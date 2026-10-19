@@ -13,12 +13,12 @@ from collections.abc import Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Protocol
 
 from saffron.cell import worktree
 from saffron.gates import runner
 from saffron.gates.baseline import NewFailure, subtract_baseline, suite_drift
-from saffron.gates.contract import GateResult, witness_blocking
+from saffron.gates.contract import GateResult
 from saffron.gates.core.census import census_gate
 from saffron.gates.core.committed import committed_gate
 from saffron.gates.core.criteria import criteria_gate
@@ -27,7 +27,7 @@ from saffron.gates.core.revert import revert_gate
 from saffron.gates.core.scope import scope_gate
 from saffron.gates.core.size import size_gate
 from saffron.gates.core.witness import constant_mutants
-from saffron.intake import Criterion, Mutant, RiskTier
+from saffron.intake import Criterion, Mutant
 from saffron.repos.policy import Policy, effective_risk
 
 
@@ -243,13 +243,12 @@ def size_blocks(tier: str) -> bool:
 
 
 def _advisory(tier: str, policy: Policy) -> frozenset[str]:
-    """`blocking: false` is advisory at every tier; `size` and `witness` are
-    advisory unless the tier is elevated (§5.4, §5.4.1, §5.6)."""
+    """`blocking: false` is advisory at every tier. `size` is advisory below
+    `elevated` (§5.4, §5.6). `witness` is advisory at no tier: a declared
+    mutant that survives its witness blocks everywhere (§5.4.1)."""
     advisory = {name for name, decl in policy.gates.items() if not decl.blocking}
     if not size_blocks(tier):
         advisory.add("size")
-    if not witness_blocking(cast(RiskTier, tier)):
-        advisory.add("witness")
     return frozenset(advisory)
 
 

@@ -279,9 +279,9 @@ def _new_failures(
     change's problem (DESIGN.md §5.4).
 
     `advisory_failures` are the same suite comparison's new failures in a
-    gate this run holds advisory (`size` and `witness` at `standard`, or a
-    gate declared `blocking: false`): reported in their own section, after
-    the blocking one, and never a reason this body says anything but green.
+    gate this run holds advisory (`size` below `elevated`, or a gate
+    declared `blocking: false`): reported in their own section, after the
+    blocking one, and never a reason this body says anything but green.
     """
     if not new_failures and not advisory_failures:
         return "### No new failures\n\nEvery failure at head was already present at base.\n"

@@ -32,9 +32,10 @@ measured carries `witness`.
 - Does a claim written over a set of things drive every member of it.
 - Does the size estimate the spec states stay under its own type's
   ceiling, named below.
-- Does the gate that checks size and witness block here: the spec states
-  `risk: elevated`, or a path its criteria would touch matches one of the
-  paths named below.
+- The witness gate blocks at every risk tier.
+- Does the gate that checks size block here: the spec states `risk:
+  elevated`, or a path its criteria would touch matches one of the paths
+  named below.
 - Is every sentence the spec states about the current code true at this
   snapshot.
 

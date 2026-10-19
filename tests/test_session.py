@@ -3741,9 +3741,9 @@ def test_a_size_failure_at_standard_does_not_enter_the_repair_loop(
     # body, the queue line — has the effective tier and the advisory set to
     # render, rather than re-deriving them from `spec.risk` alone.
     assert outcome.effective_risk == "standard"
-    # `witness` joins `size` here too: both are advisory at `standard`
-    # (§5.4.1's own level for `witness`, `contract.witness_blocking`).
-    assert outcome.advisory_gates == ["size", "witness"]
+    # `witness` blocks at every tier now (b-02d328), so only `size` is
+    # advisory here.
+    assert outcome.advisory_gates == ["size"]
 
 
 _HIDDEN_DIFF = (
@@ -3916,10 +3916,9 @@ def test_a_declared_gate_with_blocking_false_does_not_repair(monkeypatch, tmp_pa
     assert not any(nf.gate == "lint" for nf in outcome.new_failures)
     (lint_result,) = [g for g in outcome.gates if g.gate == "lint"]
     assert lint_result.status == "fail"
-    # `size` and `witness` are also advisory here — the spec is `standard`
-    # and nothing declared an `elevate_on` match — beside `lint`'s own
-    # `blocking: false`.
-    assert outcome.advisory_gates == ["lint", "size", "witness"]
+    # `size` is also advisory here, standard and unelevated, beside `lint`'s
+    # own `blocking: false`. `witness` blocks at every tier now (b-02d328).
+    assert outcome.advisory_gates == ["lint", "size"]
 
 
 def _judged_attempt(ledger, task_id):
@@ -10872,13 +10871,11 @@ def test_a_cell_run_supplies_the_real_mutator(monkeypatch, tmp_path):
 def test_a_witness_failure_is_advisory_at_standard_and_blocking_when_elevated(
     monkeypatch, tmp_path
 ):
-    """§5.4.1's level, in effect rather than in prose: the identical new
-    `witness` failure ends a `standard` attempt clean and an `elevated` one
-    `EXHAUSTED` — agreeing with `contract.witness_blocking` rather than
-    defaulting to blocking at every tier for want of an entry in the
-    advisory set. `max_attempts=1` is what lets `repair_decision` resolve on
-    the first suite alone, so no repair turn is needed to tell the two
-    tiers apart."""
+    """Its name predates `witness` blocking at every tier (b-02d328). All
+    three legs below now end `EXHAUSTED`: `_advisory` leaves `witness` out
+    of every tier's advisory set rather than only `elevated`'s.
+    `max_attempts=1` is what lets `repair_decision` resolve on the first
+    suite alone, so no repair turn is needed to see it."""
     survived = Failure(file="t.py::test_guard", code="survived-mutant", message="m")
     baseline_suite = [GateResult(gate="witness", status="skip")]
     head_suite = [
@@ -10887,13 +10884,10 @@ def test_a_witness_failure_is_advisory_at_standard_and_blocking_when_elevated(
         )
     ]
 
-    # The third leg is the one the level is read from `current_tier` for: a
-    # `standard` spec that an `elevate_on` path match elevates. Measured —
-    # `witness_blocking(spec.risk)` in place of the effective tier fails no
-    # behavioural test without it, so half of §5.6's rule went unguarded while
-    # the claim said "in effect". `size` already exercises this half.
+    # The third leg is a `standard` spec an `elevate_on` match elevates.
+    # `size` already exercises this half.
     for label, risk, policy, expected in (
-        ("standard", "standard", "gates: {}\n", "READY_FOR_REVIEW"),
+        ("standard", "standard", "gates: {}\n", "EXHAUSTED"),
         ("elevated", "elevated", "gates: {}\n", "EXHAUSTED"),
         (
             "elevated-by-path",
@@ -10989,6 +10983,102 @@ def test_a_skipped_witness_blocks_nothing_at_either_tier(monkeypatch, tmp_path):
         assert captured, tier
         assert all(_bound_to_this_cell(mutate) for _acc, mutate in captured), tier
         assert all(list(acc) == [criterion] for acc, _mutate in captured), tier
+
+
+def test_a_task_whose_declared_mutant_survives_its_witness_never_reaches_review(
+    monkeypatch, tmp_path
+):
+    """§5.4.1 (b-02d328): a declared mutant that survives its witness blocks
+    at every risk tier, never only `elevated`. Three legs: a declared
+    `standard`, a declared `elevated`, and a `standard` spec an
+    `elevate_on` path elevates. Each runs the real `witness_gate`.
+
+    `run_suite` is replaced with one calling `witness_gate` for real, a
+    fresh frame opened each call. `run_tests` records its subset into
+    that frame and reports `pass`. The patched `worktree.source_mutated`,
+    applied after `_stub_the_runtime`'s own, records the mutant there.
+    """
+    from saffron.gates.core.witness import Mutated, witness_gate
+    from saffron.intake import Criterion, Mutant
+
+    criterion = Criterion(
+        claim="the guard rejects a negative amount",
+        witness="tests/test_x.py::test_guard",
+        mutant=Mutant(file="src/x.py", find="if amount < 0:", replace="if False:"),
+    )
+
+    def _make_run_suite(frames: list[dict]):
+        def _run_suite(
+            gates,
+            cwd,
+            *,
+            timeout_s=900,
+            executor=None,
+            acceptance: Sequence[Criterion] = (),
+            mutate: Mutated | None = None,
+        ):
+            assert mutate is not None  # `_suite` always supplies one
+            frame: dict = {"subsets": [], "mutants": []}
+            frames.append(frame)
+
+            def _run_tests(subset):
+                frame["subsets"].append(list(subset))
+                return GateResult(
+                    gate="tests",
+                    status="pass",
+                    tool="pytest 8.0",
+                    collected=list(subset),
+                )
+
+            return [
+                witness_gate(acceptance=acceptance, mutate=mutate, run_tests=_run_tests)
+            ]
+
+        return _run_suite
+
+    def _make_source_mutated(frames: list[dict]):
+        @contextlib.contextmanager
+        def _source_mutated(_container, mutant):
+            frames[-1]["mutants"].append(mutant)
+            yield None
+
+        return _source_mutated
+
+    for label, risk, policy, expected_tier in (
+        ("standard", "standard", "gates: {}\n", "standard"),
+        ("elevated", "elevated", "gates: {}\n", "elevated"),
+        (
+            "elevated-by-path",
+            "standard",
+            "gates: {}\nelevate_on:\n  - src/**\n",
+            "elevated",
+        ),
+    ):
+        frames: list[dict] = []
+        cell = _stub_the_runtime(monkeypatch)
+        monkeypatch.setattr("saffron.gates.runner.run_suite", _make_run_suite(frames))
+        monkeypatch.setattr(
+            "saffron.cell.worktree.source_mutated", _make_source_mutated(frames)
+        )
+
+        outcome, _ledger = _drive(
+            monkeypatch,
+            tmp_path / label,
+            cell=cell,
+            turns=[_turn(_block(_PLAN)), _turn()],
+            spec=_spec(risk=risk, max_attempts=1, acceptance=[criterion]),
+            policy=policy,
+        )
+        assert outcome.effective_risk == expected_tier, label
+        assert outcome.state == "EXHAUSTED", label
+        assert "witness" not in outcome.advisory_gates, label
+        assert [
+            (nf.gate, nf.failure.file, nf.failure.code) for nf in outcome.new_failures
+        ] == [("witness", criterion.witness, "survived-mutant")], label
+
+        last = frames[-1]
+        assert last["subsets"] == [[criterion.witness]], label
+        assert last["mutants"] == [criterion.mutant], label
 
 
 def _cell_container(mutate) -> str | None:

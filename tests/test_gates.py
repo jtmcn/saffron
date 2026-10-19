@@ -4,18 +4,20 @@ backlog item 69).
 `SA-0056` built the mutant/witness data model and `SA-0057` built
 `saffron/gates/core/witness.py`'s `witness_gate`, but nothing invoked it. This
 covers the wiring in `saffron/gates/runner.py` (`run_witness`, `run_suite`)
-and the blocking-level decision in `saffron/gates/contract.py`
-(`witness_blocking`) that turns it on.
+and the blocking-level decision in `saffron/gates/suite.py`'s `_advisory`
+that turns it on.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from saffron.gates.contract import GateResult, witness_blocking
+from saffron.gates import suite
+from saffron.gates.contract import GateResult
 from saffron.gates.core.witness import witness_gate
 from saffron.gates.runner import run_suite, run_witness
 from saffron.intake import Criterion, Mutant
+from saffron.repos.policy import Policy
 from tests.mutation import host_mutator
 
 
@@ -78,8 +80,11 @@ def test_the_witness_gate_runs_after_the_tests_it_re_invokes(tmp_path):
 
 
 def test_witness_is_advisory_at_standard_and_blocking_when_elevated():
-    assert witness_blocking("standard") is False
-    assert witness_blocking("elevated") is True
+    """Keeps its pre-fix name (b-02d328): `witness` blocks at every tier
+    now, so it is absent from the advisory set at both."""
+    policy = Policy(gates={})
+    assert "witness" not in suite._advisory("standard", policy)
+    assert "witness" not in suite._advisory("elevated", policy)
 
 
 def test_a_tests_gate_that_takes_no_subset_skips_the_witness_gate(tmp_path):

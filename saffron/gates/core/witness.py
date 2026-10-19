@@ -258,8 +258,8 @@ def witness_gate(
             tool = tool or tests_result.tool
             continue
         if tests_result.status == "pass":
-            # The claim and the file, never the edit: at `elevated` this message
-            # reaches the REPAIR turn verbatim, and a mutant is withheld (§5.4.1).
+            # The claim and the file, never the edit: this message reaches
+            # REPAIR verbatim at every tier, and a mutant is withheld (§5.4.1).
             survived.append(
                 Failure(
                     file=criterion.witness,
