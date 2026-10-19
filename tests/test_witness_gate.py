@@ -91,9 +91,9 @@ def test_a_witness_that_survives_its_mutant_fails(tmp_path):
 def test_a_surviving_mutant_names_its_claim_and_not_its_edit(tmp_path):
     """A mutant its witness survives fails `witness` with a result that names
     the criterion's claim and its witness, and carries neither the edit's
-    `find` text nor its `replace` text anywhere in the result. At `elevated`,
-    where `witness` blocks, `repair_prompt` hands this message to the next
-    REPAIR turn verbatim — a mutant a cell can read back is a mutant chosen
+    `find` text nor its `replace` text anywhere in the result. `witness`
+    blocks at every tier. `repair_prompt` hands this message to the next
+    REPAIR turn verbatim. A mutant a cell can read back is a mutant chosen
     to be killed (`CONTEXT.md`, **Mutant**)."""
     _write(tmp_path, "a.py", "def total(x):\n    return max(x, 0)\n")
     # `replace` appears nowhere else in the result, so finding it can only
