@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from saffron.gates import contract
 from saffron.gates.contract import (
     Failure,
     GateResult,
@@ -15,15 +16,15 @@ from saffron.gates.contract import (
 
 
 def test_the_schema_version_comment_cites_the_gate_result_section():
-    lines = (
-        (Path(__file__).parents[1] / "saffron/gates/contract.py")
-        .read_text()
-        .splitlines()
-    )
-    line = lines[
-        next(i for i, x in enumerate(lines) if x.startswith("SCHEMA_VERSIONS")) - 1
+    lines = Path(contract.__file__).read_text().splitlines()
+    above = lines[
+        : next(i for i, x in enumerate(lines) if x.startswith("SCHEMA_VERSIONS"))
     ]
-    sections = re.findall(r"§\d+(?:\.\d+)*", line)
+    comment = []
+    while above and above[-1].startswith("#"):
+        comment.insert(0, above.pop())
+    # The grammar tests/test_citations.py reads, so a lettered section is not cut short.
+    sections = re.findall(r"§\d+(?:\.\d+)*[a-z]?", "\n".join(comment))
     assert sections == ["§5.4"]
 
 
