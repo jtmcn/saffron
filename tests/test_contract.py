@@ -1,4 +1,6 @@
 import json
+import re
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -10,6 +12,13 @@ from saffron.gates.contract import (
     normalize_message,
     parse_gate_json,
 )
+
+
+def test_the_schema_version_comment_cites_the_gate_result_section():
+    text = Path("saffron/gates/contract.py").read_text()
+    line = next(line for line in text.splitlines() if "Versioned per module" in line)
+    sections = re.findall(r"§\d+(?:\.\d+)*", line)
+    assert sections == ["§5.4"]
 
 
 def test_parses_a_well_formed_gate_result():
