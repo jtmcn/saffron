@@ -40,3 +40,4 @@ chosen behaviour.
 
 - 2026-09-22: filed from ADR 4's review. ADR 4's principle 28 records it.
 - 2026-10-19: measured in the spec loop's run 44, and moved to tier 1. On `SA-0288` (#914) the host probed a canned witness result at `saffron/gates/runner.py:330`, and the witness survived. The finding was filed `anchored: false` with `probe_verdict: survived`, since that line sits outside the diff. `review_state` counts only anchored blockers, so no REBUT ran and the task ended `READY_FOR_REVIEW`. Both seats then confirmed the witness could not fail. The evidence is `~/.saffron/batches/v0/SA-0288/findings.json`.
+- 2026-10-20: the anchored case worked in run 45. `SA-0290`'s six criterion-probe survivors all sat in the diff, so REBUT ran, fixed each, and killed each on re-run. The unanchored case is unchanged.
