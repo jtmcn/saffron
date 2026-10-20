@@ -129,6 +129,8 @@ acceptance:
       - A recipe of two plain lines, which make stops after the first failure, so the tree hook never runs.
       - A recipe joining the two calls with `;` alone, which exits 0 when only the first call fails.
       - A recipe ending the first call in `|| true`, which exits 0 when only the first call fails.
+      - "A recipe writing `status=$?` and `exit $status` with a single `$`, which make expands to `exit tatus`, so a clean tree fails `make lint`."
+      - A recipe whose first call carries a leading `-`, so make ignores its failure and the recipe exits 0 when only the first call fails.
       - A first call that does not skip `prose-limit`, so a staged copy the working tree has fixed still fails `make check`.
       - A second call of `prek run --all-files --stage manual` with no hook id, which reruns every hook, `prose-limit` included.
 ---
@@ -225,12 +227,19 @@ second says a file moved with plain `mv` reads against zero there until
   fix, `git add -A`.
 - **CI.** `.github/workflows/ci.yml:18` keeps `prek run --all-files`. A clean
   checkout has no working-tree change for the tree mode to read.
-- **`CLAUDE.md` and `.claude/agents/spec-writer.md`.** Both stay true as
-  written, and both are forbidden here.
-- **`.claude/skills/create-saffron-spec/SKILL.md:73-76`.** Its sentence on
-  what `make check`'s lint pass reads becomes false with this change. The
-  operator lands that edit by hand in the spec's pull request, since
-  `.claude/**` is forbidden here.
+- **Two sentences this change makes false.** `CLAUDE.md:30` says
+  `lint = prek run --all-files`. `.claude/skills/create-saffron-spec/SKILL.md:73-75`
+  says the lint pass reads tracked files only, so an untracked spec passes
+  it. Both go false only when this change lands, and both files are
+  forbidden here. The delegate edits them in a review commit on this cell's
+  pull request. The new wording says only the `prose-limit-tree` hook reads
+  the working tree. The `--all-files` hooks still read tracked files only.
+- **`.claude/agents/spec-writer.md`.** It stays true as written, and it is
+  forbidden here.
+- **A file staged as added, then deleted from the working tree.** Neither
+  listing names it. Measured with git 2.54.0 and 2.47.3, for a file added
+  with `git add`, one added with `git add -N`, and a `git mv` target, each
+  then removed. So tree mode never reads it, and no witness drives it.
 
 ## Notes for the agent
 
@@ -249,10 +258,15 @@ Each wrong version under every criterion failed its witness.
 **Run the recipe without make.** The cell image has no `make` (measured
 2026-10-20 in `saffron/cell:saffron`). So the sixth witness reads the `lint`
 recipe from `Makefile` and runs it the way make does. Each logical line,
-after joining a backslash continuation, goes to its own `sh -c` with `$$`
-read as `$`. It stops at the first line that exits non-zero. The stub reads
+after joining a backslash continuation, goes to its own `sh -c`. It strips a
+leading `@`, `-` or `+`, and a `-` makes it ignore that line's status. It
+reads `$$` as `$`. It expands any other `$` reference to nothing, as make
+does: `$x`, `$(...)` and `${...}` alike. It stops at the first line that
+exits non-zero. The stub reads
 an environment variable naming which call fails. Measured on a prototype:
-the real `make lint` with a ruff failure ran both calls and exited 2.
+the real `make lint` with a ruff failure ran both calls and exited 2. Real
+make with a stub `prek` agreed with that emulation on the single-`$` recipe.
+That recipe exited 2 with both calls passing, since `$status` became `tatus`.
 
 **Name the hook `prose-limit-tree`.** The fifth witness and the `lint`
 recipe both select it by id. Measured with `--dry-run`, `--skip` matches by
