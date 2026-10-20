@@ -4,7 +4,7 @@ title: The prose hook reads the index, so `make check` passes a new file that wa
 type: bug
 priority: 2
 depends_on: []
-estimated_lines: 60
+estimated_lines: 62
 estimate_measured: true
 touches:
   - hooks/prose_limit.py
@@ -41,7 +41,7 @@ forbidden:
   - tests/test_scheduler.py
 budget_usd: 24
 max_attempts: 3
-max_turns: 120
+max_turns: 140
 acceptance:
   - claim: >-
       `python3 hooks/prose_limit.py --tree` reads a file git does not track,
@@ -61,12 +61,17 @@ acceptance:
       content against `HEAD`, in both kinds of file the gate reads. The witness
       edits a committed `README.md` and a committed `saffron/m.py` with nothing
       staged. The Markdown file gains a long sentence and the Python file a
-      three-line comment block. `--tree` exits 1 naming both. The no-argument
-      commit mode still exits 0 on the same repo, since nothing is staged.
+      three-line comment block. `--tree` exits 1 and prints in the commit
+      mode's format. Its stdout holds the lines `README.md: 1 new
+      sentence-length hit` and `saffron/m.py: 1 new comment-block hit`, and a
+      line opening with two spaces and `README.md:3: sentence-length: `. The
+      no-argument commit mode still exits 0 on the same repo, since nothing
+      is staged.
     witness: tests/test_prose_limit_hook.py::test_tree_mode_reads_an_unstaged_edit_against_head
     wrong_versions:
       - A tree mode that lists only `git diff --cached`, so an unstaged edit is never read.
       - A tree mode that reads Markdown alone, so the comment block passes.
+      - A tree mode that prints `--file`'s format, one `N new hits against HEAD` line per file and unindented hit lines.
       - A no-argument mode rewired to read the working tree, so the commit hook refuses a commit over an edit it does not carry.
   - claim: >-
       `--tree` reads the working copy of a staged file, not the staged copy,
@@ -80,36 +85,52 @@ acceptance:
       - A shared helper that makes the commit mode read the working tree too, so the commit mode exits 0.
       - A no-argument mode that runs the tree mode, so the commit mode exits 0.
   - claim: >-
-      `--tree` counts only what each file's baseline lacks, and reads only
-      files in the gate's scope that git does not ignore. The witness exits 0
-      with empty stdout on one repo carrying four shapes at once. A committed
-      `README.md` with a long sentence gains an unrelated line above it. A
-      committed `docs/backlog/1-a.md` with a long sentence is renamed by
-      `git mv`. An untracked `docs/evidence/run.md`, out of scope, carries a
-      long sentence. An untracked in-scope `docs/backlog/9-ignored.md`, listed
-      in `.gitignore`, carries one too.
+      `--tree` counts only new `prose` hits against each file's baseline. It
+      reads only files in the gate's scope that git does not ignore. The
+      witness exits 0 with empty stdout on one repo carrying six shapes at
+      once. A committed `README.md` with a long sentence gains an unrelated
+      line above it. A committed `docs/backlog/1-a.md` with a long sentence
+      is renamed by `git mv`. A committed `docs/backlog/3-c.md` gains a
+      sentence naming a sandbox, a `terms` hit and no `prose` hit. A
+      committed `docs/evidence/x.md`, out of scope, gains a long sentence
+      unstaged. An untracked `docs/evidence/run.md`, out of scope, carries a
+      long sentence. An untracked in-scope `docs/backlog/9-ignored.md`,
+      listed in `.gitignore`, carries one too.
     witness: tests/test_prose_limit_hook.py::test_tree_mode_counts_only_what_head_lacks
     wrong_versions:
       - A tree mode that reads every file against zero, so the old hit in `README.md` fails it.
       - A tree mode that drops the rename's old path, so the renamed file reads against zero.
       - A tree mode that lists untracked files without `--exclude-standard`, so the ignored file fails it.
-      - A tree mode that skips the `in_scope` check, so the evidence file fails it.
+      - A tree mode that skips the `in_scope` check, so the evidence files fail it.
+      - A tree mode that applies `in_scope` to the untracked list alone, so the tracked `docs/evidence/x.md` fails it.
+      - A tree mode that reuses `_new_lines`, which runs both gates in `GATES`, so the `terms` hit in `docs/backlog/3-c.md` fails it.
   - claim: >-
       `make check` runs the tree mode and skips the index mode, and a commit
       runs only the index mode. The witness reads `.pre-commit-config.yaml`
       and `Makefile`. One hook runs the tree mode with `stages: [manual]`,
       `pass_filenames: false` and `always_run: true`. The `prose-limit` hook
-      declares no `stages`, so it still runs on commit. The `lint` recipe is
-      two commands. The first runs `prek run --all-files` skipping
-      `prose-limit`. The second runs the manual stage with the tree hook's id
-      and no other.
+      declares no `stages`, so it still runs on commit.
     witness: tests/test_prose_limit_hook.py::test_make_check_runs_the_tree_hook_and_a_commit_does_not
     wrong_versions:
       - A tree hook with no `stages`, which runs on commit and refuses a commit over an untracked file it does not carry.
       - "A `stages: [manual]` added to `prose-limit`, so a commit runs no prose limit at all."
+  - claim: >-
+      `make lint` calls prek twice, in order, whichever way the first call
+      ends. The first is `prek run --all-files --skip prose-limit`. The second
+      is `prek run --all-files --stage manual prose-limit-tree`. The recipe
+      exits non-zero when either call fails, and 0 when both pass. The
+      witness runs the `lint` recipe from `Makefile` as make would, against a
+      stub `prek` on `PATH` that logs its arguments. It drives three cases.
+      Both calls pass, the first fails, and the second fails. Each case logs
+      both calls, and only the first case exits 0.
+    witness: tests/test_prose_limit_hook.py::test_lint_runs_the_tree_hook_after_a_failure_and_still_fails
+    wrong_versions:
       - A `lint` recipe left as `prek run --all-files`, which skips every manual hook.
-      - A `lint` recipe that does not skip `prose-limit`, so a staged copy the working tree has fixed still fails `make check`.
-      - A second command of `prek run --all-files --stage manual` with no hook id, which reruns every hook, `prose-limit` included.
+      - A recipe of two plain lines, which make stops after the first failure, so the tree hook never runs.
+      - A recipe joining the two calls with `;` alone, which exits 0 when only the first call fails.
+      - A recipe ending the first call in `|| true`, which exits 0 when only the first call fails.
+      - A first call that does not skip `prose-limit`, so a staged copy the working tree has fixed still fails `make check`.
+      - A second call of `prek run --all-files --stage manual` with no hook id, which reruns every hook, `prose-limit` included.
 ---
 
 ## Context
@@ -176,17 +197,22 @@ exits 1 on any new hit, else 0.
 
 Wire it into `make check`. Add a local hook to `.pre-commit-config.yaml` that
 runs the tree mode at the manual stage only, with `always_run: true`. Change
-the `lint` recipe in `Makefile` to two commands. The first runs
+the `lint` recipe in `Makefile` to call prek twice. The first call runs
 `prek run --all-files` skipping `prose-limit`. The second runs the manual
-stage with the new hook's id alone.
+stage with the new hook's id alone. The second call runs even when the first
+fails, so a ruff failure cannot hide a prose hit. The recipe still exits
+non-zero when either fails. Keeping the first call's status in a shell
+variable does this in one recipe line, written as `$$` for make.
 
 Leave the commit mode as it is. `prose-limit`'s config entry stays unchanged,
 and the no-argument mode keeps reading the index. The per-commit limit
 belongs there.
 
-Add one sentence to `docs/agents/issue-tracker.md` after the `make check`
-sentence at `:85-86`. It says `make check` reads each changed file's
-working-tree copy, staged or not, while the commit hook reads the index.
+Add two sentences to `docs/agents/issue-tracker.md` after the `make check`
+sentence at `:85-86`. The first says `make check` reads each changed file's
+working-tree copy, staged or not, while the commit hook reads the index. The
+second says a file moved with plain `mv` reads against zero there until
+`git add -A` stages the rename.
 
 ## Out of scope
 
@@ -194,24 +220,39 @@ working-tree copy, staged or not, while the commit hook reads the index.
   and the `terms` hook already scans the tree (`.pre-commit-config.yaml:41-52`).
 - **A rename git cannot see.** A file moved with plain `mv` and never staged
   shows as a deletion and an untracked file. Tree mode reads the new path
-  against zero. No witness drives it, and the claim names only `git mv`.
+  against zero, so its old hits fail `make check`. No witness drives it, and
+  the claim names only `git mv`. The `issue-tracker.md` sentence names the
+  fix, `git add -A`.
 - **CI.** `.github/workflows/ci.yml:18` keeps `prek run --all-files`. A clean
   checkout has no working-tree change for the tree mode to read.
 - **`CLAUDE.md` and `.claude/agents/spec-writer.md`.** Both stay true as
   written, and both are forbidden here.
+- **`.claude/skills/create-saffron-spec/SKILL.md:73-76`.** Its sentence on
+  what `make check`'s lint pass reads becomes false with this change. The
+  operator lands that edit by hand in the spec's pull request, since
+  `.claude/**` is forbidden here.
 
 ## Notes for the agent
 
 **Each criterion is new code**, so each declares a witness and no mutant,
-and `witness` reports `skip`. Write all five tests in
+and `witness` reports `skip`. Write all six tests in
 `tests/test_prose_limit_hook.py`, beside the `--file` tests, with its
 `_repo`, `_stage`, `_hook` and `_git` helpers.
 
 **Each witness fails at base.** There `main` refuses `--tree` as an
 unexpected argument and exits 2 (`hooks/prose_limit.py:203-214`). The fifth
-finds no tree hook in the config. Measured on a prototype: all five failed with
+finds no tree hook in the config. The sixth logs one call,
+`run --all-files`. Measured on a prototype: all six failed with
 `hooks/prose_limit.py`, `.pre-commit-config.yaml` and `Makefile` reverted.
 Each wrong version under every criterion failed its witness.
+
+**Run the recipe without make.** The cell image has no `make` (measured
+2026-10-20 in `saffron/cell:saffron`). So the sixth witness reads the `lint`
+recipe from `Makefile` and runs it the way make does. Each logical line,
+after joining a backslash continuation, goes to its own `sh -c` with `$$`
+read as `$`. It stops at the first line that exits non-zero. The stub reads
+an environment variable naming which call fails. Measured on a prototype:
+the real `make lint` with a ruff failure ran both calls and exited 2.
 
 **Name the hook `prose-limit-tree`.** The fifth witness and the `lint`
 recipe both select it by id. Measured with `--dry-run`, `--skip` matches by
@@ -229,8 +270,8 @@ intent-to-add file as `A`. It did not list an untracked file. `git ls-files
 parse (`hooks/prose_limit.py:59-70`) reads the first command's output as
 written.
 
-**Size.** Measured at 233 changed tokens by `size_gate` on the prototype, with
-291 more under `tests/**` uncounted. That is under the `bug` ceiling of 1300.
+**Size.** Measured at 238 changed tokens by `size_gate` on the prototype, with
+495 more under `tests/**` uncounted. That is under the `bug` ceiling of 1300.
 
 **The `prose` gate** reads `hooks/` and `tests/`. A new comment or
 docstring takes no em dash, semicolon, contraction or perfect tense. It takes
