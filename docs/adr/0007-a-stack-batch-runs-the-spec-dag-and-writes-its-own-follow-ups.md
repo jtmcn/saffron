@@ -104,6 +104,9 @@ departure from principle 18, and so does the join lens. A spec writer returns
 its spec through a separate extraction turn. A spec review returns its tags
 the same way, since a tag decides whether a spec is revised. Both keep
 principle 18.
+Amended 2026-10-20, b-8a0c9a (`SA-0301`, `SA-0305`): a batch started with
+`--defer-end-review` holds its end review until `saffron finish`. The end
+review then grades the heads the operator's review commits produced.
 
 **The end review takes four exceptions to ADR 4, and this ADR carries them.**
 Its lenses are not ADR 4's declared lenses. They run once per batch, not on
@@ -138,6 +141,11 @@ parent's head is fetched, never remembered. The finish is not a task, and it
 takes the recorded `pushed_sha` of the batch's highest layer. That stays safe
 because the batch compares each layer's remote head with its record before
 the push, and escalates a moved branch (`SA-0167`).
+Amended 2026-10-20, b-8a0c9a (`SA-0306`): a finish handed the end review's
+graded heads takes the graded head of the batch's highest layer instead, and
+runs its suite against that head. Only a branch that moved after its graded
+head escalates. A layer the end review did not grade keeps its recorded
+`pushed_sha` for the parent, the suite's base and the remote check.
 
 **Nothing merges.** The batch links the stack, and leaves every layer a draft.
 A stack on a stack base is not linked (`SA-0265`).
