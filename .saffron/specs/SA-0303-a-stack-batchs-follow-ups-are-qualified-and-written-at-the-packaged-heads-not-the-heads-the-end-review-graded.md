@@ -4,7 +4,7 @@ title: "A stack batch's follow-ups are qualified and written at the packaged hea
 type: feature
 priority: 2
 depends_on: [SA-0302]
-estimated_lines: 392
+estimated_lines: 391
 estimate_measured: true
 touches:
   - saffron/qualify.py
@@ -140,7 +140,7 @@ third of five specs that item splits into. `SA-0302` has the end review
 grade each layer at its branch head and record what it graded in
 `StackReview.fields`. This spec has qualification and the follow-up writer
 read those fields. `SA-0305` then runs both outside a batch. Every line
-below was read at `f2d951b4`, which is `e8f5529e` plus `SA-0302`'s spec.
+below was read at `cb2b0602`. Its `saffron/` is `e8f5529e`'s.
 `SA-0302` edits `saffron/cli.py` first, so find each function there by
 name.
 
@@ -150,10 +150,9 @@ the pushed head's parent. `StackReview.fields` maps a task key to the
 fields the end review graded that layer at. It holds every layer either
 walk resolved. The join resolves every layer before the layer walk, so a
 layer the reserve did not reach is still there whenever the join ran. A
-one-layer stack, a join that was not reached, or a layer whose resolution
-failed leaves a layer out. So a layer's presence says nothing about
-whether it was reviewed. `run_end_review` returns it
-(`SA-0302`, Problem 4). `_end_review_error_reviews` builds a
+layer neither walk reached, or whose resolution failed, is absent. So a
+layer's presence says nothing about whether it was reviewed.
+`run_end_review` returns it (`SA-0302`, Problem 4). `_end_review_error_reviews` builds a
 `StackReview` with no `fields` (`saffron/cli.py:818`).
 
 **Qualification reads the packaged heads.** `qualify` reads the top and
@@ -177,8 +176,8 @@ its head's parent to its head, and so is the range the prompt names
 reads the top layer through `layer_fields` before anything else runs
 (`saffron/cli.py:1485`). Each writer cell opens at it (`:1520-1521`).
 `qualify.qualify` is called with no fields (`:1494-1507`). The origin's
-spec id comes from `layer_fields` (`:1514`). The resolver keeps a layer's
-spec id, so that line can stay.
+spec id comes from `layer_fields` too (`:1514`), inside each `write`
+call.
 
 **Inside a batch the two agree.** Each branch still sits at its pushed head
 when a batch's own end review runs (`SA-0302`, Problem 5). So each graded
@@ -204,7 +203,10 @@ range is the packaged one, and a batch's follow-ups do not change.
    over.
 4. **`_stack_follow_ups` passes them on.** Its `qualify` call passes
    `stack.fields`. Its top layer is read through the helper, so each writer
-   cell opens at the graded top head.
+   cell opens at the graded top head. Each `write` call reads its origin
+   layer through the helper too. Graded fields keep the layer's spec id,
+   so the writer's agent is named as before. A layer the ledger has not
+   recorded still raises there, as `layer_fields` does.
 
 ## Out of scope
 
@@ -215,6 +217,8 @@ range is the packaged one, and a batch's follow-ups do not change.
 - The finishing layer's parent. ADR 7 keeps it at the top layer's recorded
   `pushed_sha`, and `saffron/finish.py` reads it. This spec does not touch
   it.
+- A follow-up still stacks on the top layer's recorded `pushed_sha`, while
+  its writer read the graded top head. `SA-0305` reconciles the two.
 - `finish.write_findings` names each finding's `head` as the layer's
   `pushed_sha` (`saffron/finish.py:259`). A finding anchored at a graded
   head is still reported against the packaged one. This spec leaves
@@ -239,10 +243,12 @@ not run them yourself.
   same `fields`. Criterion 5's witness is one of them.
 - `tests/test_cli.py`'s
   `test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_base_at_the_stacks_top`
-  replaces `cli.end_review.layer_fields` with a fake. Pass that fake's two
-  results as the stack's `fields` instead, and drop the replacement. Its
-  `k-gone` case still stops before `qualify`, because the fallback reads a
-  layer the ledger does not have.
+  replaces `cli.end_review.layer_fields` with a fake. Its ledger records
+  no layers, so every read must come from the stack's `fields`. Pass that
+  fake's two results as the stack's `fields`, and drop the replacement.
+  The top layer, the `qualify` call and each `write` call's origin then
+  read only those. Its `k-gone` case still stops before `qualify`, because
+  the fallback reads a layer the ledger does not have.
 
 **Import new names inside each test.** Both test modules' docstrings say
 why. A module-scope import of a name the change adds turns the reverted
@@ -276,9 +282,12 @@ run into a collection error.
   `end_review.layer_cell`, `follow_up.write_follow_ups` and
   `spec_review.run_spec_writer`, all reached through `cli`.
 
-**Measured on a prototype at `f2d951b4` with `SA-0302`'s prototype
-applied.** It passed all five witnesses, and the `lint`, `types`, `dead` and
-`structure` gates. Each new witness failed with `saffron/` reverted. Every
-wrong version above was applied as an edit and failed its own criterion's
-witness, and so did each declared mutant. Its diff measured 1568 changed
-tokens, 136 of them outside `tests/`.
+**Measured on a prototype at `e8f5529e` with `SA-0302`'s revised
+prototype applied.** It passed all five witnesses and the whole of
+`tests/test_cli.py`, `tests/test_qualify.py` and `tests/test_follow_up.py`.
+It passed the `lint`, `types`, `dead` and `structure` gates too. Each new
+witness failed with `saffron/` reverted. Every wrong version above was
+applied as an edit and failed its own criterion's witness, and so did each
+declared mutant. A `write` that read its origin through `layer_fields`
+failed the existing follow-ups test named above. Its diff measured 1564
+changed tokens, 136 of them outside `tests/`.
