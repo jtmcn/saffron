@@ -73,6 +73,13 @@ class DisclosedMutantError(SpecError):
         self.spec = spec
 
 
+def _is_canonical_path(path: str) -> bool:
+    """Whether `path` is repo-relative: `/`-split segments all non-empty and
+    none `.` or `..`. Refuses an absolute path, a trailing `/`, and a `//`."""
+    segments = path.split("/")
+    return not any(segment == "" or segment in (".", "..") for segment in segments)
+
+
 class Mutant(BaseModel):
     """The smallest edit that would falsify the claim beside it (§5.4.1).
 
@@ -132,6 +139,10 @@ class Criterion(BaseModel):
     """The edit that would falsify `claim` (§5.4.1). Absent by default, and
     every spec in this repo predates the field — an omitted `mutant` must
     parse exactly as it did before this field existed."""
+    subject: str | None = None
+    """The path a claim is about, when `mutant.file` is not that code
+    (backlog item b-000d04). `None` by default, and every criterion
+    predating this field must parse exactly as it did before it existed."""
     wrong_versions: list[str] = Field(default_factory=list)
     """Plausible wrong implementations of this criterion, in the author's own
     words (backlog item b-7e69d0). Absent by default, and an omitted field
@@ -156,6 +167,20 @@ class Criterion(BaseModel):
                 raise ValueError(f"wrong_versions entry {version!r} is declared twice")
             seen.add(version)
         return value
+
+    @model_validator(mode="after")
+    def _subject_needs_a_mutant_and_a_canonical_path(self) -> Criterion:
+        """A `subject` only narrows an exemption `mutant` already opened, and
+        only a canonical path reaches `revert_gate`'s comparison cleanly."""
+        if self.subject is None:
+            return self
+        if self.mutant is None:
+            raise ValueError(f"{self.witness} declares a subject with no mutant")
+        if not _is_canonical_path(self.subject):
+            raise ValueError(
+                f"subject {self.subject!r} has a path that is not canonical"
+            )
+        return self
 
 
 class History(BaseModel):
@@ -271,8 +296,7 @@ class Spec(BaseModel):
                 raise ValueError(f"{field} entry {entry!r} has an empty path")
             if sep and not name:
                 raise ValueError(f"{field} entry {entry!r} has an empty name")
-            segments = path.split("/")
-            if any(segment == "" or segment in (".", "..") for segment in segments):
+            if not _is_canonical_path(path):
                 raise ValueError(
                     f"{field} entry {entry!r} has a path that is not canonical"
                 )

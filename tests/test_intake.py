@@ -673,6 +673,58 @@ def test_a_mutant_pinning_text_the_code_determines_parses():
     assert declared.mutant is not None
 
 
+def test_a_subject_needs_a_mutant_and_a_canonical_path():
+    """A `subject` narrows the `revert` exemption only when the mutant's own
+    file is not what a claim leans on (backlog item b-000d04)."""
+    spec = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: feature\n"
+        "acceptance:\n"
+        "  - claim: the prompt names the right bullets\n"
+        "    witness: tests/test_review.py::test_prompt\n"
+        "    mutant:\n"
+        "      file: saffron/phases/review.py\n"
+        "      find: LENSES\n"
+        "      replace: LENSES2\n"
+        "    subject: saffron/agents/prompts/review.md\n"
+        "  - claim: unrelated, no subject declared\n"
+        "    witness: tests/test_review.py::test_unrelated\n"
+        "---\n\nbody\n"
+    )
+    declared, undeclared = spec.acceptance
+    assert declared.subject == "saffron/agents/prompts/review.md"
+    assert undeclared.subject is None
+
+    with pytest.raises(SpecError) as excinfo:
+        parse_spec(
+            "---\nid: TE-1\ntitle: t\ntype: feature\n"
+            "acceptance:\n"
+            "  - claim: c\n    witness: t.py::test_w\n"
+            "    subject: a/b.py\n"
+            "---\n\nbody\n"
+        )
+    cause = excinfo.value.__cause__
+    assert isinstance(cause, ValidationError)
+    msg = cause.errors()[0]["msg"]
+    assert "t.py::test_w" in msg
+    assert "subject" in msg
+
+    bad_paths = ["", "/a", "a/./b", "a/../b", "a/b/", "a//b"]
+    for path in bad_paths:
+        with pytest.raises(SpecError) as excinfo:
+            parse_spec(
+                "---\nid: TE-1\ntitle: t\ntype: feature\n"
+                "acceptance:\n"
+                "  - claim: c\n    witness: t.py::test_w\n"
+                "    mutant:\n      file: a.py\n      find: x\n"
+                f"    subject: {json.dumps(path)}\n"
+                "---\n\nbody\n"
+            )
+        cause = excinfo.value.__cause__
+        assert isinstance(cause, ValidationError)
+        msg = cause.errors()[0]["msg"]
+        assert repr(path) in msg
+
+
 def test_a_spec_defers_the_symbols_it_will_bring_into_use():
     spec = parse_spec(
         "---\nid: TE-1\ntitle: t\ntype: chore\n"
