@@ -80,6 +80,10 @@ Amended 2026-10-15, by hand for b-4901d2 in place of `SA-0293`: the
 extraction draws on a $4.00 reserve plus what the rebuttal turn left. The
 verdicts draw on $2.00 plus what the extraction left. A costly fix starved
 the extraction of `SA-0273`.
+Amended 2026-10-20, `SA-0299`: a host-filed survivor counts whether or not it
+anchors. One that does not anchor is still recorded `anchored = false`.
+Each goes to REBUT as an anchored blocker does
+(b-e40d09).
 
 Otherwise the implementer gets one attempt to fix each blocker or argue against
 it. A rebuttal that neither moved HEAD nor argued halts at `REBUTTING`, and the
@@ -114,7 +118,7 @@ review. Every in-cell critic keeps it whole.
 - **9** upholds. Any one blocker routes to REBUT. Disjoint lenses never form a
   majority, and overlapping ones agree for reasons that are not evidence
   (principle 51).
-- **15** departs. At REVIEW a finding counts only once the host anchors it. At
+- **15** departs. At REVIEW a lens's finding counts only once the host anchors it. At
   REBUT the adequacy session can withdraw a probe the host ran and saw
   survive, so a reading overrules a measurement. ADR 3 records the same step.
 - **16** upholds. The budget exit keeps the work. The findings are written,
@@ -130,8 +134,8 @@ review. Every in-cell critic keeps it whole.
   was filed on, since the rebuttal moves its line.
 - **28** departs. `LensReview.drop_rate` excludes a host-filed survivor, and the
   ledger's drop rate in §4.1 counts it against the lens (backlog item
-  b-b431c1). A survivor that fails to anchor never reaches REBUT (backlog item
-  b-e40d09).
+  b-b431c1). Since `SA-0299` a survivor that fails
+  to anchor still reaches REBUT (backlog item b-e40d09).
 - **29** departs. "Any one blocker goes to REBUT" has an exception. REBUT's
   budget check sends a task over its ceiling to `EXHAUSTED` with no rebuttal.
   That also narrows ADR 3's rule that a surviving probe reaches REBUT. §4.3's
