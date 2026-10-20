@@ -3921,6 +3921,30 @@ def test_a_removed_name_is_read_from_the_body_the_claims_and_consumes(tmp_path, 
         assert "TE-1" in reason
 
 
+def test_a_named_entry_naming_its_own_path_is_not_a_bare_path(tmp_path, ledger):
+    """Only an entry with no colon is bare. `a.py:a.py` names a name, so a
+    reader consuming another name under `a.py` does not clash with it."""
+    directory = _spec_dir(tmp_path)
+    repo_id = _repo(ledger)
+    _task_at(ledger, repo_id, spec_id="TE-0", spec_sha="0" * 64, state="MERGED")
+    _write_spec(
+        directory, "remover.md", id="TE-1", touches=["x.py"], removes=["a.py:a.py"]
+    )
+    _write_spec(
+        directory,
+        "reader.md",
+        id="TE-2",
+        touches=["y.py"],
+        depends_on=["TE-0"],
+        consumes=["a.py:OTHER"],
+    )
+
+    candidates, refusals = build_queue(directory, repo_id, ledger)
+
+    assert [r.reason for r in refusals] == []
+    assert sorted(c.spec.id for c in candidates) == ["TE-1", "TE-2"]
+
+
 def test_a_removed_name_matches_only_as_a_whole_word(tmp_path, ledger):
     """No letter, digit or underscore stands on either side of a removed
     name's match, and case must match. A match at the start or end of a

@@ -37,11 +37,11 @@ by hand both times; `retirement_refusal` reads that fact from the repository
 rather than the spec's own prose, from `mirror.retirement_markers` handed in
 by the caller, the same shape `protected` already takes.
 
-Backlog item b-e773d9 adds a ninth site under the `depends_on` kind. Two live
-specs that share no path can still collide when one declares `removes` and
-the other still reads the removed name. `_removed_name_refusals` computes
-every clash once, over every partner, before `build_queue` runs `_refuse` on
-each candidate. A partner is a candidate, or a live spec whose task still
+Backlog item b-e773d9 adds a third site to the sixth refusal, under the
+`depends_on` kind. Two live specs that share no path can still collide when
+one declares `removes` and the other still reads the removed name.
+`_removed_name_refusals` computes every clash once, over every partner,
+before `build_queue` runs `_refuse` on each candidate. A partner is a candidate, or a live spec whose task still
 sits in `DEPENDENCY_WAITING_STATES` at its current spec_sha. A clash refuses
 only the later of two candidates, compared as strings, or the one candidate
 beside a partner that is already waiting. The reason names a parent and
@@ -728,7 +728,7 @@ def _removed_name_clash(remover: Spec, reader: Spec) -> str | None:
     texts = [reader.body, *_criteria_texts(reader)]
     for entry in remover.removes:
         path, subject = _entry_subject(entry)
-        bare = subject == path
+        bare = ":" not in entry
         if any(_whole_word(text, subject) for text in texts):
             return subject
         for consumed in reader.consumes:
@@ -1164,8 +1164,7 @@ def build_queue(
     pushed_landed: PushedLanded | None = None,
     stack: bool = False,
 ) -> tuple[list[Candidate], list[Refusal]]:
-    """Turn the specs `discover_specs` found in `directory` into an ordered
-    queue and a list of refusals.
+    """Turn the specs found in `directory` into a queue and its refusals.
 
     `repo_id` is `resolve_repo_id`'s answer, and `None` is a real case — a repo
     with no ledger row has no history to filter against, so every parseable
@@ -1202,10 +1201,11 @@ def build_queue(
     reproduces exactly the queue every caller before `SA-0131` got.
 
     Ordered by `spec.priority` (lower runs first), then by `discover_specs`'
-    filename order to break ties — `sorted` is stable and `discover_specs`
-    already returns its specs in that order, so no second key is needed.
+    filename order, kept by a stable `sorted` with no second key.
 
-    `stack=True` orders and refuses on `depends_on` by `_stack_order`.
+    `stack=True` orders and refuses on `depends_on` by `_stack_order`. In
+    either mode, a candidate that clashes with a partner on a name one
+    `removes` is held under the `depends_on` kind (`_removed_name_refusals`).
     """
     specs, failures = discover_specs(directory)
     existing = ledger.tasks_by_spec(repo_id) if repo_id is not None else {}

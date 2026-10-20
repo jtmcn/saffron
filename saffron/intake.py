@@ -259,7 +259,8 @@ class Spec(BaseModel):
         Split at the first colon. An empty entry, an empty path or an empty
         name is refused, and so is a path that is not canonical: repo-relative,
         with `/`-split segments all non-empty and none `.` or `..`, no
-        trailing `/`, and no `//`.
+        trailing `/`, and no `//`. A segment that only starts or ends with a
+        dot, like `.github` or `pkg/v1./mod.py`, stays untouched.
         """
         field = info.field_name
         for entry in value:
