@@ -114,7 +114,7 @@ local commits, and restack the layers above once the batch drains
 with the token as in (a). The batch's deferral line names the id. The finish
 reads each branch at origin, so it grades only pushed commits. Record each
 follow-up it runs with `driver.py record`, and read
-`finish/<batch id>/findings.json` for step 5. The attended path below is the fallback, and taking it is the
+`~/.saffron/batches/v0/finish/<batch id>/findings.json` for step 5. The attended path below is the fallback, and taking it is the
 operator's call.
 
 `uv run .claude/skills/run-saffron-spec-loop/driver.py next` names the next
