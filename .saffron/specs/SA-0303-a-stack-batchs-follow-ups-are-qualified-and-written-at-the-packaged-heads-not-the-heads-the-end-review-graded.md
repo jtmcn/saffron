@@ -4,7 +4,7 @@ title: "A stack batch's follow-ups are qualified and written at the packaged hea
 type: feature
 priority: 2
 depends_on: [SA-0302]
-estimated_lines: 391
+estimated_lines: 443
 estimate_measured: true
 touches:
   - saffron/qualify.py
@@ -55,13 +55,16 @@ acceptance:
       `qualify.qualify` takes the end review's graded fields as a required
       keyword, and reads every range from them. The join's findings are
       anchored and probed from the bottom layer's diff base to the top
-      layer's graded head. Each layer's findings are read from its own diff
-      base to its graded head. The probe runs at that range's base, over
-      that range's patch. A layer missing from the fields reads the range
-      `end_review.layer_fields` gives it, its packaged head's parent to its
-      packaged head. That holds for a missing top layer and a missing
-      bottom layer alike, in the join's range and in its own. The witness
-      drives both ranges over moved heads, then each missing layer.
+      layer's graded head. Each layer's end-review findings are read from
+      its own diff base to its graded head. The probe runs at that range's
+      base, over that range's patch. A layer's in-cell REVIEW concerns cite
+      its packaged head, so they are still read over the range
+      `end_review.layer_fields` gives, its packaged head's parent to its
+      packaged head. A layer missing from the fields reads that packaged
+      range for its end-review findings too. That holds for a missing top
+      layer and a missing bottom layer alike, in the join's range and in
+      its own. The witness drives both ranges over moved heads, a moved
+      layer with both kinds of finding, then each missing layer.
     witness: tests/test_qualify.py::test_findings_are_anchored_and_probed_over_the_range_the_end_review_graded
     mutant:
       file: saffron/qualify.py
@@ -76,6 +79,8 @@ acceptance:
       - A layer missing from the fields raises `KeyError`.
       - The fields are ignored, so every range stays the packaged one.
       - A layer missing from the fields is skipped, and its findings are never recorded.
+      - A layer's in-cell concerns are anchored over its graded range.
+      - A layer's end-review findings stay on its packaged range while its in-cell concerns move.
   - claim: >-
       `write_follow_ups` reads every head and range from `stack.fields`,
       with the same fallback for a missing layer. The stack's test paths
@@ -83,9 +88,12 @@ acceptance:
       head. The probe check reads the top layer's graded head. Each writer
       prompt carries its origin layer's diff, from its diff base to its
       graded head. The prompt names that range, the origin's graded head
-      and the top's graded head. A missing top layer and a missing bottom
-      layer each read their packaged head. The witness drives a prompt for
-      each layer of a moved stack, then each missing layer.
+      and the top's graded head. Each in-cell concern's line in the prompt
+      names the origin's packaged head, the head its lines cite. An
+      end-review finding's line names none. A missing top layer and a
+      missing bottom layer each read their packaged head. The witness
+      drives a prompt for each layer of a moved stack, a group holding both
+      kinds of finding, then each missing layer.
     witness: tests/test_follow_up.py::test_a_follow_up_is_written_from_the_heads_and_ranges_the_end_review_graded
     mutant:
       file: saffron/follow_up.py
@@ -102,6 +110,9 @@ acceptance:
       - The prompt's top head is the origin's head.
       - A missing top layer raises `KeyError`.
       - A missing bottom layer raises `KeyError`.
+      - An in-cell concern's line names no head.
+      - An in-cell concern's line names the origin's graded head.
+      - Every finding's line names the packaged head, an end-review finding's included.
   - claim: >-
       `_stack_follow_ups` hands `qualify` the stack's own `fields`. It
       seeds every writer cell at the top layer's graded fields, or at the
@@ -136,13 +147,13 @@ acceptance:
 ## Context
 
 Backlog item **b-8a0c9a**, under `DESIGN.md` §5.7 and ADR 7. It is the
-third of five specs that item splits into. `SA-0302` has the end review
+third of six specs that item splits into. `SA-0302` has the end review
 grade each layer at its branch head and record what it graded in
 `StackReview.fields`. This spec has qualification and the follow-up writer
 read those fields. `SA-0305` then runs both outside a batch. Every line
 below was read at `cb2b0602`. Its `saffron/` is `e8f5529e`'s.
-`SA-0302` edits `saffron/cli.py` first, so find each function there by
-name.
+`SA-0302` edits `saffron/cli.py` first, and `SA-0300` moves lines in
+`saffron/follow_up.py`. So find each function in those two files by name.
 
 **What `SA-0302` gives this spec.** `LayerFields` gains `diff_base`, the
 commit a layer's diff starts from. `end_review.layer_fields` sets it to
@@ -159,7 +170,11 @@ layer's presence says nothing about whether it was reviewed.
 bottom layers through `end_review.layer_fields`
 (`saffron/qualify.py:223-224`). It walks the join from the bottom layer's
 head's parent to the top layer's head (`:231-232`). It reads each layer
-the same way, over `head^..head` (`:255`, `:260-261`). `_qualify_range`
+the same way, over `head^..head` (`:255`, `:260-261`). That range holds
+the layer's end-review findings and its in-cell REVIEW concerns together
+(`:251-252`). `_in_cell_concerns` rebuilds those concerns from the
+`findings` table, at the line numbers the task's own REVIEW cited at its
+packaged head (`:81-96`). `_qualify_range`
 anchors over `base..head`, reads each cited file at `head`, and probes at
 `base` over that range's patch (`:124-152`).
 
@@ -195,12 +210,16 @@ range is the packaged one, and a batch's follow-ups do not change.
    keyword-only `fields`. The join's top and bottom layers and each layer
    are read through the helper. The join's base is the bottom layer's
    `diff_base`. A layer's base is its own `diff_base`. Each head is the
-   graded `head`.
+   graded `head`. A layer's in-cell concerns get a range of their own,
+   read through `layer_fields`, after its end-review findings. Rows keep
+   today's order.
 3. **`write_follow_ups` reads `stack.fields`.** The top, bottom and origin
    layers are read through the helper. The stack's test paths start at
    the bottom layer's `diff_base`. The origin diff starts at the origin's
    `diff_base`. The range the prompt names is the one the diff was read
-   over.
+   over. A finding whose lens is one of `review.LENSES` is an in-cell
+   concern, and its line names the origin's packaged head. The packaged
+   head is read through `layer_fields` only for a group that holds one.
 4. **`_stack_follow_ups` passes them on.** Its `qualify` call passes
    `stack.fields`. Its top layer is read through the helper, so each writer
    cell opens at the graded top head. Each `write` call reads its origin
@@ -215,14 +234,17 @@ range is the packaged one, and a batch's follow-ups do not change.
 - Ending a batch without its end review, resuming a closed batch's tail,
   and `saffron finish`. `SA-0301`, `SA-0304` and `SA-0305` build those.
 - The finishing layer's parent. ADR 7 keeps it at the top layer's recorded
-  `pushed_sha`, and `saffron/finish.py` reads it. This spec does not touch
-  it.
+  `pushed_sha`, and `saffron/finish.py` reads it. `SA-0306` moves it to the
+  graded head. This spec does not touch it.
 - A follow-up still stacks on the top layer's recorded `pushed_sha`, while
-  its writer read the graded top head. `SA-0305` reconciles the two.
+  its writer read the graded top head. `SA-0306` reconciles the two.
 - `finish.write_findings` names each finding's `head` as the layer's
   `pushed_sha` (`saffron/finish.py:259`). A finding anchored at a graded
-  head is still reported against the packaged one. This spec leaves
-  that file as it is.
+  head is still reported against the packaged one. `SA-0306` changes
+  that file.
+- A stack whose top layer alone is missing from the fields mixes heads.
+  Its writer cell opens at the packaged top head, while a lower origin is
+  graded. Only a failed resolution of the top layer reaches that.
 
 ## Notes for the agent
 
@@ -237,8 +259,9 @@ not run them yourself.
 **Existing tests that change.**
 
 - `tests/test_qualify.py`: `_Built.run` passes `fields`, built by calling
-  `layer_fields` for each of its layers. Every existing test keeps its
-  assertions. Criterion 4's witness is one of them.
+  `layer_fields` for each of its layers. Its docstring's count of the
+  keywords it forwards goes from eight to nine (`:328`). Every existing
+  test keeps its assertions. Criterion 4's witness is one of them.
 - `tests/test_follow_up.py`: `_stack` builds its `StackReview` with the
   same `fields`. Criterion 5's witness is one of them.
 - `tests/test_cli.py`'s
@@ -269,14 +292,17 @@ run into a collection error.
   parent. Cite one finding per changed line and one on `M`'s line, in the
   join and each layer, and give one in each range a probe. Replace
   `session.probe_findings` with a double recording each call's base and
-  patch. Then run the same stack again, once without the top layer's entry
-  and once without the bottom's.
+  patch. Record two in-cell concerns on TE-2, under a lens in
+  `review.LENSES`. One cites its packaged change and one its review line.
+  Then run the same stack again, once without the top layer's entry and
+  once without the bottom's.
 - Criterion 2: extend `_build`'s mirror. From `base`, `D` adds a test
   file, and `H1r` rebases `H1`'s change onto it. `R1` and `R2` are review
   commits that each add a test file. `H2r` restacks `H2`'s change on
   `R1`. Grade the bottom layer from `D` to `R1`, and the top from `R1` to
-  `R2`. Give the top group a probe whose find text only `R2` carries. Pass
-  one group per layer, and a `write` double that records each prompt.
+  `R2`. Give the top group a probe whose find text only `R2` carries, and
+  an in-cell concern. Pass one group per layer, and a `write` double that
+  records each prompt.
 - Criterion 3: `_follow_ups_mirror` for the pinned base, a ledger with two
   recorded layers, and doubles for `qualify.qualify`,
   `end_review.layer_cell`, `follow_up.write_follow_ups` and
@@ -289,5 +315,5 @@ It passed the `lint`, `types`, `dead` and `structure` gates too. Each new
 witness failed with `saffron/` reverted. Every wrong version above was
 applied as an edit and failed its own criterion's witness, and so did each
 declared mutant. A `write` that read its origin through `layer_fields`
-failed the existing follow-ups test named above. Its diff measured 1564
-changed tokens, 136 of them outside `tests/`.
+failed the existing follow-ups test named above. Its diff measured 1770
+changed tokens, 220 of them outside `tests/`.
