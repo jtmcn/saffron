@@ -213,11 +213,14 @@ the follow-ups' `_drive` reason when they are driven, else
 helper both call, so `_stop` stays the single call to `close_batch`.
 Follow-ups are driven only when `resume.stop_reason` is `DRAINED`.
 
-**Two texts in `saffron/batch.py` go false, so edit them.** The comment
+**Four texts in `saffron/batch.py` go false, so edit them.** The comment
 above `finish` says it runs "while the batch row is still open"
-(`:462`). Under a resume the row is closed. `_stop`'s docstring says
-`run_stack_batch` calls it once, and in its `finally` on a raise
-(`:930-932`). A resume calls it never.
+(`:462`). Under a resume the row is closed. `run_stack_batch`'s own
+docstring says the tail runs "before the row closes" (`:475-476`). Keep
+that docstring within ten lines. The `generation` comment says it is set
+"once the order's own pass drains" (`:507-508`). Under a resume no order
+runs. `_stop`'s docstring says `run_stack_batch` calls it once, and in
+its `finally` on a raise (`:930-932`). A resume calls it never.
 
 ## Out of scope
 
@@ -273,6 +276,11 @@ stop too, so a resume after one still runs its end review.
 the tail does. A SIGTERM during a resume leaves it the same way. The
 tail's spend still counts in `batch_spend`, which sums live rows
 (`saffron/ledger.py:1364-1388`). Only the `spent_usd_est` snapshot omits it.
+The stack view shows the live figure (`saffron/report/stack.py:93`).
+`saffron serve`'s batch spend reads the snapshot instead
+(`saffron/view/graph.py:178-179`, `ontology/queries/view/V1-batches.rq`).
+So after a resume it omits the tail's spend. The operator accepts that,
+and the delegate files a backlog item for the view.
 
 **The standing aborts are not carried.** The row holds no count, so the
 follow-ups start at zero. A drained order ends with fewer than two.

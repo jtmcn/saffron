@@ -223,8 +223,8 @@ swallowed, as `_stack_end_review` swallows its own raise.
   writer read the graded fields from `StackReview`.
 - `SA-0304` (depends on this one). `run_stack_batch` takes a resume that
   carries a closed batch's id, budget, recorded status, top layer and
-  specs. It continues the tail on that id and closes the row again. It
-  runs follow-ups only when the recorded status is `DRAINED`. So a
+  specs. It runs the tail on that id, leaves the row as the night
+  closed it, and returns the tail's reason. It runs follow-ups only when the recorded status is `DRAINED`. So a
   deferred batch closed `INCOMPLETE` skips them, where the in-batch path
   would run them. That is a stated, conservative difference (see below).
 - `SA-0305` (depends on `SA-0303` and `SA-0304`). `saffron finish <batch
