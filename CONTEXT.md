@@ -567,7 +567,7 @@ _Avoid_: "reviewer", "pass", "check", "critic #2".
 tasks (ADR 7). The join lens reads first. The end-review lenses then read each layer
 from the top down. It spends only the end-review reserve, and it runs after an `UNTIL`
 stop too. A batch started with `--defer-end-review` skips it and leaves that reserve
-unspent (b-8a0c9a).
+unspent until `saffron finish` runs it on the batch's own id (b-8a0c9a).
 
 **End-review lens**: The Spec or the Standards session that reads one layer in the end
 review. Each runs in a fresh critic cell at the layer's branch head as fetched when the end

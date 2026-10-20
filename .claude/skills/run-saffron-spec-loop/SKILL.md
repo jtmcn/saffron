@@ -103,14 +103,18 @@ answered by the operator.
 
 **A batch is the default.** The operator set this on 2026-10-07, in run 30.
 Start `saffron batch --repo . --budget <total>` over the order, with the token
-and listeners as in (a). Use `--stack` unless a parent is an open pull request
-outside the order (b-e0e1cf). Then call `mcp__cell-watch__watch` once with
+and listeners as in (a). Use `--stack --defer-end-review` unless a parent is an open pull
+request outside the order (b-e0e1cf). Then call `mcp__cell-watch__watch` once with
 `{}`. It follows each task in turn and never expires. Run `driver.py record`
 for a task when its hand-over wake-up names the next spec, since PACKAGE is
 then done. Record the last task when the batch exits. Stop the watch once the batch
 exits. Without the tool, fall back to the Monitor in (a). Review each pull request while the next cell runs, hold its fixes as
 local commits, and restack the layers above once the batch drains
-(b-cab612). The attended path below is the fallback, and taking it is the
+(b-cab612). Then push each layer and run `saffron finish <batch id> --repo .`
+with the token as in (a). The batch's deferral line names the id. The finish
+reads each branch at origin, so it grades only pushed commits. Record each
+follow-up it runs with `driver.py record`, and read
+`finish/<batch id>/findings.json` for step 5. The attended path below is the fallback, and taking it is the
 operator's call.
 
 `uv run .claude/skills/run-saffron-spec-loop/driver.py next` names the next
