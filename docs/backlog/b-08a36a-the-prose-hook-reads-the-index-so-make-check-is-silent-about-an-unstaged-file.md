@@ -4,7 +4,7 @@ title: The prose hook reads the index, so `make check` passes on a new spec that
 status: open
 tier: 2
 filed: 2026-09-19
-specs: []
+specs: [SA-0298]
 prs: [378]
 commits: []
 cites: []
