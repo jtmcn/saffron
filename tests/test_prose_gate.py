@@ -399,6 +399,16 @@ def test_a_new_long_comment_is_new_though_an_old_one_is_trimmed():
     assert _new_at_head("saffron/c.py", base, grown) == [(1, "comment-block")]
 
 
+def test_a_comment_split_by_a_blank_line_is_one_block():
+    """`SA-0291`'s cell split four-line comments in two to pass (b-998bb7)."""
+    split = "def f():\n    # a1\n    # a2\n\n    # a3\n    # a4\n    return 1\n"
+    assert _python_codes(split) == [(2, "comment-block")]
+    apart = (
+        "def f():\n    # a1\n    # a2\n    x = 1\n    # a3\n    # a4\n    return x\n"
+    )
+    assert _python_codes(apart) == []
+
+
 def _tracked() -> list[str]:
     return subprocess.run(
         ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
