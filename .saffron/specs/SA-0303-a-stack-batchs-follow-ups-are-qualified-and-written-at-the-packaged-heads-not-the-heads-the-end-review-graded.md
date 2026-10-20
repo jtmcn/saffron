@@ -236,8 +236,10 @@ range is the packaged one, and a batch's follow-ups do not change.
 - The finishing layer's parent. ADR 7 keeps it at the top layer's recorded
   `pushed_sha`, and `saffron/finish.py` reads it. `SA-0306` moves it to the
   graded head. This spec does not touch it.
-- A follow-up still stacks on the top layer's recorded `pushed_sha`, while
-  its writer read the graded top head. `SA-0306` reconciles the two.
+- A follow-up's cell is seeded from its predecessor's branch, fetched
+  fresh (`saffron/cli.py:750-754`), so it stacks on the head the branch
+  carries. Only its `stack_layers` row's `predecessor_head` keeps the
+  recorded `pushed_sha`.
 - `finish.write_findings` names each finding's `head` as the layer's
   `pushed_sha` (`saffron/finish.py:259`). A finding anchored at a graded
   head is still reported against the packaged one. `SA-0306` changes

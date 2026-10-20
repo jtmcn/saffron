@@ -4,7 +4,7 @@ title: "A stack batch's finish builds on and checks the packaged heads, not the 
 type: feature
 priority: 2
 depends_on: [SA-0303]
-estimated_lines: 363
+estimated_lines: 375
 estimate_measured: true
 touches:
   - saffron/finish.py
@@ -70,24 +70,26 @@ acceptance:
       - "`heads` is looked up by spec id, so a mapping keyed by task key is never matched."
       - The commit is built on any entry in `heads`, so a lower layer's head is used.
   - claim: >-
-      `finish.write_findings` takes the same `heads`. Each entry from a
-      layer named there carries that head as its `head`. That holds for its
-      pooled, `follow_up` and `unanchored` `qualifications` entries, and for
-      a generation-1 layer's own critic entries. A layer
-      `heads` lacks keeps its `pushed_sha`. A follow-up that added no layer
-      keeps the head it names without `heads`. The witness names a
-      generation-0 layer and the generation-1 layer of one batch, and leaves
-      its bottom layer out.
+      `finish.write_findings` takes the same `heads`. For a layer named
+      there, each `qualifications` entry from an end-review lens or the
+      join carries that head as its `head`. The witness drives the `spec`,
+      `standards` and `join` lenses, as pooled, `follow_up` and `unanchored`
+      entries. Each entry from a lens in `review.LENSES` keeps the layer's
+      `pushed_sha`, and the witness drives all four of those lenses. A layer
+      `heads` lacks keeps its `pushed_sha` on every entry, its critic
+      entries included. A follow-up that added no layer keeps the head it
+      names without `heads`. The witness names one generation-0 layer and
+      leaves the bottom layer and the generation-1 layer out.
     witness: tests/test_finish.py::test_each_finding_names_the_head_the_end_review_graded_its_layer_at
     mutant:
       file: saffron/finish.py
-      find: entries.extend(_left_by_critic(ledger, layer["task_id"], spec_id, head))
-      replace: entries.extend(_left_by_critic(ledger, layer["task_id"], spec_id, layer["pushed_sha"]))
+      find: "                \"head\": head,"
+      replace: "                \"head\": layer[\"pushed_sha\"],"
     wrong_versions:
       - "`heads` is ignored, so every entry names its `pushed_sha`."
       - A layer missing from `heads` gets `None` as its head.
-      - A generation-1 layer's critic entries keep its `pushed_sha` while its qualifications take the graded head.
-      - Its qualifications keep the `pushed_sha` while its critic entries take the graded head.
+      - Every entry of a named layer takes the graded head, in-cell entries included.
+      - Only the `spec` and `standards` lenses take the graded head, so a join entry keeps the `pushed_sha`.
       - "`write_findings` never passes `heads` on to `_layer_findings`."
   - claim: >-
       `finish.publish_finish` takes the same `heads`. It hands `verify` the
@@ -120,7 +122,8 @@ acceptance:
       time its callable runs. `finish.write_findings`,
       `finish.commit_finish` and `finish.publish_finish` each get it.
       `saffron batch --stack` wraps the end review it hands
-      `run_stack_batch`. The wrapper copies each `StackReview.fields`
+      `run_stack_batch` in `cli._keeping_graded_heads(end_review, heads)`,
+      a module-level function. The wrapper copies each `StackReview.fields`
       entry's `head` into the mapping it hands `_stack_finish`, and returns
       the review it got. A review whose `fields` is empty leaves the mapping
       empty. The witness drives one review with two graded layers and one
@@ -211,7 +214,17 @@ layer's `pushed_sha` (`:259`). Every `qualifications` entry carries it
 (`:270-282`), and so does a generation-1 layer's critic entry (`:283-284`,
 `_left_by_critic` at `:230-250`). `write_findings` calls `_layer_findings`
 once per layer (`:306-307`). A follow-up that added no layer names its own
-row's `pushed_sha` (`:314-317`).
+row's `pushed_sha` (`:314-317`). A `qualifications` row holds the
+end-review lenses (`END_LENSES`, `saffron/end_review.py:35-38`), the join,
+and the in-cell lenses of `review.LENSES` (`saffron/phases/review.py:41-46`).
+`SA-0303` qualifies an in-cell concern over the packaged range, citing the
+packaged head. So only an end-review or join row was graded at the
+graded head.
+
+**No generation-1 layer is graded.** `run_stack_batch` calls `end_review`
+before `follow_ups` (`saffron/batch.py:863-867`). So `StackReview.fields`
+never holds a follow-up's layer, and a critic entry never meets a graded
+head.
 
 **The batch builds both callables from one resolve.** `_batch` builds
 `_stack_end_review` and `_stack_finish` in the same `--stack` branch
@@ -245,20 +258,24 @@ the newest.
    `heads: Mapping[str, str]`, keyed by task key, empty by default.
    `write_findings` passes it to `_layer_findings`. A layer found there
    uses that head in place of its `pushed_sha`, and a layer missing from
-   it keeps its `pushed_sha`. That changes four reads: the commit the
-   finish is built on, `verify`'s `base`, the head each layer's remote
-   branch is checked against, and each of a layer's finding entries. The escalation
+   it keeps its `pushed_sha`. That changes four reads. The first is the
+   commit the finish is built on, and the second is `verify`'s `base`.
+   The third is the head each layer's remote branch is checked against.
+   The fourth is the head of a layer's end-review and join entries. An entry whose lens is in `review.LENSES` and every
+   critic entry keep the layer's `pushed_sha`. The escalation
    line names the head the branch was checked against. So only a branch
    that moved after it was graded escalates. The `pushed_sha is None`
    refusal in `commit_finish` reads the head it chose.
 2. **`_stack_finish` takes the mapping.** It is a required keyword
    `heads`. Its callable reads it on each call and never copies it at
    build time. It hands it to all three `finish` calls.
-3. **The batch fills it from its end review.** A small function in
-   `saffron/cli.py` wraps an end-review callable and a dict. It calls the
-   callable, copies `{key: fields.head}` for each `StackReview.fields`
-   entry into the dict, and returns the result unchanged. It copies
-   nothing from a result that is not a `StackReview`. `_batch` builds one
+3. **The batch fills it from its end review.** Add
+   `_keeping_graded_heads(end_review, heads)` at module level in
+   `saffron/cli.py`. `SA-0305` calls it by that name. It returns a
+   callable that calls `end_review`, copies `{key: fields.head}` for each
+   `StackReview.fields` entry into `heads`, and returns the result
+   unchanged. It copies only from a result `isinstance` finds to be a
+   `StackReview`, and nothing from any other. `_batch` builds one
    empty dict, wraps `_stack_end_review`'s callable with it, and hands the
    same dict to `_stack_finish`. `SA-0305` builds `_stack_finish` the same
    way.
@@ -282,20 +299,27 @@ the newest.
 - **The finishing row.** `record_stack_finish` records the finishing
   commit's own sha (`saffron/finish.py:434`, `:445`), which does not move.
 - **ADR 7.** Its paragraph "The finishing layer's parent is the top
-  layer's recorded head" (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:136-140`)
-  goes false here. `docs/adr/**` is `protected`, so the operator amends it
-  by hand in this spec's pull request.
+  layer's recorded head" and its dated amendment
+  (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:136-145`)
+  are the operator's. `docs/adr/**` is `protected`, and the amendment
+  lands by hand in this spec's pull request.
 
 ## Notes for the agent
 
 **Which criteria are edits.** Criteria 2 and 3 each mutate a line the
-change keeps. Leave the critic-entries call in `_layer_findings` and the
-remote read in `publish_finish` as they are. Criterion 1 replaces the one
+change keeps. Keep the `head` key of the dict `_layer_findings` builds
+per `qualifications` row bound to a per-row local named `head`. Leave the
+remote read in `publish_finish` as it is. Criterion 1 replaces the one
 line that picks the commit to build on, so no line it keeps pins the
 claim. Criteria 4 and 5 are new wiring and a new keyword. Those three declare no mutant, and
 `witness` reports `skip` for them. Criteria 6 to 10 name tests that exist
 now. The wrong versions under each criterion are what its witness must
 kill. Do not run them yourself.
+
+**Where the wrapper goes on.** Wrap the end review only inside the
+readiness guard, and only where `_batch` builds the in-batch end review.
+Under `--defer-end-review` (`SA-0301`) `finish` is `None`, so nothing is
+wrapped.
 
 **Name the new dict apart from `heads`.** `_batch`'s `heads` is the commit
 cache, typed by a pair of strings (`saffron/cli.py:2121`). A second binding
@@ -325,10 +349,13 @@ in its body with the source reverted, rather than at collection.
   and `TE-20`. Give `TE-7` a pooled row, a `qualified` row no group
   matches, and an `unanchored` row with a reason. Give `TE-20` one
   qualification and one critic finding through `record_findings`, and
-  `TE-22` one critic finding. Call `write_findings` without `heads`, then
-  with `TE-7` and `TE-20` named. Assert the second result equals the first
-  with only those two layers' heads replaced. Assert the set of
-  `(spec_id, outcome, head)` too, so a missing outcome shows. The kept
+  `TE-22` one critic finding. Give `TE-7` one `qualified` row under each
+  lens in `review.LENSES` too, importing that inside the test. Call
+  `write_findings` without `heads`, then with `TE-7` alone named. Assert
+  the second result equals the first, with the head replaced only on
+  `TE-7`'s entries whose lens is not in `review.LENSES`. Assert the set of
+  `(spec_id, lens, outcome, head)` too, so a missing entry shows. Each
+  in-cell entry of `TE-7` keeps `stack.heads["TE-7"]`. The kept
   outcomes `note` and `unverified` take the branch `unanchored` takes
   (`saffron/finish.py:268-269`), and no witness drives them apart.
 - Criterion 3: `_stack(root, 3)` per case. Push a new commit past a branch
@@ -354,14 +381,14 @@ in its body with the source reverted, rather than at collection.
   name an id no batch carries. Read the page through its own path, since
   the call returns `Path | None` and `types` reads each use.
 
-**Measured on a prototype at `45305c7a`, with `StackReview.fields` stubbed
-as `SA-0302` specifies it.** It passed all five new witnesses and all five
+**Measured on a prototype at `45305c7a`.** It stubbed
+`StackReview.fields` and `LayerFields.diff_base` as `SA-0302` specifies. It passed all five new witnesses and all five
 `preserves` witnesses. The full `tests/test_finish.py`, `tests/test_cli.py`
 and `tests/test_stack_view.py` passed, and so did the `lint`, `types`,
 `dead` and `structure` gates and the `prose` hook. Each new witness failed
 with `saffron/` reverted. Every wrong version above was applied as an edit
 and failed its own criterion's witness, and so did each declared mutant.
-Its diff measured 1450 changed tokens, 288 of them outside `tests/`.
+Its diff measured 1499 changed tokens, 312 of them outside `tests/`.
 
 **Docstrings at the cap.** `_stack_finish`'s and `publish_finish`'s
 docstrings are at ten lines now, and the `prose` gate caps one at ten.
