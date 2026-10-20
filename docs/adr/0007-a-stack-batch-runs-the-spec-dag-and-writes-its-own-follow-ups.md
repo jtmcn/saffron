@@ -140,9 +140,9 @@ because the batch compares each layer's remote head with its record before
 the push, and escalates a moved branch (`SA-0167`).
 Amended 2026-10-20, b-8a0c9a (`SA-0306`): a finish handed the end review's
 graded heads takes the graded head of the batch's highest layer instead, and
-runs its suite against that head. Only a branch that moved after the end
-review escalates. A layer the end review did not grade keeps its recorded
-`pushed_sha` for both.
+runs its suite against that head. Only a branch that moved after its graded
+head escalates. A layer the end review did not grade keeps its recorded
+`pushed_sha` for the parent, the suite's base and the remote check.
 
 **Nothing merges.** The batch links the stack, and leaves every layer a draft.
 A stack on a stack base is not linked (`SA-0265`).
