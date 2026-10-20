@@ -130,8 +130,8 @@ review. Every in-cell critic keeps it whole.
   was filed on, since the rebuttal moves its line.
 - **28** departs. `LensReview.drop_rate` excludes a host-filed survivor, and the
   ledger's drop rate in §4.1 counts it against the lens (backlog item
-  b-b431c1). A survivor that fails to anchor never reaches REBUT (backlog item
-  b-e40d09).
+  b-b431c1). Since `SA-0299` a survivor that fails
+  to anchor still reaches REBUT (backlog item b-e40d09).
 - **29** departs. "Any one blocker goes to REBUT" has an exception. REBUT's
   budget check sends a task over its ceiling to `EXHAUSTED` with no rebuttal.
   That also narrows ADR 3's rule that a surviving probe reaches REBUT. §4.3's

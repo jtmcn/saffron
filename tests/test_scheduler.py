@@ -2836,9 +2836,9 @@ def test_a_stack_order_stacks_on_one_earlier_pull_request_and_refuses_a_spec_nam
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-10-18 for SA-0279's `.claude/` refusal, which refuses SA-0280,
-    SA-0282 and SA-0283 on their touches. Re-measured 2026-10-14 for SA-0293, refused on
-    its parents. The candidates and the refusals are the two lists below, in scan order.
+    """Re-measured 2026-10-20 for SA-0299, a priority-1 candidate with no parent.
+    Re-measured 2026-10-14 for SA-0293, refused on its parents. The candidates and
+    the refusals are the two lists below, in scan order.
 
     Re-measured 2026-09-25, a hundred-and-first time: the spec loop's run 17
     retired `SA-0141` (#520) to `done/`, so `SA-0142` is the one candidate.
@@ -3508,6 +3508,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0290",
         "SA-0291",
         "SA-0293",
+        "SA-0299",
     }
     directory = tmp_path / "specs"
     _arrange_measured_queue(REAL_SPECS, directory, measured)
@@ -3526,6 +3527,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0259",
         "SA-0260",
         "SA-0286",
+        "SA-0299",
         "SA-0200",
         "SA-0201",
         "SA-0208",

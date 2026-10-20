@@ -141,7 +141,7 @@ every `DESIGN.md` and `CONTEXT.md` sentence that carried an older form of it.
   criterion session reads a witness there.
 - **28** departs. The anchor rule was written for lens findings, and a
   criterion-probe survivor now passes through it. One that does not anchor
-  stays in the record and never reaches REBUT. A `preserves` claim's probe is
+  stays in the record and, since `SA-0299`, still reaches REBUT. A `preserves` claim's probe is
   the likeliest to edit code outside the diff. The ledger's drop rate still
   counts a host-filed survivor against the lens (backlog item b-b431c1).
 - **30** upholds. The pull request rewrites every sentence that still stated
@@ -156,8 +156,7 @@ every `DESIGN.md` and `CONTEXT.md` sentence that carried an older form of it.
   13's cells ran before #434 merged.
 - **45** upholds. Mutation now reaches every claim that names a witness,
   through a criterion probe, whether or not its spec declares a mutant. It
-  misses a claim with no witness, a probe that ends `unproven` or `error`, and
-  a survivor that does not anchor.
+  misses a claim with no witness, and a probe that ends `unproven` or `error`.
 - **47** upholds. Coverage is the proxy the adequacy question rejects.
 - **48** upholds. The lens and the criterion session look for what no gate
   thought to check, and the host then turns what they name into a check.
@@ -200,4 +199,4 @@ The operator decided that `witness` as a suite gate blocks at every tier, and
 `SA-0288` builds it. A false constant-mutant survivor then blocks as a true one
 does. A surviving probe of either kind is a blocker for REBUT, whatever the tier, once
 its finding anchors to the diff. A criterion-probe survivor that does not anchor
-stays in the record and never reaches REBUT.
+stays in the record and, since `SA-0299`, reaches REBUT too.

@@ -490,7 +490,8 @@ claim false. During REVIEW the host starts one session per criterion in the crit
 Each session sees one claim and the diff, and is never told which test is its witness.
 Its edits are recorded in `criterion-probes.json`. A criterion probe that survives its own
 criterion's witness is the finding: nothing guards the claim. The host applies each one in
-a gate-only cell, and a survivor that anchors to the diff is a blocker for REBUT (`SA-0120`).
+a gate-only cell, and a survivor is a blocker for REBUT whether or not it anchors (`SA-0120`,
+`SA-0299`).
 _Avoid_: "mutant" for one. A mutant is declared in a criterion, and a criterion probe is
 named by a session that wrote neither the code nor the witness. _Avoid_ "vacuity probe" for
 one. A lens names a vacuity probe against the tests, and a criterion probe targets a claim.
@@ -501,8 +502,8 @@ During REVIEW one fresh session per such criterion turns each into a find-and-re
 It sees the claim, the list and the diff, and is never told which test is its witness. A
 version it cannot express as an edit is recorded as such. The host applies each edit in the
 gate-only cell criterion probes use and runs that criterion's witness. Every outcome is
-recorded in `wrong-versions.json`. A survivor that anchors to the diff is a blocker for REBUT
-(`SA-0187`, `SA-0190`). The host declines to run an edit to a declared test path or outside the
+recorded in `wrong-versions.json`. A survivor is a blocker for REBUT whether or not it
+anchors (`SA-0187`, `SA-0190`, `SA-0299`). The host declines to run an edit to a declared test path or outside the
 tree. It records why under the version's `refusal` key, and REVIEW's line counts it as refused.
 That is not a task **Refusal** (`SA-0233`).
 _Avoid_ "mutant" for one. A mutant is exact text withheld from the implementer, and a wrong
@@ -595,7 +596,8 @@ naming an identifier the diff changed. The second target is what keeps a lens
 usable when its findings point at code the diff did not touch. The second target was written for
 blast radius (retired, `DESIGN.md` §5.5.1). It is now load-bearing for test
 adequacy, whose finding is often about a test that already existed.
-Unanchored findings are recorded and excluded, never deleted, because the drop rate per
+Unanchored findings are recorded and excluded, never deleted, save a host-filed survivor,
+which still reaches REBUT. They are kept because the drop rate per
 lens is the signal that a lens is badly prompted.
 
 **Severity**: `blocker`, `concern`, or `note`.
