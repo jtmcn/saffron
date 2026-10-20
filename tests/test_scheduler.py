@@ -3541,6 +3541,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0298",
         "SA-0225",
         "SA-0269",
+        "SA-0300",
     ]
     assert [r.path.name[:7] for r in refusals] == [
         "SA-0202",
