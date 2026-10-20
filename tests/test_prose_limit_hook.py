@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -278,6 +279,167 @@ def test_file_mode_refuses_a_file_outside_the_worktree(tmp_path):
     done = _hook(repo, "--file", str(outside))
     assert done.returncode == 2
     assert "out of the gates' scope" in done.stderr
+
+
+def test_tree_mode_reads_an_untracked_file_against_zero(tmp_path):
+    repo = _repo(tmp_path, {"README.md": "Short.\n"})
+    (repo / "docs" / "backlog").mkdir(parents=True)
+    (repo / "docs" / "backlog" / "1-new.md").write_text(LONG_A + "\n")
+    spec_dir = repo / ".saffron" / "specs"
+    spec_dir.mkdir(parents=True)
+    spec_path = spec_dir / "SA-0001-x.md"
+    spec_path.write_text("")
+    _git(repo, "add", "-N", str(spec_path.relative_to(repo)))
+    spec_path.write_text(LONG_B + "\n")
+    done = _hook(repo, "--tree")
+    assert done.returncode == 1
+    assert "docs/backlog/1-new.md: 1 new sentence-length hit" in done.stdout
+    assert "docs/backlog/1-new.md:1: sentence-length:" in done.stdout
+    assert ".saffron/specs/SA-0001-x.md: 1 new sentence-length hit" in done.stdout
+    assert ".saffron/specs/SA-0001-x.md:1: sentence-length:" in done.stdout
+
+
+def test_tree_mode_reads_an_unstaged_edit_against_head(tmp_path):
+    repo = _repo(tmp_path, {"README.md": "Short.\n", "saffron/m.py": "x = 1\n"})
+    (repo / "README.md").write_text("Short.\n\n" + LONG_A + "\n")
+    (repo / "saffron" / "m.py").write_text("# one\n# two\n# three\nx = 1\n")
+    done = _hook(repo, "--tree")
+    assert done.returncode == 1
+    assert "README.md: 1 new sentence-length hit" in done.stdout
+    assert "saffron/m.py: 1 new comment-block hit" in done.stdout
+    assert "  README.md:3: sentence-length: " in done.stdout
+    assert _hook(repo).returncode == 0
+
+
+def test_tree_mode_reads_a_fixed_working_copy_not_the_staged_one(tmp_path):
+    # The working copy still differs from HEAD, so the file stays in the
+    # diff `--tree` reads; it just carries no hit, unlike the staged blob.
+    repo = _repo(tmp_path, {"README.md": "Short.\n"})
+    _stage(repo, "README.md", "Short.\n\n" + LONG_A + "\n")
+    (repo / "README.md").write_text("Short.\n\nFixed now.\n")
+    done = _hook(repo, "--tree")
+    assert (done.returncode, done.stdout) == (0, "")
+    assert _hook(repo).returncode == 1
+
+
+def test_tree_mode_counts_only_what_head_lacks(tmp_path):
+    repo = _repo(
+        tmp_path,
+        {
+            "README.md": LONG_A + "\n",
+            "docs/backlog/1-a.md": LONG_A + "\n",
+            "docs/backlog/3-c.md": LONG_A + "\n",
+            "docs/evidence/x.md": "Short.\n",
+            ".gitignore": "docs/backlog/9-ignored.md\n",
+        },
+    )
+    (repo / "README.md").write_text("Intro.\n\n" + LONG_A + "\n")
+    _git(repo, "mv", "docs/backlog/1-a.md", "docs/backlog/2-b.md")
+    (repo / "docs" / "backlog" / "3-c.md").write_text(
+        LONG_A + "\n\nThe agent runs in a sandbox.\n"
+    )
+    (repo / "docs" / "evidence" / "x.md").write_text(LONG_A + "\n")
+    (repo / "docs" / "evidence" / "run.md").write_text(LONG_A + "\n")
+    (repo / "docs" / "backlog" / "9-ignored.md").write_text(LONG_A + "\n")
+    done = _hook(repo, "--tree")
+    assert (done.returncode, done.stdout) == (0, "")
+
+
+def test_make_check_runs_the_tree_hook_and_a_commit_does_not():
+    config = yaml.safe_load((REPO / ".pre-commit-config.yaml").read_text())
+    hooks = [hook for repo in config["repos"] for hook in repo["hooks"]]
+    (tree_hook,) = [hook for hook in hooks if hook["id"] == "prose-limit-tree"]
+    assert tree_hook["stages"] == ["manual"]
+    assert tree_hook["pass_filenames"] is False
+    assert tree_hook["always_run"] is True
+    (commit_hook,) = [hook for hook in hooks if hook["id"] == "prose-limit"]
+    assert "stages" not in commit_hook
+    # The config alone does not say `make check` reaches this hook; `lint`
+    # must name the two ids tied to the right flags, each to its own call.
+    makefile = (REPO / "Makefile").read_text()
+    assert "--skip prose-limit " in makefile
+    assert "--stage manual prose-limit-tree" in makefile
+
+
+def _lint_recipe_lines() -> list[str]:
+    """`Makefile`'s `lint:` recipe, continuation lines joined, the way make
+    reads it."""
+    text = (REPO / "Makefile").read_text()
+    raw: list[str] = []
+    in_lint = False
+    for line in text.splitlines():
+        if line == "lint:":
+            in_lint = True
+            continue
+        if in_lint:
+            if not line.startswith("\t"):
+                break
+            raw.append(line[1:])
+    joined: list[str] = []
+    buf = ""
+    for line in raw:
+        buf += line
+        if buf.endswith("\\"):
+            buf = buf[:-1]
+            continue
+        joined.append(buf)
+        buf = ""
+    return joined
+
+
+def _expand_make_dollars(cmd: str) -> str:
+    """`$$` becomes a literal `$`. Any other `$` reference expands to nothing,
+    the way make expands an undefined variable."""
+    cmd = re.sub(r"\$\$", "\x00", cmd)
+    cmd = re.sub(r"\$\([^)]*\)|\$\{[^}]*\}|\$.", "", cmd)
+    return cmd.replace("\x00", "$")
+
+
+def _run_make_recipe(lines: list[str], env: dict[str, str]) -> int:
+    """Run `lines` the way make runs a recipe: each to its own `sh -c`. A
+    leading `-` keeps that line's exit status from stopping the recipe."""
+    for line in lines:
+        cmd, ignore = line, False
+        while cmd and cmd[0] in "@-+":
+            ignore = ignore or cmd[0] == "-"
+            cmd = cmd[1:]
+        done = subprocess.run(["sh", "-c", _expand_make_dollars(cmd)], env=env)
+        if done.returncode != 0 and not ignore:
+            return done.returncode
+    return 0
+
+
+def test_lint_runs_the_tree_hook_after_a_failure_and_still_fails(tmp_path):
+    lines = _lint_recipe_lines()
+    stub = tmp_path / "prek"
+    stub.write_text(
+        "#!/bin/sh\n"
+        'echo "$@" >> "$PREK_LOG"\n'
+        'case "$*" in\n'
+        '  *--skip*) [ "$PREK_FAIL" = first ] && exit 1 ;;\n'
+        '  *--stage*) [ "$PREK_FAIL" = second ] && exit 1 ;;\n'
+        "esac\n"
+        "exit 0\n"
+    )
+    stub.chmod(0o755)
+    log = tmp_path / "log"
+    for fail, expect in [("none", 0), ("first", 1), ("second", 1)]:
+        log.write_text("")
+        env = {
+            **os.environ,
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+            "PREK_LOG": str(log),
+            "PREK_FAIL": fail,
+        }
+        status = _run_make_recipe(lines, env)
+        logged = [call for call in log.read_text().splitlines() if call]
+        # Exact content and order, not just a count: a hook id swapped
+        # between the two calls still logs two lines but the wrong ones.
+        assert logged == [
+            "run --all-files --skip prose-limit",
+            "run --all-files --stage manual prose-limit-tree",
+        ]
+        assert status == expect
 
 
 def test_claude_code_runs_the_hook_after_each_edit():

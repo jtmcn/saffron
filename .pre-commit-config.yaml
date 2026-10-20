@@ -105,3 +105,16 @@ repos:
         entry: uv run hooks/prose_limit.py
         pass_filenames: false
         files: \.(md|py)$
+
+  # The `prose` gate's rules over the working tree: `--all-files` and the
+  # commit hook both read the index, so an untracked or unstaged fix is
+  # invisible to either. `make check`'s second prek call runs this one.
+  - repo: local
+    hooks:
+      - id: prose-limit-tree
+        name: prose limit, working tree (the prose gate's rules, manual)
+        language: system
+        entry: uv run hooks/prose_limit.py --tree
+        pass_filenames: false
+        stages: [manual]
+        always_run: true

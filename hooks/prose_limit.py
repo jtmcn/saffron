@@ -13,6 +13,10 @@ PostToolUse cannot block, because the edit already happened.
 
 With `--file <path>`, the same question about one file in the working tree,
 answered on stdout before anything is staged.
+
+With `--tree`, the commit mode's question asked of the whole working tree
+instead of the index: every changed or untracked file, read at its
+working-tree content, printed in the commit mode's format.
 """
 
 from __future__ import annotations
@@ -50,11 +54,10 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def staged(root: Path) -> list[tuple[str | None, str]]:
-    """`(path at HEAD or None, staged path)` for each added, modified or renamed file."""
-    done = _git(
-        root, "diff", "--cached", "--name-status", "-M", "-z", "--diff-filter=AMR"
-    )
+def _diff_pairs(root: Path, *extra: str) -> list[tuple[str | None, str]]:
+    """`(path at HEAD or None, new path)` for each added, modified or renamed
+    file `git diff <extra>` reports."""
+    done = _git(root, "diff", *extra, "--name-status", "-M", "-z", "--diff-filter=AMR")
     done.check_returncode()
     fields = done.stdout.split("\0")
     pairs: list[tuple[str | None, str]] = []
@@ -68,6 +71,20 @@ def staged(root: Path) -> list[tuple[str | None, str]]:
             pairs.append((None if status == "A" else fields[i + 1], fields[i + 1]))
             i += 2
     return pairs
+
+
+def staged(root: Path) -> list[tuple[str | None, str]]:
+    """`(path at HEAD or None, staged path)` for each added, modified or renamed file."""
+    return _diff_pairs(root, "--cached")
+
+
+def tree_pairs(root: Path) -> list[tuple[str | None, str]]:
+    """`staged`'s pairs against the working tree instead of the index, plus
+    every untracked file git does not ignore."""
+    others = _git(root, "ls-files", "-z", "--others", "--exclude-standard")
+    others.check_returncode()
+    untracked = [(None, p) for p in others.stdout.split("\0") if p]
+    return _diff_pairs(root, "HEAD") + untracked
 
 
 def _identity(hit: Any) -> tuple[str, str]:
@@ -97,14 +114,22 @@ def _show(root: Path, spec: str) -> str:
     return done.stdout
 
 
-def commit_time(root: Path) -> int:
-    prose = load_prose()
+def _report(
+    prose: Any,
+    root: Path,
+    pairs: list[tuple[str | None, str]],
+    new_text_of: Any,
+) -> int:
+    """New `prose` hits for each `(old, new)` pair whose new text `new_text_of`
+    can read, printed in the commit mode's format."""
     failed = False
-    for old, new in staged(root):
+    for old, new in pairs:
         if not prose.in_scope(new):
             continue
+        new_text = new_text_of(new)
+        if new_text is None:
+            continue
         old_text = _show(root, f"HEAD:{old}") if old else None
-        new_text = _show(root, f":{new}")
         hits = new_hits(prose, root, "prose", new, old_text, new_text)
         for code, n in sorted(Counter(hit.code for hit in hits).items()):
             print(f"{new}: {n} new {code} hit{'' if n == 1 else 's'}")
@@ -112,6 +137,24 @@ def commit_time(root: Path) -> int:
         for hit in hits:
             print(f"  {new}:{hit.line}: {hit.code}: {hit.excerpt}")
     return 1 if failed else 0
+
+
+def commit_time(root: Path) -> int:
+    prose = load_prose()
+    return _report(prose, root, staged(root), lambda new: _show(root, f":{new}"))
+
+
+def tree_time(root: Path) -> int:
+    """The commit mode's question, asked of the working tree."""
+    prose = load_prose()
+
+    def read(new: str) -> str | None:
+        file_path = root / new
+        if not file_path.is_file():
+            return None
+        return file_path.read_text(encoding="utf-8", errors="replace")
+
+    return _report(prose, root, tree_pairs(root), read)
 
 
 def _in_repo(root: Path, file_path: Path) -> str | None:
@@ -209,6 +252,8 @@ def main(argv: list[str]) -> int:
         return edit_time(Path.cwd(), event)
     if len(argv) == 2 and argv[0] == "--file":
         return file_time(Path.cwd(), argv[1])
+    if argv == ["--tree"]:
+        return tree_time(Path.cwd())
     if argv:
         print(f"unexpected arguments: {argv}", file=sys.stderr)
         return 2
