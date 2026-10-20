@@ -695,6 +695,21 @@ def _stack_head(
     return package_phase.fetch_parent_branch(pinned.mirror, pinned.url, branch)
 
 
+def _heads_key(candidate: Candidate, layer: Candidate | None) -> tuple[str, str | None]:
+    """The key `_stack_cite` stores a commit under and `_stack_review` pops."""
+    return (candidate.spec.id, layer.spec.id if layer is not None else None)
+
+
+def _queued_spec_text(pinned: PinnedBase, candidate: Candidate) -> str:
+    """The queued spec file at the pinned base (ADR 7), read before any fetch
+    or cell: a spec with no revision yet has no other text."""
+    path = f".saffron/specs/{candidate.path.name}"
+    queued = git_mirror.file_at(pinned.mirror, pinned.base_sha, path)
+    if queued is None:
+        raise ValueError(f"{path} not found at {pinned.base_sha}")
+    return queued
+
+
 def _stack_base_alive(pinned: PinnedBase) -> Callable[[str], bool]:
     """`run_stack_batch`'s `stack_base_alive` (ADR 7).
 
@@ -1063,7 +1078,7 @@ def _stack_review(
         spec_text: str | None = None,
         sentence: str | None = None,
     ) -> spec_review.SpecReviewSession:
-        key = (candidate.spec.id, layer.spec.id if layer is not None else None)
+        key = _heads_key(candidate, layer)
         head = heads.pop(key, None) if heads is not None else None
         if head is None:
             head = _stack_head(pinned, layer, stack_base)
@@ -1143,17 +1158,10 @@ def _stack_cite(
         candidate: Candidate, layer: Candidate | None, spec_text: str | None
     ) -> list[str]:
         if spec_text is None:
-            # The queued file at the pinned base, read before any fetch
-            # (ADR 7): a spec with no revision yet has no other text.
-            path = f".saffron/specs/{candidate.path.name}"
-            queued = git_mirror.file_at(pinned.mirror, pinned.base_sha, path)
-            if queued is None:
-                raise ValueError(f"{path} not found at {pinned.base_sha}")
-            spec_text = queued
+            spec_text = _queued_spec_text(pinned, candidate)
         head = _stack_head(pinned, layer, stack_base)
         if heads is not None:
-            key = (candidate.spec.id, layer.spec.id if layer is not None else None)
-            heads[key] = head
+            heads[_heads_key(candidate, layer)] = head
         return citation_defects(pinned.mirror, head, spec_text)
 
     return run
@@ -1185,13 +1193,7 @@ def _stack_revise(
         review_text: str,
     ) -> spec_review.SpecWriterSession:
         if spec_text is None:
-            # The queued file at the pinned base, read before any fetch or
-            # cell: a spec with no revision yet has no other current text.
-            path = f".saffron/specs/{candidate.path.name}"
-            queued = git_mirror.file_at(pinned.mirror, pinned.base_sha, path)
-            if queued is None:
-                raise ValueError(f"{path} not found at {pinned.base_sha}")
-            spec_text = queued
+            spec_text = _queued_spec_text(pinned, candidate)
         head = _stack_head(pinned, layer, stack_base)
 
         # The export always reads `base_sha`, never a layer's head (ADR 7).
