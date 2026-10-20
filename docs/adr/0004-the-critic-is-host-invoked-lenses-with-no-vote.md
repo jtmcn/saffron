@@ -81,8 +81,9 @@ extraction draws on a $4.00 reserve plus what the rebuttal turn left. The
 verdicts draw on $2.00 plus what the extraction left. A costly fix starved
 the extraction of `SA-0273`.
 Amended 2026-10-20, `SA-0299`: a host-filed survivor counts whether or not it
-anchors. It is still recorded `anchored = false`, and it goes to REBUT as an
-anchored blocker does (b-e40d09).
+anchors. One that does not anchor is still recorded `anchored = false`.
+Each goes to REBUT as an anchored blocker does
+(b-e40d09).
 
 Otherwise the implementer gets one attempt to fix each blocker or argue against
 it. A rebuttal that neither moved HEAD nor argued halts at `REBUTTING`, and the

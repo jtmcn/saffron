@@ -596,8 +596,8 @@ naming an identifier the diff changed. The second target is what keeps a lens
 usable when its findings point at code the diff did not touch. The second target was written for
 blast radius (retired, `DESIGN.md` §5.5.1). It is now load-bearing for test
 adequacy, whose finding is often about a test that already existed.
-Unanchored findings are recorded and excluded, never deleted. A host-filed survivor is
-recorded unanchored and still reaches REBUT. Findings are kept because the drop rate per
+Unanchored findings are recorded and excluded, never deleted. A host-filed survivor that does
+not anchor is recorded so, and still reaches REBUT. Findings are kept because the drop rate per
 lens is the signal that a lens is badly prompted.
 
 **Severity**: `blocker`, `concern`, or `note`.
