@@ -608,10 +608,14 @@ def _not_covered(
             f"criteri{'on is' if len(claims) == 1 else 'a are'} not mechanically "
             "checked: no `criteria` gate result stands behind the checklist."
         )
-    # Unanchored findings skip REBUT and §6's concern count. Keyed on the
-    # review's lens, as `_findings` keys the `anchored: no` cells it points to.
+    # Unanchored findings skip REBUT and the concern count (§6). A
+    # host-filed survivor `anchored_blockers` selected is not one of them.
+    selected = {id(f) for f in blockers}
     if unanchored := [
-        (r.lens, f) for r in reviews for f in r.findings if not f.anchored
+        (r.lens, f)
+        for r in reviews
+        for f in r.findings
+        if not f.anchored and id(f) not in selected
     ]:
         lenses = sorted({lens for lens, _ in unanchored})
         lines.append(

@@ -17,7 +17,7 @@ from saffron.phases.rebut import (
     RebuttalTurn,
     Verdict,
 )
-from saffron.phases.review import LensReview
+from saffron.phases.review import HOST_FILED, LensReview
 from saffron.report.index import (
     _RANKED_BY_RISK,
     _STATE_RANK,
@@ -1251,6 +1251,85 @@ def test_disagreement_rows_attribute_the_right_rebuttal_to_the_right_blocker():
     assert "rebuttal two text" in row2
     assert "verdict two text" in row2
     assert "blocker one claim" not in row2
+
+
+def test_a_host_filed_survivor_outside_the_diff_is_reported_as_a_blocker():
+    """A host-filed survivor reaches `_disagreements` though it never
+    anchors. `Disagreements` numbers it after the anchored blocker before
+    it, with its own rebuttal and verdict. The exhausted line lists both
+    locations in the order `anchored_blockers` selected them. The unanchored
+    line still names the lens's own blocker, which carries no such mark."""
+    anchored = _finding(file="a.py", line=1, claim="a real anchored claim")
+    stray = _finding(file="c.py", line=9, claim="a lens's own claim", anchored=False)
+    survivor = Finding(
+        lens="adequacy",
+        severity="blocker",
+        file="saffron/gates/runner.py",
+        line=330,
+        claim=(
+            f"{HOST_FILED}t.py::a stayed green with the spec's wrong version "
+            "'the guard is removed' applied to saffron/gates/runner.py as an "
+            "edit."
+        ),
+        anchored=False,
+        probe_verdict="survived",
+    )
+    reviews = [
+        LensReview(lens="correctness", findings=[anchored, stray]),
+        LensReview(lens="adequacy", findings=[survivor]),
+    ]
+    rebut_result = RebutResult(
+        state="READY_FOR_REVIEW",
+        why="test",
+        rebuttal=RebuttalTurn(
+            rebuttals=[
+                Rebuttal(finding=2, action="argued", argument="nothing notices it")
+            ]
+        ),
+        verdicts=[
+            LensVerdicts(
+                lens="adequacy",
+                verdicts=[
+                    Verdict(finding=2, verdict="confirmed", reason="the gate stands in")
+                ],
+            )
+        ],
+        moved=False,
+        cost_usd=0.0,
+    )
+    rendered = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        reviews=reviews,
+        rebut_result=rebut_result,
+        exhausted=True,
+    )
+    rows = [
+        line
+        for line in rendered.splitlines()
+        if line.startswith("| 1 ") or line.startswith("| 2 ")
+    ]
+    assert len(rows) == 2
+    row2 = next(r for r in rows if r.startswith("| 2 "))
+    assert "saffron/gates/runner.py:330" in row2
+    assert "nothing notices it" in row2
+    assert "the gate stands in" in row2
+
+    section = rendered.split("## Not covered", 1)[1]
+    standing = next(line for line in section.splitlines() if "blockers stand" in line)
+    assert standing.index("a.py:1") < standing.index("saffron/gates/runner.py:330")
+    unanchored_line = next(
+        line for line in section.splitlines() if "could not be anchored" in line
+    )
+    assert "1 finding" in unanchored_line
+    assert "`correctness`" in unanchored_line
+    assert "adequacy" not in unanchored_line
 
 
 def test_the_disagreements_table_shows_the_first_answer_to_a_duplicated_finding():
