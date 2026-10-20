@@ -570,8 +570,8 @@ stop too. A batch started with `--defer-end-review` skips it and leaves that res
 unspent (b-8a0c9a).
 
 **End-review lens**: The Spec or the Standards session that reads one layer in the end
-review. Each runs in a fresh critic cell at the layer's pushed head, with no patch
-applied. Neither is one of ADR 4's declared lenses.
+review. Each runs in a fresh critic cell at the layer's branch head as fetched when the end
+review runs, with no patch applied. Neither is one of ADR 4's declared lenses.
 
 **Join lens**: The session that reads a whole stack's diff once, from the bottom
 layer's base to the top layer's head (ADR 6). It reads the seams between layers. A
