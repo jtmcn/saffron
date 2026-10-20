@@ -49,7 +49,7 @@ forbidden:
   - tests/test_stack_view.py
   - tests/test_scheduler.py
   - tests/test_queued_specs.py
-budget_usd: 42
+budget_usd: 45
 max_attempts: 3
 max_turns: 200
 acceptance:
@@ -89,6 +89,7 @@ acceptance:
       - "The open pull request reader gets no slug."
       - "`INCOMPLETE` exits 0."
       - "`budget_usd` is the newest batch's budget, not the finished batch's."
+      - "`stop_reason` is the newest batch's `status`, not the finished batch's."
       - "The adapters are built on the operator's checkout, not the recorded mirror."
       - "The stack view gets no specs."
       - "The citation check gets a cache of its own, so it and the review fetch twice."
@@ -129,13 +130,13 @@ acceptance:
 Backlog item **b-8a0c9a**, under ADR 7 and `DESIGN.md` §4.2.1. A stack
 batch's end review grades the heads PACKAGE pushed, before the delegate's
 review commits land. Runs 32, 33, 35, 44 and 45 each found most of its
-findings already fixed on the branches. This is the last of the five specs
-`SA-0301`'s notes lay out, and it adds the command the other four build
-toward. Every line cited below was read at `45305c7a`, which holds the
-five specs and none of their code. `SA-0301` to `SA-0304` and `SA-0306`
+findings already fixed on the branches. This is the last of the six specs
+that item splits into, and it adds the command the other five build
+toward. Every line cited below was read in `saffron/` as it stands at
+`e8f5529e`, which holds none of the specs' code. `SA-0301` to `SA-0304` and `SA-0306`
 each edit `saffron/cli.py` first, so find each function there by name.
 
-**What the four parents give this spec.**
+**What the five specs below give this spec.**
 
 - `SA-0301` adds `saffron batch --stack --defer-end-review`. Its deferring
   callable writes `finish/<batch id>/deferred.json` under the batch tree.
@@ -162,8 +163,8 @@ each edit `saffron/cli.py` first, so find each function there by name.
   `write_stack_view` takes a `batch_id` keyword.
 
 **`_batch` builds the stack adapters.** Under `--stack` it builds them once
-the scan resolves (`saffron/cli.py:2116-2154`). `_stack_review` and
-`_stack_cite` share one commit cache there (`:2119-2131`). That covers
+the scan resolves (`saffron/cli.py:2108-2154`). `_stack_review` and
+`_stack_cite` share one commit cache there (`:2121`). That covers
 `_stack_runner`, `_stack_end_review`, `_stack_review`, `_stack_cite`,
 `_stack_revise`, `_stack_mint`, `_stack_base_alive`, `_stack_follow_ups`
 with `cap_usd=writer_usd`, `_stack_open_prs` and `_stack_finish`. It then
@@ -304,8 +305,8 @@ both witnesses share it.
 - A batch of budget 40.0 with two layers, `SY-1` at position 1 on the
   stack base and `SY-2` at position 2. Close it with a given reason, or
   leave it open, or give it no layer, as the case needs.
-- A later batch of budget 10.0 with no layer, closed. The newest batch is
-  then not the finished one.
+- A later batch of budget 10.0 with no layer, closed `BUDGET`. The newest
+  batch is then not the finished one, and its budget and status differ.
 - `deferred.json` with `reserve_usd` 6.0 and `writer_usd` 3.0, so neither
   matches a quarter of 40.0 and the two differ. Give one spec a field set
   at its default, such as `priority=3`.
@@ -351,6 +352,14 @@ criterion's witness failed every time. Its diff measured 646 changed
 tokens outside `tests/` and 932 inside, about 395 lines. The estimate is
 that figure, docstrings and the `CLAUDE.md` edits included.
 
-**The `prose` gate** counts each new comment and docstring. Write none with
+**Exit codes mirror `_batch`.** The reason reports the night. So a finish
+over a night closed `INCOMPLETE` or `INFRASTRUCTURE` exits 2, though its own
+tail ran. A retry then meets the end-review refusal.
+
+**No unattended refusal.** `_batch` calls `runtime.unattended_refusal()`
+before readiness. The finish is attended, so it does not.
+
+**The `prose` gate** counts each new comment and docstring, and each
+edited `CLAUDE.md` sentence. Write none with
 an em dash, a semicolon, a contraction, the perfect tense or a sentence
 over 25 words.
