@@ -210,13 +210,15 @@ swallowed, as `_stack_end_review` swallows its own raise.
 
 **The chain this spec heads.** Each child is its own spec.
 
-- `SA-0302` (depends on this one). `LayerFields` gains the diff base, and
+- `SA-0302` (depends on this one). `LayerFields` gains `diff_base`, and
   a resolver fetches each layer's branch. A layer's base is its
   predecessor's current head when its own head contains it, else the
-  predecessor's recorded head when contained. The bottom layer's base is
-  the commit PACKAGE built it on. A layer containing neither, or whose
+  predecessor's recorded head when contained. A bottom layer's base is
+  its merge base with the fetched default branch, bounded below by the
+  commit PACKAGE built it on. A layer containing no candidate, or whose
   branch is gone, gets `error` on both lenses at cost 0. `run_end_review`
-  takes the resolver, and `StackReview` carries the fields it graded.
+  takes the resolver, and `StackReview.fields` holds every layer either
+  walk resolved.
 - `SA-0303` (depends on `SA-0302`). Qualification and the follow-up
   writer read the graded fields from `StackReview`.
 - `SA-0304` (depends on this one). `run_stack_batch` takes a resume that
