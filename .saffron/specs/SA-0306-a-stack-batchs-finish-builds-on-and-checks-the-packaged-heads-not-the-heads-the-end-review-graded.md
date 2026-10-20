@@ -74,7 +74,7 @@ acceptance:
       there, each `qualifications` entry from an end-review lens or the
       join carries that head as its `head`. The witness drives the `spec`,
       `standards` and `join` lenses, as pooled, `follow_up` and `unanchored`
-      entries. Each entry from a lens in `review.LENSES` keeps the layer's
+      entries. Each `qualifications` entry from a lens in `review.LENSES` keeps the layer's
       `pushed_sha`, and the witness drives all four of those lenses. A layer
       `heads` lacks keeps its `pushed_sha` on every entry, its critic
       entries included. A follow-up that added no layer keeps the head it
@@ -184,7 +184,7 @@ and the follow-up writer read those fields. The finish still reads the
 packaged heads. This spec has it read the graded ones. `SA-0305` then
 builds `saffron finish <batch id> --repo .` on what this spec adds.
 
-Every line below was read at `45305c7a`, whose source matches `e8f5529e`.
+Every line below was read in `saffron/` as it stands at `e8f5529e`.
 `SA-0301`, `SA-0302` and `SA-0303` edit `saffron/cli.py` before this
 spec runs, so find each function there by name. None of them edits
 `saffron/finish.py` or `saffron/report/stack.py`.
@@ -245,7 +245,7 @@ strings to a sha, and it is not this mapping.
 
 **The stack view reads the newest batch.** `write_stack_view` renders
 `stack_view` of `ledger.latest_batch_id()` (`saffron/report/stack.py:264-272`).
-Its docstring says "the newest batch" (`:267-270`). A finish that runs
+Its docstring says "the newest batch" (`:265-270`). A finish that runs
 after a later batch would render that later batch. `SA-0305` calls it
 with the id of the batch it finishes. `_batch` calls it after
 `run_stack_batch` returns (`saffron/cli.py:2210`), when its own batch is
@@ -264,8 +264,7 @@ the newest.
    The fourth is the head of a layer's end-review and join entries. An entry whose lens is in `review.LENSES` and every
    critic entry keep the layer's `pushed_sha`. The escalation
    line names the head the branch was checked against. So only a branch
-   that moved after it was graded escalates. The `pushed_sha is None`
-   refusal in `commit_finish` reads the head it chose.
+   that moved after it was graded escalates.
 2. **`_stack_finish` takes the mapping.** It is a required keyword
    `heads`. Its callable reads it on each call and never copies it at
    build time. It hands it to all three `finish` calls.
@@ -284,7 +283,7 @@ the newest.
    it without one.
 5. **Four docstrings go false, so edit them.** `finish.py`'s module
    docstring (`:3-5`), `commit_finish`'s (`:156`), `publish_finish`'s
-   (`:364-366`) and `write_stack_view`'s (`saffron/report/stack.py:267-270`).
+   (`:364-366`) and `write_stack_view`'s (`saffron/report/stack.py:265-270`).
 
 ## Out of scope
 
@@ -306,9 +305,16 @@ the newest.
 
 ## Notes for the agent
 
+**The fixtures are unit arrangements.** Production never grades `TE-20` or
+puts a `join` row on `TE-7`. Only generation 0 is graded, and join rows sit
+on the top layer. The witnesses exercise each function on
+its own.
+
 **Which criteria are edits.** Criteria 2 and 3 each mutate a line the
 change keeps. Keep the `head` key of the dict `_layer_findings` builds
-per `qualifications` row bound to a per-row local named `head`. Leave the
+per `qualifications` row bound to a per-row local named `head`. Pass
+`layer["pushed_sha"]` to `_left_by_critic` explicitly, so that local never
+reaches it. Leave the
 remote read in `publish_finish` as it is. Criterion 1 replaces the one
 line that picks the commit to build on, so no line it keeps pins the
 claim. Criteria 4 and 5 are new wiring and a new keyword. Those three declare no mutant, and
