@@ -4,7 +4,7 @@ title: "A stack batch's end review grades each layer's packaged head, not the he
 type: feature
 priority: 2
 depends_on: [SA-0301]
-estimated_lines: 406
+estimated_lines: 509
 estimate_measured: true
 touches:
   - saffron/end_review.py
@@ -55,16 +55,22 @@ acceptance:
       Given the resolver `end_review.branch_heads` builds, `run_end_review`
       opens each layer's cell, and the join's, at the head the layer's
       branch carries when the end review runs. Each lens's diff and stated
-      range start at the base the rule picks, for each of its three arms.
-      A layer with no predecessor starts at its pushed head's parent. A
-      restacked layer starts at its predecessor's current head, which
-      outranks the recorded one. A layer that was not restacked starts at
-      its predecessor's recorded head. The join reads from the bottom
-      layer's base to the top layer's current head. Each branch is fetched
-      once per end review. `StackReview.fields` holds each layer's fields
-      as its lenses graded them. An unmoved stack still reads `head^..head`
-      per layer. The witness drives all three arms over moved branches, and
-      an unmoved stack.
+      range start at the base the rule picks. The witness drives each arm
+      of the rule. A layer with no predecessor starts at its merge base
+      with the freshly fetched default branch, when its pushed head's
+      parent is an ancestor of that merge base. An unrebased layer and a
+      layer rebased onto a newer default branch are both driven, and the
+      newer default branch's commit stays out of the layer's diff and the
+      join's. A restacked layer starts at its predecessor's current head,
+      which outranks the recorded one. A layer that was not restacked starts
+      at its predecessor's recorded head. A layer whose predecessor is a
+      stack base whose branch is gone starts at that recorded head when its
+      head contains it. The join reads from the bottom layer's base to the
+      top layer's current head. Each layer's and predecessor's branch is
+      fetched once per end review. `StackReview.fields` holds every layer
+      either walk resolved. The witness drives a stack whose join ran while
+      the reserve stopped the layer walk, and a one-layer stack with no
+      join. An unmoved stack still reads `head^..head` per layer.
     witness: tests/test_end_review.py::test_an_end_review_grades_each_layer_at_its_branch_head_after_package
     mutant:
       file: saffron/end_review.py
@@ -73,22 +79,32 @@ acceptance:
     wrong_versions:
       - The resolver fetches each branch but keeps the pushed head as the head it grades.
       - A restacked layer starts at its predecessor's recorded head, so the predecessor's review commits join its diff.
-      - A layer with no predecessor starts at its run's `base_sha` rather than its pushed head's parent.
+      - A layer with no predecessor starts at its run's `base_sha` rather than the commit PACKAGE built it on.
+      - A layer with no predecessor always starts at its pushed head's parent, so a rebased bottom layer's diff takes in the default branch's newer commit.
+      - A predecessor whose branch is gone ends the layer `error` even when the layer contains its recorded head.
       - The layer diff stays `head^..head` of the current head, so a layer with a review commit loses its own commit.
       - The join's range still starts at the bottom layer's pushed head's parent.
       - The join's stated base is not the base its diff starts from.
       - The stated range in a layer's prompt keeps the recorded base while the diff starts at the chosen one.
       - Each lens fetches its branch again, so the join and the layers can grade two heads.
       - "`StackReview.fields` stays empty."
+      - "`StackReview.fields` keeps only what the layer walk resolved, so a layer the reserve did not reach is absent though the join read it."
+      - "`StackReview.fields` keeps only what the join resolved, so a one-layer stack's is empty."
   - claim: >-
       A layer the resolver cannot place gets `error` on both its lenses at
-      cost 0, and the walk goes on to the layer below. The set of outcomes
-      is three. Its own branch is gone at origin. Its predecessor's branch is
-      gone at origin. Its current head contains none of its candidate bases.
-      Each error names the branch it could not read or place. The third
-      also names the current head and every candidate. The join is filed `error`
-      at cost 0 when any layer fails, a middle layer included. The witness
-      drives each outcome, on a layer with a predecessor and on one without.
+      cost 0, and the walk goes on to the layer below. There are two
+      outcomes. Its own branch is gone at origin, driven on a bottom layer
+      and on one with a predecessor. Its current head contains none of its
+      candidate bases, driven on a layer with a predecessor and on two
+      bottom layers. One bottom layer was force-pushed onto unrelated
+      history. The other was rebased below the commit PACKAGE built it on,
+      so its merge base with the default branch does not descend from that
+      commit. A layer whose predecessor is a stack base with a gone branch,
+      and whose head does not contain that recorded head, is driven too.
+      Each error names the layer's branch. The second outcome also names
+      the current head and every candidate, and any predecessor branch
+      found gone. The join is filed `error` at cost 0 when any layer fails,
+      at the bottom, the top or the middle of a stack.
     witness: tests/test_end_review.py::test_a_layer_whose_branch_head_cannot_be_resolved_errors_at_no_cost
     mutant:
       file: saffron/end_review.py
@@ -96,11 +112,12 @@ acceptance:
       replace: top_task_id, lens="join", status="reviewed", cost_usd=0.0, error=error
     wrong_versions:
       - A gone layer branch falls back to the layer's pushed head and is reviewed.
-      - A gone predecessor branch falls back to the predecessor's recorded head and the layer is reviewed.
       - A head that contains none of its bases is graded from the recorded base anyway.
+      - A bottom layer starts at its merge base with the default branch even when that merge base does not descend from the commit PACKAGE built it on.
       - A resolution failure stops the walk, so the layers below it get no review.
       - The join resolves only its top and bottom layers, so a middle layer's failure leaves it `reviewed`.
       - The error names the branch but not the current head or the candidates.
+      - The error leaves out the predecessor branch it found gone.
   - claim: >-
       Read through `layer_fields`, whose diff base is the pushed head's
       parent, each layer's lenses still get that layer's own commit,
@@ -114,12 +131,15 @@ acceptance:
       `saffron batch --stack` hands `run_end_review` the resolver
       `branch_heads` builds on the pinned mirror and the pinned url. Asked
       for a layer, it fetches that layer's branch there and grades the
-      fetched head.
+      fetched head. Each end review builds its own resolver, with an empty
+      cache. The witness runs the end review twice, with the branch moved
+      between the two, and each grades the head fetched for it.
     witness: tests/test_cli.py::test_a_stack_batchs_end_review_reads_each_layer_at_its_fetched_branch_head
     wrong_versions:
       - "`_stack_end_review` passes `layer_fields` as the resolver."
       - The resolver is built on the operator's repo rather than the pinned mirror.
       - The resolver is built on a url other than the pinned url.
+      - "`_stack_end_review` builds one resolver outside `run`, so a second end review grades the head its cache kept."
 ---
 
 ## Context
@@ -129,7 +149,7 @@ second of five specs that item splits into. `SA-0301` lets a stack batch
 end without its end review, so the review can run after the loop's review
 commits land. This spec makes the end review read those commits.
 `SA-0303` then has `qualify` and the follow-up writer read the fields this
-spec records. Every line below was read at `e8f5529e`. `SA-0301` edits
+spec records. Every line below was read at `f2d951b4`. `SA-0301` edits
 `saffron/cli.py` first, so find each function by name.
 
 **The end review reads the head PACKAGE pushed.** `layer_fields` takes a
@@ -147,6 +167,19 @@ seeds each critic cell at `fields.head` (`:601`, `:620`).
 **Review commits land after PACKAGE.** The item records five runs where
 most end-review findings were already fixed on the branches. `DESIGN.md`
 §5.7 already says a parent's head is fetched, never remembered.
+
+**Only pushed commits are read.** A batch's url is the repo's real remote
+(`saffron/preflight.py:549`), and the resolver fetches from it. So a review
+commit is graded only once it is pushed. `SA-0305` and the spec loop's
+skill carry that order, and this spec does not.
+
+**A stack base is a predecessor too.** A stack's bottom layer records the
+stack base's task as its predecessor (`saffron/batch.py:488-490`). That
+branch can be merged and deleted before the end review runs.
+
+**The default branch is fetched fresh in one place.**
+`fetch_default_branch` asks the remote for its default branch and fetches
+its head into the mirror (`saffron/phases/package.py:129-150`).
 
 **A branch is fetched fresh in one place.** `fetch_parent_branch` fetches
 a branch into the mirror and returns its head
@@ -182,25 +215,35 @@ layers, and nothing else (`saffron/end_review.py:496-502`).
    with a predecessor also fetches the predecessor's branch, read from
    that task's row. The base is the first candidate the current head
    contains, by `git merge-base --is-ancestor` in the mirror.
-   - With a predecessor: its current head, then its recorded head.
-   - With none: the pushed head's parent.
+   - With a predecessor: its current head, then its recorded head. A
+     predecessor whose branch is gone offers its recorded head alone.
+   - With none: one candidate. Fetch the default branch through
+     `package_phase.fetch_default_branch`, and take the merge base of the
+     current head and its head. The candidate is that merge base when the
+     pushed head's parent is its ancestor, else the pushed head's parent.
+     An unrebased layer gets the pushed head's parent. A layer rebased
+     onto a newer default branch starts after the default branch's
+     commits.
 
    It returns the recorded fields with `head` set to the current head, and
    both `base` and the diff base set to the chosen base. The prompt's
    stated range is then the diff's own range. It caches each fetched
-   head by branch, so one resolver fetches a branch once. A gone branch
-   raises naming the branch and its role, layer or predecessor. No
-   candidate contained raises `ValueError` naming the layer's branch, its
-   current head and every candidate.
+   head, the default branch's included, so one resolver fetches each
+   once. A gone layer branch raises naming that branch. No candidate
+   contained raises `ValueError` naming the layer's branch, its current
+   head, every candidate and any predecessor branch it found gone.
 3. **The walk takes the resolver.** `run_end_review`, `review_stack` and
    `review_joins` each take a required keyword `resolve`, and
    `_review_one_layer` too. Each reads a layer's fields through it, never
    through `layer_fields` directly. A layer's diff and the join's range
    start at the diff base. The join's stated base is the bottom layer's
    diff base. A failed resolution raises into the two existing catches.
-4. **`StackReview` carries the fields it graded.** A `fields` mapping, by
-   task key, defaults empty. `run_end_review` wraps `resolve` so that
-   every resolution it makes lands there. `SA-0303` reads it.
+4. **`StackReview` carries the fields it resolved.** A `fields` mapping,
+   by task key, defaults empty. `run_end_review` wraps `resolve`, so every
+   layer either walk resolved lands there. The join resolves every layer,
+   so a layer the reserve did not reach is still present when the join
+   ran. A layer absent from it had no resolution. `SA-0303` reads it, and
+   falls back to `layer_fields` for an absent layer.
 5. **The batch passes the resolver.** `_stack_end_review` passes
    `branch_heads(pinned.mirror, pinned.url)`, built inside its `run`, so
    each end review starts with an empty cache. Inside a batch each branch
@@ -213,15 +256,12 @@ layers, and nothing else (`saffron/end_review.py:496-502`).
   batch the two agree, since each branch still sits at its pushed head.
 - Ending a batch without its end review, and running it later. `SA-0301`
   and `SA-0305` build those.
-- A bottom layer rebased onto a newer default branch. Its head still
-  contains the commit PACKAGE built it on, so it resolves. Its range then
-  takes in the default branch's newer commits too.
 - A layer rebased onto a head its predecessor's branch no longer carries.
   It contains neither candidate and ends `error`.
 - The finishing layer's parent. ADR 7 keeps it at the top layer's
   recorded head.
-- `CONTEXT.md`'s **End-review lens** entry says each lens runs at the
-  layer's pushed head. The operator edits it by hand.
+- `CONTEXT.md`'s **End-review lens** entry. The operator edited it by
+  hand in `f2d951b4`.
 
 ## Notes for the agent
 
@@ -252,23 +292,32 @@ equality. Compare the other keywords, and check the wrapped one delegates.
   origin's path as the url, so `fetch_parent_branch` runs for real.
   Record each layer with `set_task_package` and `record_stack_layer`, as
   `_stack_ledger` does (`tests/test_end_review.py:574-634`).
+- The origin's checked-out branch is the default branch
+  `fetch_default_branch` reads, so leave it on `main` before each review.
+- A stack base is a task with a pushed head and no `stack_layers` row,
+  passed as the bottom layer's predecessor.
 - Criterion 1: cut the bottom layers from a commit after the run's
   `base_sha`, so a bottom base read from the run shows in the diff. Give
   each review commit its own file, so the layer's own commit stays in its
-  diff. Count fetches with a spy that wraps the real
-  `fetch_parent_branch`. Assert each lens's diff equals the mirror's
-  `DIFF_FLAGS` diff of its expected range.
+  diff. For the rebase, commit to `main` and cherry-pick both layers onto
+  it. Count fetches with a spy that wraps the real `fetch_parent_branch`.
+  Assert each lens's diff equals the mirror's `DIFF_FLAGS` diff of its
+  expected range. One `run_end_review` per stack keeps the calls apart.
+  For the stopped walk, a join cost of 0.5 against a reserve of 2.5
+  leaves the top layer reached and the bottom one not.
 - Criterion 2: point a branch at an orphan commit for "contains none".
-  Delete a bottom layer's branch for the predecessor case above it. Put
+  Rebase another bottom layer onto the root, below its build commit. Put
   the unplaceable layer in the middle of a three-layer stack once.
 - Criterion 4: a plain repository as the mirror, with
   `.saffron/policy.yaml` and `CLAUDE.md` at base. Replace
-  `package.fetch_parent_branch` and `cli.end_review.run_end_review`. Call
-  the captured `resolve` on a one-layer ledger.
+  `package.fetch_parent_branch`, `package.fetch_default_branch` and
+  `cli.end_review.run_end_review`. Call the captured `resolve` on a
+  one-layer ledger, once per end review.
 
-**Measured on a prototype at `e8f5529e`.** It passed all four witnesses,
-and the `lint`, `types` and `dead` gates. Each new witness failed with
-`saffron/end_review.py` and `saffron/cli.py` reverted. Every wrong version
-above was applied as an edit and failed its own criterion's witness, and
-so did each declared mutant. Its diff measured 1622 changed tokens, 354
-of them outside `tests/`.
+**Measured on a prototype at `e8f5529e`,** whose source matches
+`f2d951b4`. It passed all four witnesses, and the `lint`, `types` and
+`dead` gates. Each new witness failed with `saffron/end_review.py` and
+`saffron/cli.py` reverted. Every wrong version above was applied as an
+edit and failed its own criterion's witness, and so did each declared
+mutant. Its diff measured 2034 changed tokens, 434 of them outside
+`tests/`.
