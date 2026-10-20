@@ -785,12 +785,21 @@ def _describe(review: LensReview) -> str:
 
 
 def anchored_blockers(reviews: Sequence[LensReview]) -> list[Finding]:
-    """Anchored blockers, in order. ORDER IS LOAD-BEARING: `rebut.py` numbers
-    this result from 1, and the pull-request body renders `_disagreements`
-    against those same numbers — the single selection rule every caller of
-    REBUT's blocker list must share."""
+    """Anchored blockers, plus every host-filed survivor, in order.
+    ORDER IS LOAD-BEARING: `rebut.py` numbers this result from 1, and the
+    pull-request body renders `_disagreements` against those same numbers —
+    the single selection rule every caller of REBUT's blocker list must
+    share.
+
+    A `HOST_FILED` blocker is exempt from the anchor check. The host already
+    ran its edit and watched the witness stay green. So anchoring's job of
+    dropping a lens's hallucinated or off-diff claim does not apply here
+    (`DESIGN.md` §5.4.1, §5.5)."""
     return [
-        f for r in reviews for f in r.findings if f.anchored and f.severity == "blocker"
+        f
+        for r in reviews
+        for f in r.findings
+        if f.severity == "blocker" and (f.anchored or f.claim.startswith(HOST_FILED))
     ]
 
 
@@ -864,9 +873,10 @@ def review_state(reviews: Sequence[LensReview]) -> tuple[str, str]:
     """The task's state after REVIEW, and the one line that says why.
 
     Any single anchored blocker routes to REBUT (§5.5), so `REBUTTING` here is
-    a phase to run, not a stop. A lens that errored *is* a stop, at
-    `REVIEW_INCOMPLETE`. An unrun lens must not read as a clean review, and
-    there is no finding set to rebut against.
+    a phase to run, not a stop. So does a host-filed survivor, anchored or
+    not: the host already ran its own edit. A lens that errored *is* a stop,
+    at `REVIEW_INCOMPLETE`. An unrun lens must not read as a clean review,
+    and there is no finding set to rebut against.
     """
     if errored := [r.lens for r in reviews if r.error]:
         return (

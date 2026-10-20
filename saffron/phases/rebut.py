@@ -2,10 +2,11 @@
 
 The order the design left ambiguous, settled here: anchored blockers → the
 implementer rebuts → the critic verdicts each one. "Confirmed" in §5.6 is the
-host's anchoring (§5.5), which already established the finding points at real
-changed code; a critic that verdicts before it has seen the argument is
-restating rather than disagreeing, and the recorded disagreement is the entire
-product of this phase.
+host's anchoring (§5.5), which already established that the finding points at
+real changed code. For a survivor, the host's own run of the edit against the
+witness stands in for that check. A critic that verdicts before reading the
+argument restates it rather than disagreeing. The recorded disagreement is
+the entire product of this phase.
 
 The implementer *resumes*: it already holds the plan, the diff it wrote and the
 vocabulary, so REBUT injects none of its own (§5.3). Each verdict is a fresh
@@ -601,7 +602,7 @@ def sustained_blockers(rebut_result: RebutResult | None) -> int:
 
     Zero with no `RebutResult`, with a rebuttal turn that errored, and for a
     blocker verdicted but never rebutted, which never enters `_confirmed_with`'s
-    answered set. An unanchored blocker never reaches REBUT at all (§5.5).
+    answered set. Only a host-filed survivor reaches REBUT unanchored (§5.5).
     """
     if rebut_result is None or rebut_result.rebuttal.error:
         return 0

@@ -11528,10 +11528,10 @@ def test_a_criterion_probe_its_witness_survives_is_rebutted_as_a_blocker(
     monkeypatch, tmp_path
 ):
     """Criterion 1: an edit its own witness does not notice is filed as a
-    host-filed `adequacy` blocker. Of two survivors, only the one anchored by
-    the token rule (its `find` sits outside `_ANCHORING_DIFF`'s one-line
-    hunk) reaches `rebuttal.json`. The other reaches only `findings.json`.
-    Neither moves the `adequacy` lens's own drop rate, which counts only its own."""
+    host-filed `adequacy` blocker. Both survivors reach `rebuttal.json`,
+    anchored or not, because a host-filed claim is exempt from the anchor
+    check. Neither moves the `adequacy` lens's own drop rate, which counts
+    only its own."""
     from saffron.agents.findings import Finding
     from saffron.intake import Criterion, Mutant
 
@@ -11609,13 +11609,15 @@ def test_a_criterion_probe_its_witness_survives_is_rebutted_as_a_blocker(
     assert adequacy["findings"][1]["probe"] == unanchored
 
     record = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
-    (blocker,) = record["blockers"]
+    (blocker, second) = record["blockers"]
     assert blocker["claim"].startswith(review.HOST_FILED)
     assert blocker["lens"] == "adequacy"
     assert blocker["probe_verdict"] == "survived"
     assert blocker["line"] == 3
     # The edit `_blocker_line` renders to the implementer for this survivor.
     assert blocker["probe"] == anchors
+    assert second["line"] == 2
+    assert second["anchored"] is False
 
     # A lens's own unanchored finding still counts, whatever its probe
     # verdict. A `HOST_FILED` one, alike in every field but its claim, does not.
@@ -11982,6 +11984,115 @@ def test_a_wrong_version_its_witness_survives_is_rebutted_as_a_blocker(
             "probe_verdict": "survived",
             "severity": "blocker",
         }
+    ]
+
+
+def test_a_survivor_outside_the_diff_still_reaches_rebut(monkeypatch, tmp_path):
+    """SA-0288's measured shape, run through a whole cell: a wrong version's
+    survivor and a criterion probe's own survivor both reach REBUT though
+    neither anchors. The correctness lens's blocker, filed on a line the
+    diff never touches, stays out of `rebuttal.json` because its claim never
+    carries the host's mark."""
+    from saffron.intake import Criterion
+
+    criterion = Criterion(
+        claim="the guard rejects a negative amount",
+        witness="t.py::a",
+        wrong_versions=["the guard is removed"],
+    )
+
+    probe_edit = {"file": "src/y.py", "find": "check(9)", "replace": "check(0)"}
+    filler = "\n".join(f"line {n}" for n in range(1, 330))
+    wrong_edit = {
+        "file": "saffron/gates/runner.py",
+        "find": "RESULT = CANNED",
+        "replace": "RESULT = REAL",
+    }
+
+    cell = _stub_the_runtime(
+        monkeypatch,
+        patch=_ANCHORING_DIFF,
+        gate_cell_suite=[_tests_result("pass", collected=["t.py::a"])],
+    )
+    _rebuttable(monkeypatch, cell, rebut_commits=0)
+    contents = {
+        "src/y.py": "def other():\n    check(9)\n",
+        "saffron/gates/runner.py": f"{filler}\nRESULT = CANNED\n",
+    }
+
+    def _read_at_head(container, path):
+        return None if container == _CRITIC_CONTAINER else contents.get(path)
+
+    monkeypatch.setattr("saffron.cell.worktree.read_at_head", _read_at_head)
+
+    subsets: list[list[str]] = []
+    _stub_probe_gates(
+        monkeypatch,
+        cell,
+        gate_results=[
+            _tests_result("pass", collected=["t.py::a"]),
+            _tests_result("pass", collected=["t.py::a"]),
+        ],
+        subsets=subsets,
+    )
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            _turn(),
+            _turn(
+                _block(
+                    {
+                        "findings": [
+                            {
+                                "file": "z.py",
+                                "line": 1,
+                                "severity": "blocker",
+                                "claim": "z.py returns nothing",
+                            }
+                        ]
+                    }
+                )
+            ),
+            _turn(_EMPTY),
+            _turn(_EMPTY),
+            _turn(_EMPTY),
+            _turn(
+                _probe_answer(probe_edit, "removing the check lets a bad value through")
+            ),
+            _turn(
+                _wrong_version_answer((wrong_edit, "nothing notices the canned result"))
+            ),
+            _turn("I have addressed the findings."),
+            _turn(structured_output=_CLAIMED_FIX),
+        ],
+        spec=_spec(acceptance=[criterion]),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "REBUTTAL_UNJUDGED"
+    assert subsets == [["t.py::a"], ["t.py::a"]]
+
+    findings = json.loads((tmp_path / "out" / "SY-1" / "findings.json").read_text())
+    (correctness,) = [r for r in findings if r["lens"] == "correctness"]
+    (adequacy,) = [r for r in findings if r["lens"] == "adequacy"]
+    assert correctness["findings"][0]["anchored"] is False
+    assert [(f["file"], f["line"], f["anchored"]) for f in adequacy["findings"]] == [
+        ("src/y.py", 2, False),
+        ("saffron/gates/runner.py", 330, False),
+    ]
+    assert adequacy["drop_rate"] == 0.0
+
+    record = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
+    assert [
+        (b["finding"], b["file"], b["line"], b["anchored"], b["probe"])
+        for b in record["blockers"]
+    ] == [
+        (1, "src/y.py", 2, False, probe_edit),
+        (2, "saffron/gates/runner.py", 330, False, wrong_edit),
     ]
 
 

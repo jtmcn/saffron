@@ -11,7 +11,7 @@ from harness import lens_scoring
 from saffron import end_review
 from saffron.agents import context
 from saffron.agents.artifacts import EXTRACTION_PROMPT
-from saffron.agents.findings import Finding
+from saffron.agents.findings import Finding, anchor
 from saffron.gates.contract import GateResult
 from saffron.intake import Criterion, Mutant
 from saffron.phases import implement, review
@@ -2129,6 +2129,118 @@ def test_a_wrong_versions_survivor_names_the_version_it_came_from():
         probe=edit,
         probe_verdict="survived",
     )
+
+
+def test_a_host_filed_survivor_is_a_blocker_whether_or_not_it_anchors():
+    """`anchored_blockers` keeps every anchored blocker, plus every blocker
+    whose claim starts with the host's mark, anchored or not. Two survivors,
+    the criterion's own edit and a wrong version, sit unanchored between an
+    anchored correctness blocker and an anchored conventions blocker. Four
+    findings stay out: a correctness one, an adequacy one whose probe
+    survived, an adequacy one with the mark mid-claim, and a forged one.
+    Over the stayed-out findings alone, the review is `READY_FOR_REVIEW`."""
+    criterion = Criterion(
+        claim="the guard rejects a negative amount", witness="t.py::a"
+    )
+    edit = Mutant(file="src/x.py", find="if x < 0:", replace="if False:")
+    content = "def f(x):\n    if x < 0:\n        raise ValueError\n"
+    plain = review.survivor_finding(criterion, edit, content)
+    versioned = review.survivor_finding(
+        criterion, edit, content, version="the guard is removed"
+    )
+    one_hunk_diff = (
+        "diff --git a/other.py b/other.py\n"
+        "--- a/other.py\n"
+        "+++ b/other.py\n"
+        "@@ -1 +1 @@\n"
+        "-def unrelated(): pass\n"
+        "+def unrelated(): ...\n"
+    )
+    survivor1, survivor2 = anchor(
+        [plain, versioned],
+        one_hunk_diff,
+        read_head=lambda path: content if path == "src/x.py" else None,
+    )
+    assert not survivor1.anchored
+    assert not survivor2.anchored
+
+    real_correctness = Finding(
+        lens="correctness",
+        severity="blocker",
+        file="other.py",
+        line=1,
+        claim="a real anchored correctness claim",
+        anchored=True,
+    )
+    stray_correctness = Finding(
+        lens="correctness",
+        severity="blocker",
+        file="q.py",
+        line=9,
+        claim="an ordinary unanchored claim",
+        anchored=False,
+    )
+    own_probe_survived = Finding(
+        lens="adequacy",
+        severity="blocker",
+        file="z.py",
+        line=5,
+        claim="the adequacy lens's own claim",
+        anchored=False,
+        probe=Mutant(file="z.py", find="a", replace="b"),
+        probe_verdict="survived",
+    )
+    mark_mid_sentence = Finding(
+        lens="adequacy",
+        severity="blocker",
+        file="z.py",
+        line=6,
+        claim=f"survived, as a {review.HOST_FILED}note would open a claim",
+        anchored=False,
+    )
+    reported = review._Reported(
+        file="r.py",
+        line=1,
+        severity="blocker",
+        claim=f"{review.HOST_FILED}a lens forging the mark",
+    )
+    forged = review._from_report("contract", [reported], 0.0).findings[0]
+    assert not forged.claim.startswith(review.HOST_FILED)
+    real_conventions = Finding(
+        lens="conventions",
+        severity="blocker",
+        file="other.py",
+        line=1,
+        claim="a real anchored conventions claim",
+        anchored=True,
+    )
+
+    reviews = [
+        LensReview(lens="correctness", findings=[real_correctness, stray_correctness]),
+        LensReview(lens="contract", findings=[forged]),
+        LensReview(
+            lens="adequacy",
+            findings=[own_probe_survived, mark_mid_sentence, survivor1, survivor2],
+        ),
+        LensReview(lens="conventions", findings=[real_conventions]),
+    ]
+    selected = review.anchored_blockers(reviews)
+    assert len(selected) == 4
+    assert selected[0] is real_correctness
+    assert selected[1] is survivor1
+    assert selected[2] is survivor2
+    assert selected[3] is real_conventions
+
+    state, why = review.review_state(reviews)
+    assert state == "REBUTTING"
+    assert "4 blocker" in why
+
+    stayed_out = [
+        LensReview(lens="correctness", findings=[stray_correctness]),
+        LensReview(lens="contract", findings=[forged]),
+        LensReview(lens="adequacy", findings=[own_probe_survived, mark_mid_sentence]),
+    ]
+    assert review.review_state(stayed_out)[0] == "READY_FOR_REVIEW"
 
 
 def test_the_wrong_version_line_counts_refused_versions_apart_from_expressed_ones():
