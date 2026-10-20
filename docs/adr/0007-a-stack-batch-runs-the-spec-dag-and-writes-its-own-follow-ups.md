@@ -104,7 +104,6 @@ departure from principle 18, and so does the join lens. A spec writer returns
 its spec through a separate extraction turn. A spec review returns its tags
 the same way, since a tag decides whether a spec is revised. Both keep
 principle 18.
-
 Amended 2026-10-20, b-8a0c9a (`SA-0301`, `SA-0305`): a batch started with
 `--defer-end-review` holds its end review until `saffron finish`. The end
 review then grades the heads the operator's review commits produced.
