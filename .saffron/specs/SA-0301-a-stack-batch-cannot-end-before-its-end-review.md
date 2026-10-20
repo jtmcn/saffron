@@ -4,7 +4,7 @@ title: A stack batch cannot end before its end review, so the end review grades 
 type: feature
 priority: 2
 depends_on: [SA-0300]
-estimated_lines: 245
+estimated_lines: 255
 touches:
   - saffron/cli.py
   - tests/test_cli.py
@@ -74,7 +74,8 @@ acceptance:
       `writer_usd` is the writer's share `_batch` held. `base_sha`, `url`
       and `mirror` are the pinned base's. `repo` is the resolved `--repo`.
       `specs` maps each spec id it was handed to an object that
-      `intake.Spec.model_validate` turns back into an equal `Spec`. It
+      `intake.Spec.model_validate` turns back into an equal `Spec` with
+      the same `model_fields_set`. It
       then prints one line naming the batch id, the reserve and the
       command `saffron finish <batch id> --repo <repo>`.
     witness: tests/test_cli.py::test_a_deferred_end_review_writes_what_saffron_finish_reads_and_names_the_command
@@ -83,6 +84,8 @@ acceptance:
       - "`batch_id` written as the string key."
       - "`specs` written as spec ids alone, with no spec fields."
       - "Each spec dumped with every default included, so a criterion with no `wrong_versions` dumps an empty list that `model_validate` refuses."
+      - "Each spec dumped with `exclude_defaults`, so a field declared at its default value drops out of `model_fields_set`."
+      - "`writer_usd` written as the reserve instead of the writer's share."
       - The file written under the operator's checkout instead of the batch tree.
       - The printed command names no `--repo`.
       - A key added or missing, such as the batch's budget.
@@ -95,13 +98,16 @@ acceptance:
       - The flag is accepted without `--stack` and a plain batch runs.
       - The refusal comes inside `_batch` after the readiness probe.
   - claim: >-
-      A deferral file that cannot be written does not end the batch. The
-      deferring callable prints one line naming the exception's type and
-      prints no `saffron finish` command. `saffron batch` then exits on its
-      own stop reason.
+      A deferral file that cannot be written does not end the batch. That
+      covers both places the write can raise: creating the batch key's
+      directory, and writing `deferred.json` inside a directory that
+      exists. In each the deferring callable prints one line naming the
+      exception's type and prints no `saffron finish` command. `saffron
+      batch` then exits on its own stop reason.
     witness: tests/test_cli.py::test_a_deferral_file_that_cannot_be_written_is_named_and_the_batch_ends_on_its_own_stop
     wrong_versions:
       - The write's `OSError` propagates out of the callable, so the batch closes `INFRASTRUCTURE`.
+      - The guard wraps creating the directory alone, so a raise writing the file closes the batch `INFRASTRUCTURE`.
       - The failure is swallowed in silence.
       - The `saffron finish` command is printed although no file exists for it to read.
   - claim: >-
@@ -208,8 +214,11 @@ swallowed, as `_stack_end_review` swallows its own raise.
 - `SA-0303` (depends on `SA-0302`). Qualification and the follow-up
   writer read the graded fields from `StackReview`.
 - `SA-0304` (depends on this one). `run_stack_batch` takes a resume that
-  carries a closed batch's id, budget, stop reason, top layer and specs.
-  It continues the tail on that id and closes the row again.
+  carries a closed batch's id, budget, recorded status, top layer and
+  specs. It continues the tail on that id and closes the row again. It
+  runs follow-ups only when the recorded status is `DRAINED`. So a
+  deferred batch closed `INCOMPLETE` skips them, where the in-batch path
+  would run them. That is a stated, conservative difference (see below).
 - `SA-0305` (depends on `SA-0303` and `SA-0304`). `saffron finish <batch
   id> --repo .` reads this spec's `deferred.json` and refuses a batch
   already reviewed. It builds the adapters `_batch` builds from the pinned
@@ -227,22 +236,32 @@ these eight keys and no others.
 - `specs`: each spec id the callable was handed, mapped to that `Spec`'s
   fields as JSON.
 
-The batch's budget and stop reason stay on its ledger row. The row closes
-after this file is written, so the file cannot hold the stop reason.
+The batch's budget and status stay on its ledger row. The row closes after
+this file is written, so the file cannot hold the status. The row holds
+`_stop`'s result, not the reason the order's own drive returned. `_stop`
+turns any reason but `INFRASTRUCTURE` into `INCOMPLETE` when a task was
+left in flight (`saffron/batch.py:935`). The in-batch path gates
+follow-ups on the drive's own reason (`saffron/batch.py:872`). `Ledger`
+has no reader for a batch's status, and a folded ledger has no `batches`
+row at all (`saffron/record/fold.py:9-13`). `SA-0304` and `SA-0305` own
+those gaps. This spec records nothing of the status.
 
 **Dumping a `Spec` so it validates again.** A plain
 `model_dump(mode="json")` writes an empty `wrong_versions` for a criterion
 that declares none, and `Spec.model_validate` refuses it. With
 `exclude_unset=True` every spec in `.saffron/specs/done/SA-02*.md` round
-trips to an equal `Spec` (measured on the host). Give one of the second
-witness's `Spec`s a criterion with no `wrong_versions`, so the plain dump
-fails it.
+trips to an equal `Spec` with the same `model_fields_set`, over 85 specs
+(measured on the host). Give one of the second witness's `Spec`s a
+criterion with no `wrong_versions`, so the plain dump fails it. Give the
+other a field declared at its default, such as `priority=3`. An
+`exclude_defaults` dump then loses it from `model_fields_set` (measured).
 
 **Why a flag and not the default.** The launchd night runs `saffron
 batch` without `--stack` (`docs/host/dev.saffron.batch.plist:29`). An
 unattended `--stack` night has nobody pushing review commits. So its
-packaged heads are its current heads, and its end review is right today. The spec loop is the one caller that pushes review commits,
-and its skill passes the flag. The flag also keeps every existing
+packaged heads are its current heads, and its end review is right today.
+The spec loop is the one caller that pushes review commits, and its skill
+passes the flag. The flag also keeps every existing
 `--stack` test, which the three `preserves` witnesses hold.
 
 **Why the batch tree.** `batches` rows append no fact
@@ -262,8 +281,11 @@ message, and the other three fail on `SystemExit`.
 **The witnesses reuse the batch rigs.** Use `_readiness_passes`,
 `_fake_batch_resolution` and a faked `run_stack_batch`, as
 `test_a_stack_batch_holds_the_writer_share_and_passes_its_follow_up_writer`
-does. With `--budget 42` the batch holds a reserve of 10.50 and a writer's
-share of 5.25.
+does. In the first two, patch the follow-up module's share to 0.125, as that
+test patches `WRITER_SHARE` (`tests/test_cli.py:8503`). With `--budget 42` the batch then
+holds a reserve of 10.50 and a writer's share of 5.25. Unpatched, both
+shares are 0.25 (`saffron/follow_up.py:32`), so the two values coincide
+and neither witness could tell them apart.
 
 - **The first** fakes `_stack_end_review` and `end_review.run_end_review`,
   each recording its calls. The faked `run_stack_batch` calls the handed
@@ -276,17 +298,22 @@ share of 5.25.
 - **The second** has the faked `run_stack_batch` call the handed
   `end_review` with `"7"`, `3.25` and two `Spec`s. The reserve handed then
   differs from 10.50. Load the file and assert its key set and each value.
-  Assert each validated `Spec` equals the one handed. Assert the printed line holds
+  Assert each validated `Spec` equals the one handed, and that its
+  `model_fields_set` equals the original's. Assert the printed line holds
   `7`, `3.25` and `saffron finish 7 --repo <repo>`.
 - **The third** calls `main` with `batch --defer-end-review` and no
   `--stack`, with `check_readiness` replaced by a recorder. Assert
   `SystemExit` with code 2, stderr naming both flags, no readiness call
   and no batch row in the home ledger.
-- **The fourth** writes a plain file at `<home>/batches/v0/finish`, so
-  creating the directory raises. The faked `run_stack_batch` calls the
-  handed `end_review` and returns `"DRAINED"`. Assert `main` returns 0,
-  prints `batch: DRAINED`, prints a line naming the exception's type, and
-  prints no `saffron finish`.
+- **The fourth** runs two arrangements, each with a fresh home. In the
+  first, a plain file at `<home>/batches/v0/finish` makes creating the
+  directory raise. In the second, `<home>/batches/v0/finish/7/deferred.json`
+  is created beforehand as a directory. The directory step then succeeds
+  and the write itself raises. In each, the faked `run_stack_batch` calls
+  the handed `end_review` with `"7"` and returns `"DRAINED"`. Assert `main`
+  returns 0, prints `batch: DRAINED`, prints a line naming the exception's
+  type, and prints no `saffron finish`. Keep the guard as broad as
+  `_stack_end_review`'s, which catches `Exception` (`saffron/cli.py:869`).
 
 **`SA-0300` is not under you.** It adds a separate read-only command to
 `saffron/cli.py`. This spec depends on it only because both edit that
@@ -297,4 +324,4 @@ with an em dash, a semicolon, a contraction, the perfect tense or a
 sentence over 25 words.
 
 **Size.** The estimate covers about 55 lines in `saffron/cli.py` and four
-witnesses of about 190 lines.
+witnesses of about 200 lines.
