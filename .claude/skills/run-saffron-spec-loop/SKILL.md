@@ -81,7 +81,9 @@ above 80% of the ceiling it blocks at `elevated` and prints a concern at
 `standard`. A blocker goes to the operator before the cell: raise the ceiling,
 run the spec as written, split it, or drop it. A spec of a shape no past cell
 matches prints `no past cells of this shape to compare against`, which is a
-note rather than a pass.
+note rather than a pass. A `concern:` names a criterion whose mutant edits a
+file outside `touches` and declares no `subject:`. `revert` sets that
+witness aside, so ask the spec's author for a `subject:` (b-000d04).
 
 A spec whose code reads `.saffron/specs/` gets one more question. Does it
 need `done/`, where every merged spec lives? A projection that missed it kept
