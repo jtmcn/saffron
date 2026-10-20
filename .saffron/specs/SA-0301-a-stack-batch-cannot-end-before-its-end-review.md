@@ -4,7 +4,7 @@ title: A stack batch cannot end before its end review, so the end review grades 
 type: feature
 priority: 2
 depends_on: [SA-0300]
-estimated_lines: 255
+estimated_lines: 270
 touches:
   - saffron/cli.py
   - tests/test_cli.py
@@ -44,7 +44,7 @@ forbidden:
   - tests/test_end_review.py
   - tests/test_scheduler.py
   - tests/test_queued_specs.py
-budget_usd: 27
+budget_usd: 29
 max_attempts: 3
 max_turns: 135
 acceptance:
@@ -52,8 +52,8 @@ acceptance:
       `saffron batch --stack --defer-end-review` hands `run_stack_batch` an
       `end_review` callable that opens no cell and never calls
       `end_review.run_end_review`. It hands `follow_ups=None` and
-      `finish=None`. It still hands `review`, `cite`, `mint`, `revise` and
-      `open_prs`, and the same `reserve_usd` and `writer_usd` a batch
+      `finish=None`. It still hands `review`, `cite`, `mint`, `revise`,
+      `open_prs` and `stack_base_alive`, and the same `reserve_usd` and `writer_usd` a batch
       without the flag holds back. When readiness fails it hands
       `end_review=None` and writes no deferral file.
     witness: tests/test_cli.py::test_a_deferred_stack_batch_hands_run_stack_batch_no_end_review_follow_ups_or_finish
@@ -63,7 +63,7 @@ acceptance:
       - "`finish` is still handed, so the finishing layer commits before the review commits land."
       - "`reserve_usd` is handed as 0.0 when deferring, so the order's tasks spend the reserve."
       - "`writer_usd` is handed as 0.0 when deferring, so the order's tasks spend the writer's share."
-      - "`review` or `cite` is dropped along with `follow_ups`."
+      - "`review`, `cite` or `stack_base_alive` is dropped along with `follow_ups`."
       - The deferring callable is built before readiness passes, so a failed night still writes a deferral file.
   - claim: >-
       Called with a batch key, a reserve and a specs map, the deferring
@@ -98,16 +98,18 @@ acceptance:
       - The flag is accepted without `--stack` and a plain batch runs.
       - The refusal comes inside `_batch` after the readiness probe.
   - claim: >-
-      A deferral file that cannot be written does not end the batch. That
-      covers both places the write can raise: creating the batch key's
-      directory, and writing `deferred.json` inside a directory that
-      exists. In each the deferring callable prints one line naming the
+      A deferral file that cannot be written does not end the batch. The
+      guard catches any `Exception`. That covers an `OSError` creating the
+      batch key's directory, an `OSError` writing `deferred.json` inside a
+      directory that exists, and a `ValueError` encoding the JSON. In each
+      the deferring callable prints one line naming the
       exception's type and prints no `saffron finish` command. `saffron
       batch` then exits on its own stop reason.
     witness: tests/test_cli.py::test_a_deferral_file_that_cannot_be_written_is_named_and_the_batch_ends_on_its_own_stop
     wrong_versions:
       - The write's `OSError` propagates out of the callable, so the batch closes `INFRASTRUCTURE`.
       - The guard wraps creating the directory alone, so a raise writing the file closes the batch `INFRASTRUCTURE`.
+      - The guard catches `OSError` only, so a `ValueError` encoding the JSON closes the batch `INFRASTRUCTURE`.
       - The failure is swallowed in silence.
       - The `saffron finish` command is printed although no file exists for it to read.
   - claim: >-
@@ -144,7 +146,7 @@ runs the follow-ups and the finishing layer as the batch would have. The
 work is split into five specs. This is the parent.
 
 **`run_stack_batch` runs three callables after its order.** It hands
-that callable the batch key, the reserve and a specs map. It calls
+`end_review` the batch key, the reserve and a specs map. It calls
 `end_review` whenever one is handed, whatever the stop reason
 (`saffron/batch.py:852`, `:863`). It calls `follow_ups` only when one is handed (`:866`). It calls
 `finish` only when one is handed (`:908-909`). The batch row closes after
@@ -197,6 +199,10 @@ swallowed, as `_stack_end_review` swallows its own raise.
   review as the default (see the notes).
 - **`DESIGN.md` §4.2.1, `CONTEXT.md` and the spec loop's skill.** The
   operator edits them by hand in this spec's pull request.
+- **An `end_reviews` row for a deferred batch.** The deferring callable
+  records none. `SA-0305` refuses a batch whose layers hold one, so a row
+  written here would refuse every deferred batch. No witness drives it,
+  because the batch rigs hold no layer.
 - **`saffron/batch.py`.** It needs no change. A `None` `follow_ups` and
   `finish` already skip both.
 
@@ -290,8 +296,8 @@ and neither witness could tell them apart.
 - **The first** fakes `_stack_end_review` and `end_review.run_end_review`,
   each recording its calls. The faked `run_stack_batch` calls the handed
   `end_review` once. Assert neither fake ran and that both `follow_ups`
-  and `finish` are `None`. Assert `review`, `cite`, `mint`, `revise` and
-  `open_prs` are not `None`. Assert `reserve_usd == 10.5` and
+  and `finish` are `None`. Assert `review`, `cite`, `mint`, `revise`,
+  `open_prs` and `stack_base_alive` are not `None`. Assert `reserve_usd == 10.5` and
   `writer_usd == 5.25`. Then fail readiness, as that test's second case
   does, and assert `end_review` is `None` and no `deferred.json` exists
   under the home.
@@ -305,7 +311,7 @@ and neither witness could tell them apart.
   `--stack`, with `check_readiness` replaced by a recorder. Assert
   `SystemExit` with code 2, stderr naming both flags, no readiness call
   and no batch row in the home ledger.
-- **The fourth** runs two arrangements, each with a fresh home. In the
+- **The fourth** runs three arrangements, each with a fresh home. In the
   first, a plain file at `<home>/batches/v0/finish` makes creating the
   directory raise. In the second, `<home>/batches/v0/finish/7/deferred.json`
   is created beforehand as a directory. The directory step then succeeds
@@ -314,6 +320,18 @@ and neither witness could tell them apart.
   returns 0, prints `batch: DRAINED`, prints a line naming the exception's
   type, and prints no `saffron finish`. Keep the guard as broad as
   `_stack_end_review`'s, which catches `Exception` (`saffron/cli.py:869`).
+  A third arrangement raises a `ValueError` inside the guard. The faked
+  `run_stack_batch` patches `dump` and `dumps` on the `json` module to
+  raise it. It patches them right before it calls the handed `end_review`
+  and restores them after. `saffron/cli.py` imports no `json` at base, so the cell adds
+  `import json`, and that binds the same module object. Patch both,
+  because `json.dump` never calls `json.dumps` (its source names no
+  `dumps`, measured). Assert the printed line names `ValueError`.
+
+**Four tests call `cli._batch` with a hand-built `Namespace` that has no
+`defer_end_review`** (`tests/test_cli.py:5918`, `:6915`, `:6942`,
+`:6998`). Each sets `stack=False`. Read `args.defer_end_review` only
+inside the `--stack` branch, or add the field to those four tests.
 
 **`SA-0300` is not under you.** It adds a separate read-only command to
 `saffron/cli.py`. This spec depends on it only because both edit that
@@ -324,4 +342,4 @@ with an em dash, a semicolon, a contraction, the perfect tense or a
 sentence over 25 words.
 
 **Size.** The estimate covers about 55 lines in `saffron/cli.py` and four
-witnesses of about 200 lines.
+witnesses of about 215 lines.
