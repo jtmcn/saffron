@@ -63,6 +63,7 @@ from saffron.cell.session import _SHA as _RESOLVED_SHA
 from saffron.gates.core.scope import matches
 from saffron.intake import DiscoveredSpec, DiscoveryFailure, Spec, discover_specs
 from saffron.ledger import Ledger
+from saffron.repos.mirror import _word_pattern
 
 # Same shape `saffron/phases/package.py` already uses for the same reason —
 # a `gh` call the host makes, injectable so a test never reaches the network
@@ -704,17 +705,10 @@ def _entry_subject(entry: str) -> tuple[str, str]:
     return path, name or path
 
 
-_WORD_BOUNDARY = r"[A-Za-z0-9_]"
-
-
 def _whole_word(text: str, subject: str) -> bool:
     """Whether `subject` sits in `text` with no identifier character on
-    either side, case sensitive. `re.escape` keeps a dot or a slash in a
-    path subject from reading as regex syntax."""
-    if not subject:
-        return False
-    pattern = rf"(?<!{_WORD_BOUNDARY}){re.escape(subject)}(?!{_WORD_BOUNDARY})"
-    return re.search(pattern, text) is not None
+    either side, by the pattern `consumes` resolution already reads."""
+    return bool(subject) and _word_pattern(subject).search(text) is not None
 
 
 def _removed_name_clash(remover: Spec, reader: Spec) -> str | None:
