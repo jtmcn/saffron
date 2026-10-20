@@ -283,7 +283,8 @@ def _documented(text: str) -> list[Any] | None:
 
 def _comment_blocks(text: str) -> list[Hit]:
     """Runs of full-line comments longer than `COMMENT_LIMIT`, `#` lines in the
-    code and `--` lines in a string literal each counted apart."""
+    code and `--` lines in a string literal each counted apart. Only code ends
+    a run, so a blank line cannot split one into two that pass (b-998bb7)."""
     comments, sql = _comments(text), _sql_comments(text)
     if comments is None or sql is None:
         return []  # unparseable Python is the `lint` gate's to report
@@ -291,11 +292,13 @@ def _comment_blocks(text: str) -> list[Hit]:
         (t.start[0], t.string) for t in comments if not t.line[: t.start[1]].strip()
     ]
     dashed = [(line, f"--{body}") for _, line, body in sql]
+    blank = {n for n, line in enumerate(text.splitlines(), 1) if not line.strip()}
     found = []
     for lines in (hashed, dashed):
         run: list[tuple[int, str]] = []
         for number, comment in [*lines, (-1, "")]:
-            if run and number != run[-1][0] + 1:
+            gap = range(run[-1][0] + 1, number) if run else range(0)
+            if run and (number <= run[-1][0] or not blank.issuperset(gap)):
                 if len(run) > COMMENT_LIMIT:
                     excerpt = _excerpt(f"{len(run)} lines: {run[0][1]}")
                     found.append(Hit(run[0][0], "comment-block", excerpt))

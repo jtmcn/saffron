@@ -567,7 +567,7 @@ then passed it. No gate re-runs a parent's wrong versions.
 **b-a12047**. Fakes kept a reordered function's old signature, so a revert
 passed. PACKAGE leaves a spec's deferred check out of `## Not covered`.
 
-**Placed 2026-10-20**, from the spec loop's run 45: **b-998bb7**. A comment
+**Placed 2026-10-20**, from the spec loop's run 45: ~~**b-998bb7**~~ (done, #924). A comment
 split by a blank line passes the `prose` gate's two-line limit.
 
 ### Tier 3 — real, not urgent

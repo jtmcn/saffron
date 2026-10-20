@@ -1,11 +1,13 @@
 ---
 id: b-998bb7
 title: A comment split by a blank line passes the `prose` gate's two-line limit
-status: open
+status: done
 tier: 2
 filed: 2026-10-20
+closed: 2026-10-20
+by_hand: true
 specs: []
-prs: [920]
+prs: [920, 924]
 commits: []
 cites: [§5.4]
 related: [b-122686, b-044ae7]
@@ -33,3 +35,5 @@ one block, unless code sits between the parts. The rule ships with the
 
 - 2026-10-20: filed from the spec loop's run 45. A review commit on #920
   fixed both instances.
+- 2026-10-20: fixed by hand in #924. A comment run now ends only at code.
+  Eight existing runs join into hits that subtraction grandfathers.
