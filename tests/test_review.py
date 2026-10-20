@@ -2135,10 +2135,11 @@ def test_a_host_filed_survivor_is_a_blocker_whether_or_not_it_anchors():
     """`anchored_blockers` keeps every anchored blocker, plus every blocker
     whose claim starts with the host's mark, anchored or not. Two survivors,
     the criterion's own edit and a wrong version, sit unanchored between an
-    anchored correctness blocker and an anchored conventions blocker. Four
+    anchored correctness blocker and an anchored conventions blocker. Five
     findings stay out: a correctness one, an adequacy one whose probe
-    survived, an adequacy one with the mark mid-claim, and a forged one.
-    Over the stayed-out findings alone, the review is `READY_FOR_REVIEW`."""
+    survived, an adequacy one with the mark mid-claim, a forged one, and a
+    host-filed concern. Over the stayed-out findings alone, the review is
+    `READY_FOR_REVIEW`."""
     criterion = Criterion(
         claim="the guard rejects a negative amount", witness="t.py::a"
     )
@@ -2163,6 +2164,7 @@ def test_a_host_filed_survivor_is_a_blocker_whether_or_not_it_anchors():
     )
     assert not survivor1.anchored
     assert not survivor2.anchored
+    host_concern = survivor1.model_copy(update={"severity": "concern"})
 
     real_correctness = Finding(
         lens="correctness",
@@ -2220,7 +2222,13 @@ def test_a_host_filed_survivor_is_a_blocker_whether_or_not_it_anchors():
         LensReview(lens="contract", findings=[forged]),
         LensReview(
             lens="adequacy",
-            findings=[own_probe_survived, mark_mid_sentence, survivor1, survivor2],
+            findings=[
+                own_probe_survived,
+                mark_mid_sentence,
+                host_concern,
+                survivor1,
+                survivor2,
+            ],
         ),
         LensReview(lens="conventions", findings=[real_conventions]),
     ]
@@ -2238,7 +2246,10 @@ def test_a_host_filed_survivor_is_a_blocker_whether_or_not_it_anchors():
     stayed_out = [
         LensReview(lens="correctness", findings=[stray_correctness]),
         LensReview(lens="contract", findings=[forged]),
-        LensReview(lens="adequacy", findings=[own_probe_survived, mark_mid_sentence]),
+        LensReview(
+            lens="adequacy",
+            findings=[own_probe_survived, mark_mid_sentence, host_concern],
+        ),
     ]
     assert review.review_state(stayed_out)[0] == "READY_FOR_REVIEW"
 

@@ -414,9 +414,10 @@ def test_an_advisory_gate_that_passed_is_not_a_gap():
 
 
 def test_findings_that_never_anchored_are_named_as_never_adjudicated():
-    """`anchored_blockers` and `anchored_concerns` both filter on the anchor, so
-    an unanchored finding reached neither REBUT nor the concern count the queue
-    sorts on. The findings table shows `anchored: no` and says neither."""
+    """Both rules filter a lens's finding on the anchor. An unanchored one
+    reaches neither REBUT nor the concern count the queue sorts on. Only a
+    host-filed survivor reaches REBUT unanchored. The findings table shows
+    `anchored: no` and says neither."""
     rendered = render_pr_body(
         SPEC,
         RESULTS,
