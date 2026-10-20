@@ -3510,6 +3510,13 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0293",
         "SA-0298",
         "SA-0299",
+        "SA-0300",
+        "SA-0301",
+        "SA-0302",
+        "SA-0303",
+        "SA-0304",
+        "SA-0305",
+        "SA-0306",
     }
     directory = tmp_path / "specs"
     _arrange_measured_queue(REAL_SPECS, directory, measured)
