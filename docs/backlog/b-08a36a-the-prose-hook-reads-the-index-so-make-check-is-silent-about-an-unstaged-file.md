@@ -65,3 +65,4 @@ line in each, and leaves the hole open for anyone who does not read them.
   paid for it.
 - 2026-10-14: recurred in the spec loop's run 39. `make check` passed a
   review commit whose new docstring the commit hook then refused.
+- 2026-10-20: recurred in the spec loop's run 45. On #919 `make check` exited 0 with `build_queue`'s docstring two lines further over its limit, because the edit was unstaged. The commit hook refused it.

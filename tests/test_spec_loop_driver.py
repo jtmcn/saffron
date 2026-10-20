@@ -3506,3 +3506,30 @@ def test_check_blocks_a_queued_spec_whose_citations_drifted_at_its_cut_base(
     parent.max_turns, parent.budget_usd = 1000, 1000.0
     rc, out = check("SA-0001")
     assert rc == 1 and "blocker: 1 of 1 citation(s)" in out
+
+
+def test_check_names_a_mutant_outside_touches_that_declares_no_subject(
+    monkeypatch, capsys
+):
+    """b-000d04: `revert` sets aside a witness whose mutant lies outside the
+    diff, unless a `subject:` keeps it judged. `check` names each such
+    criterion before its cell, and blocks nothing for it."""
+    from saffron.intake import Criterion, Mutant
+    from tests.test_spec_size_estimate import _run
+
+    def criterion(file, subject=None):
+        mutant = Mutant(file=file, find="a", replace="b")
+        return Criterion(claim="c", witness="t.py::t", mutant=mutant, subject=subject)
+
+    target = _spec("SA-0009")
+    target.acceptance_criteria = []
+    target.acceptance = [
+        criterion("elsewhere.py"),
+        criterion("elsewhere.py", subject="f0.py"),
+        criterion("f1.py"),
+    ]
+    rc, out = _run(monkeypatch, capsys, target, [])
+    named = [line for line in out if "elsewhere.py" in line]
+    assert rc == 0, out
+    assert len(named) == 1, out
+    assert named[0].startswith("concern: ") and "criterion 1" in named[0], out

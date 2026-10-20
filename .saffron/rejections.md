@@ -2384,3 +2384,37 @@ seat finding the in-cell critic and the end review both passed.
 - Run 44: the cell's seed fetch takes no fixture head, so `SA-0276`'s
   baseline failed 4 corpus witnesses. **No bucket**, the cell's seed.
   **Open:** b-055fa3.
+
+## 2026-10-20, spec loop run 45 (#919 to #921)
+
+- `SA-0290` (#919): `build_queue`'s docstring lacked the sentence the spec
+  asked for. The contract lens raised it as a note, so REVIEW passed it.
+  **Bucket 3**, contract. **Landed:** a review commit on #919.
+- `SA-0290` (#919): the module docstring called the clash a ninth site,
+  against §4.2.1's sixth refusal. **Bucket 3**, conventions. **Landed:** a
+  review commit on #919.
+- `SA-0290` (#919): the validator's rewritten docstring dropped its
+  dot-segment sentence. **Bucket 3**, conventions. **Landed:** a review
+  commit on #919.
+- `SA-0290` (#919): `_whole_word` restated `mirror._word_pattern`. The end
+  review raised it, and the in-cell critic did not. **Bucket 3**,
+  conventions. **Landed:** a review commit on #919.
+- `SA-0290` (#919): three modules each split an entry at its colon.
+  **No bucket**, a spec's scope. **Open:** b-5288d7.
+- `SA-0291` (#920): the six-criteria leg's fifth criterion had no
+  `subject`, so a kept set ignoring the collected run survived the file.
+  **Bucket 3**, adequacy. **Landed:** a review commit on #920.
+- `SA-0291` (#920): two four-line comments were split by a blank line to
+  pass the two-line limit. **Bucket 1**, no rule joins them yet. **Open:**
+  b-998bb7. A review commit on #920 fixed both.
+- `SA-0291` (#920): a comment narrated the spec's instruction, and a
+  predicate's docstring said it refuses. **Bucket 3**, conventions.
+  **Landed:** a review commit on #920.
+- `SA-0295` (#921): `_stack_cite` copied `_stack_revise`'s queued-file read
+  and `_stack_review`'s key. **Bucket 3**, conventions. **Landed:** a review
+  commit on #921.
+- Run 45: `make check` exited 0 on an unstaged docstring that grew past its
+  limit. **No bucket**, the hook. **Open:** b-08a36a.
+- Run 45: batch 39's end review drafted `SA-0297` from #919's packaged head,
+  redoing two held review commits. **No bucket**, the end review. **Open:**
+  b-8a0c9a.

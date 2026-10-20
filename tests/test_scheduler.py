@@ -14,6 +14,7 @@ from saffron.intake import (
 )
 from saffron.ledger import Ledger
 from saffron.scheduler import (
+    DEPENDENCY_WAITING_STATES,
     DONE_STATES,
     REQUEUE_STATES,
     _unmatched_criterion_path,
@@ -181,12 +182,17 @@ def _write_spec(
     touches=None,
     depends_on=None,
     forbidden=None,
+    consumes=None,
+    removes=None,
+    claims=None,
     body="",
 ):
     """A spec with the frontmatter the refusal-gate tests need — `_write`
     only carries id/type/priority, and these tests need `touches`,
     `forbidden`, `depends_on` and a body worth parsing acceptance criteria
-    out of."""
+    out of. `consumes` and `removes` take a list of entries. `claims` takes
+    a list of `(claim, witness)` pairs, written as an `acceptance:` block so
+    each one parses into a structured criterion."""
     lines = ["---", f"id: {id}", "title: t", f"type: {type}", f"priority: {priority}"]
     if depends_on:
         lines.append("depends_on:")
@@ -197,6 +203,17 @@ def _write_spec(
     if forbidden:
         lines.append("forbidden:")
         lines += [f"  - {f}" for f in forbidden]
+    if consumes:
+        lines.append("consumes:")
+        lines += [f"  - {json.dumps(c)}" for c in consumes]
+    if removes:
+        lines.append("removes:")
+        lines += [f"  - {json.dumps(r)}" for r in removes]
+    if claims:
+        lines.append("acceptance:")
+        for claim, witness in claims:
+            lines.append(f"  - claim: {json.dumps(claim)}")
+            lines.append(f"    witness: {witness}")
     lines.append("---")
     lines.append("")
     lines.append(body)
@@ -3686,6 +3703,467 @@ def test_no_real_spec_names_a_criterion_path_its_touches_do_not_cover(tmp_path):
         if (token := _unmatched_criterion_path(found.spec)) is not None
     }
     assert named == {}
+
+
+# ---------------------------------------------------------- removed-name clash
+
+
+def test_a_spec_removing_a_name_another_reads_refuses_the_later_id(tmp_path, ledger):
+    """Two live specs sharing no path still clash when one removes a name
+    the other reads (backlog item b-e773d9). Both orientations, and both
+    scan modes, hold the same way: the later id, as a string."""
+    for remover_is_later in (True, False):
+        for stack in (False, True):
+            remover_id, reader_id = (
+                ("TE-2", "TE-1") if remover_is_later else ("TE-1", "TE-2")
+            )
+            name = f"orient-{remover_is_later}-{stack}"
+            base = tmp_path / name
+            base.mkdir()
+            directory = _spec_dir(base)
+            repo_id = _repo(ledger, origin=f"/{name}")
+            _write_spec(
+                directory,
+                "reader.md",
+                id=reader_id,
+                touches=["a.py"],
+                body="the reader's prose says runtime.GATEWAY directly",
+            )
+            _write_spec(
+                directory,
+                "remover.md",
+                id=remover_id,
+                touches=["b.py"],
+                removes=["saffron/cell/runtime.py:GATEWAY"],
+                body="the remover's own body names GATEWAY as well",
+            )
+
+            candidates, refusals = build_queue(directory, repo_id, ledger, stack=stack)
+
+            held_id = max(remover_id, reader_id)
+            kept_id = remover_id if held_id == reader_id else reader_id
+            ids = [c.spec.id for c in candidates]
+            assert kept_id in ids, (remover_is_later, stack, ids)
+            assert held_id not in ids, (remover_is_later, stack, ids)
+            held_refusal = next(
+                r for r in refusals if load_spec(r.path)[0].id == held_id
+            )
+            assert remover_id in held_refusal.reason
+            assert reader_id in held_refusal.reason
+            assert "GATEWAY" in held_refusal.reason
+            assert held_refusal.kind == "depends_on"
+
+
+def test_a_waiting_partner_holds_a_candidate_through_a_rescan(tmp_path, ledger):
+    """A partner is a candidate, or a live spec whose task still sits in
+    `DEPENDENCY_WAITING_STATES` at its current spec_sha. Only a candidate is
+    held, and a waiting partner holds one whatever its own id."""
+    # The reader has already reached `READY_FOR_REVIEW`. The remover, still
+    # a fresh candidate, is held on the next scan.
+    base = tmp_path / "rescan"
+    base.mkdir()
+    directory = _spec_dir(base)
+    _write_spec(
+        directory, "reader.md", id="TE-1", touches=["a.py"], body="reads GATEWAY"
+    )
+    _write_spec(
+        directory,
+        "remover.md",
+        id="TE-2",
+        touches=["b.py"],
+        removes=["saffron/cell/runtime.py:GATEWAY"],
+    )
+    repo_id = _repo(ledger, origin="/rescan")
+    _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-1",
+        spec_sha=_sha(directory / "reader.md"),
+        state="READY_FOR_REVIEW",
+    )
+
+    candidates, refusals = build_queue(directory, repo_id, ledger)
+
+    assert candidates == []
+    reason = next(r.reason for r in refusals if load_spec(r.path)[0].id == "TE-2")
+    assert "TE-1" in reason
+    assert "GATEWAY" in reason
+
+    # Named here, not read off `DEPENDENCY_WAITING_STATES`, so a state
+    # dropped from that set still gets driven and still fails this witness.
+    named_waiting_states = frozenset(
+        {
+            "READY_FOR_REVIEW",
+            "APPROVED",
+            "MERGE_TRAIN",
+            "REBUTTAL_UNJUDGED",
+            "REVIEW_INCOMPLETE",
+        }
+    )
+    assert named_waiting_states == DEPENDENCY_WAITING_STATES
+    for state in sorted(named_waiting_states):
+        name = f"wait-{state}"
+        base = tmp_path / name
+        base.mkdir()
+        directory = _spec_dir(base)
+        _write_spec(
+            directory, "reader.md", id="TE-1", touches=["a.py"], body="reads GATEWAY"
+        )
+        _write_spec(
+            directory,
+            "remover.md",
+            id="TE-2",
+            touches=["b.py"],
+            removes=["saffron/cell/runtime.py:GATEWAY"],
+        )
+        repo_id = _repo(ledger, origin=f"/{name}")
+        _task_at(
+            ledger,
+            repo_id,
+            spec_id="TE-2",
+            spec_sha=_sha(directory / "remover.md"),
+            state=state,
+        )
+
+        candidates, refusals = build_queue(directory, repo_id, ledger)
+
+        assert candidates == [], state
+        reason = next(r.reason for r in refusals if load_spec(r.path)[0].id == "TE-1")
+        assert "TE-2" in reason
+        assert "GATEWAY" in reason
+
+    # A merged or exhausted remover holds nothing at all.
+    for state in ("MERGED", "EXHAUSTED"):
+        name = f"dead-{state}"
+        base = tmp_path / name
+        base.mkdir()
+        directory = _spec_dir(base)
+        _write_spec(
+            directory, "reader.md", id="TE-1", touches=["a.py"], body="reads GATEWAY"
+        )
+        _write_spec(
+            directory,
+            "remover.md",
+            id="TE-2",
+            touches=["b.py"],
+            removes=["saffron/cell/runtime.py:GATEWAY"],
+        )
+        repo_id = _repo(ledger, origin=f"/{name}")
+        _task_at(
+            ledger,
+            repo_id,
+            spec_id="TE-2",
+            spec_sha=_sha(directory / "remover.md"),
+            state=state,
+        )
+
+        candidates, refusals = build_queue(directory, repo_id, ledger)
+
+        assert "TE-1" in [c.spec.id for c in candidates], state
+        assert [r for r in refusals if load_spec(r.path)[0].id == "TE-1"] == [], state
+
+
+def test_a_removed_name_is_read_from_the_body_the_claims_and_consumes(tmp_path, ledger):
+    """The scan reads a removed name from the other spec's body, its
+    acceptance claims and its `consumes`, each holding the name in one
+    place only."""
+    cases = [
+        (
+            "body-path",
+            ["saffron/cell/old.py"],
+            {"body": "touches saffron/cell/old.py directly"},
+        ),
+        (
+            "claim-name",
+            ["saffron/cell/runtime.py:GATEWAY"],
+            {"claims": [("names GATEWAY in its own claim", "tests/test_x.py::test_a")]},
+        ),
+        (
+            "consumes-name",
+            ["saffron/cell/runtime.py:GATEWAY"],
+            {
+                "depends_on": ["TE-0"],
+                "consumes": ["other/path.py:GATEWAY"],
+            },
+        ),
+        (
+            "consumes-bare-path",
+            ["saffron/cell/old2.py"],
+            {"depends_on": ["TE-0"], "consumes": ["saffron/cell/old2.py"]},
+        ),
+        (
+            "consumes-path-half",
+            ["saffron/cell/old3.py"],
+            {"depends_on": ["TE-0"], "consumes": ["saffron/cell/old3.py:SOMENAME"]},
+        ),
+    ]
+
+    for name, removes, reader_kwargs in cases:
+        base = tmp_path / name
+        base.mkdir()
+        directory = _spec_dir(base)
+        repo_id = _repo(ledger, origin=f"/{name}")
+        if "depends_on" in reader_kwargs:
+            _task_at(ledger, repo_id, spec_id="TE-0", spec_sha="0" * 64, state="MERGED")
+        _write_spec(
+            directory, "remover.md", id="TE-1", touches=["a.py"], removes=removes
+        )
+        _write_spec(
+            directory, "reader.md", id="TE-2", touches=["b.py"], **reader_kwargs
+        )
+
+        _, refusals = build_queue(directory, repo_id, ledger)
+
+        reason = next(
+            (r.reason for r in refusals if load_spec(r.path)[0].id == "TE-2"), None
+        )
+        assert reason is not None, (name, [r.reason for r in refusals])
+        assert "TE-1" in reason
+
+
+def test_a_named_entry_naming_its_own_path_is_not_a_bare_path(tmp_path, ledger):
+    """Only an entry with no colon is bare. `a.py:a.py` names a name, so a
+    reader consuming another name under `a.py` does not clash with it."""
+    directory = _spec_dir(tmp_path)
+    repo_id = _repo(ledger)
+    _task_at(ledger, repo_id, spec_id="TE-0", spec_sha="0" * 64, state="MERGED")
+    _write_spec(
+        directory, "remover.md", id="TE-1", touches=["x.py"], removes=["a.py:a.py"]
+    )
+    _write_spec(
+        directory,
+        "reader.md",
+        id="TE-2",
+        touches=["y.py"],
+        depends_on=["TE-0"],
+        consumes=["a.py:OTHER"],
+    )
+
+    candidates, refusals = build_queue(directory, repo_id, ledger)
+
+    assert [r.reason for r in refusals] == []
+    assert sorted(c.spec.id for c in candidates) == ["TE-1", "TE-2"]
+
+
+def test_a_removed_name_matches_only_as_a_whole_word(tmp_path, ledger):
+    """No letter, digit or underscore stands on either side of a removed
+    name's match, and case must match. A match at the start or end of a
+    claim still counts, since neither side needs a real character there."""
+    no_match_cases = [
+        (
+            "name-v2",
+            ["saffron/cell/runtime.py:GATEWAY"],
+            {"body": "reads GATEWAY_V2 here"},
+        ),
+        (
+            "no-name",
+            ["saffron/cell/runtime.py:GATEWAY"],
+            {"body": "reads NOGATEWAY here"},
+        ),
+        ("lower", ["saffron/cell/runtime.py:GATEWAY"], {"body": "reads gateway here"}),
+        ("old-py", ["saffron/cell/old.py"], {"body": "reads saffron/cell/old_py here"}),
+        (
+            "old-pyc",
+            ["saffron/cell/old.py"],
+            {"body": "reads saffron/cell/old.pyc here"},
+        ),
+    ]
+    for name, removes, reader_kwargs in no_match_cases:
+        base = tmp_path / name
+        base.mkdir()
+        directory = _spec_dir(base)
+        repo_id = _repo(ledger, origin=f"/{name}")
+        _write_spec(
+            directory, "remover.md", id="TE-1", touches=["a.py"], removes=removes
+        )
+        _write_spec(
+            directory, "reader.md", id="TE-2", touches=["b.py"], **reader_kwargs
+        )
+
+        candidates, refusals = build_queue(directory, repo_id, ledger)
+
+        assert {c.spec.id for c in candidates} == {"TE-1", "TE-2"}, (
+            name,
+            [r.reason for r in refusals],
+        )
+
+    match_cases = [
+        ("claim-start", [("GATEWAY opens the batch", "tests/test_x.py::test_a")]),
+        ("claim-end", [("the batch opens GATEWAY", "tests/test_x.py::test_b")]),
+    ]
+    for name, claims in match_cases:
+        base = tmp_path / name
+        base.mkdir()
+        directory = _spec_dir(base)
+        repo_id = _repo(ledger, origin=f"/{name}")
+        _write_spec(
+            directory,
+            "remover.md",
+            id="TE-1",
+            touches=["a.py"],
+            removes=["saffron/cell/runtime.py:GATEWAY"],
+        )
+        _write_spec(directory, "reader.md", id="TE-2", touches=["b.py"], claims=claims)
+
+        candidates, refusals = build_queue(directory, repo_id, ledger)
+
+        assert "TE-2" not in [c.spec.id for c in candidates], name
+        reason = next(r.reason for r in refusals if load_spec(r.path)[0].id == "TE-2")
+        assert "GATEWAY" in reason
+
+
+def test_a_depends_on_path_either_way_lifts_the_removed_name_refusal(tmp_path, ledger):
+    """No refusal names the removed name once a `depends_on` path joins the
+    pair, walked over every entry of every live spec, in either direction.
+    The same pair with no `depends_on` is still refused, in both modes."""
+
+    def arrange(name, reader_deps, remover_deps, third_deps, merge_ids):
+        base = tmp_path / name
+        base.mkdir()
+        directory = _spec_dir(base)
+        repo_id = _repo(ledger, origin=f"/{name}")
+        for spec_id in merge_ids:
+            _task_at(
+                ledger, repo_id, spec_id=spec_id, spec_sha="0" * 64, state="MERGED"
+            )
+        _write_spec(
+            directory,
+            "reader.md",
+            id="TE-1",
+            touches=["a.py"],
+            depends_on=reader_deps,
+            body="reads GATEWAY",
+        )
+        _write_spec(
+            directory,
+            "remover.md",
+            id="TE-2",
+            touches=["b.py"],
+            depends_on=remover_deps,
+            removes=["saffron/cell/runtime.py:GATEWAY"],
+        )
+        if third_deps is not None:
+            _write_spec(
+                directory,
+                "third.md",
+                id="TE-3",
+                touches=["c.py"],
+                depends_on=third_deps,
+            )
+        return directory, repo_id
+
+    arrangements = [
+        ("direct-reader-on-remover", ["TE-2"], [], None, ["TE-2"]),
+        ("direct-remover-on-reader", [], ["TE-1"], None, ["TE-1"]),
+        ("indirect-reader-third-remover", ["TE-3"], [], ["TE-2"], ["TE-3"]),
+        ("indirect-remover-third-reader", [], ["TE-3"], ["TE-1"], ["TE-3"]),
+        ("second-entry", ["TE-9", "TE-2"], [], None, ["TE-9", "TE-2"]),
+    ]
+
+    for name, reader_deps, remover_deps, third_deps, merge_ids in arrangements:
+        for stack in (False, True):
+            directory, repo_id = arrange(
+                f"{name}-{stack}", reader_deps, remover_deps, third_deps, merge_ids
+            )
+
+            _, refusals = build_queue(directory, repo_id, ledger, stack=stack)
+
+            assert not any("GATEWAY" in r.reason for r in refusals), (
+                name,
+                stack,
+                [r.reason for r in refusals],
+            )
+
+    for stack in (False, True):
+        directory, repo_id = arrange(f"no-link-{stack}", [], [], None, [])
+
+        _, refusals = build_queue(directory, repo_id, ledger, stack=stack)
+
+        assert any("GATEWAY" in r.reason for r in refusals), stack
+
+
+def test_a_clash_adds_no_second_refusal_row_and_holds_beside_a_refused_partner(
+    tmp_path, ledger
+):
+    """A clash adds no second refusal row. A partner `_refuse` already
+    refused still clashes, so the later id is held beside it."""
+    for stack in (False, True):
+        name = f"beside-{stack}"
+        base = tmp_path / name
+        base.mkdir()
+        directory = _spec_dir(base)
+        _write_spec(
+            directory,
+            "remover.md",
+            id="TE-1",
+            touches=["protected/area.py"],
+            removes=["saffron/cell/runtime.py:GATEWAY"],
+        )
+        _write_spec(
+            directory,
+            "reader.md",
+            id="TE-2",
+            touches=["b.py"],
+            body="reads GATEWAY in its own prose",
+        )
+        repo_id = _repo(ledger, origin=f"/{name}")
+
+        candidates, refusals = build_queue(
+            directory,
+            repo_id,
+            ledger,
+            protected=["protected/area.py"],
+            stack=stack,
+        )
+
+        assert candidates == [], stack
+        assert len(refusals) == 2, (stack, [r.reason for r in refusals])
+        remover_refusals = [r for r in refusals if load_spec(r.path)[0].id == "TE-1"]
+        reader_refusals = [r for r in refusals if load_spec(r.path)[0].id == "TE-2"]
+        assert len(remover_refusals) == 1, stack
+        assert len(reader_refusals) == 1, stack
+        assert "protected list" in remover_refusals[0].reason
+        assert "GATEWAY" not in remover_refusals[0].reason
+        assert "GATEWAY" in reader_refusals[0].reason
+        assert "TE-1" in reader_refusals[0].reason
+
+    # The held id and the protected-touch id can be the *same* spec: it
+    # still earns exactly one row, and it is the `protected_touch` one.
+    for stack in (False, True):
+        name = f"same-spec-{stack}"
+        base = tmp_path / name
+        base.mkdir()
+        directory = _spec_dir(base)
+        _write_spec(
+            directory,
+            "remover.md",
+            id="TE-2",
+            touches=["protected/area.py"],
+            removes=["saffron/cell/runtime.py:GATEWAY"],
+        )
+        _write_spec(
+            directory,
+            "reader.md",
+            id="TE-1",
+            touches=["b.py"],
+            body="reads GATEWAY in its own prose",
+        )
+        repo_id = _repo(ledger, origin=f"/{name}")
+
+        candidates, refusals = build_queue(
+            directory,
+            repo_id,
+            ledger,
+            protected=["protected/area.py"],
+            stack=stack,
+        )
+
+        assert [c.spec.id for c in candidates] == ["TE-1"], (stack, candidates)
+        assert len(refusals) == 1, (stack, [r.reason for r in refusals])
+        assert load_spec(refusals[0].path)[0].id == "TE-2", stack
+        assert "protected list" in refusals[0].reason
+        assert "GATEWAY" not in refusals[0].reason
+        assert refusals[0].kind == "protected_touch"
 
 
 def test_no_real_spec_is_refused_on_its_own_acceptance_criteria(tmp_path, ledger):

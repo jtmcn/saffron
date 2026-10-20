@@ -1,11 +1,12 @@
 ---
 id: b-d31930
 title: A queued spec cites lines that moved since it was written, and nothing says so before its batch pays to find out
-status: partial
+status: done
+closed: 2026-10-20
 tier: 2
 filed: 2026-10-15
 specs: [SA-0273, SA-0294, SA-0295]
-prs: [880, 890, 891, 892, 897, 898]
+prs: [880, 890, 891, 892, 897, 898, 921]
 commits: []
 cites: [§3.2]
 related: [b-b24cf7]
@@ -37,3 +38,4 @@ money is spent.
   #892 refreshed the citations `check` then blocked on. The check's own
   match is loose both ways (b-2da959).
 - 2026-10-17: #898 (`SA-0294`) moves the check into core as `saffron/spec_citations.py` and gives `run_stack_batch` a `cite` hook. `SA-0295` still owes the production adapter. #897 refreshed 12 citations `check` blocked in run 43.
+- 2026-10-20: #921 (`SA-0295`) gives `saffron batch --stack` its `cite` adapter, at the commit the spec review reads.

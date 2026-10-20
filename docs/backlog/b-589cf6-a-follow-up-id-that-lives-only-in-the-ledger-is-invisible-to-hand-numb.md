@@ -28,3 +28,4 @@ Hand numbering reads the ledger too, or an uncommitted follow-up's id is recorde
 ## Record
 
 - 2026-09-25: filed from the spec reviews of `b-792ab2`'s last build specs.
+- 2026-10-20: batch 39 in the spec loop's run 45 took `SA-0297` for a refused follow-up. Its text is only in the ledger, so the next hand-numbered spec starts at `SA-0298`.

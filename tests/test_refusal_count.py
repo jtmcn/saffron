@@ -41,8 +41,8 @@ SITES = {
     # A live spec that does not parse, and a retired one in `done/` (§4.2.1).
     "malformed_spec": 2,
     "unmatched_criterion_path": 1,
-    # One entry at a time, and the stack order that replaces it under `--stack`.
-    "depends_on": 2,
+    # One entry at a time, the stack order under `--stack`, and the removed-name clash.
+    "depends_on": 3,
     "protected_touch": 1,
     # A marker `touches` does not reach, and one naming an id nothing declares.
     "retirement_marker": 2,

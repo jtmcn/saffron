@@ -1,11 +1,12 @@
 ---
 id: b-000d04
 title: "`revert` reads a mutant's file as its claim's subject, so a mutant pointed elsewhere exempts a witness of code the diff changed"
-status: open
+status: done
+closed: 2026-10-20
 tier: 1
 filed: 2026-10-13
 specs: [SA-0291]
-prs: []
+prs: [920]
 commits: []
 cites: [§5.4, §5.4.1]
 related: [84, b-02d328]
@@ -60,3 +61,4 @@ their witnesses read changed files.
   rule. `issue-tracker.md` and `DESIGN.md` §5.4 changed by hand in the
   spec's own commit. The glossary entry is b-cd1566, and the `driver.py
   check` warning lands by hand after the cell.
+- 2026-10-20: #920 (`SA-0291`) adds `subject:` and narrows `revert`'s set-aside rule. The run 45 step 5 PR adds the `driver.py check` concern.

@@ -2241,6 +2241,21 @@ def _is_review_trigger(entry: str) -> bool:
     )
 
 
+def _subject_concerns(target: Spec) -> list[str]:
+    """b-000d04: `revert` sets aside a witness whose mutant's file the diff
+    never touches, unless the criterion declares a `subject:` it does."""
+    from saffron.gates.core.scope import matches
+
+    return [
+        f"concern: criterion {n}'s mutant edits {c.mutant.file}, outside "
+        "touches, and it declares no subject, so revert sets its witness aside"
+        for n, c in enumerate(target.acceptance, start=1)
+        if c.mutant is not None
+        and c.subject is None
+        and not any(matches(c.mutant.file, pat) for pat in target.touches)
+    ]
+
+
 def _review_change_lines(target: Spec, specs: dict[str, Spec]) -> list[str]:
     """One `review:` line per live ancestor, reached through `depends_on` at
     any depth, whose `touches` names a REVIEW-shaping path. A stacked
@@ -2305,7 +2320,7 @@ def cmd_check(args) -> int:
     size_blocker, size_concern = _size_verdict(target, ratio, basis, _elevate_on())
     if size_concern:
         print(f"concern: {size_concern}")
-    for line in _review_change_lines(target, specs):
+    for line in _review_change_lines(target, specs) + _subject_concerns(target):
         print(line)
     cite_blocker = _cite_blocker(target, specs)
     if not rows:

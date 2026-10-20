@@ -19,6 +19,7 @@ from pydantic import (
     Field,
     StringConstraints,
     ValidationError,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -70,6 +71,13 @@ class DisclosedMutantError(SpecError):
     def __init__(self, message: str, spec: Spec) -> None:
         super().__init__(message)
         self.spec = spec
+
+
+def _is_canonical_path(path: str) -> bool:
+    """Whether `path` is repo-relative: `/`-split segments all non-empty and
+    none `.` or `..`. False for an absolute path, a trailing `/`, and a `//`."""
+    segments = path.split("/")
+    return not any(segment == "" or segment in (".", "..") for segment in segments)
 
 
 class Mutant(BaseModel):
@@ -131,6 +139,10 @@ class Criterion(BaseModel):
     """The edit that would falsify `claim` (§5.4.1). Absent by default, and
     every spec in this repo predates the field — an omitted `mutant` must
     parse exactly as it did before this field existed."""
+    subject: str | None = None
+    """The path a claim is about, when `mutant.file` is not that code
+    (backlog item b-000d04). `None` by default, and every criterion
+    predating this field must parse exactly as it did before it existed."""
     wrong_versions: list[str] = Field(default_factory=list)
     """Plausible wrong implementations of this criterion, in the author's own
     words (backlog item b-7e69d0). Absent by default, and an omitted field
@@ -155,6 +167,20 @@ class Criterion(BaseModel):
                 raise ValueError(f"wrong_versions entry {version!r} is declared twice")
             seen.add(version)
         return value
+
+    @model_validator(mode="after")
+    def _subject_needs_a_mutant_and_a_canonical_path(self) -> Criterion:
+        """A `subject` only narrows an exemption `mutant` already opened, and
+        only a canonical path reaches `revert_gate`'s comparison cleanly."""
+        if self.subject is None:
+            return self
+        if self.mutant is None:
+            raise ValueError(f"{self.witness} declares a subject with no mutant")
+        if not _is_canonical_path(self.subject):
+            raise ValueError(
+                f"subject {self.subject!r} has a path that is not canonical"
+            )
+        return self
 
 
 class History(BaseModel):
@@ -195,6 +221,9 @@ class Spec(BaseModel):
     # A path or `path:name` a parent already built. `run_task` checks this
     # against the tree base before any cell starts.
     consumes: list[str] = Field(default_factory=list)
+    # A path or `path:name` this spec deletes (backlog item b-e773d9). Needs
+    # no `depends_on`, since a spec can remove a name nothing here built.
+    removes: list[str] = Field(default_factory=list)
     envelope: list[str] = Field(default_factory=list)
     touches: list[str] = Field(default_factory=list)
     forbidden: list[str] = Field(default_factory=list)
@@ -244,31 +273,32 @@ class Spec(BaseModel):
         (item 170)."""
         return self.risk if "risk" in self.model_fields_set else None
 
-    @field_validator("consumes")
+    @field_validator("consumes", "removes")
     @classmethod
-    def _consumes_entries_are_well_formed(cls, value: list[str]) -> list[str]:
-        """Refuse a shape the reader would either choke on or false-pass.
+    def _consumes_and_removes_entries_are_well_formed(
+        cls, value: list[str], info: ValidationInfo
+    ) -> list[str]:
+        """Refuse a shape the reader would either choke on or false-pass, one
+        rule for both fields: `info.field_name` names the one that differs.
 
         Split at the first colon. An empty entry, an empty path or an empty
-        name is refused. So is a path that is not canonical: repo-relative,
-        its `/`-split segments all non-empty and none `.` or `..`. That
-        covers an absolute path, a bare `.` or `..`, and a `.` or `..`
-        segment anywhere. It also covers a path ending in `/` or holding
-        `//`. A segment that only starts or ends with a dot, like `.github`
-        or `pkg/v1./mod.py`, stays untouched.
+        name is refused, and so is a path that is not canonical: repo-relative,
+        with `/`-split segments all non-empty and none `.` or `..`, no
+        trailing `/`, and no `//`. A segment that only starts or ends with a
+        dot, like `.github` or `pkg/v1./mod.py`, stays untouched.
         """
+        field = info.field_name
         for entry in value:
             if not entry:
-                raise ValueError(f"consumes entry {entry!r} is empty")
+                raise ValueError(f"{field} entry {entry!r} is empty")
             path, sep, name = entry.partition(":")
             if not path:
-                raise ValueError(f"consumes entry {entry!r} has an empty path")
+                raise ValueError(f"{field} entry {entry!r} has an empty path")
             if sep and not name:
-                raise ValueError(f"consumes entry {entry!r} has an empty name")
-            segments = path.split("/")
-            if any(segment == "" or segment in (".", "..") for segment in segments):
+                raise ValueError(f"{field} entry {entry!r} has an empty name")
+            if not _is_canonical_path(path):
                 raise ValueError(
-                    f"consumes entry {entry!r} has a path that is not canonical"
+                    f"{field} entry {entry!r} has a path that is not canonical"
                 )
         return value
 

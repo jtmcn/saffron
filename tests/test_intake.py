@@ -1,6 +1,8 @@
+import json
 import os
 
 import pytest
+from pydantic import ValidationError
 
 from saffron.intake import SpecError, discover_specs, load_spec, parse_spec
 
@@ -671,6 +673,58 @@ def test_a_mutant_pinning_text_the_code_determines_parses():
     assert declared.mutant is not None
 
 
+def test_a_subject_needs_a_mutant_and_a_canonical_path():
+    """A `subject` narrows the `revert` exemption only when the mutant's own
+    file is not what a claim leans on (backlog item b-000d04)."""
+    spec = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: feature\n"
+        "acceptance:\n"
+        "  - claim: the prompt names the right bullets\n"
+        "    witness: tests/test_review.py::test_prompt\n"
+        "    mutant:\n"
+        "      file: saffron/phases/review.py\n"
+        "      find: LENSES\n"
+        "      replace: LENSES2\n"
+        "    subject: saffron/agents/prompts/review.md\n"
+        "  - claim: unrelated, no subject declared\n"
+        "    witness: tests/test_review.py::test_unrelated\n"
+        "---\n\nbody\n"
+    )
+    declared, undeclared = spec.acceptance
+    assert declared.subject == "saffron/agents/prompts/review.md"
+    assert undeclared.subject is None
+
+    with pytest.raises(SpecError) as excinfo:
+        parse_spec(
+            "---\nid: TE-1\ntitle: t\ntype: feature\n"
+            "acceptance:\n"
+            "  - claim: c\n    witness: t.py::test_w\n"
+            "    subject: a/b.py\n"
+            "---\n\nbody\n"
+        )
+    cause = excinfo.value.__cause__
+    assert isinstance(cause, ValidationError)
+    msg = cause.errors()[0]["msg"]
+    assert "t.py::test_w" in msg
+    assert "subject" in msg
+
+    bad_paths = ["", "/a", "a/./b", "a/../b", "a/b/", "a//b"]
+    for path in bad_paths:
+        with pytest.raises(SpecError) as excinfo:
+            parse_spec(
+                "---\nid: TE-1\ntitle: t\ntype: feature\n"
+                "acceptance:\n"
+                "  - claim: c\n    witness: t.py::test_w\n"
+                "    mutant:\n      file: a.py\n      find: x\n"
+                f"    subject: {json.dumps(path)}\n"
+                "---\n\nbody\n"
+            )
+        cause = excinfo.value.__cause__
+        assert isinstance(cause, ValidationError)
+        msg = cause.errors()[0]["msg"]
+        assert repr(path) in msg
+
+
 def test_a_spec_defers_the_symbols_it_will_bring_into_use():
     spec = parse_spec(
         "---\nid: TE-1\ntitle: t\ntype: chore\n"
@@ -750,3 +804,61 @@ def test_a_history_declaration_parses_and_a_malformed_one_is_refused():
     )
     with pytest.raises(SpecError):
         parse_spec(unknown_key)
+
+
+# Every shape `consumes` refuses: an empty entry, an empty path, an empty
+# name, an absolute path, a `.` segment, a `..` segment, a trailing `/` and a `//`.
+_MALFORMED_ENTRY_SHAPES = [
+    "",
+    ":name",
+    "a.py:",
+    "/a.py",
+    "a/./b.py",
+    "a/../b.py",
+    "a.py/",
+    "a//b.py",
+]
+
+
+def _entry_field_frontmatter(field: str, entry: str) -> str:
+    """A spec declaring one `consumes` or `removes` entry. `consumes` needs a
+    `depends_on` to load at all, and `removes` needs none."""
+    depends = "depends_on: [TE-0]\n" if field == "consumes" else ""
+    return (
+        "---\nid: TE-1\ntitle: t\ntype: chore\n"
+        f"{depends}{field}:\n  - {json.dumps(entry)}\n---\n"
+    )
+
+
+def test_a_removes_entry_is_refused_on_each_shape_consumes_refuses():
+    for field in ("consumes", "removes"):
+        for entry in _MALFORMED_ENTRY_SHAPES:
+            text = _entry_field_frontmatter(field, entry)
+            with pytest.raises(SpecError) as excinfo:
+                parse_spec(text)
+            cause = excinfo.value.__cause__
+            assert isinstance(cause, ValidationError), (field, entry)
+            msg = cause.errors()[0]["msg"]
+            assert field in msg, (field, entry, msg)
+            other = "removes" if field == "consumes" else "consumes"
+            assert other not in msg, (field, entry, msg)
+
+    # `removes` loads with no `depends_on`, a bare path and a `path:name`
+    # entry both well-formed for both fields.
+    bare = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: chore\nremoves:\n  - a/b.py\n---\n"
+    )
+    assert bare.removes == ["a/b.py"]
+    assert bare.depends_on == []
+
+    named = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: chore\n"
+        "depends_on: [TE-0]\n"
+        "removes:\n  - a/b.py:NAME\nconsumes:\n  - c/d.py\n---\n"
+    )
+    assert named.removes == ["a/b.py:NAME"]
+    assert named.consumes == ["c/d.py"]
+
+    # `consumes` with no `depends_on` still refuses, unlike `removes`.
+    with pytest.raises(SpecError):
+        parse_spec("---\nid: TE-1\ntitle: t\ntype: chore\nconsumes:\n  - a/b.py\n---\n")

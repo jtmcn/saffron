@@ -43,3 +43,4 @@ declares one. It lands after `SA-0291` merges.
 ## Record
 
 - 2026-10-13: filed with `SA-0291`.
+- 2026-10-20: #920 landed `subject:`. The Standards seat noted the **Mutant** entry still says a mutant is declared "against its own subject". This item rewrites that entry too, not only adds one.

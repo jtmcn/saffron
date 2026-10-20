@@ -263,7 +263,7 @@ spec's own mutant survived and its task packaged. A lens that errors halts its
 task in flight (moved up from tier 3 by the operator). A batch on an empty
 image store asks a registry for the proxy.
 
-**Placed 2026-10-12**, from writing `SA-0284`: **b-e773d9**. Two queued specs
+**Placed 2026-10-12**, from writing `SA-0284`: ~~**b-e773d9**~~. Two queued specs
 in separate chains clashed on a name one deletes and the other reads. No
 check compares names, so the second to land would end `EXHAUSTED`.
 
@@ -271,7 +271,7 @@ check compares names, so the second to land would end `EXHAUSTED`.
 removed a name whose reader sat outside its `touches`, so its cell could not
 pass both `scope` and `tests`. It ended `EXHAUSTED` at $41.03.
 
-**Placed 2026-10-13**, from `SA-0286`'s second review: **b-000d04**. `revert`
+**Placed 2026-10-13**, from `SA-0286`'s second review: ~~**b-000d04**~~. `revert`
 reads a mutant's file as its claim's subject. A mutant pointed at an untouched
 file exempts a witness of code the diff changed, so `revert` never judges it.
 
@@ -295,7 +295,7 @@ that added a refusal refused the specs queued below it, and its cell ended
 
 ### Tier 2 — the morning after
 
-**Placed 2026-10-15**, from the spec loop's run 40: **b-d31930**, then
+**Placed 2026-10-15**, from the spec loop's run 40: ~~**b-d31930**~~, then
 **b-bba47a**. A queued spec's citations drift and nothing checks them before
 its batch. The `tests` gate takes a printed warning for every failure.
 
@@ -567,6 +567,9 @@ then passed it. No gate re-runs a parent's wrong versions.
 **b-a12047**. Fakes kept a reordered function's old signature, so a revert
 passed. PACKAGE leaves a spec's deferred check out of `## Not covered`.
 
+**Placed 2026-10-20**, from the spec loop's run 45: **b-998bb7**. A comment
+split by a blank line passes the `prose` gate's two-line limit.
+
 ### Tier 3 — real, not urgent
 
 **Placed 2026-10-16**, from the spec loop's run 42: **b-60317d**.
@@ -578,6 +581,9 @@ passed. PACKAGE leaves a spec's deferred check out of `## Not covered`.
 **Placed 2026-10-19**, from the spec loop's run 44: **b-b8f0d9**, **b-e9cd43**,
 **b-524b1a**, **b-62e00a**, **b-b33854**, **b-d149c6**, **b-0094bd**, then
 **b-8ef729**. Each is a gap a seat found and the stack left alone.
+
+**Placed 2026-10-20**, from the spec loop's run 45: **b-5288d7**. Three
+modules each split a `consumes` or `removes` entry at its colon.
 
 ~~**22**~~, ~~**23**~~, **31**, ~~**19**~~, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, ~~**62**~~, **63**, ~~**64**~~, **75**, **76**, **77**.

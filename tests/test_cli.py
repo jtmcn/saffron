@@ -7967,6 +7967,114 @@ def test_a_stack_batch_reads_its_stack_base_as_gone_only_when_its_ref_is_missing
         unreachable_alive("saffron/SY-9000")
 
 
+def test_a_stack_batch_passes_run_stack_batch_its_citation_check(tmp_path, monkeypatch):
+    """`saffron batch --stack` builds `cli._stack_cite` once readiness
+    pins a base. It passes the pinned base and the order's stack base,
+    and hands it and `cli._stack_review` one shared `heads` object. It
+    passes the adapter to `run_stack_batch` as `cite`. A failed readiness
+    builds none and passes `cite=None`. A batch without `--stack` never
+    builds it."""
+    from saffron import intake
+    from saffron.scheduler import StackBase
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+
+    review_calls: list[dict] = []
+    cite_calls: list[dict] = []
+    review_sentinel = object()
+    cite_sentinel = object()
+
+    def _fake_stack_review(**kwargs):
+        review_calls.append(kwargs)
+        return review_sentinel
+
+    def _fake_stack_cite(**kwargs):
+        cite_calls.append(kwargs)
+        return cite_sentinel
+
+    monkeypatch.setattr(cli, "_stack_review", _fake_stack_review)
+    monkeypatch.setattr(cli, "_stack_cite", _fake_stack_cite)
+
+    stack_base = StackBase(spec_id="SY-9", task_id=42, branch="saffron/SY-9")
+    first = Candidate(
+        path=Path("SY-1.md"),
+        spec=intake.Spec(id="SY-1", title="t", type="chore", priority=1),
+        spec_sha="r" * 64,
+        task_id=None,
+        stack_base=stack_base,
+    )
+    monkeypatch.setattr(
+        cli,
+        "_resolve_queue",
+        lambda *a, **k: _fake_batch_resolution(tmp_path, candidates=[first]),
+    )
+
+    stack_batch_calls: list[dict] = []
+
+    def _fake_run_stack_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        stack_batch_calls.append({"ledger": ledger, **kwargs})
+        return "DRAINED"
+
+    plain_batch_calls: list[dict] = []
+
+    def _fake_run_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        plain_batch_calls.append({"ledger": ledger, **kwargs})
+        return "DRAINED"
+
+    monkeypatch.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
+    monkeypatch.setattr(cli, "run_batch", _fake_run_batch)
+
+    # Case 1: readiness passes, `--stack`.
+    _readiness_passes(monkeypatch, tmp_path)
+    home1 = tmp_path / "home1"
+    assert main(["--home", str(home1), "batch", "--stack"]) == 0
+
+    assert len(cite_calls) == 1
+    pinned = task.PinnedBase(
+        mirror=tmp_path / "pinned-mirror.git",
+        url="https://github.com/o/r.git",
+        base_sha="a" * 40,
+    )
+    assert cite_calls[0]["pinned"] == pinned
+    assert cite_calls[0]["stack_base"] == stack_base
+    assert len(stack_batch_calls) == 1
+    assert stack_batch_calls[0]["cite"] is cite_sentinel
+
+    heads = cite_calls[0]["heads"]
+    assert isinstance(heads, dict)
+    assert len(review_calls) == 1
+    assert review_calls[0]["heads"] is heads
+    assert plain_batch_calls == []
+
+    # Case 2: readiness fails.
+    cite_calls.clear()
+    review_calls.clear()
+    stack_batch_calls.clear()
+    monkeypatch.setattr(
+        cli.preflight,
+        "check_readiness",
+        lambda *a, **k: preflight.Readiness(False, "auth", "token invalid"),
+    )
+    home2 = tmp_path / "home2"
+    main(["--home", str(home2), "batch", "--stack"])
+
+    assert cite_calls == []
+    assert len(stack_batch_calls) == 1
+    assert stack_batch_calls[0]["cite"] is None
+
+    # Case 3: `batch` without `--stack`.
+    cite_calls.clear()
+    stack_batch_calls.clear()
+    plain_batch_calls.clear()
+    _readiness_passes(monkeypatch, tmp_path)
+    home3 = tmp_path / "home3"
+    assert main(["--home", str(home3), "batch"]) == 0
+
+    assert cite_calls == []
+    assert len(plain_batch_calls) == 1
+
+
 def test_a_review_reads_a_recorded_text_and_a_revision_starts_from_the_queued_file(
     tmp_path, monkeypatch
 ):
@@ -8052,6 +8160,217 @@ def test_a_review_reads_a_recorded_text_and_a_revision_starts_from_the_queued_fi
     with pytest.raises(ValueError, match=r"\.saffron/specs/SY-5-x\.md"):
         revise(sy5, None, None, "rt")
     assert len(rig.cell_up_calls) == before
+
+
+def test_a_stack_batchs_citation_check_resolves_at_the_commit_its_review_reads(
+    tmp_path, monkeypatch
+):
+    """`cli._stack_cite`'s callable resolves the same commit `_stack_review`
+    would seed its cell at: a layer's branch fetched fresh, else the stack
+    base's, else the pinned `base_sha` with no fetch at all. The text it
+    hands the check is the recorded `spec_text` when given, else the
+    queued file read at `base_sha`. It is never a fetched head and never
+    read from the operator's checkout. A queued file absent there raises
+    `ValueError` naming the path, before the check runs."""
+    from saffron.scheduler import StackBase
+
+    rig = _spec_session_rig(tmp_path, monkeypatch, ".saffron/specs/SY-1-x.md")
+    mirror, base_sha = rig.mirror, rig.base_sha
+    fetch_calls = rig.fetch_calls
+
+    real_head = _rev_parse(mirror, "HEAD")
+
+    def _fake_fetch(mirror_arg, url_arg, branch):
+        fetch_calls.append((mirror_arg, url_arg, branch))
+        if branch == "saffron/SY-8":
+            raise package.ParentGone("gone")
+        return real_head
+
+    monkeypatch.setattr(package, "fetch_parent_branch", _fake_fetch)
+
+    check_calls: list[tuple] = []
+
+    def _fake_citation_defects(mirror_arg, commit, text):
+        check_calls.append((mirror_arg, commit, text))
+        return []
+
+    monkeypatch.setattr(cli, "citation_defects", _fake_citation_defects)
+
+    stack_base = StackBase(spec_id="SY-9", task_id=42, branch="saffron/SY-9")
+    pinned = task.PinnedBase(
+        mirror=mirror, url="https://github.com/o/r.git", base_sha=base_sha
+    )
+
+    sy1 = rig.candidate("SY-1")
+    layer7 = rig.candidate("SY-7")
+
+    monkeypatch.chdir(rig.repo)
+
+    cite_with_base = cli._stack_cite(pinned=pinned, stack_base=stack_base)
+    cite_without_base = cli._stack_cite(pinned=pinned)
+
+    # A layer, with a stack base built in too: the layer still outranks it.
+    cite_with_base(sy1, layer7, None)
+    assert fetch_calls[-1] == (mirror, pinned.url, "saffron/SY-7")
+    assert check_calls[-1] == (mirror, real_head, "queued at base\n")
+
+    # A layer, no stack base built in: the same layer branch is fetched.
+    cite_without_base(sy1, layer7, None)
+    assert fetch_calls[-1] == (mirror, pinned.url, "saffron/SY-7")
+    assert check_calls[-1] == (mirror, real_head, "queued at base\n")
+
+    # No layer, a stack base: its own branch is fetched instead.
+    cite_with_base(sy1, None, None)
+    assert fetch_calls[-1] == (mirror, pinned.url, "saffron/SY-9")
+    assert check_calls[-1] == (mirror, real_head, "queued at base\n")
+
+    # No layer, no stack base: the pinned base, with no fetch at all.
+    before = len(fetch_calls)
+    cite_without_base(sy1, None, None)
+    assert len(fetch_calls) == before
+    assert check_calls[-1] == (mirror, base_sha, "queued at base\n")
+
+    # A queued file absent at `base_sha` raises before the check runs.
+    sy5 = rig.candidate("SY-5")
+    before_checks = len(check_calls)
+    with pytest.raises(ValueError, match=r"\.saffron/specs/SY-5-x\.md"):
+        cite_without_base(sy5, None, None)
+    assert len(check_calls) == before_checks
+
+    # The same candidate, with a recorded text, reaches the check with no raise.
+    cite_without_base(sy5, None, "recorded text\n")
+    assert check_calls[-1] == (mirror, base_sha, "recorded text\n")
+
+    # The raise still comes first even with a layer whose own fetch would
+    # raise: the missing file is checked before any fetch is attempted.
+    layer8 = rig.candidate("SY-8")
+    before_fetches = len(fetch_calls)
+    with pytest.raises(ValueError, match=r"\.saffron/specs/SY-5-x\.md"):
+        cite_without_base(sy5, layer8, None)
+    assert len(fetch_calls) == before_fetches
+
+
+def test_a_stack_batchs_citation_check_and_spec_review_read_one_fetch(
+    tmp_path, monkeypatch
+):
+    """A cite and the review right after it, for the same candidate and
+    layer, share one fetch: the cite adapter fetches, and the review reads
+    that commit with no fetch of its own. A review whose layer or candidate
+    differs, or a second review with no cite between them, fetches again."""
+    from saffron.scheduler import StackBase
+
+    rig = _spec_session_rig(tmp_path, monkeypatch)
+    mirror, base_sha = rig.mirror, rig.base_sha
+    repo, out_dir = rig.repo, rig.out_dir
+    fetch_calls, cell_up_calls = rig.fetch_calls, rig.cell_up_calls
+
+    def _fake_fetch(mirror_arg, url_arg, branch):
+        fetch_calls.append((mirror_arg, url_arg, branch))
+        return f"{branch}-head"
+
+    monkeypatch.setattr(package, "fetch_parent_branch", _fake_fetch)
+
+    def _fake_run_agent(
+        container,
+        *,
+        prompt,
+        options,
+        spec_id,
+        timeout_s,
+        resume=None,
+        emit=None,
+        last_cost_usd=0.0,
+    ):
+        return implement.AttemptResult(
+            session_id="sid",
+            subtype="success",
+            terminal_reason=None,
+            num_turns=1,
+            cost_usd_est=0.0,
+            rate_limit_status="rejected",
+        )
+
+    monkeypatch.setattr(implement, "run_agent", _fake_run_agent)
+
+    def _fake_run_spec_review(container, *, system_prompt, prompt, agent):
+        agent(container, prompt="x", options={})
+        return object()
+
+    monkeypatch.setattr(spec_review, "run_spec_review", _fake_run_spec_review)
+
+    def _fake_citation_defects(mirror_arg, commit, text):
+        return []
+
+    monkeypatch.setattr(cli, "citation_defects", _fake_citation_defects)
+
+    pinned = task.PinnedBase(
+        mirror=mirror, url="https://github.com/o/r.git", base_sha=base_sha
+    )
+    c = rig.candidate("SY-2")
+    d = rig.candidate("SY-3")
+    layer_a = rig.candidate("SY-7")
+    layer_b = rig.candidate("SY-8")
+    stack_base = StackBase(spec_id="SY-9", task_id=42, branch="saffron/SY-9")
+
+    def _pair(sb=None):
+        heads: dict = {}
+        cite = cli._stack_cite(pinned=pinned, stack_base=sb, heads=heads)
+        review = cli._stack_review(
+            pinned=pinned,
+            repo=repo,
+            out_dir=out_dir,
+            stack_base=sb,
+            heads=heads,
+        )
+        return cite, review
+
+    # A layer, no stack base: one fetch, and the cell starts where the
+    # check was handed.
+    fetch_calls.clear()
+    cite, review = _pair()
+    cite(c, layer_a, "t\n")
+    review(c, layer_a)
+    assert fetch_calls == [(mirror, pinned.url, "saffron/SY-7")]
+    assert cell_up_calls[-1]["tree_base"] == "saffron/SY-7-head"
+
+    # No layer, a stack base: one fetch of its branch instead, same sharing.
+    fetch_calls.clear()
+    cite, review = _pair(stack_base)
+    cite(c, None, "t\n")
+    review(c, None)
+    assert fetch_calls == [(mirror, pinned.url, "saffron/SY-9")]
+    assert cell_up_calls[-1]["tree_base"] == "saffron/SY-9-head"
+
+    # Another layer: the review's own branch is fetched too.
+    fetch_calls.clear()
+    cite, review = _pair()
+    cite(c, layer_a, "t\n")
+    review(c, layer_b)
+    assert fetch_calls == [
+        (mirror, pinned.url, "saffron/SY-7"),
+        (mirror, pinned.url, "saffron/SY-8"),
+    ]
+
+    # Another candidate, same layer: the sharing does not cross candidates.
+    fetch_calls.clear()
+    cite, review = _pair()
+    cite(c, layer_a, "t\n")
+    review(d, layer_a)
+    assert fetch_calls == [
+        (mirror, pinned.url, "saffron/SY-7"),
+        (mirror, pinned.url, "saffron/SY-7"),
+    ]
+
+    # A second review, with no cite between them: it fetches again.
+    fetch_calls.clear()
+    cite, review = _pair()
+    cite(c, layer_a, "t\n")
+    review(c, layer_a)
+    review(c, layer_a)
+    assert fetch_calls == [
+        (mirror, pinned.url, "saffron/SY-7"),
+        (mirror, pinned.url, "saffron/SY-7"),
+    ]
 
 
 def _default_spec_session_emit(event):

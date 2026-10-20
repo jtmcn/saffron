@@ -621,12 +621,11 @@ def test_a_witness_whose_subject_the_diff_never_touched_is_skipped():
 
     "This diff could not have made that test pass, because it never touched the
     code the claim is about" is unproven, not theater, and `skip` already means
-    that. The subject is the criterion's own `mutant.file`, compared against
-    `source` — the exact set about to be reverted — rather than against
-    `touches`: `touches` is what a spec was permitted to change, and a spec
-    permitted to change a file it then left alone leaves `revert` just as
-    unable to answer. A criterion declaring no mutant names no subject and is
-    judged exactly as before."""
+    that. The mutant's file is compared against `source`, the exact set about
+    to be reverted, rather than against `touches`. A spec permitted to change
+    a file it then left alone leaves `revert` equally unable to answer. A
+    criterion with no mutant names no subject and stays judged as before. A
+    criterion whose declared `subject` reaches `source` stays judged too."""
     witness = "tests/test_report.py::test_effective_tier"
     criterion = Criterion(
         claim="a task that recorded nothing packages the body it packages today",
@@ -706,6 +705,201 @@ def test_a_mutant_naming_a_test_file_does_not_exempt_its_witness():
     )
     assert result.status == "fail"
     assert [f.file for f in result.failures] == [witness]
+
+
+_CHANGED = "pkg/a.py"
+_UNTOUCHED = "pkg/untouched.py"
+_UNTOUCHED_2 = "pkg/other_untouched.py"
+_TEST_FILE = "tests/test_thing.py"
+
+
+def _subject_criterion(witness, *, mutant_file, find, subject=None):
+    kwargs = {"file": mutant_file, "find": find, "replace": "y"}
+    return Criterion(claim="c", witness=witness, mutant=kwargs, subject=subject)
+
+
+def test_a_witness_whose_declared_subject_the_diff_changed_is_judged_and_named():
+    """Backlog item b-000d04, narrowing item 84. A mutant sitting outside
+    the diff no longer sets a witness aside on its own. A declared
+    `subject` reaching the source keeps it judged."""
+    witness = "t.py::test_new"
+
+    def run(*, subject, failed):
+        criterion = _subject_criterion(
+            witness, mutant_file=_UNTOUCHED, find="m1", subject=subject
+        )
+        return revert_gate(
+            prior=[_tests("t.py::test_a")],
+            results=[_tests("t.py::test_a", witness)],
+            acceptance=[criterion],
+            changed_files=[_CHANGED],
+            test_paths=[_TESTS],
+            dirty=lambda: [],
+            reverted=lambda paths: _reverted(paths, log=[]),
+            run_tests=lambda subset: _tests(*subset, failed=failed),
+            exempt=[],
+        )
+
+    # A subject the diff changed keeps the witness judged, and theater here
+    # is still theater: the reverted run passes it.
+    result = run(subject=_CHANGED, failed=())
+    assert result.status == "fail"
+    assert [f.file for f in result.failures] == [witness]
+    assert witness in result.summary and _CHANGED in result.summary
+
+    # A subject under the repo's own test paths reaches the source too.
+    result = run(subject=_TEST_FILE, failed=())
+    assert result.status == "fail"
+    assert _TEST_FILE in result.summary
+
+    # The same witness truly depends on its subject here. The reverted run
+    # fails it, and the subject is still named on a pass verdict.
+    result = run(subject=_CHANGED, failed=(witness,))
+    assert result.status == "pass"
+    assert witness in result.summary and _CHANGED in result.summary
+
+    # A lone criterion with no subject at all is set aside as at base, and
+    # names no "subject" anywhere in its summary.
+    lone = Criterion(
+        claim="c", witness=witness, mutant={"file": _UNTOUCHED, "find": "m2"}
+    )
+    result = revert_gate(
+        prior=[_tests("t.py::test_a")],
+        results=[_tests("t.py::test_a", witness)],
+        acceptance=[lone],
+        changed_files=[_CHANGED],
+        test_paths=[_TESTS],
+        dirty=lambda: [],
+        reverted=_refuse,
+        run_tests=_refuse_run,
+        exempt=[],
+    )
+    assert result.status == "skip"
+    assert witness in result.summary and _UNTOUCHED in result.summary
+    assert "subject" not in result.summary
+
+    # Only the first is kept by its subject and named. The fifth is never
+    # collected, and the sixth is named by its mutant's file.
+    w = [f"t.py::test_c{i}" for i in range(1, 7)]
+    criteria = [
+        _subject_criterion(w[0], mutant_file=_UNTOUCHED, find="a1", subject=_CHANGED),
+        _subject_criterion(w[1], mutant_file=_CHANGED, find="a2", subject=_CHANGED),
+        _subject_criterion(w[2], mutant_file=_TEST_FILE, find="a3", subject=_CHANGED),
+        _subject_criterion(w[3], mutant_file=_CHANGED, find="a4"),
+        _subject_criterion(w[4], mutant_file=_UNTOUCHED, find="a5", subject=_CHANGED),
+        _subject_criterion(
+            w[5], mutant_file=_UNTOUCHED, find="a6", subject=_UNTOUCHED_2
+        ),
+    ]
+    collected = [w[0], w[1], w[2], w[3], w[5]]
+    result = revert_gate(
+        prior=[_tests("t.py::test_a")],
+        results=[_tests("t.py::test_a", *collected)],
+        acceptance=criteria,
+        changed_files=[_CHANGED],
+        test_paths=[_TESTS],
+        dirty=lambda: [],
+        reverted=lambda paths: _reverted(paths, log=[]),
+        run_tests=lambda subset: _tests(*subset),
+        exempt=[],
+    )
+    assert result.status == "fail"
+    assert sorted(f.file for f in result.failures) == sorted(w[:4])
+    assert w[0] in result.summary
+    for name in w[1:5]:
+        assert name not in result.summary
+    assert _UNTOUCHED_2 not in result.summary
+
+
+def test_a_witness_is_set_aside_only_when_its_mutant_and_its_subject_lie_outside_the_source():
+    """The full twelve-pair grid (backlog item b-000d04). Only a mutant
+    outside `source` and the test paths is set aside, and only when its
+    `subject` is absent or also outside both."""
+    mutant_files = {"source": _CHANGED, "outside": _UNTOUCHED, "tests": _TEST_FILE}
+    subjects = {
+        "absent": None,
+        "source": _CHANGED,
+        "outside": _UNTOUCHED_2,
+        "tests": _TEST_FILE,
+    }
+    aside_pairs = {("outside", "absent"), ("outside", "outside")}
+    for mutant_key, mutant_file in mutant_files.items():
+        for subject_key, subject in subjects.items():
+            witness = f"t.py::test_{mutant_key}_{subject_key}"
+            criterion = _subject_criterion(
+                witness,
+                mutant_file=mutant_file,
+                find=f"m_{mutant_key}_{subject_key}",
+                subject=subject,
+            )
+            result = revert_gate(
+                prior=[_tests("t.py::test_a")],
+                results=[_tests("t.py::test_a", witness)],
+                acceptance=[criterion],
+                changed_files=[_CHANGED],
+                test_paths=[_TESTS],
+                dirty=lambda: [],
+                reverted=lambda paths: _reverted(paths, log=[]),
+                run_tests=lambda subset: _tests(*subset),
+                exempt=[],
+            )
+            pair = (mutant_key, subject_key)
+            if pair in aside_pairs:
+                assert result.status == "skip", pair
+                assert witness in result.summary
+            else:
+                assert result.status == "fail", pair
+                assert [f.file for f in result.failures] == [witness]
+
+
+def test_a_witness_two_criteria_disagree_on_stays_set_aside():
+    """A witness any criterion sets aside is never named as kept, even
+    where another of its criteria declares a `subject` in `source`."""
+    witness = "t.py::test_shared"
+    aside_criterion = _subject_criterion(witness, mutant_file=_UNTOUCHED, find="s1")
+    kept_criterion = _subject_criterion(
+        witness, mutant_file=_UNTOUCHED, find="s2", subject=_CHANGED
+    )
+
+    result = revert_gate(
+        prior=[_tests("t.py::test_a")],
+        results=[_tests("t.py::test_a", witness)],
+        acceptance=[aside_criterion, kept_criterion],
+        changed_files=[_CHANGED],
+        test_paths=[_TESTS],
+        dirty=lambda: [],
+        reverted=_refuse,
+        run_tests=_refuse_run,
+        exempt=[],
+    )
+    assert result.status == "skip"
+    assert witness in result.summary
+    assert _CHANGED not in result.summary
+
+
+def test_a_witness_two_subjects_keep_is_counted_once():
+    """One witness kept through two declared subjects counts as one
+    witness, the way the set-aside note counts, and names both."""
+    witness = "t.py::test_shared"
+    criteria = [
+        _subject_criterion(witness, mutant_file=_UNTOUCHED, find="k1", subject=s)
+        for s in (_CHANGED, _TEST_FILE)
+    ]
+
+    result = revert_gate(
+        prior=[_tests("t.py::test_a")],
+        results=[_tests("t.py::test_a", witness)],
+        acceptance=criteria,
+        changed_files=[_CHANGED],
+        test_paths=[_TESTS],
+        dirty=lambda: [],
+        reverted=lambda paths: _reverted(paths, log=[]),
+        run_tests=lambda subset: _tests(*subset),
+        exempt=[],
+    )
+    assert "1 witness(es) a declared subject kept" in result.summary
+    assert f"{witness} ({_CHANGED})" in result.summary
+    assert f"{witness} ({_TEST_FILE})" in result.summary
 
 
 def test_an_exempt_new_test_is_left_out_of_the_reverted_run_and_named():
