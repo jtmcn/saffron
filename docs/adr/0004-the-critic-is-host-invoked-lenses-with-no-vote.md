@@ -80,6 +80,9 @@ Amended 2026-10-15, by hand for b-4901d2 in place of `SA-0293`: the
 extraction draws on a $4.00 reserve plus what the rebuttal turn left. The
 verdicts draw on $2.00 plus what the extraction left. A costly fix starved
 the extraction of `SA-0273`.
+Amended 2026-10-20, `SA-0299`: a host-filed survivor counts whether or not it
+anchors. It is still recorded `anchored = false`, and it goes to REBUT as an
+anchored blocker does (b-e40d09).
 
 Otherwise the implementer gets one attempt to fix each blocker or argue against
 it. A rebuttal that neither moved HEAD nor argued halts at `REBUTTING`, and the
@@ -114,7 +117,7 @@ review. Every in-cell critic keeps it whole.
 - **9** upholds. Any one blocker routes to REBUT. Disjoint lenses never form a
   majority, and overlapping ones agree for reasons that are not evidence
   (principle 51).
-- **15** departs. At REVIEW a finding counts only once the host anchors it. At
+- **15** departs. At REVIEW a lens's finding counts only once the host anchors it. At
   REBUT the adequacy session can withdraw a probe the host ran and saw
   survive, so a reading overrules a measurement. ADR 3 records the same step.
 - **16** upholds. The budget exit keeps the work. The findings are written,

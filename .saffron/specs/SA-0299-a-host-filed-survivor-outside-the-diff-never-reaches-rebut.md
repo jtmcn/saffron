@@ -42,7 +42,7 @@ forbidden:
   - tests/test_task.py
   - tests/test_scheduler.py
   - tests/test_queued_specs.py
-budget_usd: 23
+budget_usd: 25
 max_attempts: 3
 max_turns: 130
 acceptance:
@@ -154,8 +154,8 @@ every finding whose claim starts with `HOST_FILED`
 (`saffron/phases/review.py:148-158`). A survivor stays recorded
 `anchored: false`, so the rate reads the same before and after. No query in
 `saffron/` computes a drop rate from the ledger. A case-blind search for the
-words finds that property and two comments, at saffron/agents/findings.py:6
-and saffron/ledger.py:221. Item b-b431c1 owns that query's half.
+words finds that property and comments in `saffron/phases/review.py`,
+`saffron/agents/findings.py` and `saffron/ledger.py`, none a query. Item b-b431c1 owns that query's half.
 
 ## Problem
 
@@ -194,9 +194,8 @@ today's rule.
 - **An adequacy lens's own probe.** `adequacy_probes` still takes anchored
   adequacy findings alone (`saffron/phases/review.py:797-807`). An
   unanchored lens finding is never probed, and stays unselected.
-- **The design record and the vocabulary.** `DESIGN.md` §5.4.1 and §5.5,
-  ADR 4 and `CONTEXT.md` each say a survivor that anchors is a blocker for
-  REBUT. The operator edits them by hand in this spec's pull request.
+- **The design record and the vocabulary.** `DESIGN.md`, ADR 3, ADR 4 and
+  `CONTEXT.md` said only an anchored survivor reaches REBUT. The operator edited them by hand in this spec's pull request.
 
 ## Notes for the agent
 
