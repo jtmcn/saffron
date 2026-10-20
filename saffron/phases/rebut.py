@@ -3,8 +3,8 @@
 The order the design left ambiguous, settled here: anchored blockers → the
 implementer rebuts → the critic verdicts each one. "Confirmed" in §5.6 is the
 host's anchoring (§5.5), which already established that the finding points at
-real changed code. For a survivor, the host's own run of the edit against the
-witness stands in for that check. A critic that verdicts before reading the
+real changed code. For a survivor, the host applied the edit and watched the
+witness stay green, which stands in for that check. A critic that verdicts before reading the
 argument restates it rather than disagreeing. The recorded disagreement is
 the entire product of this phase.
 
