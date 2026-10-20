@@ -4,7 +4,7 @@ title: "A stack batch's end review grades the packaged heads, before the loop's 
 status: open
 tier: 2
 filed: 2026-10-09
-specs: []
+specs: [SA-0301]
 prs: [789]
 commits: []
 cites: []
