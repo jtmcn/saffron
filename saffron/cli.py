@@ -64,6 +64,7 @@ from saffron.scheduler import (
     retirement_refusal,
     run_gh,
 )
+from saffron.spec_citations import citation_defects
 from saffron.task import (
     Handoff,
     PinnedBase,
@@ -679,6 +680,21 @@ def _seed_branch(
     return None
 
 
+def _stack_head(
+    pinned: PinnedBase,
+    layer: Candidate | None,
+    stack_base: scheduler.StackBase | None,
+) -> str:
+    """The commit a stack spec session seeds its cell at: a layer's branch
+    fetched fresh, else the stack base's, else the pinned `base_sha`
+    (`_seed_branch`). `_stack_review`, `_stack_revise` and `_stack_cite`
+    all read it here, so the resolution exists once."""
+    branch = _seed_branch(layer, stack_base)
+    if branch is None:
+        return pinned.base_sha
+    return package_phase.fetch_parent_branch(pinned.mirror, pinned.url, branch)
+
+
 def _stack_base_alive(pinned: PinnedBase) -> Callable[[str], bool]:
     """`run_stack_batch`'s `stack_base_alive` (ADR 7).
 
@@ -1028,13 +1044,16 @@ def _stack_review(
     repo: Path,
     out_dir: Path,
     stack_base: scheduler.StackBase | None = None,
+    heads: dict[tuple[str, str | None], str] | None = None,
 ) -> Callable[..., spec_review.SpecReviewSession]:
     """`run_stack_batch`'s `review` adapter (ADR 7). Given a layer, it
     fetches that spec's branch fresh and seeds the cell there. Given
     `None`, it fetches the stack base's own branch instead, when this batch
-    has one, else it seeds the cell at the pinned `base_sha` (`_seed_branch`).
+    has one, else it seeds the cell at the pinned `base_sha` (`_stack_head`).
     The system prompt and gates always come from `base_sha`'s own export,
-    never a layer's head.
+    never a layer's head. `heads`, shared with `_stack_cite`, can hold
+    this candidate's and layer's commit, popped to seed with no fetch,
+    else resolved here as it always was.
     """
 
     def run(
@@ -1044,11 +1063,10 @@ def _stack_review(
         spec_text: str | None = None,
         sentence: str | None = None,
     ) -> spec_review.SpecReviewSession:
-        branch = _seed_branch(layer, stack_base)
-        if branch is None:
-            head = pinned.base_sha
-        else:
-            head = package_phase.fetch_parent_branch(pinned.mirror, pinned.url, branch)
+        key = (candidate.spec.id, layer.spec.id if layer is not None else None)
+        head = heads.pop(key, None) if heads is not None else None
+        if head is None:
+            head = _stack_head(pinned, layer, stack_base)
 
         # The export always reads `base_sha`, never a layer's head (ADR 7).
         exported = git_mirror.export_saffron_dir(
@@ -1104,6 +1122,43 @@ def _stack_review(
     return run
 
 
+def _stack_cite(
+    *,
+    pinned: PinnedBase,
+    stack_base: scheduler.StackBase | None = None,
+    heads: dict[tuple[str, str | None], str] | None = None,
+) -> Callable[[Candidate, Candidate | None, str | None], list[str]]:
+    """`run_stack_batch`'s `cite` adapter (`SA-0295`). Checks a spec's
+    citations at the same commit `_stack_review` seeds its cell at
+    (`_stack_head`), never at the operator's checkout. A `None` spec text
+    reads the queued file at `base_sha`, and a missing one raises
+    `ValueError` before any fetch, the way `_stack_revise` reads one.
+
+    The commit it resolves is kept in `heads`, keyed by the candidate's
+    and the layer's spec ids. The review this check precedes then seeds
+    there with no second fetch.
+    """
+
+    def run(
+        candidate: Candidate, layer: Candidate | None, spec_text: str | None
+    ) -> list[str]:
+        if spec_text is None:
+            # The queued file at the pinned base, read before any fetch
+            # (ADR 7): a spec with no revision yet has no other text.
+            path = f".saffron/specs/{candidate.path.name}"
+            queued = git_mirror.file_at(pinned.mirror, pinned.base_sha, path)
+            if queued is None:
+                raise ValueError(f"{path} not found at {pinned.base_sha}")
+            spec_text = queued
+        head = _stack_head(pinned, layer, stack_base)
+        if heads is not None:
+            key = (candidate.spec.id, layer.spec.id if layer is not None else None)
+            heads[key] = head
+        return citation_defects(pinned.mirror, head, spec_text)
+
+    return run
+
+
 def _stack_revise(
     *,
     pinned: PinnedBase,
@@ -1117,7 +1172,7 @@ def _stack_revise(
     `_stack_review` is. Given a layer, it fetches that spec's branch fresh
     and seeds the cell there. Given `None`, it fetches the stack base's own
     branch instead, when this batch has one, else it seeds the cell at the
-    pinned `base_sha` (`_seed_branch`). The prompt and gates always come
+    pinned `base_sha` (`_stack_head`). The prompt and gates always come
     from `base_sha`'s own export, never a layer's head. A `None` spec text
     reads the queued file at `base_sha`, and a missing one raises
     `ValueError` before any cell.
@@ -1137,11 +1192,7 @@ def _stack_revise(
             if queued is None:
                 raise ValueError(f"{path} not found at {pinned.base_sha}")
             spec_text = queued
-        branch = _seed_branch(layer, stack_base)
-        if branch is None:
-            head = pinned.base_sha
-        else:
-            head = package_phase.fetch_parent_branch(pinned.mirror, pinned.url, branch)
+        head = _stack_head(pinned, layer, stack_base)
 
         # The export always reads `base_sha`, never a layer's head (ADR 7).
         exported = git_mirror.export_saffron_dir(
@@ -1960,6 +2011,10 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     stack_end_review: Callable[[str, float, Mapping[str, Spec]], object] | None = None
     # Same: neither runs a spec review nor mints a task for one until then.
     stack_review: Callable[..., spec_review.SpecReviewSession] | None = None
+    # Same: no citation is checked until then.
+    stack_cite: (
+        Callable[[Candidate, Candidate | None, str | None], list[str]] | None
+    ) = None
     stack_mint: Callable[[Candidate], int] | None = None
     # Same: no reviewed spec is revised until then.
     stack_revise: (
@@ -2059,8 +2114,18 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                 stack_end_review = _stack_end_review(
                     pinned=pinned, repo=repo, ledger=ledger, out_dir=out_dir
                 )
+                # One shared commit cache: a cite and the review right
+                # after it read the same fetch, never two (`SA-0295`).
+                heads: dict[tuple[str, str | None], str] = {}
                 stack_review = _stack_review(
-                    pinned=pinned, repo=repo, out_dir=out_dir, stack_base=stack_base
+                    pinned=pinned,
+                    repo=repo,
+                    out_dir=out_dir,
+                    stack_base=stack_base,
+                    heads=heads,
+                )
+                stack_cite = _stack_cite(
+                    pinned=pinned, stack_base=stack_base, heads=heads
                 )
                 stack_revise = _stack_revise(
                     pinned=pinned, repo=repo, out_dir=out_dir, stack_base=stack_base
@@ -2130,6 +2195,7 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                 writer_usd=writer_usd or 0.0,
                 end_review=stack_end_review,
                 review=stack_review,
+                cite=stack_cite,
                 mint=stack_mint,
                 revise=stack_revise,
                 follow_ups=follow_ups,
