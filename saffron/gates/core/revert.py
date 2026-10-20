@@ -179,18 +179,13 @@ def revert_gate(
             summary="the diff has no source outside the repo's declared test paths",
         )
 
-    # A mutant outside `source` and the test paths cannot be reached by
-    # this revert (item 84). A subject the diff reaches keeps it judged.
-
-    # A test path never exempts a mutant or a subject by itself. One line
-    # of frontmatter could otherwise buy this gate a standing pass.
+    # A revert cannot reach a mutant outside `source` and the test paths
+    # (item 84), unless a declared subject the diff reaches keeps it judged.
     aside: set[tuple[str, str]] = set()
     kept: set[tuple[str, str]] = set()
     for c in acceptance:
         if c.mutant is None or c.witness not in subset:
             continue
-        # Computed once, exactly as at base: whether reverting `source` could
-        # possibly reach this witness through its mutant's own file alone.
         file_outside = c.mutant.file not in source and not any(
             matches(c.mutant.file, pat) for pat in test_paths
         )
@@ -218,7 +213,7 @@ def revert_gate(
         )
     if kept_by_subject:
         note += (
-            f" — {len(kept_by_subject)} witness(es) a declared subject kept "
+            f" — {len({w for w, _ in kept_by_subject})} witness(es) a declared subject kept "
             "judged: " + ", ".join(f"{w} ({s})" for w, s in kept_by_subject)
         )
     if not subset:

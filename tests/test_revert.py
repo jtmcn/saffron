@@ -778,18 +778,15 @@ def test_a_witness_whose_declared_subject_the_diff_changed_is_judged_and_named()
     assert witness in result.summary and _UNTOUCHED in result.summary
     assert "subject" not in result.summary
 
-    # Six criteria: the first is kept by its subject and named. The second,
-    # third and fourth are judged without a note for other reasons.
-
-    # The fifth is never collected. The sixth is set aside and named by its
-    # mutant's file, not by its subject.
+    # Only the first is kept by its subject and named. The fifth is never
+    # collected, and the sixth is named by its mutant's file.
     w = [f"t.py::test_c{i}" for i in range(1, 7)]
     criteria = [
         _subject_criterion(w[0], mutant_file=_UNTOUCHED, find="a1", subject=_CHANGED),
         _subject_criterion(w[1], mutant_file=_CHANGED, find="a2", subject=_CHANGED),
         _subject_criterion(w[2], mutant_file=_TEST_FILE, find="a3", subject=_CHANGED),
         _subject_criterion(w[3], mutant_file=_CHANGED, find="a4"),
-        _subject_criterion(w[4], mutant_file=_UNTOUCHED, find="a5"),
+        _subject_criterion(w[4], mutant_file=_UNTOUCHED, find="a5", subject=_CHANGED),
         _subject_criterion(
             w[5], mutant_file=_UNTOUCHED, find="a6", subject=_UNTOUCHED_2
         ),
@@ -878,6 +875,31 @@ def test_a_witness_two_criteria_disagree_on_stays_set_aside():
     assert result.status == "skip"
     assert witness in result.summary
     assert _CHANGED not in result.summary
+
+
+def test_a_witness_two_subjects_keep_is_counted_once():
+    """One witness kept through two declared subjects counts as one
+    witness, the way the set-aside note counts, and names both."""
+    witness = "t.py::test_shared"
+    criteria = [
+        _subject_criterion(witness, mutant_file=_UNTOUCHED, find="k1", subject=s)
+        for s in (_CHANGED, _TEST_FILE)
+    ]
+
+    result = revert_gate(
+        prior=[_tests("t.py::test_a")],
+        results=[_tests("t.py::test_a", witness)],
+        acceptance=criteria,
+        changed_files=[_CHANGED],
+        test_paths=[_TESTS],
+        dirty=lambda: [],
+        reverted=lambda paths: _reverted(paths, log=[]),
+        run_tests=lambda subset: _tests(*subset),
+        exempt=[],
+    )
+    assert "1 witness(es) a declared subject kept" in result.summary
+    assert f"{witness} ({_CHANGED})" in result.summary
+    assert f"{witness} ({_TEST_FILE})" in result.summary
 
 
 def test_an_exempt_new_test_is_left_out_of_the_reverted_run_and_named():

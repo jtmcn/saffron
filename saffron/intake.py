@@ -75,7 +75,7 @@ class DisclosedMutantError(SpecError):
 
 def _is_canonical_path(path: str) -> bool:
     """Whether `path` is repo-relative: `/`-split segments all non-empty and
-    none `.` or `..`. Refuses an absolute path, a trailing `/`, and a `//`."""
+    none `.` or `..`. False for an absolute path, a trailing `/`, and a `//`."""
     segments = path.split("/")
     return not any(segment == "" or segment in (".", "..") for segment in segments)
 
