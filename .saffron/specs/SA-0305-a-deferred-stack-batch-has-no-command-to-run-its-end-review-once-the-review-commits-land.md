@@ -157,7 +157,7 @@ each edit `saffron/cli.py` first, so find each function there by name.
 - `SA-0306` has the finishing layer, `findings.json` and the stack view
   read the heads the end review graded. `cli._stack_finish` takes a
   `heads` mapping from task key to head. SA-0306's module-level
-  end-review wrapper (named in its Problem 3) fills that mapping. It copies
+  end-review wrapper, `cli._keeping_graded_heads(end_review, heads)`, fills that mapping. It copies
   each `StackReview.fields` entry's head, and only from a `StackReview`.
   `write_stack_view` takes a `batch_id` keyword.
 
@@ -243,7 +243,7 @@ turns an unexpected raise into `saffron:` and exit 2.
    Pass no stack base, since every follow-up's predecessor is `top`. Share
    one commit cache between `_stack_review` and `_stack_cite`, as `_batch`
    does. Name it apart from `SA-0306`'s `heads` mapping. Wrap
-   the end review in `SA-0306`'s wrapper, and hand `_stack_finish` the
+   the end review in `_keeping_graded_heads`, and hand `_stack_finish` the
    mapping that wrapper fills. Hand `_stack_follow_ups` the file's
    `writer_usd` as its cap, and the finish the same `pooled` list.
 4. **Run the tail.** Call `run_stack_batch` with an empty order, the
