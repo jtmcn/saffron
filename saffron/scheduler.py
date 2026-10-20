@@ -36,6 +36,17 @@ not cover was measured twice in one run (backlog item 35) and fixed
 by hand both times; `retirement_refusal` reads that fact from the repository
 rather than the spec's own prose, from `mirror.retirement_markers` handed in
 by the caller, the same shape `protected` already takes.
+
+Backlog item b-e773d9 adds a ninth site under the `depends_on` kind. Two live
+specs that share no path can still collide when one declares `removes` and
+the other still reads the removed name. `_removed_name_refusals` computes
+every clash once, over every partner, before `build_queue` runs `_refuse` on
+each candidate. A partner is a candidate, or a live spec whose task still
+sits in `DEPENDENCY_WAITING_STATES` at its current spec_sha. A clash refuses
+only the later of two candidates, compared as strings, or the one candidate
+beside a partner that is already waiting. The reason names a parent and
+never the field, so the spec loop's own deferral on that text does not
+swallow it.
 """
 
 from __future__ import annotations
@@ -50,7 +61,7 @@ from typing import Literal
 
 from saffron.cell.session import _SHA as _RESOLVED_SHA
 from saffron.gates.core.scope import matches
-from saffron.intake import DiscoveryFailure, Spec, discover_specs
+from saffron.intake import DiscoveredSpec, DiscoveryFailure, Spec, discover_specs
 from saffron.ledger import Ledger
 
 # Same shape `saffron/phases/package.py` already uses for the same reason —
@@ -683,6 +694,128 @@ def _dependency_refusal(
     return f"depends_on {dep} is {states[-1]}, which is not {DEPENDENCY_MERGED}"
 
 
+def _entry_subject(entry: str) -> tuple[str, str]:
+    """A `consumes` or `removes` entry's path half and subject.
+
+    The subject is the name after the colon, or the path when the entry
+    names none, the same reading `removes` and `consumes` share.
+    """
+    path, _, name = entry.partition(":")
+    return path, name or path
+
+
+_WORD_BOUNDARY = r"[A-Za-z0-9_]"
+
+
+def _whole_word(text: str, subject: str) -> bool:
+    """Whether `subject` sits in `text` with no identifier character on
+    either side, case sensitive. `re.escape` keeps a dot or a slash in a
+    path subject from reading as regex syntax."""
+    if not subject:
+        return False
+    pattern = rf"(?<!{_WORD_BOUNDARY}){re.escape(subject)}(?!{_WORD_BOUNDARY})"
+    return re.search(pattern, text) is not None
+
+
+def _removed_name_clash(remover: Spec, reader: Spec) -> str | None:
+    """The subject of one of `remover`'s `removes` entries that `reader`
+    still reads, or `None`.
+
+    It checks the reader's body and claims first. Then it checks its own
+    `consumes` entries for the same subject. A bare removed path also
+    checks a `consumes` entry's path half.
+    """
+    texts = [reader.body, *_criteria_texts(reader)]
+    for entry in remover.removes:
+        path, subject = _entry_subject(entry)
+        bare = subject == path
+        if any(_whole_word(text, subject) for text in texts):
+            return subject
+        for consumed in reader.consumes:
+            consumed_path, consumed_subject = _entry_subject(consumed)
+            if consumed_subject == subject:
+                return subject
+            if bare and consumed_path == path:
+                return subject
+    return None
+
+
+def _depends_on_path(
+    start: str, target: str, edges: Mapping[str, Sequence[str]]
+) -> bool:
+    """Whether a forward walk of `depends_on` edges from `start` reaches
+    `target`. `edges` holds every live spec's whole `depends_on` list, not
+    only its first entry, and `visited` keeps a cycle from looping forever.
+    """
+    visited = {start}
+    stack = list(edges.get(start, ()))
+    while stack:
+        current = stack.pop()
+        if current == target:
+            return True
+        if current in visited:
+            continue
+        visited.add(current)
+        stack.extend(edges.get(current, ()))
+    return False
+
+
+def _removed_name_refusals(
+    specs: Sequence[DiscoveredSpec],
+    candidate_ids: frozenset[str],
+    states_at_current_sha: Mapping[str, list[str]],
+) -> dict[str, str]:
+    """Every candidate id a removed-name clash holds, mapped to its reason
+    (backlog item b-e773d9, still the `depends_on` kind).
+
+    A partner is a candidate, or a live spec whose task still sits in
+    `DEPENDENCY_WAITING_STATES` at its current spec_sha. Of two candidates
+    the later id, as a string, is held. A waiting partner holds the
+    candidate whatever its id. `setdefault` keeps the first clash found.
+    """
+    partners = {
+        discovered.spec.id: discovered.spec
+        for discovered in specs
+        if discovered.spec.id in candidate_ids
+        or any(
+            state in DEPENDENCY_WAITING_STATES
+            for state in states_at_current_sha.get(discovered.spec.id, ())
+        )
+    }
+    edges = {discovered.spec.id: discovered.spec.depends_on for discovered in specs}
+
+    def joined(a: str, b: str) -> bool:
+        return _depends_on_path(a, b, edges) or _depends_on_path(b, a, edges)
+
+    held: dict[str, str] = {}
+    for remover_id, remover in partners.items():
+        if not remover.removes:
+            continue
+        for reader_id, reader in partners.items():
+            if reader_id == remover_id or joined(remover_id, reader_id):
+                continue
+            subject = _removed_name_clash(remover, reader)
+            if subject is None:
+                continue
+            remover_is_candidate = remover_id in candidate_ids
+            reader_is_candidate = reader_id in candidate_ids
+            if remover_is_candidate and reader_is_candidate:
+                held_id = max(remover_id, reader_id)
+                other_id = remover_id if held_id == reader_id else reader_id
+            elif reader_is_candidate:
+                held_id, other_id = reader_id, remover_id
+            elif remover_is_candidate:
+                held_id, other_id = remover_id, reader_id
+            else:
+                continue
+            held.setdefault(
+                held_id,
+                f"{held_id} and {other_id} both name {subject}, "
+                "declare one a parent of the other",
+            )
+    return held
+
+
 def open_pr_refusal(
     candidate: Candidate, open_prs: list[dict], exempt_branches: frozenset[str]
 ) -> tuple[RefusalKind, str] | None:
@@ -1168,6 +1301,14 @@ def build_queue(
     refusals += _dangling_marker_refusals(
         markers, known_ids, len(failures) + len(retired_failures)
     )
+
+    # Computed once, over every partner, before `_refuse` runs on each
+    # candidate below (backlog item b-e773d9).
+    candidate_ids = frozenset(c.spec.id for c in candidates)
+    removed_name_held = _removed_name_refusals(
+        specs, candidate_ids, states_at_current_sha
+    )
+
     kept: list[Candidate] = []
     for candidate in candidates:
         refused = _refuse(
@@ -1182,7 +1323,15 @@ def build_queue(
             ancestor_branches=_ancestor_branches(candidate.spec.id, parent_of),
             check_dependencies=not stack,
         )
-        if refused is not None:
+        if refused is None and candidate.spec.id in removed_name_held:
+            refusals.append(
+                Refusal(
+                    path=candidate.path,
+                    reason=removed_name_held[candidate.spec.id],
+                    kind="depends_on",
+                )
+            )
+        elif refused is not None:
             kind, reason = refused
             refusals.append(Refusal(path=candidate.path, reason=reason, kind=kind))
         else:
