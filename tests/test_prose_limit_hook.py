@@ -313,7 +313,7 @@ def test_tree_mode_reads_an_unstaged_edit_against_head(tmp_path):
 
 def test_tree_mode_reads_a_fixed_working_copy_not_the_staged_one(tmp_path):
     # The working copy still differs from HEAD, so the file stays in the
-    # diff `--tree` reads; it just carries no hit, unlike the staged blob.
+    # diff `--tree` reads. It carries no hit, unlike the staged blob.
     repo = _repo(tmp_path, {"README.md": "Short.\n"})
     _stage(repo, "README.md", "Short.\n\n" + LONG_A + "\n")
     (repo / "README.md").write_text("Short.\n\nFixed now.\n")
@@ -354,8 +354,8 @@ def test_make_check_runs_the_tree_hook_and_a_commit_does_not():
     assert tree_hook["always_run"] is True
     (commit_hook,) = [hook for hook in hooks if hook["id"] == "prose-limit"]
     assert "stages" not in commit_hook
-    # The config alone does not say `make check` reaches this hook; `lint`
-    # must name the two ids tied to the right flags, each to its own call.
+    # The config alone does not say `make check` reaches this hook. `lint`
+    # names each id with its own flag, in its own call.
     makefile = (REPO / "Makefile").read_text()
     assert "--skip prose-limit " in makefile
     assert "--stage manual prose-limit-tree" in makefile
@@ -433,8 +433,8 @@ def test_lint_runs_the_tree_hook_after_a_failure_and_still_fails(tmp_path):
         }
         status = _run_make_recipe(lines, env)
         logged = [call for call in log.read_text().splitlines() if call]
-        # Exact content and order, not just a count: a hook id swapped
-        # between the two calls still logs two lines but the wrong ones.
+        # Exact content and order: a hook id swapped between the two calls
+        # still logs two lines, but the wrong ones.
         assert logged == [
             "run --all-files --skip prose-limit",
             "run --all-files --stage manual prose-limit-tree",
