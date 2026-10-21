@@ -7,8 +7,10 @@ GitHub issues remain in use only for research/evidence records under
 
 ## Conventions
 
-- **One spec per file**: `.saffron/specs/SA-NNNN-<slug>.md`, numbered from the
-  highest existing `SA-` id + 1 (e.g. after `SA-0011`, next is `SA-0012`).
+- **One spec per file**: `.saffron/specs/SA-NNNN-<slug>.md`, numbered with
+  `uv run saffron next-id --repo .` (e.g. after `SA-0011`, next is `SA-0012`).
+  The command also reads the home ledger, because a refused follow-up's id
+  lives only there.
 - **Frontmatter** (YAML between `---` fences). `id`, `title` and `type` are
   required. The rest default: `priority` 3; `depends_on`, `envelope`, `touches`,
   `forbidden` and `pending_symbols` empty; the ceilings `budget_usd` 12,

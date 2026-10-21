@@ -1,6 +1,6 @@
-"""`saffron`: cell, batch, draft, queue, reconcile, regate, adopt, package,
-watch, fold, migrate, chains, serve, replay. `ratify` and `gc` are still
-unbuilt (§4.2.1, §4.5)."""
+"""`saffron`: cell, batch, draft, next-id, queue, reconcile, regate, adopt,
+package, watch, fold, migrate, chains, serve, replay. `ratify` and `gc` are
+still unbuilt (§4.2.1, §4.5)."""
 
 from __future__ import annotations
 
@@ -161,6 +161,13 @@ def main(argv: list[str] | None = None) -> int:
     draft_parser.add_argument("item", type=Path)
     draft_parser.add_argument("--repo", type=Path, default=Path.cwd())
 
+    next_id_parser = subcommands.add_parser(
+        "next-id",
+        help="print the next free spec id for a checkout, reading its "
+        "spec files and, when one exists, the home ledger",
+    )
+    next_id_parser.add_argument("--repo", type=Path, default=Path.cwd())
+
     reconcile_parser = subcommands.add_parser(
         "reconcile",
         help="ask GitHub what happened to this repo's open pull requests",
@@ -297,6 +304,15 @@ def main(argv: list[str] | None = None) -> int:
         # Before the home ledger below: its constructor creates the file
         # this command must report missing, not create.
         return _serve(args)
+
+    if args.command == "next-id":
+        # Before the home ledger below: a missing ledger file must stay
+        # missing, and this command opens its own only when one is there.
+        try:
+            return _next_id(args)
+        except Exception as broke:
+            print(f"saffron: {type(broke).__name__}: {broke}")
+            return 2
 
     # The lambda reads `ledger` only once a write appends, by which point
     # the name below is bound.
@@ -2289,6 +2305,40 @@ def _migrate(args: argparse.Namespace) -> int:
     # Exit 1, not 2: every task that reached here was read fine. The record
     # or the origin refused it, which is no infrastructure failure.
     return 1 if had_trouble else 0
+
+
+def _next_id(args: argparse.Namespace) -> int:
+    """`saffron next-id [--repo .]`: the next free spec id for this
+    checkout. It reads the checkout's own spec files, and, when the
+    home ledger exists, this repo's own ledger tasks too (b-589cf6).
+
+    Opens no `Ledger` when `<home>/ledger.db` is not a file, since the
+    constructor would create it. A checkout with no `origin` remote
+    contributes no ledger rows either, the same as an origin the ledger
+    holds no row for.
+    """
+    repo = args.repo.resolve()
+    specs_dir = repo / ".saffron" / "specs"
+    seed_id = draft.seed_spec_id(specs_dir)
+
+    ledger_path = args.home / "ledger.db"
+    if not ledger_path.is_file():
+        print(follow_up.next_spec_id(seed_id, specs_dir, None, None))
+        return 0
+
+    try:
+        url = package_phase.real_remote(repo)
+    except package_phase.PackageError:
+        print(follow_up.next_spec_id(seed_id, specs_dir, None, None))
+        return 0
+
+    ledger = Ledger(ledger_path)
+    try:
+        repo_id = ledger.resolve_repo_id(url)
+        print(follow_up.next_spec_id(seed_id, specs_dir, ledger, repo_id))
+    finally:
+        ledger.close()
+    return 0
 
 
 def _serve(args: argparse.Namespace) -> int:

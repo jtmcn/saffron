@@ -47,14 +47,17 @@ class Pooled:
     reason: str
 
 
-def next_spec_id(origin_id: str, specs_dir: Path, ledger: Ledger, repo_id: int) -> str:
+def next_spec_id(
+    origin_id: str, specs_dir: Path, ledger: Ledger | None, repo_id: int | None
+) -> str:
     """One more than the highest number sharing `origin_id`'s prefix.
 
     Reads three places: the live spec files, their `done/` retirees, and
     this repo's own tasks. Each carries a spec id whether or not the file
     that named it still parses, or still exists. The result is
     zero-padded to `origin_id`'s own digit width. A width already
-    exceeded stays as is.
+    exceeded stays as is. `ledger` and `repo_id` are `None` together when
+    the caller has no ledger to read, and the third place is then skipped.
     """
     match = _SPEC_ID.match(origin_id)
     if match is None:
@@ -70,10 +73,11 @@ def next_spec_id(origin_id: str, specs_dir: Path, ledger: Ledger, repo_id: int) 
             found = file_id.match(path.name)
             if found is not None:
                 highest = max(highest, int(found.group(1)))
-    for row in ledger.tasks_by_repo(repo_id):
-        found = file_id.match(row["spec_id"])
-        if found is not None:
-            highest = max(highest, int(found.group(1)))
+    if ledger is not None and repo_id is not None:
+        for row in ledger.tasks_by_repo(repo_id):
+            found = file_id.match(row["spec_id"])
+            if found is not None:
+                highest = max(highest, int(found.group(1)))
 
     return f"{prefix}-{str(highest + 1).zfill(len(digits))}"
 
