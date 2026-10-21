@@ -7442,21 +7442,7 @@ def test_a_resumed_stack_batch_drives_no_follow_up_after_a_stop_other_than_drain
 
         def end_review(batch_key, reserve_usd, specs):
             end_review_calls.append(batch_key)
-            run_id = ledger.create_run(
-                repo_id, base_sha="a" * 40, batch_id=int(batch_key)
-            )
-            task_id = ledger.create_task(
-                run_id, spec_id="EV", spec_sha="e" * 64, branch="saffron/EV"
-            )
-            attempt_id = ledger.open_attempt(task_id, phase="IMPLEMENT")
-            ledger.close_attempt(
-                attempt_id,
-                session_id="s",
-                subtype="success",
-                terminal_reason=None,
-                num_turns=1,
-                cost_usd_est=2.0,
-            )
+            ledger.attach_run_to_batch(_spend(ledger, repo_id, 2.0), int(batch_key))
             return "stack-review-sentinel"
 
         run_id = ledger.create_run(repo_id, base_sha="a" * 40)
@@ -7519,20 +7505,8 @@ def test_a_resumed_stack_batch_that_raises_writes_nothing_to_its_row(ledger, rep
     def _unexpected(*args, **kwargs):
         raise AssertionError("must not run")
 
-    def _spend(batch_key):
-        run_id = ledger.create_run(repo_id, base_sha="a" * 40, batch_id=int(batch_key))
-        task_id = ledger.create_task(
-            run_id, spec_id="EV", spec_sha="e" * 64, branch="saffron/EV"
-        )
-        attempt_id = ledger.open_attempt(task_id, phase="IMPLEMENT")
-        ledger.close_attempt(
-            attempt_id,
-            session_id="s",
-            subtype="success",
-            terminal_reason=None,
-            num_turns=1,
-            cost_usd_est=2.0,
-        )
+    def _spend_on(batch_key):
+        ledger.attach_run_to_batch(_spend(ledger, repo_id, 2.0), int(batch_key))
 
     for which in ("end_review", "follow_ups", "finish"):
         batch_id, resume = _resumable_batch(ledger, repo_id, reason="UNTIL")
@@ -7541,19 +7515,19 @@ def test_a_resumed_stack_batch_that_raises_writes_nothing_to_its_row(ledger, rep
 
         def end_review(batch_key, reserve_usd, specs, which=which):
             if which == "end_review":
-                _spend(batch_key)
+                _spend_on(batch_key)
                 raise RuntimeError("end_review boom")
             return "stack-review-sentinel"
 
         def follow_ups(batch_key, stack_review, which=which):
             if which == "follow_ups":
-                _spend(batch_key)
+                _spend_on(batch_key)
                 raise RuntimeError("follow_ups boom")
             return []
 
         def finish(finished_batch_id, unrun, which=which):
             if which == "finish":
-                _spend(str(finished_batch_id))
+                _spend_on(str(finished_batch_id))
                 raise RuntimeError("finish boom")
 
         with pytest.raises(RuntimeError, match=f"{which} boom"):
@@ -7637,6 +7611,7 @@ def test_a_resume_with_an_order_another_budget_or_no_top_task_raises_before_anyt
     cases = [
         ([_candidate("TE-99")], resume.budget_usd, resume),
         ([], resume.budget_usd + 1.0, resume),
+        ([], resume.budget_usd - 1.0, resume),
         ([], resume.budget_usd, dataclasses.replace(resume, top=no_task_top)),
     ]
     for order, budget_usd, this_resume in cases:

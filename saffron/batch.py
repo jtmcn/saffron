@@ -479,8 +479,8 @@ def run_stack_batch(
     # `None` means nothing is refused on an open pull request. Neither a
     # follow-up nor a revised spec of the order meets a check (`SA-0162`).
     open_prs: Callable[[], list[dict]] | None = None,
-    # Runs once, after the follow-ups, on a row still open or already
-    # closed by a resume (ADR 7).
+    # Runs once, after the follow-ups: on the open row, or under a resume on
+    # the row its night already closed (ADR 7).
     finish: Callable[[int, list[int]], object] | None = None,
     # `order[0].stack_base`'s own liveness check (ADR 7). `None` means every
     # spec with no predecessor runs. `_batch` passes the real one under `--stack`.
@@ -972,7 +972,7 @@ def _promote_in_flight(
     in_flight: list[tuple[str, str]],
     emit: Callable[[str], None],
 ) -> StopReason:
-    """Name every task this night left in flight, promoting `reason` to
+    """Name every task this call left in flight, promoting `reason` to
     `INCOMPLETE` whenever `in_flight` is non-empty and `reason` is not
     already `INFRASTRUCTURE`.
 
@@ -998,7 +998,8 @@ def _stop(
     row with it. `run_batch` calls this once. An unresumed `run_stack_batch`
     calls it once, for the reason its own `_drive` call, or calls, returned,
     and in its own `finally` on a raise. A resume calls it never. The row
-    it would close is already closed."""
+    it would close is already closed. It stays the single call to
+    `close_batch`."""
     reason = _promote_in_flight(reason, in_flight, emit)
     ledger.close_batch(batch_id, reason)
     return reason
