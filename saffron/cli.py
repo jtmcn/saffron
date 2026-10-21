@@ -895,6 +895,10 @@ def _stack_end_review(
     return run
 
 
+# What `saffron finish` reads to run a deferred batch's end review (SA-0305).
+DEFERRED_NAME = "deferred.json"
+
+
 def _stack_deferred_end_review(
     *, pinned: PinnedBase, repo: Path, out_dir: Path, writer_usd: float
 ) -> Callable[[str, float, Mapping[str, Spec]], object]:
@@ -903,13 +907,13 @@ def _stack_deferred_end_review(
 
     Writes `deferred.json` into `finish/<batch key>/` under the batch
     tree, the directory `_stack_finish` writes `findings.json` into, then
-    prints the `saffron finish` line `SA-0305` reads. A raise writing the
+    prints the `saffron finish` command that reads it. A raise writing the
     file is printed and swallowed, as `_stack_end_review` swallows its own.
     """
 
     def run(batch_key: str, reserve_usd: float, specs: Mapping[str, Spec]) -> object:
         dest_dir = out_dir / "finish" / batch_key
-        dest = dest_dir / "deferred.json"
+        dest = dest_dir / DEFERRED_NAME
         try:
             dest_dir.mkdir(parents=True, exist_ok=True)
             payload = {
@@ -927,7 +931,10 @@ def _stack_deferred_end_review(
             }
             dest.write_text(json.dumps(payload))
         except Exception as exc:
-            print(f"end review: deferred, {type(exc).__name__}: {exc}")
+            print(
+                f"end review: not deferred, {DEFERRED_NAME} unwritten, "
+                f"{type(exc).__name__}: {exc}"
+            )
             return None
         print(
             f"end review: deferred, reserve ${reserve_usd:.2f} held, "

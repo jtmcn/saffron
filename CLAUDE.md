@@ -75,7 +75,9 @@ uv run saffron next-id --repo .            # the next free spec id, from the spe
 
 `saffron batch` is the unattended one: `--until` is a *start no new task after* bound, not a
 kill, so a night ends at the deadline plus at most one task (backlog item 67). A `--stack`
-night then runs its end review, paid from the reserve it held back (ADR 7). Under launchd it
+night then runs its end review, paid from the reserve it held back (ADR 7). With
+`--defer-end-review` it skips that review, its follow-ups and its finishing layer, and writes
+`finish/<batch id>/deferred.json` in the batch tree for a later finish (b-8a0c9a). Under launchd it
 needs `PYTHONUNBUFFERED=1`, or a SIGKILL loses whatever output is still buffered, and the
 log is the night's only human-readable record. `docs/host/dev.saffron.batch.plist` and
 `docs/HOST-HARDENING.md` §4a carry the setup.

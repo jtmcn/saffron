@@ -8764,9 +8764,11 @@ def test_defer_end_review_without_stack_is_refused_before_readiness(
         main(["--home", str(home), "batch", "--defer-end-review"])
 
     assert exited.value.code == 2
-    err = capsys.readouterr().err
-    assert "--defer-end-review" in err
-    assert "--stack" in err
+    # The usage line names both flags, so read the error line alone.
+    error_line = capsys.readouterr().err.strip().splitlines()[-1]
+    assert "error:" in error_line
+    assert "--defer-end-review" in error_line
+    assert "--stack" in error_line
     assert readiness_calls == []
     assert not (home / "ledger.db").exists()
 
@@ -8814,7 +8816,7 @@ def test_a_deferral_file_that_cannot_be_written_is_named_and_the_batch_ends_on_i
     assert out == 0
     assert "batch: DRAINED" in printed
     assert any(
-        line.startswith("end review: deferred,") and "Error" in line
+        line.startswith("end review: not deferred,") and "Error" in line
         for line in printed.splitlines()
     )
     assert "saffron finish" not in printed
@@ -8829,7 +8831,7 @@ def test_a_deferral_file_that_cannot_be_written_is_named_and_the_batch_ends_on_i
     assert out == 0
     assert "batch: DRAINED" in printed
     assert any(
-        line.startswith("end review: deferred,") and "Error" in line
+        line.startswith("end review: not deferred,") and "Error" in line
         for line in printed.splitlines()
     )
     assert "saffron finish" not in printed
