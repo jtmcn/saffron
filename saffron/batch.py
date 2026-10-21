@@ -418,6 +418,26 @@ def _revised_spec_refusal(
     return None if refused is None else refused[1]
 
 
+@dataclasses.dataclass(frozen=True)
+class StackResume:
+    """What `saffron finish` hands `run_stack_batch` to run a closed
+    stack batch's own tail (`SA-0305`). `batch_id` and `budget_usd`
+    name the row, and `stop_reason` is its own closed `status`. `top`,
+    `position` and `layer_branches` seed the follow-up pass where the
+    order's own pass left off. `specs` stands in for the specs an
+    order would build, since a resume's own order is empty. The tail
+    skips `readiness_check`, drives follow-ups only on `DRAINED`, and
+    never calls `close_batch`: the row is already closed."""
+
+    batch_id: int
+    budget_usd: float
+    stop_reason: StopReason
+    top: Candidate
+    position: int
+    layer_branches: frozenset[str]
+    specs: Mapping[str, Spec]
+
+
 def run_stack_batch(
     order: Sequence[Candidate],
     ledger: Ledger,
@@ -459,11 +479,15 @@ def run_stack_batch(
     # `None` means nothing is refused on an open pull request. Neither a
     # follow-up nor a revised spec of the order meets a check (`SA-0162`).
     open_prs: Callable[[], list[dict]] | None = None,
-    # Runs once, after the follow-ups, while the batch row is still open (ADR 7).
+    # Runs once, after the follow-ups, on a row still open or already
+    # closed by a resume (ADR 7).
     finish: Callable[[int, list[int]], object] | None = None,
     # `order[0].stack_base`'s own liveness check (ADR 7). `None` means every
     # spec with no predecessor runs. `_batch` passes the real one under `--stack`.
     stack_base_alive: Callable[[str], bool] | None = None,
+    # `None` for every ordinary call. A closed batch's own tail, handed by
+    # `saffron finish` (`SA-0305`). `StackResume`'s own docstring is the account.
+    resume: StackResume | None = None,
 ) -> StopReason:
     """Run one stack's planned `order`, then its follow-ups, without rescanning (`SA-0142`,
     `SA-0162`). `runner` takes each candidate and its predecessor, the last one that reached
@@ -473,25 +497,38 @@ def run_stack_batch(
     up to `MAX_REVISE_ROUNDS` times. An order candidate whose `depends_on` reaches a missed
     spec is refused. `reserve_usd` and `writer_usd` hold back only the order's checks.
     `end_review`, `follow_ups` (run one generation up only on `DRAINED`) and then `finish`
-    run before the row closes, unless one of the first two raises."""
+    run in that order, unless one of the first two raises. `resume` runs only that
+    tail, against a batch already closed (`StackResume`)."""
     if review is not None and mint is None:
         raise ValueError("run_stack_batch needs mint whenever review is given")
     if follow_ups is not None and review is None:
         raise ValueError("run_stack_batch needs review whenever follow_ups is given")
     if cite is not None and review is None:
         raise ValueError("run_stack_batch needs review whenever cite is given")
+    if resume is not None:
+        if order:
+            raise ValueError("run_stack_batch needs an empty order with a resume")
+        if budget_usd != resume.budget_usd:
+            raise ValueError("run_stack_batch needs the resume's own budget_usd")
+        if resume.top.task_id is None:
+            raise ValueError("run_stack_batch needs a resume whose top names a task")
     order = list(order)
     stack_base = order[0].stack_base if order else None
     remaining = list(order)
     missed: dict[str, frozenset[str]] = {}  # spec id -> the misses it reaches
-    predecessor: Candidate | None = None
+    # A resume's own tail starts from its top layer, never from `None`.
+    predecessor: Candidate | None = resume.top if resume is not None else None
     predecessor_task_id: int | None = (
-        stack_base.task_id if stack_base is not None else None
+        resume.top.task_id
+        if resume is not None
+        else stack_base.task_id
+        if stack_base is not None
+        else None
     )
     # `None` until a gone stack base is confirmed, then cached: the reason
     # every further no-predecessor spec is refused with, asking nothing more.
     stack_base_gone: str | None = None
-    position = 0
+    position = resume.position if resume is not None else 0
     # Spec ids cleared `run`. A `wait` route is never added here, so the
     # next call for that spec reviews it again (ADR 7).
     reviewed: set[str] = set()
@@ -505,11 +542,17 @@ def run_stack_batch(
     # after the wait hands `revise` the same one, with no review between.
     pending_revision: dict[str, tuple[str | None, str]] = {}
     # 0 for the order, 1 for its follow-ups, read by `wrapped` and
-    # `record_layer` below, set once the order's own pass drains.
-    generation = 0
-    # `_branch` of every layer this batch recorded, either generation, plus
-    # the stack base's own branch: the exempt set gate 0's checks share.
-    layer_branches: set[str] = {stack_base.branch} if stack_base is not None else set()
+    # `record_layer` below. A resume skips the order, so it starts at 1.
+    generation = 1 if resume is not None else 0
+    # `_branch` of every layer recorded here, plus the stack base's own
+    # branch, or a resume's own set: the exempt set gate 0's checks share.
+    layer_branches: set[str] = (
+        set(resume.layer_branches)
+        if resume is not None
+        else {stack_base.branch}
+        if stack_base is not None
+        else set()
+    )
     # Spec ids whose review routed `run`, `escalate` or `revise`, decided by the
     # route alone, never by a raise, a wait or a `Refused` return.
     follow_up_reviewed: set[str] = set()
@@ -591,9 +634,7 @@ def run_stack_batch(
                     remaining.remove(original)
                     raise
                 task_ids[candidate.spec.id] = task_id
-                ledger.attach_run_to_batch(
-                    ledger.task_run(task_id), ledger.latest_batch_id()
-                )
+                ledger.attach_run_to_batch(ledger.task_run(task_id), batch_id)
             candidate = dataclasses.replace(
                 candidate, task_id=task_ids[candidate.spec.id]
             )
@@ -744,11 +785,7 @@ def run_stack_batch(
                 # A revision is spec work, so the writer's share pays for it.
                 # A follow-up's revision runs after the reserve left `batch_spend`.
                 held_back = 0.0 if is_follow_up else reserve_usd
-                budget_left = (
-                    budget_usd
-                    - held_back
-                    - ledger.batch_spend(ledger.latest_batch_id())
-                )
+                budget_left = budget_usd - held_back - ledger.batch_spend(batch_id)
                 if budget_left < needed:
                     emit(
                         f"{candidate.spec.id:<10} unrevised  "
@@ -826,49 +863,61 @@ def run_stack_batch(
         return result
 
     in_flight: list[tuple[str, str]] = []
-    batch_id = ledger.create_batch(budget_usd, until_ts=_until_ts(until))
+    batch_id = (
+        resume.batch_id
+        if resume is not None
+        else ledger.create_batch(budget_usd, until_ts=_until_ts(until))
+    )
     stopped: StopReason | None = None
     try:
-        reason, aborts = _drive(
-            resolve_prefix(),
-            ledger,
-            budget_usd,
-            until,
-            wrapped,
-            rescan=resolve_prefix,
-            batch_id=batch_id,
-            clock=clock,
-            readiness_check=readiness_check,
-            emit=emit,
-            in_flight=in_flight,
-            after_attach=record_layer,
-            reserve_usd=reserve_usd,
-            writer_usd=writer_usd,
-            sleep=sleep,
-        )
+        if resume is not None:
+            # No row to write and no order to drive: the tail picks up
+            # right where the night it resumes left off.
+            reason, aborts = resume.stop_reason, 0
+        else:
+            reason, aborts = _drive(
+                resolve_prefix(),
+                ledger,
+                budget_usd,
+                until,
+                wrapped,
+                rescan=resolve_prefix,
+                batch_id=batch_id,
+                clock=clock,
+                readiness_check=readiness_check,
+                emit=emit,
+                in_flight=in_flight,
+                after_attach=record_layer,
+                reserve_usd=reserve_usd,
+                writer_usd=writer_usd,
+                sleep=sleep,
+            )
         # Filled only when `follow_ups` runs, below. Otherwise it stays `[]`,
         # so `finish` always sees the right set, whatever `end_review` was given.
         unrun_task_ids: list[int] = []
         if end_review is not None:
-            specs: dict[str, Spec] = {}
-            for candidate in order:
-                resolved = candidate.spec
-                task_id = task_ids.get(candidate.spec.id)
-                if task_id is not None:
-                    text_row = ledger.spec_text(task_id)
-                    if text_row is not None:
-                        with contextlib.suppress(SpecError):
-                            resolved = parse_spec(text_row["text"])
-                specs[candidate.spec.id] = resolved
-            review_result = end_review(
-                str(ledger.latest_batch_id()), reserve_usd, specs
-            )
+            specs: Mapping[str, Spec]
+            if resume is not None:
+                specs = resume.specs
+            else:
+                built_specs: dict[str, Spec] = {}
+                for candidate in order:
+                    resolved = candidate.spec
+                    task_id = task_ids.get(candidate.spec.id)
+                    if task_id is not None:
+                        text_row = ledger.spec_text(task_id)
+                        if text_row is not None:
+                            with contextlib.suppress(SpecError):
+                                resolved = parse_spec(text_row["text"])
+                    built_specs[candidate.spec.id] = resolved
+                specs = built_specs
+            review_result = end_review(str(batch_id), reserve_usd, specs)
             if follow_ups is not None:
                 follow_up_candidates = follow_ups(
-                    str(ledger.latest_batch_id()), cast("StackReview", review_result)
+                    str(batch_id), cast("StackReview", review_result)
                 )
-                # Only once the order's own pass drains. One `follow_ups`
-                # returns otherwise is never driven, so it stays unrun below.
+                # Only on `DRAINED`, the order's own or a resume's. One
+                # `follow_ups` returns otherwise stays unrun, below.
                 if follow_up_candidates and reason == "DRAINED":
                     for candidate in follow_up_candidates:
                         assert candidate.task_id is not None  # SA-0161 mints one
@@ -907,11 +956,35 @@ def run_stack_batch(
                     unrun_task_ids.append(candidate.task_id)
         if finish is not None:
             finish(batch_id, unrun_task_ids)
+        if resume is not None:
+            # The row is already closed. Only the reason is this call's to
+            # give back, promoted for anything a follow-up left in flight.
+            return _promote_in_flight(reason, in_flight, emit)
         stopped = _stop(ledger, batch_id, reason, in_flight, emit)
         return stopped
     finally:
-        if stopped is None:
+        if stopped is None and resume is None:
             _stop(ledger, batch_id, "INFRASTRUCTURE", in_flight, emit)
+
+
+def _promote_in_flight(
+    reason: StopReason,
+    in_flight: list[tuple[str, str]],
+    emit: Callable[[str], None],
+) -> StopReason:
+    """Name every task this night left in flight, promoting `reason` to
+    `INCOMPLETE` whenever `in_flight` is non-empty and `reason` is not
+    already `INFRASTRUCTURE`.
+
+    `INFRASTRUCTURE` outranks `INCOMPLETE`, which outranks every ordinary
+    reason, never the other way (backlog item 70, `DESIGN.md` §4.2.1).
+    Shared by `_stop` and a stack batch's resumed tail, which returns
+    this and closes no row."""
+    for spec_id, state in in_flight:
+        emit(f"{spec_id:<10} left in flight in {state}")
+    if in_flight and reason != "INFRASTRUCTURE":
+        reason = "INCOMPLETE"
+    return reason
 
 
 def _stop(
@@ -921,18 +994,11 @@ def _stop(
     in_flight: list[tuple[str, str]],
     emit: Callable[[str], None],
 ) -> StopReason:
-    """Name every task this night left in flight, then close the batch row
-    with `reason`. `INCOMPLETE` takes its place whenever `in_flight` is
-    non-empty and `reason` is not already `INFRASTRUCTURE`.
-
-    `INFRASTRUCTURE` outranks `INCOMPLETE`, which outranks every ordinary
-    reason, never the other way (backlog item 70, `DESIGN.md` §4.2.1).
-    The single call site for `close_batch`: `run_batch` and `run_stack_batch`
-    each call it once, for the reason their own `_drive` call, or calls,
-    returned, and in their own `finally` on a raise."""
-    for spec_id, state in in_flight:
-        emit(f"{spec_id:<10} left in flight in {state}")
-    if in_flight and reason != "INFRASTRUCTURE":
-        reason = "INCOMPLETE"
+    """Promote `reason` for anything left in flight, then close the batch
+    row with it. `run_batch` calls this once. An unresumed `run_stack_batch`
+    calls it once, for the reason its own `_drive` call, or calls, returned,
+    and in its own `finally` on a raise. A resume calls it never. The row
+    it would close is already closed."""
+    reason = _promote_in_flight(reason, in_flight, emit)
     ledger.close_batch(batch_id, reason)
     return reason

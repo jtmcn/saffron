@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from saffron.agents.artifacts import hash_artifact
-from saffron.batch import ABORT_STATES, run_batch
+from saffron.batch import ABORT_STATES, StopReason, run_batch
 from saffron.cell.runtime import CellRuntimeError
 from saffron.cell.session import CellOutcome
 from saffron.intake import Spec
@@ -7262,3 +7262,401 @@ def test_a_stack_batch_refuses_a_spec_whose_citations_do_not_resolve_before_each
     assert _task_routes(ledger, task_id_by_spec["TE-303"]) == ["revise"]
     assert _task_routes(ledger, task_id_by_spec["TE-321"]) == []
     assert _task_routes(ledger, task_id_by_spec["TE-322"]) == []
+
+
+# backlog item b-8a0c9a: a closed stack batch's own tail, resumable
+# through `StackResume` (SA-0301's notes, step 4).
+
+
+def _resumable_batch(
+    ledger: Ledger, repo_id: int, *, reason: StopReason, budget_usd: float = 40.0
+):
+    """One stack batch's row, closed `reason` and backdated, with its top
+    layer's task costing 13.0. The one arrangement every resume witness
+    shares. Returns `(batch_id, StackResume)`, the resume seeded at
+    position 2, top spec `TE-2`, `layer_branches` `{"saffron/TE-2"}`."""
+    from saffron.batch import StackResume
+
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+    task_id = ledger.create_task(
+        run_id, spec_id="TE-2", spec_sha="t" * 64, branch="saffron/TE-2"
+    )
+    attempt_id = ledger.open_attempt(task_id, phase="IMPLEMENT")
+    ledger.close_attempt(
+        attempt_id,
+        session_id="sess",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=13.0,
+    )
+    batch_id = ledger.create_batch(budget_usd)
+    ledger.attach_run_to_batch(run_id, batch_id)
+    ledger.close_batch(batch_id, reason)
+    ledger._db.execute(
+        "UPDATE batches SET ended_at = '2020-01-01 00:00:00' WHERE batch_id = ?",
+        (batch_id,),
+    )
+    ledger._db.commit()
+    top = dataclasses.replace(_candidate("TE-2"), task_id=task_id)
+    resume = StackResume(
+        batch_id=batch_id,
+        budget_usd=budget_usd,
+        stop_reason=reason,
+        top=top,
+        position=2,
+        layer_branches=frozenset({"saffron/TE-2"}),
+        specs={"TE-2": top.spec},
+    )
+    return batch_id, resume
+
+
+def _row_window(ledger: Ledger, batch_id: int) -> tuple[object, object, object]:
+    """One batch row's own closing columns, read together so a test can
+    assert all three are untouched by a resume."""
+    row = ledger._db.execute(
+        "SELECT status, ended_at, spent_usd_est FROM batches WHERE batch_id = ?",
+        (batch_id,),
+    ).fetchone()
+    return (row["status"], row["ended_at"], row["spent_usd_est"])
+
+
+def _batch_count(ledger: Ledger) -> int:
+    row = ledger._db.execute("SELECT COUNT(*) AS n FROM batches").fetchone()
+    return int(row["n"])
+
+
+def test_a_resumed_stack_batch_runs_its_tail_on_the_closed_batchs_own_id(
+    ledger, repo_id
+):
+    """A resume with an empty order and a `DRAINED` stop reason drives its
+    follow-ups. It keys every read on the resumed batch's own id, never
+    `ledger.latest_batch_id()`, and opens no row and checks no readiness."""
+    from saffron.batch import run_stack_batch
+
+    batch_id, resume = _resumable_batch(ledger, repo_id, reason="DRAINED")
+    before = _row_window(ledger, batch_id)
+    count_before = _batch_count(ledger)
+    decoy_id = ledger.create_batch(999.0)
+
+    rows = {
+        "TE-32": {"route": "revise"},
+        "__follow_ups__": [
+            {"id": "TE-32", "budget_usd": 1.0},
+            {"id": "TE-31", "touches": ["f.py"]},
+            {"id": "TE-33", "budget_usd": 100.0},
+        ],
+    }
+    doubles = StackDoubles(ledger, repo_id, rows)
+
+    def open_prs():
+        return [{"headRefName": "saffron/TE-2", "files": [{"path": "f.py"}]}]
+
+    readiness_calls: list[int] = []
+
+    def readiness_check():
+        readiness_calls.append(1)
+        return Readiness(ok=True)
+
+    end_review_calls: list[tuple] = []
+
+    def end_review(batch_key, reserve_usd, specs):
+        end_review_calls.append((batch_key, reserve_usd, specs))
+        return doubles.end_review(batch_key, reserve_usd, specs)
+
+    follow_ups_calls: list[str] = []
+
+    def follow_ups(batch_key, stack_review):
+        follow_ups_calls.append(batch_key)
+        return doubles.follow_ups(batch_key, stack_review)
+
+    finish_calls: list[tuple] = []
+
+    def finish(finished_batch_id, unrun):
+        finish_calls.append((finished_batch_id, list(unrun)))
+
+    reason = run_stack_batch(
+        [],
+        ledger,
+        40.0,
+        None,
+        doubles.runner,
+        readiness_check=readiness_check,
+        reserve_usd=6.0,
+        writer_usd=2.0,
+        review=doubles.review,
+        mint=doubles.mint,
+        end_review=end_review,
+        follow_ups=follow_ups,
+        revise=doubles.revise,
+        open_prs=open_prs,
+        finish=finish,
+        resume=resume,
+    )
+
+    assert reason == "BUDGET"
+    assert _batch_count(ledger) == count_before + 1  # only the decoy, `decoy_id`
+    assert readiness_calls == []
+    assert end_review_calls == [(str(batch_id), 6.0, resume.specs)]
+    assert follow_ups_calls == [str(batch_id)]
+    assert doubles.revise_calls == []
+    assert doubles.mint_calls == []
+    assert doubles.runner_calls == [("TE-31", "TE-2")]
+
+    te33_task_id = ledger._db.execute(
+        "SELECT task_id FROM tasks WHERE spec_id = 'TE-33'"
+    ).fetchone()["task_id"]
+    assert finish_calls == [(batch_id, [te33_task_id])]
+
+    top_record_key = ledger._db.execute(
+        "SELECT record_key FROM tasks WHERE task_id = ?", (resume.top.task_id,)
+    ).fetchone()["record_key"]
+    layers = _stack_layers(ledger, batch_id=batch_id)
+    assert len(layers) == 1
+    assert layers[0]["spec_id"] == "TE-31"
+    assert layers[0]["position"] == 3
+    assert layers[0]["generation"] == 1
+    assert layers[0]["predecessor_key"] == top_record_key
+
+    assert _row_window(ledger, batch_id) == before
+    assert _batch_row(ledger, decoy_id)["status"] is None
+
+
+def test_a_resumed_stack_batch_drives_no_follow_up_after_a_stop_other_than_drained(
+    ledger, repo_id
+):
+    """A resume whose stop reason is not `DRAINED` still calls `end_review`
+    and `follow_ups`, but drives none of what `follow_ups` returns. It hands
+    `finish` every one of those task ids, for each of the four other stop
+    reasons."""
+    from saffron.batch import run_stack_batch
+
+    def _unexpected(*args, **kwargs):
+        raise AssertionError("must not run under a non-DRAINED resume")
+
+    def _run_once(original_reason: StopReason) -> None:
+        batch_id, resume = _resumable_batch(ledger, repo_id, reason=original_reason)
+        before = _row_window(ledger, batch_id)
+
+        end_review_calls: list[str] = []
+
+        def end_review(batch_key, reserve_usd, specs):
+            end_review_calls.append(batch_key)
+            run_id = ledger.create_run(
+                repo_id, base_sha="a" * 40, batch_id=int(batch_key)
+            )
+            task_id = ledger.create_task(
+                run_id, spec_id="EV", spec_sha="e" * 64, branch="saffron/EV"
+            )
+            attempt_id = ledger.open_attempt(task_id, phase="IMPLEMENT")
+            ledger.close_attempt(
+                attempt_id,
+                session_id="s",
+                subtype="success",
+                terminal_reason=None,
+                num_turns=1,
+                cost_usd_est=2.0,
+            )
+            return "stack-review-sentinel"
+
+        run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+        follow_up_task_id = ledger.create_task(
+            run_id, spec_id="TE-50", spec_sha="f" * 64, branch="saffron/TE-50"
+        )
+        follow_up_candidate = dataclasses.replace(
+            _candidate("TE-50", budget_usd=1.0), task_id=follow_up_task_id
+        )
+
+        follow_ups_calls: list[str] = []
+
+        def follow_ups(batch_key, stack_review):
+            follow_ups_calls.append(batch_key)
+            return [follow_up_candidate]
+
+        finish_calls: list[tuple] = []
+
+        def finish(finished_batch_id, unrun):
+            finish_calls.append((finished_batch_id, list(unrun)))
+
+        lines: list[str] = []
+
+        reason = run_stack_batch(
+            [],
+            ledger,
+            40.0,
+            None,
+            _unexpected,
+            readiness_check=_unexpected,
+            reserve_usd=6.0,
+            writer_usd=2.0,
+            review=_unexpected,
+            mint=_unexpected,
+            end_review=end_review,
+            follow_ups=follow_ups,
+            finish=finish,
+            emit=lines.append,
+            resume=resume,
+        )
+
+        assert reason == original_reason
+        assert end_review_calls == [str(batch_id)]
+        assert follow_ups_calls == [str(batch_id)]
+        assert finish_calls == [(batch_id, [follow_up_task_id])]
+        assert "follow-ups unrun  TE-50" in lines
+        assert ledger.batch_spend(batch_id) == 15.0
+        assert _row_window(ledger, batch_id) == before
+
+    for original_reason in ("BUDGET", "UNTIL", "INFRASTRUCTURE", "INCOMPLETE"):
+        _run_once(original_reason)
+
+
+def test_a_resumed_stack_batch_that_raises_writes_nothing_to_its_row(ledger, repo_id):
+    """A raise from `end_review`, `follow_ups` or `finish` during a resume
+    leaves `run_stack_batch`. Each spends before it raises, but the row
+    count and the row itself stay exactly as they were."""
+    from saffron.batch import run_stack_batch
+
+    def _unexpected(*args, **kwargs):
+        raise AssertionError("must not run")
+
+    def _spend(batch_key):
+        run_id = ledger.create_run(repo_id, base_sha="a" * 40, batch_id=int(batch_key))
+        task_id = ledger.create_task(
+            run_id, spec_id="EV", spec_sha="e" * 64, branch="saffron/EV"
+        )
+        attempt_id = ledger.open_attempt(task_id, phase="IMPLEMENT")
+        ledger.close_attempt(
+            attempt_id,
+            session_id="s",
+            subtype="success",
+            terminal_reason=None,
+            num_turns=1,
+            cost_usd_est=2.0,
+        )
+
+    for which in ("end_review", "follow_ups", "finish"):
+        batch_id, resume = _resumable_batch(ledger, repo_id, reason="UNTIL")
+        before = _row_window(ledger, batch_id)
+        count_before = _batch_count(ledger)
+
+        def end_review(batch_key, reserve_usd, specs, which=which):
+            if which == "end_review":
+                _spend(batch_key)
+                raise RuntimeError("end_review boom")
+            return "stack-review-sentinel"
+
+        def follow_ups(batch_key, stack_review, which=which):
+            if which == "follow_ups":
+                _spend(batch_key)
+                raise RuntimeError("follow_ups boom")
+            return []
+
+        def finish(finished_batch_id, unrun, which=which):
+            if which == "finish":
+                _spend(str(finished_batch_id))
+                raise RuntimeError("finish boom")
+
+        with pytest.raises(RuntimeError, match=f"{which} boom"):
+            run_stack_batch(
+                [],
+                ledger,
+                40.0,
+                None,
+                _unexpected,
+                readiness_check=_unexpected,
+                reserve_usd=6.0,
+                writer_usd=2.0,
+                review=_unexpected,
+                mint=_unexpected,
+                end_review=end_review,
+                follow_ups=follow_ups,
+                finish=finish,
+                resume=resume,
+            )
+
+        assert _row_window(ledger, batch_id) == before
+        assert _batch_count(ledger) == count_before
+
+
+def test_a_resumed_stack_batch_returns_incomplete_for_a_follow_up_left_in_flight(
+    ledger, repo_id
+):
+    """A `DRAINED` resume whose one follow-up comes back `IMPLEMENTING`
+    returns `INCOMPLETE` and prints that follow-up's own `left in flight`
+    line. It leaves the resumed row exactly as it found it."""
+    from saffron.batch import run_stack_batch
+
+    batch_id, resume = _resumable_batch(ledger, repo_id, reason="DRAINED")
+    before = _row_window(ledger, batch_id)
+
+    rows = {
+        "TE-60": {"runner": "IMPLEMENTING"},
+        "__follow_ups__": [{"id": "TE-60", "budget_usd": 1.0}],
+    }
+    doubles = StackDoubles(ledger, repo_id, rows)
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        [],
+        ledger,
+        40.0,
+        None,
+        doubles.runner,
+        readiness_check=lambda: Readiness(ok=True),
+        reserve_usd=6.0,
+        writer_usd=2.0,
+        review=doubles.review,
+        mint=doubles.mint,
+        end_review=doubles.end_review,
+        follow_ups=doubles.follow_ups,
+        emit=lines.append,
+        resume=resume,
+    )
+
+    assert reason == "INCOMPLETE"
+    assert f"{'TE-60':<10} left in flight in IMPLEMENTING" in lines
+    assert _row_window(ledger, batch_id) == before
+
+
+def test_a_resume_with_an_order_another_budget_or_no_top_task_raises_before_anything_runs(
+    ledger, repo_id
+):
+    """A resume handed a non-empty order, a `budget_usd` other than its
+    own, or a top layer with no task id, raises `ValueError`. Nothing
+    runs first, and nothing already written moves."""
+    from saffron.batch import run_stack_batch
+
+    def _unexpected(*args, **kwargs):
+        raise AssertionError("must not run")
+
+    batch_id, resume = _resumable_batch(ledger, repo_id, reason="DRAINED")
+    before = _row_window(ledger, batch_id)
+    count_before = _batch_count(ledger)
+
+    no_task_top = dataclasses.replace(resume.top, task_id=None)
+    cases = [
+        ([_candidate("TE-99")], resume.budget_usd, resume),
+        ([], resume.budget_usd + 1.0, resume),
+        ([], resume.budget_usd, dataclasses.replace(resume, top=no_task_top)),
+    ]
+    for order, budget_usd, this_resume in cases:
+        with pytest.raises(ValueError):
+            run_stack_batch(
+                order,
+                ledger,
+                budget_usd,
+                None,
+                _unexpected,
+                readiness_check=_unexpected,
+                reserve_usd=6.0,
+                writer_usd=2.0,
+                review=_unexpected,
+                mint=_unexpected,
+                end_review=_unexpected,
+                follow_ups=_unexpected,
+                finish=_unexpected,
+                resume=this_resume,
+            )
+
+    assert _row_window(ledger, batch_id) == before
+    assert _batch_count(ledger) == count_before
