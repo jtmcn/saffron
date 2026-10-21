@@ -79,6 +79,11 @@ def test_next_id_prints_one_past_a_task_whose_spec_file_exists_in_neither_direct
     assert main(["--home", str(home), "next-id"]) == 0
     assert capsys.readouterr().out == "TE-0010\n"
 
+    monkeypatch.chdir(tmp_path)
+    assert main(["--home", str(home), "next-id", "--repo", "repo"]) == 0
+    assert capsys.readouterr().out == "TE-0010\n"
+    monkeypatch.chdir(repo)
+
     assert _row_counts(home / "ledger.db") == before
 
     _write(specs_dir, "TE-0012-c.md")

@@ -56,8 +56,8 @@ def next_spec_id(
     this repo's own tasks. Each carries a spec id whether or not the file
     that named it still parses, or still exists. The result is
     zero-padded to `origin_id`'s own digit width. A width already
-    exceeded stays as is. `ledger` and `repo_id` are `None` together when
-    the caller has no ledger to read, and the third place is then skipped.
+    exceeded stays as is. Either being `None` skips the third place: a
+    caller with no ledger, or a repo the ledger holds no row for.
     """
     match = _SPEC_ID.match(origin_id)
     if match is None:
