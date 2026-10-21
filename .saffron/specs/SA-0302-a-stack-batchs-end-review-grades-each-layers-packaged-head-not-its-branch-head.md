@@ -201,7 +201,7 @@ fetch fails, or when the head is out of the mirror's reach (`:183-198`).
 Its message calls the branch a parent (`:187`, `:191`).
 `saffron/regate.py:76-83` wraps it to name the branch's role instead.
 `_stack_head` already uses it for a spec session's seed
-(`saffron/cli.py:683-695`).
+(`saffron/cli.py:704-716`).
 
 **Both catches already exist.** `_review_one_layer` turns any raise into
 an `error` for each lens at cost 0, and the next layer is still tried
@@ -209,7 +209,7 @@ an `error` for each lens at cost 0, and the next layer is still tried
 `error` join at cost 0 (`:448-483`).
 
 **One caller.** `_stack_end_review` calls `run_end_review`
-(`saffron/cli.py:821-869`, `:855`). `StackReview` holds the join and the
+(`saffron/cli.py:842-890`, `:876`). `StackReview` holds the join and the
 layers, and nothing else (`saffron/end_review.py:496-502`).
 
 ## Problem

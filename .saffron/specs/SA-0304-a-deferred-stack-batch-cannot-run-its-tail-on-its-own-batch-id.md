@@ -156,7 +156,8 @@ review later. This spec gives that command the batch loop's own tail to
 call. It is the fourth of the five specs `SA-0301`'s notes lay out.
 
 **The tail runs inside the call that created the batch.**
-`run_stack_batch` creates its row at `saffron/batch.py:829`. After the
+`run_stack_batch` creates its row with `ledger.create_batch` at
+`saffron/batch.py:829`. After the
 order's `_drive` returns, it calls `end_review` (`:852-865`), then
 `follow_ups` (`:866-869`). It drives their return only when the order's
 own reason is `DRAINED` (`:872`). It then calls `finish` (`:908-909`) and
@@ -167,18 +168,19 @@ left in flight, promotes the reason to `INCOMPLETE` for one, then calls
 
 **`close_batch` writes the night's window.** It sets `status`,
 `ended_at` and `spent_usd_est` in one update (`saffron/ledger.py:1283-1287`).
-`DESIGN.md` §4.2.1 keeps the batch's window and stop reason for §6's
-morning queue (`DESIGN.md:498`).
+`DESIGN.md` §4.2.1 keeps the batch's window and stop reason in `batches`
+for §6's morning queue (`DESIGN.md:498`).
 
 **Four reads name the batch by the newest row.** `ledger.latest_batch_id()`
 returns the highest `batch_id` (`saffron/ledger.py:1337-1345`).
-`run_stack_batch` reads it to attach a minted task's run (`:594-596`) and
-to weigh a revision's budget (`:747-751`). It also hands `end_review` and
-`follow_ups` their key from it (`:864`, `:868`). A finish run days later
+`run_stack_batch` reads `latest_batch_id()` to attach a minted task's run
+(`saffron/batch.py:594-596`) and to weigh a revision's budget
+(`saffron/batch.py:747-751`). It also hands `end_review` and `follow_ups`
+their key from `latest_batch_id()` (`:864`, `:868`). A finish run days later
 sees a newer batch there.
 
 **The follow-up pass starts from the order's state.** `record_layer`
-reads `position` and `predecessor_task_id` (`:522-534`). `wrapped` reads
+reads `position` and `predecessor_task_id` (`saffron/batch.py:522-534`). `wrapped` reads
 `predecessor` (`:557`) and the exempt set `layer_branches` (`:600-602`).
 The order's pass sets all four. `consecutive_aborts` carries the order's
 count into the follow-ups' `_drive` (`:894`).
@@ -215,10 +217,11 @@ Follow-ups are driven only when `resume.stop_reason` is `DRAINED`.
 
 **Four texts in `saffron/batch.py` go false, so edit them.** The comment
 above `finish` says it runs "while the batch row is still open"
-(`:462`). Under a resume the row is closed. `run_stack_batch`'s own
-docstring says the tail runs "before the row closes" (`:475-476`). Keep
+(`:462-463`). Under a resume the row is closed. `run_stack_batch`'s own
+docstring says the tail from `end_review` on runs "before the row
+closes" (`:475-476`). Keep
 that docstring within ten lines. The `generation` comment says it is set
-"once the order's own pass drains" (`:507-508`). Under a resume no order
+"once the order's own pass drains" (`:507-509`). Under a resume no order
 runs. `_stop`'s docstring says `run_stack_batch` calls it once, and in
 its `finally` on a raise (`:930-932`). A resume calls it never.
 
@@ -231,7 +234,7 @@ its `finally` on a raise (`:930-932`). A resume calls it never.
   accessor. `latest_batch_id`'s docstring says `run_stack_batch` reads it
   (`saffron/ledger.py:1338-1340`). That goes false here, and the delegate
   edits it in a review commit. `create_batch`'s docstring
-  (`:1249-1252`) stays true, since a resume never closes a row.
+  (`:1248-1252`) stays true, since a resume never closes a row.
 - **`write_stack_view`'s own `latest_batch_id()`**
   (`saffron/report/stack.py:272`). It is `cli.py`'s call, after the batch.
 
@@ -246,14 +249,14 @@ five `preserves` witnesses hold.
 holds `batch_id`, `reserve_usd`, `writer_usd` and `specs`. The rest come
 from the ledger.
 
-- `budget_usd` has a reader, `ledger.batch_budget` (`saffron/ledger.py:1419`).
+- `budget_usd` has a reader, `ledger.batch_budget` (`saffron/ledger.py:1419-1420`).
   `stop_reason` is the row's `status`, which has none. `SA-0305` reads it
   through `ledger._db`.
 - `top` and `position` are the highest row of `ledger.stack_layers`, with
   `top.spec` taken from `specs`. The runner reads only
-  `predecessor.spec.id` (`saffron/cli.py:677`).
+  `predecessor.spec.id` (`saffron/cli.py:698`).
 - `layer_branches` is `_branch(spec_id)` of each layer, the form
-  `record_layer` adds (`:534`). It also holds the stack base's branch.
+  `record_layer` adds (`saffron/batch.py:534`). It also holds the stack base's branch.
   That is `tasks.branch` of the task whose `record_key` is the position 1
   row's `predecessor_key`, read through `ledger._db`. It is not
   `_branch(spec_id)`.
@@ -261,9 +264,9 @@ from the ledger.
   has. It refuses a batch with no layer, which has no `top`.
 
 **Why `status` and not the order's own reason.** The row holds `_stop`'s
-result (`:930-937`). It turns a drained order that left a task in flight
-into `INCOMPLETE`. The in-batch path gates on `_drive`'s reason before
-that turn (`:872`). So a deferred `INCOMPLETE` batch drives no
+result (`saffron/batch.py:917-937`). It turns a drained order that left a task in flight
+into `INCOMPLETE`. The in-batch path gates on `_drive`'s reason being
+`DRAINED` before that turn (`:872`). So a deferred `INCOMPLETE` batch drives no
 follow-ups on resume, where the in-batch path would have. This is a
 deliberate, conservative difference. Criterion 2 drives `INCOMPLETE` and
 criterion 1 drives `DRAINED`.
@@ -277,8 +280,8 @@ the tail does. A SIGTERM during a resume leaves it the same way. The
 tail's spend still counts in `batch_spend`, which sums live rows
 (`saffron/ledger.py:1364-1388`). Only the `spent_usd_est` snapshot omits it.
 The stack view shows the live figure (`saffron/report/stack.py:93`).
-`saffron serve`'s batch spend reads the snapshot instead
-(`saffron/view/graph.py:178-179`, `ontology/queries/view/V1-batches.rq`).
+`saffron serve`'s batch spend reads the `spent_usd_est` snapshot
+instead (`saffron/view/graph.py:178-179`, `ontology/queries/view/V1-batches.rq`).
 So after a resume it omits the tail's spend. The operator accepts that,
 and the delegate files a backlog item for the view.
 
