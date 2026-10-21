@@ -155,16 +155,16 @@ is skipped.
 
 **`_batch` builds all three under `--stack`, once the scan resolves.** It
 holds back `reserve_usd` and `writer_usd` through
-`_stack_admission_shares(args.budget)` (`saffron/cli.py:1984-1985`). It
+`_stack_admission_shares(args.budget)` (`saffron/cli.py:2000-2001`). It
 builds `_stack_end_review`, `_stack_follow_ups` and `_stack_finish` inside
-the readiness and scan guard (`saffron/cli.py:2116`, `:2139`, `:2148`). It
+the readiness and scan guard (`saffron/cli.py:2132`, `:2155`, `:2164`). It
 hands them as `end_review=`, `follow_ups=` and `finish=`
-(`saffron/cli.py:2198`, `:2203`, `:2205`). Each stays `None` when
+(`saffron/cli.py:2214`, `:2219`, `:2221`). Each stays `None` when
 readiness or the scan fails.
 
 **The flag parser refuses a bad pairing with `error`.** `main` calls
-`watch_parser.error` for a flag that needs another (`saffron/cli.py:272`,
-`:274`). At base `saffron batch --defer-end-review` exits 2 with
+`watch_parser.error` for a flag that needs another (`saffron/cli.py:279`,
+`:281`). At base `saffron batch --defer-end-review` exits 2 with
 `unrecognized arguments`, from the top parser, whose usage names no
 `--stack` (measured on the host).
 
@@ -321,7 +321,7 @@ and neither witness could tell them apart.
   the handed `end_review` with `"7"` and returns `"DRAINED"`. Assert `main`
   returns 0, prints `batch: DRAINED`, prints a line naming the exception's
   type, and prints no `saffron finish`. Keep the guard as broad as
-  `_stack_end_review`'s, which catches `Exception` (`saffron/cli.py:869`).
+  `_stack_end_review`'s, which catches `Exception` (`saffron/cli.py:885`).
   A third arrangement raises a `ValueError` inside the guard. The faked
   `run_stack_batch` patches `dump` and `dumps` on the `json` module to
   raise it. It patches them right before it calls the handed `end_review`
