@@ -8571,6 +8571,281 @@ def test_a_stack_batch_holds_the_writer_share_and_passes_its_follow_up_writer(
     assert run_stack_batch_calls[0]["writer_usd"] == 5.25
 
 
+def test_a_deferred_stack_batch_hands_run_stack_batch_no_end_review_follow_ups_or_finish(
+    tmp_path, monkeypatch, capsys
+):
+    """`saffron batch --stack --defer-end-review` hands `run_stack_batch` a
+    deferring `end_review` built beside `_stack_end_review`, never that
+    callable itself, and opens no cell. `follow_ups` and `finish` are
+    `None`. Every other keyword stays exactly as a batch without the flag
+    holds it, over the same reserve and writer shares. Readiness failing
+    hands `end_review=None` and writes no deferral file."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(follow_up, "WRITER_SHARE", 0.125)
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+
+    end_review_calls: list[dict] = []
+    run_end_review_calls: list[tuple] = []
+    monkeypatch.setattr(
+        cli,
+        "_stack_end_review",
+        lambda **kwargs: end_review_calls.append(kwargs) or (lambda *a: None),
+    )
+    monkeypatch.setattr(
+        cli.end_review,
+        "run_end_review",
+        lambda *a, **k: run_end_review_calls.append((a, k)),
+    )
+
+    run_stack_batch_calls: list[dict] = []
+
+    def _fake_run_stack_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        run_stack_batch_calls.append(kwargs)
+        if kwargs["end_review"] is not None:
+            kwargs["end_review"]("7", 10.5, {})
+        return "DRAINED"
+
+    monkeypatch.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
+
+    # Case 1: readiness passes.
+    _readiness_passes(monkeypatch, tmp_path)
+    home1 = tmp_path / "home1"
+    assert (
+        main(
+            [
+                "--home",
+                str(home1),
+                "batch",
+                "--stack",
+                "--defer-end-review",
+                "--budget",
+                "42",
+            ]
+        )
+        == 0
+    )
+
+    assert end_review_calls == []
+    assert run_end_review_calls == []
+    assert len(run_stack_batch_calls) == 1
+    call = run_stack_batch_calls[0]
+    assert call["follow_ups"] is None
+    assert call["finish"] is None
+    assert call["review"] is not None
+    assert call["cite"] is not None
+    assert call["mint"] is not None
+    assert call["revise"] is not None
+    assert call["open_prs"] is not None
+    assert call["stack_base_alive"] is not None
+    assert call["reserve_usd"] == 10.5
+    assert call["writer_usd"] == 5.25
+
+    # Case 2: readiness fails.
+    run_stack_batch_calls.clear()
+    monkeypatch.setattr(
+        cli.preflight,
+        "check_readiness",
+        lambda *a, **k: preflight.Readiness(False, "auth", "token invalid"),
+    )
+    home2 = tmp_path / "home2"
+    main(
+        [
+            "--home",
+            str(home2),
+            "batch",
+            "--stack",
+            "--defer-end-review",
+            "--budget",
+            "42",
+        ]
+    )
+
+    assert len(run_stack_batch_calls) == 1
+    assert run_stack_batch_calls[0]["end_review"] is None
+    assert list(home2.rglob("deferred.json")) == []
+
+
+def test_a_deferred_end_review_writes_what_saffron_finish_reads_and_names_the_command(
+    tmp_path, monkeypatch, capsys
+):
+    """The deferring callable writes `deferred.json` into the batch tree's
+    `finish/<batch key>/`, the directory `_stack_finish` writes
+    `findings.json` into, with exactly the eight keys `SA-0305` reads. Each
+    spec round-trips through `Spec.model_validate` to an equal `Spec` with
+    the same `model_fields_set`. It then prints a line naming the batch id,
+    the reserve and the `saffron finish` command."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(follow_up, "WRITER_SHARE", 0.125)
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+
+    spec_a = intake.Spec(
+        id="SY-1",
+        title="t",
+        type="chore",
+        acceptance=[intake.Criterion(claim="c", witness="tests/test_a.py::test_a")],
+    )
+    spec_b = intake.Spec(id="SY-2", title="t2", type="chore", priority=3)
+
+    def _fake_run_stack_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        kwargs["end_review"]("7", 3.25, {spec_a.id: spec_a, spec_b.id: spec_b})
+        return "DRAINED"
+
+    monkeypatch.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
+
+    _readiness_passes(monkeypatch, tmp_path)
+    home = tmp_path / "home"
+    assert (
+        main(
+            [
+                "--home",
+                str(home),
+                "batch",
+                "--stack",
+                "--defer-end-review",
+                "--budget",
+                "42",
+            ]
+        )
+        == 0
+    )
+
+    dest = home / "batches" / "v0" / "finish" / "7" / "deferred.json"
+    data = json.loads(dest.read_text())
+
+    assert set(data) == {
+        "batch_id",
+        "reserve_usd",
+        "writer_usd",
+        "base_sha",
+        "url",
+        "mirror",
+        "repo",
+        "specs",
+    }
+    assert data["batch_id"] == 7
+    assert data["reserve_usd"] == 3.25
+    assert data["writer_usd"] == 5.25
+    assert data["base_sha"] == "a" * 40
+    assert data["url"] == "https://github.com/o/r.git"
+    assert data["mirror"] == str(tmp_path / "pinned-mirror.git")
+    assert data["repo"] == str(tmp_path.resolve())
+
+    for spec in (spec_a, spec_b):
+        validated = intake.Spec.model_validate(data["specs"][spec.id])
+        assert validated == spec
+        assert validated.model_fields_set == spec.model_fields_set
+
+    printed = capsys.readouterr().out
+    assert "7" in printed
+    assert "3.25" in printed
+    assert f"saffron finish 7 --repo {tmp_path.resolve()}" in printed
+
+
+def test_defer_end_review_without_stack_is_refused_before_readiness(
+    tmp_path, monkeypatch, capsys
+):
+    """`saffron batch --defer-end-review` without `--stack` exits 2 at parse
+    time, naming both flags, before any readiness probe or ledger row."""
+    readiness_calls: list[tuple] = []
+    monkeypatch.setattr(
+        cli.preflight,
+        "check_readiness",
+        lambda *a, **k: readiness_calls.append((a, k)),
+    )
+
+    home = tmp_path / "home"
+    with pytest.raises(SystemExit) as exited:
+        main(["--home", str(home), "batch", "--defer-end-review"])
+
+    assert exited.value.code == 2
+    err = capsys.readouterr().err
+    assert "--defer-end-review" in err
+    assert "--stack" in err
+    assert readiness_calls == []
+    assert not (home / "ledger.db").exists()
+
+
+def test_a_deferral_file_that_cannot_be_written_is_named_and_the_batch_ends_on_its_own_stop(
+    tmp_path, monkeypatch, capsys
+):
+    """A `deferred.json` that cannot be written never ends the batch
+    `INFRASTRUCTURE`. Three raises are each caught, named and swallowed.
+    One `OSError` fires creating `finish/<key>/`. A second `OSError`
+    fires writing where a directory already sits in its place. A
+    `ValueError` fires encoding the JSON. The night still closes on its
+    own stop reason, with no `saffron finish` line printed."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+
+    def _fake_run_stack_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        kwargs["end_review"]("7", 1.0, {})
+        return "DRAINED"
+
+    def _fake_run_stack_batch_value_error(
+        candidates, ledger, budget_usd, until, runner, **kwargs
+    ):
+        def _raise(*_a, **_k):
+            raise ValueError("boom")
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(json, "dump", _raise)
+            mp.setattr(json, "dumps", _raise)
+            kwargs["end_review"]("7", 1.0, {})
+        return "DRAINED"
+
+    # Arrangement 1: a plain file blocks creating the `finish` directory.
+    home1 = tmp_path / "home1"
+    out_dir1 = home1 / "batches" / "v0"
+    out_dir1.mkdir(parents=True)
+    (out_dir1 / "finish").write_text("not a directory")
+    monkeypatch.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
+    _readiness_passes(monkeypatch, tmp_path)
+    out = main(["--home", str(home1), "batch", "--stack", "--defer-end-review"])
+    printed = capsys.readouterr().out
+    assert out == 0
+    assert "batch: DRAINED" in printed
+    assert any(
+        line.startswith("end review: deferred,") and "Error" in line
+        for line in printed.splitlines()
+    )
+    assert "saffron finish" not in printed
+
+    # Arrangement 2: the destination exists as a directory, so the write itself raises.
+    home2 = tmp_path / "home2"
+    out_dir2 = home2 / "batches" / "v0"
+    (out_dir2 / "finish" / "7" / "deferred.json").mkdir(parents=True)
+    _readiness_passes(monkeypatch, tmp_path)
+    out = main(["--home", str(home2), "batch", "--stack", "--defer-end-review"])
+    printed = capsys.readouterr().out
+    assert out == 0
+    assert "batch: DRAINED" in printed
+    assert any(
+        line.startswith("end review: deferred,") and "Error" in line
+        for line in printed.splitlines()
+    )
+    assert "saffron finish" not in printed
+
+    # Arrangement 3: `json.dump`/`json.dumps` raise a `ValueError` while encoding.
+    monkeypatch.setattr(cli, "run_stack_batch", _fake_run_stack_batch_value_error)
+    home3 = tmp_path / "home3"
+    _readiness_passes(monkeypatch, tmp_path)
+    out = main(["--home", str(home3), "batch", "--stack", "--defer-end-review"])
+    printed = capsys.readouterr().out
+    assert out == 0
+    assert "batch: DRAINED" in printed
+    assert any("ValueError" in line for line in printed.splitlines())
+    assert "saffron finish" not in printed
+
+
 _SA0162_PR = {
     "number": 1,
     "headRefName": "saffron/SY-1",

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import math
 import os
 import signal
@@ -152,6 +153,8 @@ def main(argv: list[str] | None = None) -> int:
     # A stack batch plans its order once, at batch start, and runs it into
     # one pull request stack (ADR 7, `DESIGN.md` §4.2.1).
     batch_parser.add_argument("--stack", action="store_true")
+    # Needs `--stack`, refused below before the ledger opens (b-8a0c9a).
+    batch_parser.add_argument("--defer-end-review", action="store_true")
 
     draft_parser = subcommands.add_parser(
         "draft",
@@ -279,6 +282,8 @@ def main(argv: list[str] | None = None) -> int:
             watch_parser.error("--whole-log needs a spec id")
         if args.no_follow:
             watch_parser.error("--no-follow needs a spec id")
+    if args.command == "batch" and args.defer_end_review and not args.stack:
+        batch_parser.error("--defer-end-review needs --stack")
     out_dir_arg = getattr(args, "out", None)
     out_dir = out_dir_arg or (args.home / "batches" / "v0")
 
@@ -886,6 +891,49 @@ def _stack_end_review(
             message = f"{type(exc).__name__}: {exc}"
             print(f"end review: {message}")
             return _end_review_error_reviews(ledger, batch_key, message)
+
+    return run
+
+
+def _stack_deferred_end_review(
+    *, pinned: PinnedBase, repo: Path, out_dir: Path, writer_usd: float
+) -> Callable[[str, float, Mapping[str, Spec]], object]:
+    """`run_stack_batch`'s `end_review` callable under `--defer-end-review`
+    (backlog item b-8a0c9a). Opens no cell and reviews nothing.
+
+    Writes `deferred.json` into `finish/<batch key>/` under the batch
+    tree, the directory `_stack_finish` writes `findings.json` into, then
+    prints the `saffron finish` line `SA-0305` reads. A raise writing the
+    file is printed and swallowed, as `_stack_end_review` swallows its own.
+    """
+
+    def run(batch_key: str, reserve_usd: float, specs: Mapping[str, Spec]) -> object:
+        dest_dir = out_dir / "finish" / batch_key
+        dest = dest_dir / "deferred.json"
+        try:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "batch_id": int(batch_key),
+                "reserve_usd": reserve_usd,
+                "writer_usd": writer_usd,
+                "base_sha": pinned.base_sha,
+                "url": pinned.url,
+                "mirror": str(pinned.mirror),
+                "repo": str(repo),
+                "specs": {
+                    spec_id: spec.model_dump(mode="json", exclude_unset=True)
+                    for spec_id, spec in specs.items()
+                },
+            }
+            dest.write_text(json.dumps(payload))
+        except Exception as exc:
+            print(f"end review: deferred, {type(exc).__name__}: {exc}")
+            return None
+        print(
+            f"end review: deferred, reserve ${reserve_usd:.2f} held, "
+            f"run saffron finish {batch_key} --repo {repo}"
+        )
+        return None
 
     return run
 
@@ -2129,8 +2177,18 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                     out_dir=out_dir,
                     stack_base=stack_base,
                 )
-                stack_end_review = _stack_end_review(
-                    pinned=pinned, repo=repo, ledger=ledger, out_dir=out_dir
+                assert writer_usd is not None  # set whenever `args.stack` is
+                stack_end_review = (
+                    _stack_deferred_end_review(
+                        pinned=pinned,
+                        repo=repo,
+                        out_dir=out_dir,
+                        writer_usd=writer_usd,
+                    )
+                    if args.defer_end_review
+                    else _stack_end_review(
+                        pinned=pinned, repo=repo, ledger=ledger, out_dir=out_dir
+                    )
                 )
                 # One shared commit cache: a cite and the review right
                 # after it read the same fetch, never two (`SA-0295`).
@@ -2151,23 +2209,24 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                 stack_mint = _stack_mint(pinned=pinned, repo=repo, ledger=ledger)
                 stack_base_alive = _stack_base_alive(pinned)
                 pooled: list[follow_up.Pooled] = []
-                assert writer_usd is not None  # set whenever `args.stack` is
-                follow_ups = _stack_follow_ups(
-                    pinned=pinned,
-                    repo=repo,
-                    ledger=ledger,
-                    out_dir=out_dir,
-                    cap_usd=writer_usd,
-                    pooled=pooled,
-                )
+                if not args.defer_end_review:
+                    follow_ups = _stack_follow_ups(
+                        pinned=pinned,
+                        repo=repo,
+                        ledger=ledger,
+                        out_dir=out_dir,
+                        cap_usd=writer_usd,
+                        pooled=pooled,
+                    )
                 open_prs = _stack_open_prs(resolved.repo_slug)
-                stack_finish = _stack_finish(
-                    pinned=pinned,
-                    ledger=ledger,
-                    out_dir=out_dir,
-                    pooled=pooled,
-                    repo=repo,
-                )
+                if not args.defer_end_review:
+                    stack_finish = _stack_finish(
+                        pinned=pinned,
+                        ledger=ledger,
+                        out_dir=out_dir,
+                        pooled=pooled,
+                        repo=repo,
+                    )
             else:
                 # Updated by every rescan, so `_batch_runner`'s `repo_id`
                 # callable reads the latest answer, not the opening one.
