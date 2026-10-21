@@ -146,6 +146,13 @@ judge or new failures, and `2` is infrastructure:
 uv run saffron regate <task id> --repo .
 ```
 
+Print the next free spec id for a checkout, reading its spec files and, when one
+exists, the home ledger. It adds no ledger row and creates no ledger:
+
+```sh
+uv run saffron next-id --repo .
+```
+
 Run PACKAGE alone on a `READY_FOR_REVIEW` task whose own PACKAGE raised. No agent
 runs, and the token is scoped the same way:
 

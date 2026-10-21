@@ -70,6 +70,7 @@ uv run saffron migrate --from <ledger.db>  # write a stored ledger's tasks into 
 uv run saffron chains                      # compare Q4 with the checked walk over every merged task
 uv run saffron serve [--port 8765]         # the run record view at http://127.0.0.1:8765/, read-only (ADR 9)
 uv run saffron draft <item-file> --repo .  # §3.4: a spec from one item, written to the tree, not committed
+uv run saffron next-id --repo .            # the next free spec id, from the spec files and the home ledger
 ```
 
 `saffron batch` is the unattended one: `--until` is a *start no new task after* bound, not a
