@@ -27,7 +27,7 @@ are their render, so a new principle is written into its appendix record and nev
 
 ```
 make install                 # uv sync + prek install
-make check                   # lint + test — the default target (lint = prek run --all-files)
+make check                   # lint + test — the default target (lint = prek run --all-files, then the manual prose-limit-tree hook)
 make fmt                     # ruff check --fix . && ruff format .
 uv run pytest                # cell-marked tests excluded by default (pyproject addopts)
 uv run pytest tests/test_session.py::test_name    # one test
@@ -227,7 +227,8 @@ means a rule ships with the failing snippet that proves it fires. Read
   New Markdown and new comments take no em-dash, semicolon, contraction, perfect tense,
   hedge or sentence over 25 words. `python3 hooks/prose_limit.py --file <path>` counts one
   file in the working tree, staged or not. With no arguments it reads the staged index,
-  so stage again after each rewrite.
+  so stage again after each rewrite. `--tree` asks the same of every changed or untracked
+  file in the working tree, and `make check` runs it.
 - A new test is not trusted until it runs against the unfixed code. A test guarding a
   property already true runs against an edit that breaks it.
 - Commit subjects are lowercase `type(scope): what changed`, written as a sentence about the

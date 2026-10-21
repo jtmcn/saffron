@@ -105,3 +105,15 @@ repos:
         entry: uv run hooks/prose_limit.py
         pass_filenames: false
         files: \.(md|py)$
+
+  # The prose gate's rules over the working tree. prose-limit reads the index,
+  # and --all-files lists no untracked file. make lint runs this at the manual stage.
+  - repo: local
+    hooks:
+      - id: prose-limit-tree
+        name: prose limit, working tree (the prose gate's rules, manual)
+        language: system
+        entry: uv run hooks/prose_limit.py --tree
+        pass_filenames: false
+        stages: [manual]
+        always_run: true

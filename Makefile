@@ -6,7 +6,7 @@ install:
 	prek install
 
 lint:
-	prek run --all-files
+	status=0; prek run --all-files --skip prose-limit || status=$$?; prek run --all-files --stage manual prose-limit-tree || status=$$?; exit $$status
 
 fmt:
 	uv run ruff check --fix .
