@@ -7,6 +7,13 @@ prompts with the result. `review_layer` runs both lenses, in order,
 through `review.run_lens`, the same fresh-session contract every
 in-cell lens uses.
 
+`branch_heads` builds a resolver that reads a layer the way
+`layer_fields` does, but at the branch's own current head. A review
+commit lands after PACKAGE (`DESIGN.md` §5.7), so the current head can
+sit ahead of it. `run_end_review`, `review_joins` and `review_stack`
+take that resolver through a required `resolve` keyword, and never call
+`layer_fields` themselves.
+
 `review_stack` walks a batch's layers top down, within a reserve, and
 records each lens through `Ledger.record_end_review`. `review_joins`
 reads the same batch's whole range once, under ADR 6's rubric.
@@ -20,7 +27,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from saffron.agents import context
@@ -29,7 +36,8 @@ from saffron.events import Event, describe
 from saffron.intake import Criterion, Spec
 from saffron.ledger import Ledger
 from saffron.phases import implement, review
-from saffron.repos.mirror import _git
+from saffron.phases import package as package_phase
+from saffron.repos.mirror import GitError, _git, _run
 
 # Lens id, in the order a layer is read, mapped to its own prompt file.
 END_LENSES = {
@@ -56,7 +64,12 @@ def _flatten(text: str) -> str:
 class LayerFields:
     """What one layer's two end-review prompts are filled from. `known` is one
     line per in-cell finding the layer's own task carries, already
-    formatted for the prompt (`layer_fields` builds it)."""
+    formatted for the prompt (`layer_fields` builds it).
+
+    `diff_base` is the commit a layer's diff starts from.
+    `layer_fields` sets it to the pushed head's parent. `base` stays what a
+    layer's row recorded. `branch_heads`' resolver sets both to the base
+    it chose at the branch's current head (`DESIGN.md` §5.7)."""
 
     spec_id: str
     branch: str
@@ -64,6 +77,7 @@ class LayerFields:
     base: str
     head: str
     known: str
+    diff_base: str
 
 
 def _known_line(row) -> str:
@@ -130,7 +144,163 @@ def layer_fields(ledger: Ledger, task_key: str) -> LayerFields:
         base=base,
         head=row["pushed_sha"],
         known=known,
+        diff_base=f"{row['pushed_sha']}^",
     )
+
+
+_PREDECESSOR_BRANCH = "SELECT branch FROM tasks WHERE record_key = ?"
+
+
+def _is_ancestor(mirror: Path, ancestor: str, descendant: str) -> bool:
+    """Whether `ancestor` is reachable from `descendant`, read by exit
+    code rather than through `_git`, which raises on any non-zero exit.
+    Exit 0 means yes, exit 1 means no, and any other exit raises
+    (`cli._pushed_landed`'s own pattern)."""
+    done = _run(
+        ["git", "-C", str(mirror), "merge-base", "--is-ancestor", ancestor, descendant]
+    )
+    if done.returncode == 0:
+        return True
+    if done.returncode == 1:
+        return False
+    raise GitError(
+        f"git merge-base --is-ancestor {ancestor} {descendant}: {done.stderr.strip()}"
+    )
+
+
+def _merge_base(mirror: Path, a: str, b: str) -> str | None:
+    """`git merge-base a b`'s own stdout, or `None` for its exit 1: the
+    two share no ancestor at all, read as "no merge base" rather than
+    raised. Any other exit is a broken mirror, and still raises."""
+    done = _run(["git", "-C", str(mirror), "merge-base", a, b])
+    if done.returncode == 1:
+        return None
+    if done.returncode != 0:
+        raise GitError(f"git merge-base {a} {b}: {done.stderr.strip()}")
+    return done.stdout.strip()
+
+
+def _first_contained(
+    mirror: Path, candidates: list[str], current_head: str
+) -> str | None:
+    """The first of `candidates` the current head contains, or `None`."""
+    for candidate in candidates:
+        if _is_ancestor(mirror, candidate, current_head):
+            return candidate
+    return None
+
+
+def _layer_candidates(
+    ledger: Ledger,
+    mirror: Path,
+    row,
+    pushed_sha: str,
+    current_head: str,
+    *,
+    fetch: Callable[[str], str],
+    fetch_default: Callable[[], str],
+) -> tuple[list[str], str | None]:
+    """The ordered candidate bases for one layer, and any predecessor
+    branch found gone while building them.
+
+    With a predecessor: its current head, then its recorded head. A
+    gone predecessor branch offers this layer's own pushed head's
+    parent first, then the predecessor's recorded head. With none: the
+    merge base of the current head and the default branch, read only
+    when this layer's pushed head was not already merged into it.
+    Otherwise the candidate is the pushed head's parent.
+    """
+    own_parent = f"{pushed_sha}^"
+    if row["predecessor_key"] is None:
+        default_head = fetch_default()
+        merge_base = _merge_base(mirror, current_head, default_head)
+        if (
+            merge_base is not None
+            and _is_ancestor(mirror, own_parent, merge_base)
+            and not _is_ancestor(mirror, pushed_sha, merge_base)
+        ):
+            return [merge_base], None
+        return [own_parent], None
+
+    if row["predecessor_head"] is None:
+        raise ValueError("predecessor was recorded with no head")
+    pred_row = ledger._db.execute(
+        _PREDECESSOR_BRANCH, (row["predecessor_key"],)
+    ).fetchone()
+    predecessor_branch = pred_row["branch"] if pred_row is not None else None
+    if predecessor_branch is not None:
+        try:
+            return [fetch(predecessor_branch), row["predecessor_head"]], None
+        except package_phase.ParentGone:
+            return [own_parent, row["predecessor_head"]], predecessor_branch
+    return [own_parent, row["predecessor_head"]], None
+
+
+def branch_heads(mirror: Path, url: str) -> Callable[[Ledger, str], LayerFields]:
+    """A resolver with `layer_fields`'s own signature, reading a layer at
+    its current branch head, not the head PACKAGE pushed (`DESIGN.md` §5.7).
+
+    Fetches each branch, and the default branch, caching each success
+    once per resolver. A raise is never cached. `_layer_candidates`
+    picks the candidate bases. The chosen one becomes `base` and
+    `diff_base`, and the fetched head becomes `head`.
+    """
+    heads: dict[str, str] = {}
+    default: list[tuple[str, str]] = []
+
+    def fetch(branch: str) -> str:
+        if branch not in heads:
+            heads[branch] = package_phase.fetch_parent_branch(mirror, url, branch)
+        return heads[branch]
+
+    def fetch_default() -> str:
+        if not default:
+            default.append(package_phase.fetch_default_branch(mirror, url))
+        return default[0][1]
+
+    def resolve(ledger: Ledger, task_key: str) -> LayerFields:
+        row = ledger._db.execute(_LAYER_ROW, (task_key,)).fetchone()
+        if row is None:
+            raise ValueError(f"{task_key!r} names no layer")
+        branch = row["branch"]
+        pushed_sha = row["pushed_sha"]
+        if pushed_sha is None:
+            raise ValueError(f"{task_key!r} names a layer with no pushed head")
+        try:
+            current_head = fetch(branch)
+        except package_phase.ParentGone as gone:
+            raise ValueError(f"layer branch {branch!r} is gone: {gone}") from gone
+
+        candidates, gone_predecessor_branch = _layer_candidates(
+            ledger,
+            mirror,
+            row,
+            pushed_sha,
+            current_head,
+            fetch=fetch,
+            fetch_default=fetch_default,
+        )
+        base = _first_contained(mirror, candidates, current_head)
+        if base is None:
+            message = (
+                f"{branch!r}'s head {current_head} contains none of {candidates!r}"
+            )
+            if gone_predecessor_branch is not None:
+                message += f", predecessor branch {gone_predecessor_branch!r} is gone"
+            raise ValueError(message)
+
+        known = _known_block(ledger.findings(row["task_id"]))
+        return LayerFields(
+            spec_id=row["spec_id"],
+            branch=branch,
+            pr_url=row["pr_url"],
+            base=base,
+            head=current_head,
+            known=known,
+            diff_base=base,
+        )
+
+    return resolve
 
 
 def _criteria_lines(acceptance: Sequence[Criterion]) -> str:
@@ -246,12 +416,12 @@ class LayerReview:
     reviews: list[review.LensReview]
 
 
-def _diff(mirror: Path, head: str) -> str:
-    """One layer's own commit, `head^..head`, `DIFF_FLAGS` pinned the same
-    way every other diff in this repository is. Never `fields.base..head`,
-    since a repushed predecessor or a bottom layer's run `base_sha` can
-    each differ from the commit PACKAGE built this head on."""
-    return _git(mirror, "diff", *DIFF_FLAGS, f"{head}^..{head}", strip=False)
+def _diff(mirror: Path, diff_base: str, head: str) -> str:
+    """One layer's own range, `diff_base..head`, `DIFF_FLAGS` pinned the
+    same way every other diff in this repository is. Never `fields.base..
+    head`: a repushed predecessor or a bottom layer's run `base_sha` can
+    each differ from the commit this layer's diff must start at."""
+    return _git(mirror, "diff", *DIFF_FLAGS, f"{diff_base}..{head}", strip=False)
 
 
 def _review_one_layer(
@@ -268,6 +438,7 @@ def _review_one_layer(
     budget_usd: float,
     agent: Callable[..., implement.AttemptResult],
     emit: Callable[[Event], None],
+    resolve: Callable[[Ledger, str], LayerFields],
 ) -> list[review.LensReview]:
     """One layer's own two lens reviews, or a synthetic error for each.
 
@@ -278,9 +449,9 @@ def _review_one_layer(
     still tried.
     """
     try:
-        fields = layer_fields(ledger, task_key)
+        fields = resolve(ledger, task_key)
         spec = specs[fields.spec_id]
-        diff = _diff(mirror, fields.head)
+        diff = _diff(mirror, fields.diff_base, fields.head)
         with open_cell(fields) as container:
             return review_layer(
                 container,
@@ -319,6 +490,7 @@ def review_stack(
     max_turns: int,
     budget_usd: float,
     agent: Callable[..., implement.AttemptResult],
+    resolve: Callable[[Ledger, str], LayerFields],
     emit: Callable[[Event], None] = lambda event: print(describe(event)),
 ) -> list[LayerReview]:
     """One stack's layers, highest position first, inside one reserve.
@@ -328,7 +500,7 @@ def review_stack(
     that fails that check, and every layer below it, is recorded
     `not_reached` for each lens with no cell opened. A reached layer's
     findings are recorded unanchored, then one `end_review` fact per
-    lens.
+    lens. `resolve` reads each layer's fields, never `layer_fields` directly.
     """
     rows = ledger._db.execute(_BATCH_LAYERS, (batch_key,)).fetchall()
     layer_cost = budget_usd * len(END_LENSES)
@@ -350,6 +522,7 @@ def review_stack(
                 budget_usd=budget_usd,
                 agent=agent,
                 emit=emit,
+                resolve=resolve,
             )
             spent += sum(r.cost_usd for r in reviews)
             findings = [f for r in reviews for f in r.findings]
@@ -422,16 +595,18 @@ def review_joins(
     max_turns: int,
     budget_usd: float,
     agent: Callable[..., implement.AttemptResult],
+    resolve: Callable[[Ledger, str], LayerFields],
     emit: Callable[[Event], None] = lambda event: print(describe(event)),
 ) -> review.LensReview | None:
     """The join lens, over one batch's whole stack (ADR 6, principle 50).
 
-    Reads the batch's layers bottom to top. Fewer than two layers has no
-    seam to read, so this returns `None` and records nothing. The lens
-    starts only while `reserve_usd` covers `budget_usd`. Short of that it
-    records `not_reached` under the top layer's task and returns `None`.
-    A raise from the diff, the prompt, the cell or the lens is caught in
-    one place. It is recorded as an `error` review at cost 0.
+    Reads the batch's layers bottom to top, through `resolve`, never
+    `layer_fields` directly. Fewer than two layers has no seam to read, so
+    this returns `None` and records nothing. The lens starts only while
+    `reserve_usd` covers `budget_usd`. Short of that it records
+    `not_reached` under the top layer's task and returns `None`. A raise
+    from the diff, the prompt, the cell or the lens is caught in one
+    place. It is recorded as an `error` review at cost 0.
     """
     rows = ledger._db.execute(_BATCH_LAYERS, (batch_key,)).fetchall()[::-1]
     if len(rows) < 2:
@@ -446,17 +621,17 @@ def review_joins(
         return None
 
     try:
-        layers = [layer_fields(ledger, key) for key in task_keys]
+        layers = [resolve(ledger, key) for key in task_keys]
         top_fields, bottom_fields = layers[-1], layers[0]
         diff = _git(
             mirror,
             "diff",
             *DIFF_FLAGS,
-            f"{bottom_fields.head}^..{top_fields.head}",
+            f"{bottom_fields.diff_base}..{top_fields.head}",
             strip=False,
         )
         system_prompt = _join_prompt(
-            base=f"{bottom_fields.head}^",
+            base=bottom_fields.diff_base,
             head=top_fields.head,
             diff=diff,
             stack_text=_stack_spec_text(layers, specs),
@@ -495,11 +670,14 @@ def review_joins(
 
 @dataclass(frozen=True)
 class StackReview:
-    """A whole stack's end review: the join lens once, and every layer's
-    own two lenses (`LayerReview`, one per layer)."""
+    """A whole stack's end review: the join lens once, every layer's own
+    two lenses (`LayerReview`, one per layer), and `fields`, every layer
+    either walk resolved, keyed by its `task_key`. A layer absent from
+    `fields` had no resolution."""
 
     join: review.LensReview | None
     layers: list[LayerReview]
+    fields: dict[str, LayerFields] = field(default_factory=dict)
 
 
 def run_end_review(
@@ -516,17 +694,25 @@ def run_end_review(
     max_turns: int,
     budget_usd: float,
     agent: Callable[..., implement.AttemptResult],
+    resolve: Callable[[Ledger, str], LayerFields],
     emit: Callable[[Event], None] = lambda event: print(describe(event)),
 ) -> StackReview:
     """One stack's whole end review: the join lens first, the layers on
     what it left (ADR 6, principles 40 and 50).
 
-    Each layer already had three in-cell lenses of its own. The joins had
-    none, so the join lens spends first. `review_stack` then starts a
-    layer only while what remains of `reserve_usd` still covers it. An
-    errored join's cost counts the same as a clean one's, and a join of
-    `None` leaves the reserve whole.
+    `review_stack` starts a layer only while what remains of
+    `reserve_usd` still covers it. An errored join's cost counts the
+    same as a clean one's, and a join of `None` leaves the reserve
+    whole. `resolve` is wrapped once here, so every layer either walk
+    resolves through it lands in the returned `StackReview.fields`.
     """
+    fields: dict[str, LayerFields] = {}
+
+    def _recording_resolve(ledger_arg: Ledger, task_key: str) -> LayerFields:
+        resolved = resolve(ledger_arg, task_key)
+        fields[task_key] = resolved
+        return resolved
+
     join = review_joins(
         ledger,
         batch_key,
@@ -540,6 +726,7 @@ def run_end_review(
         max_turns=max_turns,
         budget_usd=budget_usd,
         agent=agent,
+        resolve=_recording_resolve,
         emit=emit,
     )
     spent_on_join = join.cost_usd if join is not None else 0.0
@@ -556,9 +743,10 @@ def run_end_review(
         max_turns=max_turns,
         budget_usd=budget_usd,
         agent=agent,
+        resolve=_recording_resolve,
         emit=emit,
     )
-    return StackReview(join=join, layers=layers)
+    return StackReview(join=join, layers=layers, fields=fields)
 
 
 @contextmanager

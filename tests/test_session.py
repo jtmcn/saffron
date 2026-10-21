@@ -8947,6 +8947,7 @@ def test_two_tasks_and_an_end_review_cell_hold_disjoint_subnets(monkeypatch, tmp
         base="a" * 40,
         head="a" * 40,
         known="",
+        diff_base="a" * 40,
     )
     with layer_cell(
         fields,

@@ -259,6 +259,7 @@ def test_each_end_review_prompt_is_its_own_file_filled_with_the_layers_fields():
         base="7",
         head="9",
         known="- concern (contract) x.py:3: b last {braces}",
+        diff_base="7",
     )
     spec_body = "Fix the {gap}, and keep {{this}} as written."
     diff = (
@@ -383,6 +384,7 @@ def test_a_layer_is_read_by_the_spec_lens_then_the_standards_lens():
         base="base1",
         head="head1",
         known="",
+        diff_base="base1",
     )
     diff = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1,2 +1,2 @@\n-old\n+new\n"
     acceptance = [Criterion(claim="c", witness="tests/x.py::t")]
@@ -698,6 +700,8 @@ def _open_cell_double(calls: list[str]):
 
 
 def _end_review_kwargs(mirror: Path, open_cell, agent) -> dict:
+    import saffron.end_review as end_review
+
     return {
         "mirror": mirror,
         "open_cell": open_cell,
@@ -708,6 +712,7 @@ def _end_review_kwargs(mirror: Path, open_cell, agent) -> dict:
         "budget_usd": 1.0,
         "agent": agent,
         "emit": lambda event: None,
+        "resolve": end_review.layer_fields,
     }
 
 
@@ -1317,11 +1322,21 @@ def test_the_end_review_runs_the_join_lens_first_and_the_layers_on_what_it_left(
     """`run_end_review` calls `review_joins` then `review_stack`, on the
     same ledger, batch key and specs. The reserve is reduced by the
     join's own cost, an errored join's cost included. A join of `None`
-    leaves the reserve whole."""
+    leaves the reserve whole. `resolve` is wrapped once per call, so the
+    keyword each fake receives is not the one passed in. Every other
+    keyword still compares equal, and the wrapped one is checked by
+    calling it and reading what it delegated to and recorded."""
     import saffron.end_review as end_review
 
     ledger = object()
     specs = object()
+
+    resolve_calls: list = []
+
+    def fake_resolve(ledger_arg, task_key):
+        resolve_calls.append((ledger_arg, task_key))
+        return f"fields-for-{task_key}"
+
     keywords = {
         "mirror": object(),
         "open_cell": object(),
@@ -1332,7 +1347,9 @@ def test_the_end_review_runs_the_join_lens_first_and_the_layers_on_what_it_left(
         "budget_usd": object(),
         "agent": object(),
         "emit": object(),
+        "resolve": fake_resolve,
     }
+    other_keywords = {k: v for k, v in keywords.items() if k != "resolve"}
 
     order: list[str] = []
     join_calls: list = []
@@ -1347,17 +1364,19 @@ def test_the_end_review_runs_the_join_lens_first_and_the_layers_on_what_it_left(
     def fake_review_joins(ledger_arg, batch_key, reserve_usd, specs_arg, **kw):
         order.append("join")
         join_calls.append((ledger_arg, batch_key, reserve_usd, specs_arg, kw))
+        kw["resolve"](ledger_arg, f"join-{batch_key}")
         return join_replies[len(join_calls) - 1]
 
     def fake_review_stack(ledger_arg, batch_key, reserve_usd, specs_arg, **kw):
         order.append("stack")
         stack_calls.append((ledger_arg, batch_key, reserve_usd, specs_arg, kw))
+        kw["resolve"](ledger_arg, f"stack-{batch_key}")
         return fixed_layers
 
     monkeypatch.setattr(end_review, "review_joins", fake_review_joins)
     monkeypatch.setattr(end_review, "review_stack", fake_review_stack)
 
-    # Sentinel `object()`s stand in for nine keywords `run_end_review` only
+    # Sentinel `object()`s stand in for eight keywords `run_end_review` only
     # passes through, never reads, so the untyped call is cast once here.
     run_end_review = cast(Any, end_review.run_end_review)
     r1 = run_end_review(ledger, "1", 5.0, specs, **keywords)
@@ -1372,7 +1391,37 @@ def test_the_end_review_runs_the_join_lens_first_and_the_layers_on_what_it_left(
     for ledger_arg, _key, _reserve, specs_arg, kw in join_calls + stack_calls:
         assert ledger_arg is ledger
         assert specs_arg is specs
-        assert kw == keywords
+        assert {k: v for k, v in kw.items() if k != "resolve"} == other_keywords
+        assert kw["resolve"] is not fake_resolve
+        assert callable(kw["resolve"])
+    for (_l, batch_key, _r, _s, join_kw), (_l2, _b2, _r2, _s2, stack_kw) in zip(
+        join_calls, stack_calls, strict=True
+    ):
+        assert batch_key == _b2
+        assert join_kw["resolve"] is stack_kw["resolve"]
+
+    # The wrapped `resolve` delegates to the one given, and what it
+    # returned lands in `fields`, keyed by the task key it was called with.
+    assert resolve_calls == [
+        (ledger, "join-1"),
+        (ledger, "stack-1"),
+        (ledger, "join-2"),
+        (ledger, "stack-2"),
+        (ledger, "join-3"),
+        (ledger, "stack-3"),
+    ]
+    assert r1.fields == {
+        "join-1": "fields-for-join-1",
+        "stack-1": "fields-for-stack-1",
+    }
+    assert r2.fields == {
+        "join-2": "fields-for-join-2",
+        "stack-2": "fields-for-stack-2",
+    }
+    assert r3.fields == {
+        "join-3": "fields-for-join-3",
+        "stack-3": "fields-for-stack-3",
+    }
 
     assert r1.join == join_replies[0]
     with pytest.raises(dataclasses.FrozenInstanceError):
@@ -1401,6 +1450,7 @@ def test_a_layers_critic_cell_is_seeded_at_its_head_and_always_torn_down(
         base="b" * 40,
         head="h" * 40,
         known="",
+        diff_base="b" * 40,
     )
     repo = tmp_path / "repo"
     mirror = tmp_path / "mirror"
@@ -1501,6 +1551,7 @@ def test_only_a_spec_sessions_layer_cell_is_granted_capabilities_and_checked(
         base="b" * 40,
         head="h" * 40,
         known="",
+        diff_base="b" * 40,
     )
     repo = tmp_path / "repo"
     mirror = tmp_path / "mirror"
@@ -1611,6 +1662,7 @@ def test_two_layer_cells_name_their_own_network_and_proxy_apart_from_any_task(
         base="b" * 40,
         head="h" * 40,
         known="",
+        diff_base="b" * 40,
     )
     fields2 = end_review.LayerFields(
         spec_id="SA-2",
@@ -1619,6 +1671,7 @@ def test_two_layer_cells_name_their_own_network_and_proxy_apart_from_any_task(
         base="b" * 40,
         head="h" * 40,
         known="",
+        diff_base="b" * 40,
     )
 
     with end_review.layer_cell(
@@ -1786,7 +1839,13 @@ def test_a_spec_sessions_bash_cannot_write_what_root_runs(tmp_path, monkeypatch)
     gates = tmp_path / "gates"
     (gates / ".saffron" / "gates").mkdir(parents=True)
     fields = end_review.LayerFields(
-        spec_id="SY-1", branch="saffron/SY-1", pr_url="", base=head, head=head, known=""
+        spec_id="SY-1",
+        branch="saffron/SY-1",
+        pr_url="",
+        base=head,
+        head=head,
+        known="",
+        diff_base=head,
     )
     wrapper = implement.UNPRIVILEGED_BASH
     prefix = implement.agent_options(
@@ -1837,3 +1896,682 @@ def test_a_spec_sessions_bash_cannot_write_what_root_runs(tmp_path, monkeypatch)
     for code, stdout, stderr in got["argc"]:
         assert code != 0 and stdout == "" and stderr == ""
     assert got["breakout"] == f"a'; id -u; echo \n{got['user']}\n"
+
+
+_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+
+def _commit_tree(repo: Path, tree: str, parents: list[str], message: str) -> str:
+    args = ["commit-tree", tree]
+    for parent in parents:
+        args += ["-p", parent]
+    return _git(repo, *args, "-m", message).strip()
+
+
+def _set_branch(repo: Path, name: str, sha: str) -> None:
+    _git(repo, "update-ref", f"refs/heads/{name}", sha)
+
+
+def _delete_branch(repo: Path, name: str) -> None:
+    _git(repo, "update-ref", "-d", f"refs/heads/{name}")
+
+
+def _resolver_origin(tmp_path: Path, monkeypatch) -> tuple[Path, str, str]:
+    """A real, non-mirror origin for `branch_heads`'s own tests. `main`
+    carries a root commit then a base commit, and each test branches off
+    the base and moves branches on this origin afterward."""
+    config = tmp_path / "gitconfig-resolver"
+    config.write_text(
+        "[diff]\n    noprefix = true\n"
+        "[user]\n    name = Test\n    email = test@example.com\n"
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    origin = tmp_path / "resolver-origin"
+    origin.mkdir()
+    _git(origin, "init", "-q")
+    _git(origin, "symbolic-ref", "HEAD", "refs/heads/main")
+
+    def commit(filename: str, content: str) -> str:
+        (origin / filename).write_text(content)
+        _git(origin, "add", filename)
+        _git(origin, "commit", "-q", "-m", f"msg {filename}")
+        return _git(origin, "rev-parse", "HEAD").strip()
+
+    root_sha = commit("root.txt", "root\n")
+    base_sha = commit("base.txt", "base\n")
+    return origin, root_sha, base_sha
+
+
+def test_a_layer_whose_branch_head_cannot_be_resolved_errors_at_no_cost(
+    tmp_path, monkeypatch
+):
+    """`branch_heads`'s resolver raises for a layer the walk cannot
+    place. `_review_one_layer` and `review_joins` turn that into an
+    `error` at cost 0 for every lens. The walk still reaches the layer
+    below, and a failed fetch is never cached."""
+    import saffron.end_review as end_review
+    from saffron.phases import package as package_phase
+
+    origin, root_sha, base_sha = _resolver_origin(tmp_path, monkeypatch)
+
+    def branch_off(parent_sha: str, name: str, filename: str) -> str:
+        _git(origin, "checkout", "-q", "-b", name, parent_sha)
+        (origin / filename).write_text(f"{name}\n")
+        _git(origin, "add", filename)
+        _git(origin, "commit", "-q", "-m", f"msg {filename}")
+        sha = _git(origin, "rev-parse", "HEAD").strip()
+        _git(origin, "checkout", "-q", "main")
+        return sha
+
+    bot_sha = branch_off(base_sha, "saffron/BOT", "bot.txt")
+    mid_sha = branch_off(base_sha, "saffron/MID", "mid.txt")
+    top_sha = branch_off(base_sha, "saffron/TOP", "top.txt")
+    orphan_branch_sha = branch_off(base_sha, "saffron/ORPHAN", "orphan.txt")
+    rebased_branch_sha = branch_off(base_sha, "saffron/REBASED", "rebased.txt")
+    base_branch_sha = branch_off(base_sha, "saffron/BASE", "base-layer.txt")
+    child_sha = branch_off(base_sha, "saffron/CHILD", "child.txt")
+    bot2_sha = branch_off(base_sha, "saffron/BOT2", "bot2.txt")
+    mid2_sha = branch_off(base_sha, "saffron/MID2", "mid2.txt")
+    top2_sha = branch_off(mid2_sha, "saffron/TOP2", "top2.txt")
+
+    mirror = tmp_path / "resolver-mirror.git"
+    subprocess.run(
+        ["git", "clone", "--mirror", "-q", str(origin), str(mirror)], check=True
+    )
+
+    # Moved on the origin only, after the mirror is cloned, so the
+    # resolver must fetch fresh to see any of this.
+    _delete_branch(origin, "saffron/BOT")
+    _delete_branch(origin, "saffron/TOP")
+
+    root_tree = _git(origin, "rev-parse", f"{root_sha}^{{tree}}").strip()
+    truly_orphan = _commit_tree(origin, root_tree, [], "unrelated history")
+    _set_branch(origin, "saffron/ORPHAN", truly_orphan)
+
+    rebased_tree = _git(origin, "rev-parse", f"{rebased_branch_sha}^{{tree}}").strip()
+    rebased_below = _commit_tree(
+        origin, rebased_tree, [root_sha], "rebased below build"
+    )
+    _set_branch(origin, "saffron/REBASED", rebased_below)
+
+    _delete_branch(origin, "saffron/BASE")
+
+    child_tree = _git(origin, "rev-parse", f"{child_sha}^{{tree}}").strip()
+    child_orphan = _commit_tree(origin, child_tree, [], "disconnected child")
+    _set_branch(origin, "saffron/CHILD", child_orphan)
+
+    mid2_tree = _git(origin, "rev-parse", f"{mid2_sha}^{{tree}}").strip()
+    mid2_orphan = _commit_tree(origin, mid2_tree, [], "disconnected middle")
+    _set_branch(origin, "saffron/MID2", mid2_orphan)
+
+    url = str(origin)
+
+    fetch_calls: list[str] = []
+    real_fetch = package_phase.fetch_parent_branch
+
+    def spy_fetch(mirror_arg, url_arg, branch):
+        fetch_calls.append(branch)
+        return real_fetch(mirror_arg, url_arg, branch)
+
+    monkeypatch.setattr(end_review.package_phase, "fetch_parent_branch", spy_fetch)
+
+    ledger = Ledger(tmp_path / "ledger.db")
+    repo_id = ledger.upsert_repo("errs", url, str(mirror), policy_sha="p" * 64)
+    batch_a = ledger.create_batch(100.0)
+    run_a = ledger.create_run(repo_id, base_sha=base_sha, batch_id=batch_a)
+    batch_d = ledger.create_batch(100.0)
+    run_d = ledger.create_run(repo_id, base_sha=base_sha, batch_id=batch_d)
+
+    def task_with_push(run_id: int, spec_id: str, branch: str, pushed_sha: str) -> int:
+        task_id = ledger.create_task(
+            run_id, spec_id=spec_id, spec_sha="s" * 64, branch=branch
+        )
+        ledger.set_task_package(
+            task_id, "READY_FOR_REVIEW", branch, pushed_sha, f"https://h/pull/{spec_id}"
+        )
+        return task_id
+
+    bot = task_with_push(run_a, "ER-0001", "saffron/BOT", bot_sha)
+    mid = task_with_push(run_a, "ER-0002", "saffron/MID", mid_sha)
+    top = task_with_push(run_a, "ER-0003", "saffron/TOP", top_sha)
+    ledger.record_stack_layer(bot, position=1, predecessor_task_id=None, generation=0)
+    ledger.record_stack_layer(mid, position=2, predecessor_task_id=bot, generation=0)
+    ledger.record_stack_layer(top, position=3, predecessor_task_id=mid, generation=0)
+
+    orphan_task = task_with_push(run_a, "ER-0004", "saffron/ORPHAN", orphan_branch_sha)
+    ledger.record_stack_layer(
+        orphan_task, position=1, predecessor_task_id=None, generation=0
+    )
+    rebased_task = task_with_push(
+        run_a, "ER-0005", "saffron/REBASED", rebased_branch_sha
+    )
+    ledger.record_stack_layer(
+        rebased_task, position=1, predecessor_task_id=None, generation=0
+    )
+    base_task = task_with_push(run_a, "ER-0006", "saffron/BASE", base_branch_sha)
+    child_task = task_with_push(run_a, "ER-0007", "saffron/CHILD", child_sha)
+    ledger.record_stack_layer(
+        child_task, position=1, predecessor_task_id=base_task, generation=0
+    )
+
+    bot2 = task_with_push(run_d, "ER-0008", "saffron/BOT2", bot2_sha)
+    mid2 = task_with_push(run_d, "ER-0009", "saffron/MID2", mid2_sha)
+    top2 = task_with_push(run_d, "ER-0010", "saffron/TOP2", top2_sha)
+    ledger.record_stack_layer(bot2, position=1, predecessor_task_id=None, generation=0)
+    ledger.record_stack_layer(mid2, position=2, predecessor_task_id=bot2, generation=0)
+    ledger.record_stack_layer(top2, position=3, predecessor_task_id=mid2, generation=0)
+
+    key_bot = ledger.record_key(bot)
+    key_mid = ledger.record_key(mid)
+    key_top = ledger.record_key(top)
+    key_orphan = ledger.record_key(orphan_task)
+    key_rebased = ledger.record_key(rebased_task)
+    key_child = ledger.record_key(child_task)
+    key_bot2 = ledger.record_key(bot2)
+    key_mid2 = ledger.record_key(mid2)
+    key_top2 = ledger.record_key(top2)
+    assert (
+        key_bot
+        and key_mid
+        and key_top
+        and key_orphan
+        and key_rebased
+        and key_child
+        and key_bot2
+        and key_mid2
+        and key_top2
+    )
+
+    resolve = end_review.branch_heads(mirror, url)
+
+    # --- a gone layer branch, on a bottom layer and on one with a
+    # predecessor ---
+    with pytest.raises(ValueError, match="saffron/BOT"):
+        resolve(ledger, key_bot)
+    with pytest.raises(ValueError, match="saffron/TOP"):
+        resolve(ledger, key_top)
+
+    # --- no candidate the current head contains ---
+    with pytest.raises(ValueError) as orphan_exc:
+        resolve(ledger, key_orphan)
+    orphan_message = str(orphan_exc.value)
+    assert "saffron/ORPHAN" in orphan_message
+    assert truly_orphan in orphan_message
+
+    with pytest.raises(ValueError, match="saffron/REBASED"):
+        resolve(ledger, key_rebased)
+
+    # --- a stack base's branch gone, and the child's own head contains
+    # neither candidate ---
+    with pytest.raises(ValueError) as child_exc:
+        resolve(ledger, key_child)
+    child_message = str(child_exc.value)
+    assert "saffron/CHILD" in child_message
+    assert "saffron/BASE" in child_message
+    assert "gone" in child_message
+
+    # --- a failed fetch is never cached: each of the three resolutions
+    # that need "saffron/BOT" fetches it again ---
+    fetch_calls.clear()
+    with pytest.raises(ValueError):
+        resolve(ledger, key_bot)
+    mid_fields = resolve(ledger, key_mid)
+    with pytest.raises(ValueError):
+        resolve(ledger, key_bot)
+    assert fetch_calls.count("saffron/BOT") == 3
+    assert mid_fields.base == f"{mid_sha}^"
+
+    # --- integration: `error` at cost 0, the walk still reaches the
+    # layer below, and the join errors too ---
+    spec_mid = Spec(
+        id="ER-0002",
+        title="t",
+        type="chore",
+        body="body ER-0002",
+        touches=["ER-0002.py"],
+        forbidden=[],
+        acceptance=[Criterion(claim="claim", witness="tests/test_a.py::t")],
+    )
+    agent_calls_a: list = []
+    agent_a = _scripted(agent_calls_a, [_turn(_block([])), _turn(_block([]))])
+    kwargs_a = _end_review_kwargs(mirror, _open_cell_double([]), agent_a)
+    kwargs_a["resolve"] = end_review.branch_heads(mirror, url)
+
+    stack_a = end_review.run_end_review(
+        ledger, str(batch_a), 100.0, {"ER-0002": spec_mid}, **kwargs_a
+    )
+    assert len(agent_calls_a) == 2
+
+    assert stack_a.join is not None
+    assert stack_a.join.error is not None
+    assert stack_a.join.cost_usd == 0.0
+    join_row_a = ledger._db.execute(
+        "SELECT * FROM end_reviews WHERE lens = 'join' AND task_key = ?", (key_top,)
+    ).fetchone()
+    assert join_row_a["status"] == "error"
+    assert join_row_a["cost_usd"] == 0.0
+    assert join_row_a["error"] is not None
+
+    by_key_a = {layer.task_key: layer for layer in stack_a.layers}
+    for key in (key_bot, key_top):
+        assert by_key_a[key].reviews != []
+        for r in by_key_a[key].reviews:
+            assert r.cost_usd == 0.0
+            assert r.error is not None
+    assert by_key_a[key_mid].reviews != []
+    for r in by_key_a[key_mid].reviews:
+        assert r.error is None
+
+    rows = {
+        (row["task_key"], row["lens"]): row
+        for row in ledger._db.execute("SELECT * FROM end_reviews").fetchall()
+    }
+    for key in (key_bot, key_top):
+        for lens in ("spec", "standards"):
+            row = rows[(key, lens)]
+            assert row["status"] == "error"
+            assert row["cost_usd"] == 0.0
+    for lens in ("spec", "standards"):
+        assert rows[(key_mid, lens)]["status"] == "reviewed"
+
+    # --- the unplaceable layer sits in the middle of a three-layer
+    # stack: the layer below it still resolves and is reviewed ---
+    specs_d = {
+        spec_id: Spec(
+            id=spec_id,
+            title="t",
+            type="chore",
+            body=f"body {spec_id}",
+            touches=[f"{spec_id}.py"],
+            forbidden=[],
+            acceptance=[
+                Criterion(claim="claim", witness=f"tests/test_{spec_id}.py::t")
+            ],
+        )
+        for spec_id in ("ER-0008", "ER-0010")
+    }
+    agent_calls_d: list = []
+    agent_d = _scripted(
+        agent_calls_d,
+        [_turn(_block([])), _turn(_block([])), _turn(_block([])), _turn(_block([]))],
+    )
+    kwargs_d = _end_review_kwargs(mirror, _open_cell_double([]), agent_d)
+    kwargs_d["resolve"] = end_review.branch_heads(mirror, url)
+
+    stack_d = end_review.run_end_review(
+        ledger, str(batch_d), 100.0, specs_d, **kwargs_d
+    )
+    assert len(agent_calls_d) == 4
+
+    assert stack_d.join is not None
+    assert stack_d.join.error is not None
+    join_row_d = ledger._db.execute(
+        "SELECT * FROM end_reviews WHERE lens = 'join' AND task_key = ?", (key_top2,)
+    ).fetchone()
+    assert join_row_d["status"] == "error"
+    assert join_row_d["cost_usd"] == 0.0
+    assert join_row_d["error"] is not None
+
+    by_key_d = {layer.task_key: layer for layer in stack_d.layers}
+    assert by_key_d[key_mid2].reviews != []
+    for r in by_key_d[key_mid2].reviews:
+        assert r.error is not None
+        assert r.cost_usd == 0.0
+    for key in (key_top2, key_bot2):
+        assert by_key_d[key].reviews != []
+        for r in by_key_d[key].reviews:
+            assert r.error is None
+
+    ledger.close()
+
+
+def _w1_origin(tmp_path: Path, monkeypatch) -> tuple[Path, str, str]:
+    """A second real origin, built the same way `_resolver_origin` is, for
+    the branch-head witness's own six stacks."""
+    return _resolver_origin(tmp_path, monkeypatch)
+
+
+def test_an_end_review_grades_each_layer_at_its_branch_head_after_package(
+    tmp_path, monkeypatch
+):
+    """`run_end_review`, through `end_review.branch_heads`, opens each
+    layer's cell, and the join's, at the branch head fetched when the
+    end review runs. Each lens's diff and stated range start at the
+    base the resolver's rule picks for that layer's own shape."""
+    import saffron.end_review as end_review
+    from saffron.phases import package as package_phase
+
+    origin, root_sha, base_sha = _w1_origin(tmp_path, monkeypatch)
+
+    def branch_from(parent_sha: str, name: str, filename: str, content: str) -> str:
+        _git(origin, "checkout", "-q", "-b", name, parent_sha)
+        (origin / filename).write_text(content)
+        _git(origin, "add", filename)
+        _git(origin, "commit", "-q", "-m", f"msg {filename}")
+        sha = _git(origin, "rev-parse", "HEAD").strip()
+        _git(origin, "checkout", "-q", "main")
+        return sha
+
+    def add_commit(branch: str, filename: str, content: str) -> str:
+        _git(origin, "checkout", "-q", branch)
+        (origin / filename).write_text(content)
+        _git(origin, "add", filename)
+        _git(origin, "commit", "-q", "-m", f"msg {filename}")
+        sha = _git(origin, "rev-parse", "HEAD").strip()
+        _git(origin, "checkout", "-q", "main")
+        return sha
+
+    def cherry_pick_onto(commit_sha: str, new_parent_sha: str) -> str:
+        """`commit_sha`'s own diff, replayed onto `new_parent_sha`, so the
+        result's tree is `new_parent_sha`'s plus that diff. A `commit-tree`
+        reusing `commit_sha`'s own tree would drop whatever `new_parent_sha`
+        added, which is not what a real rebase does."""
+        _git(origin, "checkout", "-q", "-b", "tmp-cherry", new_parent_sha)
+        _git(origin, "cherry-pick", commit_sha)
+        sha = _git(origin, "rev-parse", "HEAD").strip()
+        _git(origin, "checkout", "-q", "main")
+        _git(origin, "branch", "-D", "tmp-cherry")
+        return sha
+
+    # --- built before the mirror is cloned ---
+    a_u1 = branch_from(base_sha, "saffron/A-UNREBASED", "a-u1.txt", "a-u1\n")
+    a_r1 = branch_from(base_sha, "saffron/A-REBASED", "a-r1.txt", "a-r1\n")
+    a_m1 = branch_from(base_sha, "saffron/A-MERGED", "a-m1.txt", "a-m1\n")
+    b_p1 = branch_from(base_sha, "saffron/B-PARENT", "b-p1.txt", "b-p1\n")
+    b_c1 = branch_from(b_p1, "saffron/B-CHILD", "b-c1.txt", "b-c1\n")
+    c_x = branch_from(base_sha, "tmp-c-x", "c-x.txt", "c-x\n")
+    c_y = branch_from(c_x, "tmp-c-y", "c-y.txt", "c-y\n")
+    c_child2 = branch_from(c_y, "saffron/C-CHILD2", "c-child2.txt", "c-child2\n")
+    _delete_branch(origin, "tmp-c-x")
+    _delete_branch(origin, "tmp-c-y")
+    d_b1 = branch_from(base_sha, "saffron/D-BOT3", "d-b1.txt", "d-b1\n")
+    d_m1 = branch_from(d_b1, "saffron/D-MID3", "d-m1.txt", "d-m1\n")
+    d_t1 = branch_from(d_m1, "saffron/D-TOP3", "d-t1.txt", "d-t1\n")
+
+    mirror = tmp_path / "w1-mirror.git"
+    subprocess.run(
+        ["git", "clone", "--mirror", "-q", str(origin), str(mirror)], check=True
+    )
+    url = str(origin)
+
+    fetch_calls: list[str] = []
+    default_calls: list[int] = []
+    real_fetch = package_phase.fetch_parent_branch
+    real_default = package_phase.fetch_default_branch
+
+    def spy_fetch(mirror_arg, url_arg, branch):
+        fetch_calls.append(branch)
+        return real_fetch(mirror_arg, url_arg, branch)
+
+    def spy_default(mirror_arg, url_arg):
+        default_calls.append(1)
+        return real_default(mirror_arg, url_arg)
+
+    monkeypatch.setattr(end_review.package_phase, "fetch_parent_branch", spy_fetch)
+    monkeypatch.setattr(end_review.package_phase, "fetch_default_branch", spy_default)
+
+    ledger = Ledger(tmp_path / "ledger.db")
+    repo_id = ledger.upsert_repo("w1", url, str(mirror), policy_sha="p" * 64)
+
+    def new_run() -> tuple[int, int]:
+        batch_id = ledger.create_batch(100.0)
+        run_id = ledger.create_run(repo_id, base_sha=base_sha, batch_id=batch_id)
+        return batch_id, run_id
+
+    def task_with_push(run_id: int, spec_id: str, branch: str, pushed_sha: str) -> int:
+        task_id = ledger.create_task(
+            run_id, spec_id=spec_id, spec_sha="s" * 64, branch=branch
+        )
+        ledger.set_task_package(
+            task_id, "READY_FOR_REVIEW", branch, pushed_sha, f"https://h/pull/{spec_id}"
+        )
+        return task_id
+
+    def spec_for(spec_id: str) -> Spec:
+        return Spec(
+            id=spec_id,
+            title="t",
+            type="chore",
+            body=f"body {spec_id}",
+            touches=["*"],
+            forbidden=[],
+            acceptance=[
+                Criterion(claim="claim", witness=f"tests/test_{spec_id}.py::t")
+            ],
+        )
+
+    def run_one(batch_id: int, spec_id: str, resolve) -> tuple[Any, list[dict]]:
+        """One single-layer batch's own end review, scripted to reply
+        clean on both lenses, returning the stack and the agent calls."""
+        stack, agent_calls, _cell_calls = run_batch(
+            batch_id, [spec_id], resolve, replies=2
+        )
+        return stack, agent_calls
+
+    def run_batch(
+        batch_id: int, spec_ids: list[str], resolve, *, replies: int
+    ) -> tuple[Any, list[dict], list[str]]:
+        """A batch's own end review over every id in `spec_ids`. Replies
+        clean `replies` times, and returns the stack, the agent calls,
+        and the spec id each opened cell was given, in order."""
+        agent_calls: list[dict] = []
+        agent = _scripted(agent_calls, [_turn(_block([]))] * replies)
+        cell_calls: list[str] = []
+        kwargs = _end_review_kwargs(mirror, _open_cell_double(cell_calls), agent)
+        kwargs["resolve"] = resolve
+        stack = end_review.run_end_review(
+            ledger,
+            str(batch_id),
+            100.0,
+            {spec_id: spec_for(spec_id) for spec_id in spec_ids},
+            **kwargs,
+        )
+        return stack, agent_calls, cell_calls
+
+    # --- A: three bottom layers, each its own one-layer stack ---
+    batch_u, run_u = new_run()
+    unrebased = task_with_push(run_u, "W1-0001", "saffron/A-UNREBASED", a_u1)
+    ledger.record_stack_layer(
+        unrebased, position=1, predecessor_task_id=None, generation=0
+    )
+    key_unrebased = ledger.record_key(unrebased)
+    assert key_unrebased is not None
+
+    # The review commit lands on the origin after the mirror is cloned,
+    # so only a fresh fetch can see it.
+    a_u2 = add_commit("saffron/A-UNREBASED", "a-u2.txt", "a-u2\n")
+    stack_u, calls_u = run_one(batch_u, "W1-0001", end_review.branch_heads(mirror, url))
+    assert stack_u.join is None
+    assert key_unrebased in stack_u.fields
+    prompt_u = _flatten(calls_u[0]["options"]["system_prompt"])
+    assert "+a-u1" in prompt_u
+    assert "+a-u2" in prompt_u
+    assert a_u2 in prompt_u
+
+    batch_r, run_r = new_run()
+    rebased = task_with_push(run_r, "W1-0002", "saffron/A-REBASED", a_r1)
+    ledger.record_stack_layer(
+        rebased, position=1, predecessor_task_id=None, generation=0
+    )
+
+    main2 = add_commit("main", "main2.txt", "main2\n")
+    a_r1b = cherry_pick_onto(a_r1, main2)
+    _set_branch(origin, "saffron/A-REBASED", a_r1b)
+    stack_r, calls_r = run_one(batch_r, "W1-0002", end_review.branch_heads(mirror, url))
+    assert stack_r.join is None
+    prompt_r = _flatten(calls_r[0]["options"]["system_prompt"])
+    assert "+a-r1" in prompt_r
+    assert "main2" not in prompt_r
+    assert main2 in prompt_r
+
+    batch_m, run_m = new_run()
+    merged = task_with_push(run_m, "W1-0003", "saffron/A-MERGED", a_m1)
+    ledger.record_stack_layer(
+        merged, position=1, predecessor_task_id=None, generation=0
+    )
+
+    m1_tree = _git(origin, "rev-parse", f"{a_m1}^{{tree}}").strip()
+    main_merge = _commit_tree(origin, m1_tree, [main2, a_m1], "merge a-m1")
+    _set_branch(origin, "main", main_merge)
+    stack_m, calls_m = run_one(batch_m, "W1-0003", end_review.branch_heads(mirror, url))
+    assert stack_m.join is None
+    prompt_m = _flatten(calls_m[0]["options"]["system_prompt"])
+    assert "+a-m1" in prompt_m
+    assert f"{a_m1}^..{a_m1}" in prompt_m
+
+    # --- B: a restacked layer outranks its predecessor's recorded head ---
+    batch_b, run_b = new_run()
+    parent = task_with_push(run_b, "W1-0004", "saffron/B-PARENT", b_p1)
+    child_a = task_with_push(run_b, "W1-0005", "saffron/B-CHILD", b_c1)
+    ledger.record_stack_layer(
+        parent, position=1, predecessor_task_id=None, generation=0
+    )
+    ledger.record_stack_layer(
+        child_a, position=2, predecessor_task_id=parent, generation=0
+    )
+
+    b_p2 = add_commit("saffron/B-PARENT", "b-p2.txt", "b-p2\n")
+    b_c2 = cherry_pick_onto(b_c1, b_p2)
+    _set_branch(origin, "saffron/B-CHILD", b_c2)
+    # PARENT has no predecessor, so both walks resolve it and each needs
+    # the default branch, fetched only once between the two.
+    default_calls.clear()
+    stack_b, calls_b, cell_calls_b = run_batch(
+        batch_b,
+        ["W1-0004", "W1-0005"],
+        end_review.branch_heads(mirror, url),
+        replies=5,
+    )
+    assert stack_b.join is not None
+    assert stack_b.join.error is None
+    assert len(default_calls) == 1
+    # `cell_calls_b[0]`, the join's own open before any layer's, names
+    # the top layer's spec, never the bottom's.
+    assert cell_calls_b[0] == "W1-0005"
+    # calls_b[0] is the join's own turn. The child's two lenses follow it,
+    # since `review_stack` walks top down and the child is the top layer.
+    prompt_b = _flatten(calls_b[1]["options"]["system_prompt"])
+    assert "b-c1" in prompt_b
+    assert "b-p2" not in prompt_b
+    assert f"{b_p2}^..{b_c2}" not in prompt_b
+    assert f"{b_p2}..{b_c2}" in prompt_b
+
+    # --- C: a gone predecessor branch offers this layer's own pushed
+    # head's parent before the predecessor's recorded head ---
+    batch_c, run_c = new_run()
+    base2 = task_with_push(run_c, "W1-0006", "saffron/C-BASE2", c_x)
+    child2 = task_with_push(run_c, "W1-0007", "saffron/C-CHILD2", c_child2)
+    ledger.record_stack_layer(
+        child2, position=1, predecessor_task_id=base2, generation=0
+    )
+
+    stack_c, calls_c = run_one(batch_c, "W1-0007", end_review.branch_heads(mirror, url))
+    assert stack_c.join is None
+    prompt_c = _flatten(calls_c[0]["options"]["system_prompt"])
+    assert "c-child2" in prompt_c
+    assert "c-y" not in prompt_c
+    assert "c-x" not in prompt_c
+    assert f"{c_child2}^..{c_child2}" in prompt_c
+
+    # --- D: the join's own range, fields, and fetching each branch once ---
+    batch_d, run_d = new_run()
+    bot3 = task_with_push(run_d, "W1-0008", "saffron/D-BOT3", d_b1)
+    mid3 = task_with_push(run_d, "W1-0009", "saffron/D-MID3", d_m1)
+    top3 = task_with_push(run_d, "W1-0010", "saffron/D-TOP3", d_t1)
+    ledger.record_stack_layer(bot3, position=1, predecessor_task_id=None, generation=0)
+    ledger.record_stack_layer(mid3, position=2, predecessor_task_id=bot3, generation=0)
+    ledger.record_stack_layer(top3, position=3, predecessor_task_id=mid3, generation=0)
+    # A review commit past the pushed head, so diff_base (base_sha)
+    # differs from the current head's own parent, d_b1.
+    add_commit("saffron/D-BOT3", "d-b1b.txt", "d-b1b\n")
+    key_bot3 = ledger.record_key(bot3)
+    key_mid3 = ledger.record_key(mid3)
+    key_top3 = ledger.record_key(top3)
+    assert key_bot3 and key_mid3 and key_top3
+
+    fetch_calls.clear()
+    agent_calls_d: list[dict] = []
+    agent_d = _scripted(
+        agent_calls_d, [_turn(_block([])), _turn(_block([])), _turn(_block([]))]
+    )
+    kwargs_d = _end_review_kwargs(mirror, _open_cell_double([]), agent_d)
+    kwargs_d["resolve"] = end_review.branch_heads(mirror, url)
+    specs_d = {
+        "W1-0008": spec_for("W1-0008"),
+        "W1-0009": spec_for("W1-0009"),
+        "W1-0010": spec_for("W1-0010"),
+    }
+    # The join's cost (0.1) plus one layer's ceiling fits the reserve, but
+    # a second layer's does not, so the walk stops after the top layer.
+    stack_d = end_review.run_end_review(ledger, str(batch_d), 2.1, specs_d, **kwargs_d)
+
+    assert stack_d.join is not None
+    assert stack_d.join.error is None
+    join_prompt = _flatten(agent_calls_d[0]["options"]["system_prompt"])
+    assert f"{base_sha}..{d_t1}" in join_prompt
+    # The range starts at diff_base (base_sha), so d_b1's own change
+    # still shows. `head^..head` of the moved head would lose it.
+    assert "+d-b1" in join_prompt
+
+    assert key_bot3 in stack_d.fields
+    assert key_mid3 in stack_d.fields
+    assert key_top3 in stack_d.fields
+
+    by_key_d = {layer.task_key: layer for layer in stack_d.layers}
+    assert by_key_d[key_top3].reviews != []
+    assert by_key_d[key_mid3].reviews == []
+    assert by_key_d[key_bot3].reviews == []
+    rows_d = {
+        (row["task_key"], row["lens"]): row
+        for row in ledger._db.execute(
+            "SELECT * FROM end_reviews WHERE lens IN ('spec', 'standards')"
+        ).fetchall()
+    }
+    for lens in ("spec", "standards"):
+        assert rows_d[(key_top3, lens)]["status"] == "reviewed"
+        assert rows_d[(key_mid3, lens)]["status"] == "not_reached"
+        assert rows_d[(key_bot3, lens)]["status"] == "not_reached"
+
+    for branch in ("saffron/D-BOT3", "saffron/D-MID3", "saffron/D-TOP3"):
+        assert fetch_calls.count(branch) == 1
+
+    # --- E: the join's stated base is the diff's own, not the row's
+    # recorded `base`, which `branch_heads` never lets differ on its own ---
+    batch_e, run_e = new_run()
+    mid_e = task_with_push(run_e, "W1-0011", "saffron/D-MID3", d_m1)
+    top_e = task_with_push(run_e, "W1-0012", "saffron/D-TOP3", d_t1)
+    ledger.record_stack_layer(mid_e, position=1, predecessor_task_id=None, generation=0)
+    ledger.record_stack_layer(
+        top_e, position=2, predecessor_task_id=mid_e, generation=0
+    )
+    key_mid_e = ledger.record_key(mid_e)
+    assert key_mid_e is not None
+
+    real_resolve_e = end_review.branch_heads(mirror, url)
+
+    def resolve_e(ledger_arg, task_key):
+        fields = real_resolve_e(ledger_arg, task_key)
+        if task_key == key_mid_e:
+            # `diff_base` stays correct. Only `base` is corrupted, so the
+            # prompt can only show the right range by reading `diff_base`.
+            fields = dataclasses.replace(fields, base="deliberately-wrong-base")
+        return fields
+
+    agent_calls_e: list[dict] = []
+    agent_e = _scripted(agent_calls_e, [_turn(_block([]))])
+    kwargs_e = _end_review_kwargs(mirror, _open_cell_double([]), agent_e)
+    kwargs_e["resolve"] = resolve_e
+    join_e = end_review.review_joins(
+        ledger,
+        str(batch_e),
+        10.0,
+        {"W1-0011": spec_for("W1-0011"), "W1-0012": spec_for("W1-0012")},
+        **kwargs_e,
+    )
+    assert join_e is not None
+    assert join_e.error is None
+    join_prompt_e = _flatten(agent_calls_e[0]["options"]["system_prompt"])
+    assert "deliberately-wrong-base" not in join_prompt_e
+    assert f"{d_m1}^..{d_t1}" in join_prompt_e
+
+    ledger.close()

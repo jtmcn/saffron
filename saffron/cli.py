@@ -836,7 +836,7 @@ def _end_review_error_reviews(
                     write_failed = True
             reviews.append(review.LensReview(lens, cost_usd=0.0, error=lens_error))
         layers.append(end_review.LayerReview(task_key, reviews))
-    return end_review.StackReview(join=None, layers=layers)
+    return end_review.StackReview(join=None, layers=layers, fields={})
 
 
 def _stack_end_review(
@@ -873,6 +873,9 @@ def _stack_end_review(
                 gates_dir=exported,
                 thread_env=policy.thread_env,
             )
+            # Built fresh per call, so each end review starts with an empty
+            # cache rather than an earlier one's stale branch head.
+            resolve = end_review.branch_heads(pinned.mirror, pinned.url)
             return end_review.run_end_review(
                 ledger,
                 batch_key,
@@ -886,6 +889,7 @@ def _stack_end_review(
                 max_turns=end_review.LENS_MAX_TURNS,
                 budget_usd=end_review.LENS_BUDGET_USD,
                 agent=agent,
+                resolve=resolve,
             )
         except Exception as exc:
             message = f"{type(exc).__name__}: {exc}"
@@ -1167,6 +1171,7 @@ def _stack_review(
             base=head,
             head=head,
             known="",
+            diff_base=head,
         )
         system_prompt = spec_review.spec_review_system_prompt(
             policy, prompts_dir=context.PROMPTS_DIR
@@ -1280,6 +1285,7 @@ def _stack_revise(
             base=head,
             head=head,
             known="",
+            diff_base=head,
         )
         system_prompt = spec_review.spec_writer_system_prompt(
             policy, prompts_dir=context.PROMPTS_DIR
@@ -1406,6 +1412,7 @@ def _draft_adapters(
             base=pinned.base_sha,
             head=pinned.base_sha,
             known="",
+            diff_base=pinned.base_sha,
         )
         agent = partial(
             implement.run_agent,
