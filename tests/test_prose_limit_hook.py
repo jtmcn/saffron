@@ -349,7 +349,7 @@ def test_make_check_runs_the_tree_hook_and_a_commit_does_not():
     config = yaml.safe_load((REPO / ".pre-commit-config.yaml").read_text())
     hooks = [hook for repo in config["repos"] for hook in repo["hooks"]]
     (tree_hook,) = [hook for hook in hooks if hook["id"] == "prose-limit-tree"]
-    assert tree_hook["stages"] == ["manual"]
+    assert tree_hook.get("stages") == ["manual"]
     assert tree_hook["pass_filenames"] is False
     assert tree_hook["always_run"] is True
     (commit_hook,) = [hook for hook in hooks if hook["id"] == "prose-limit"]

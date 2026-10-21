@@ -83,8 +83,8 @@ GitHub issues remain in use only for research/evidence records under
   changes nothing, since the test reads each measured spec from `done/` as
   well. Until then, the commit that retires one re-measures as well.
   `driver.py bookkeeping` drafts whichever edits apply. Run `make check` before pushing a spec: `SA-0078` reached CI
-  without it and failed there. `make check` reads each changed file's
-  working-tree copy, staged or not, while the commit hook reads the index. A
+  without it and failed there. `make check`'s prose limit reads each
+  changed file's working-tree copy, staged or not, while the commit hook reads the index. A
   file moved with plain `mv` reads against zero there until `git add -A`
   stages the rename. The commit that adds a spec also lists it in its
   origin item's `specs:` — the item its `## Context` cites first.

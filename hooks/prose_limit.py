@@ -26,6 +26,7 @@ import json
 import subprocess
 import sys
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -118,7 +119,7 @@ def _report(
     prose: Any,
     root: Path,
     pairs: list[tuple[str | None, str]],
-    new_text_of: Any,
+    new_text_of: Callable[[str], str | None],
 ) -> int:
     """New `prose` hits for each `(old, new)` pair whose new text `new_text_of`
     can read, printed in the commit mode's format."""
@@ -150,9 +151,7 @@ def tree_time(root: Path) -> int:
 
     def read(new: str) -> str | None:
         file_path = root / new
-        if not file_path.is_file():
-            return None
-        return file_path.read_text(encoding="utf-8", errors="replace")
+        return _working_copy(file_path) if file_path.is_file() else None
 
     return _report(prose, root, tree_pairs(root), read)
 
@@ -164,12 +163,16 @@ def _in_repo(root: Path, file_path: Path) -> str | None:
         return None
 
 
+def _working_copy(file_path: Path) -> str:
+    return file_path.read_text(encoding="utf-8", errors="replace")
+
+
 def _against_head(root: Path, path: str, file_path: Path) -> tuple[str | None, str]:
     """The file at `HEAD` or None, and the working tree's copy of it."""
     head = _git(root, "show", f"HEAD:{path}")
     return (
         head.stdout if head.returncode == 0 else None,
-        file_path.read_text(encoding="utf-8", errors="replace"),
+        _working_copy(file_path),
     )
 
 

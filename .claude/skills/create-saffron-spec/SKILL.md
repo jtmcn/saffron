@@ -71,8 +71,9 @@ The reviewer reads at a commit, so the draft is committed before the review is
 dispatched. Before the commit, check each new file with
 `python3 hooks/prose_limit.py --file <path>`. It compares against `HEAD`, so
 after the commit it reports zero whatever the file holds. Then stage the draft
-and run `make check`. Its lint pass reads tracked files only, so an untracked
-spec passes it and fails the commit hook.
+and run `make check`. Its `prose-limit-tree` hook reads the working tree,
+untracked files included. The other lint hooks read tracked files only, so
+stage the draft before trusting them.
 
 ### 6. Pre-flight the spec
 
