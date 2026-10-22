@@ -67,8 +67,8 @@ class LayerFields:
     formatted for the prompt (`layer_fields` builds it).
 
     `diff_base` is the commit a layer's diff starts from.
-    `layer_fields` sets it to the pushed head's parent. `base` stays what a
-    layer's row recorded. `branch_heads`' resolver sets both to the base
+    `layer_fields` sets it to the pushed head's parent and keeps `base` as
+    before. `branch_heads`' resolver sets both to the base
     it chose at the branch's current head (`DESIGN.md` §5.7)."""
 
     spec_id: str
@@ -154,8 +154,7 @@ _PREDECESSOR_BRANCH = "SELECT branch FROM tasks WHERE record_key = ?"
 def _is_ancestor(mirror: Path, ancestor: str, descendant: str) -> bool:
     """Whether `ancestor` is reachable from `descendant`, read by exit
     code rather than through `_git`, which raises on any non-zero exit.
-    Exit 0 means yes, exit 1 means no, and any other exit raises
-    (`cli._pushed_landed`'s own pattern)."""
+    Exit 0 means yes, exit 1 means no, and any other exit raises."""
     done = _run(
         ["git", "-C", str(mirror), "merge-base", "--is-ancestor", ancestor, descendant]
     )
@@ -206,8 +205,8 @@ def _layer_candidates(
     With a predecessor: its current head, then its recorded head. A
     gone predecessor branch offers this layer's own pushed head's
     parent first, then the predecessor's recorded head. With none: the
-    merge base of the current head and the default branch, read only
-    when this layer's pushed head was not already merged into it.
+    merge base of the current head and the default branch, when the
+    pushed head's parent is its ancestor and the pushed head is not.
     Otherwise the candidate is the pushed head's parent.
     """
     own_parent = f"{pushed_sha}^"
@@ -223,7 +222,7 @@ def _layer_candidates(
         return [own_parent], None
 
     if row["predecessor_head"] is None:
-        raise ValueError("predecessor was recorded with no head")
+        raise ValueError(f"{row['branch']!r}'s predecessor was recorded with no head")
     pred_row = ledger._db.execute(
         _PREDECESSOR_BRANCH, (row["predecessor_key"],)
     ).fetchone()
@@ -269,7 +268,8 @@ def branch_heads(mirror: Path, url: str) -> Callable[[Ledger, str], LayerFields]
         try:
             current_head = fetch(branch)
         except package_phase.ParentGone as gone:
-            raise ValueError(f"layer branch {branch!r} is gone: {gone}") from gone
+            # ParentGone's own text would call this layer's branch a parent.
+            raise ValueError(f"layer branch {branch!r} could not be fetched") from gone
 
         candidates, gone_predecessor_branch = _layer_candidates(
             ledger,

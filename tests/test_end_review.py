@@ -2021,6 +2021,12 @@ def test_a_layer_whose_branch_head_cannot_be_resolved_errors_at_no_cost(
     run_a = ledger.create_run(repo_id, base_sha=base_sha, batch_id=batch_a)
     batch_d = ledger.create_batch(100.0)
     run_d = ledger.create_run(repo_id, base_sha=base_sha, batch_id=batch_d)
+    # The unplaceable single layers sit in a batch of their own, so batch
+    # A's join meets its gone bottom layer first.
+    batch_o = ledger.create_batch(100.0)
+    run_o = ledger.create_run(repo_id, base_sha=base_sha, batch_id=batch_o)
+    batch_t = ledger.create_batch(100.0)
+    run_t = ledger.create_run(repo_id, base_sha=base_sha, batch_id=batch_t)
 
     def task_with_push(run_id: int, spec_id: str, branch: str, pushed_sha: str) -> int:
         task_id = ledger.create_task(
@@ -2038,18 +2044,18 @@ def test_a_layer_whose_branch_head_cannot_be_resolved_errors_at_no_cost(
     ledger.record_stack_layer(mid, position=2, predecessor_task_id=bot, generation=0)
     ledger.record_stack_layer(top, position=3, predecessor_task_id=mid, generation=0)
 
-    orphan_task = task_with_push(run_a, "ER-0004", "saffron/ORPHAN", orphan_branch_sha)
+    orphan_task = task_with_push(run_o, "ER-0004", "saffron/ORPHAN", orphan_branch_sha)
     ledger.record_stack_layer(
         orphan_task, position=1, predecessor_task_id=None, generation=0
     )
     rebased_task = task_with_push(
-        run_a, "ER-0005", "saffron/REBASED", rebased_branch_sha
+        run_o, "ER-0005", "saffron/REBASED", rebased_branch_sha
     )
     ledger.record_stack_layer(
         rebased_task, position=1, predecessor_task_id=None, generation=0
     )
-    base_task = task_with_push(run_a, "ER-0006", "saffron/BASE", base_branch_sha)
-    child_task = task_with_push(run_a, "ER-0007", "saffron/CHILD", child_sha)
+    base_task = task_with_push(run_o, "ER-0006", "saffron/BASE", base_branch_sha)
+    child_task = task_with_push(run_o, "ER-0007", "saffron/CHILD", child_sha)
     ledger.record_stack_layer(
         child_task, position=1, predecessor_task_id=base_task, generation=0
     )
@@ -2060,6 +2066,14 @@ def test_a_layer_whose_branch_head_cannot_be_resolved_errors_at_no_cost(
     ledger.record_stack_layer(bot2, position=1, predecessor_task_id=None, generation=0)
     ledger.record_stack_layer(mid2, position=2, predecessor_task_id=bot2, generation=0)
     ledger.record_stack_layer(top2, position=3, predecessor_task_id=mid2, generation=0)
+
+    # A sound bottom layer under a top layer whose branch is gone.
+    bot_t = task_with_push(run_t, "ER-0011", "saffron/MID", mid_sha)
+    top_t = task_with_push(run_t, "ER-0012", "saffron/TOP", top_sha)
+    ledger.record_stack_layer(bot_t, position=1, predecessor_task_id=None, generation=0)
+    ledger.record_stack_layer(
+        top_t, position=2, predecessor_task_id=bot_t, generation=0
+    )
 
     key_bot = ledger.record_key(bot)
     key_mid = ledger.record_key(mid)
@@ -2097,6 +2111,7 @@ def test_a_layer_whose_branch_head_cannot_be_resolved_errors_at_no_cost(
     orphan_message = str(orphan_exc.value)
     assert "saffron/ORPHAN" in orphan_message
     assert truly_orphan in orphan_message
+    assert f"{orphan_branch_sha}^" in orphan_message
 
     with pytest.raises(ValueError, match="saffron/REBASED"):
         resolve(ledger, key_rebased)
@@ -2109,6 +2124,8 @@ def test_a_layer_whose_branch_head_cannot_be_resolved_errors_at_no_cost(
     assert "saffron/CHILD" in child_message
     assert "saffron/BASE" in child_message
     assert "gone" in child_message
+    assert f"{child_sha}^" in child_message
+    assert base_branch_sha in child_message
 
     # --- a failed fetch is never cached: each of the three resolutions
     # that need "saffron/BOT" fetches it again ---
@@ -2144,6 +2161,7 @@ def test_a_layer_whose_branch_head_cannot_be_resolved_errors_at_no_cost(
 
     assert stack_a.join is not None
     assert stack_a.join.error is not None
+    assert "saffron/BOT" in stack_a.join.error
     assert stack_a.join.cost_usd == 0.0
     join_row_a = ledger._db.execute(
         "SELECT * FROM end_reviews WHERE lens = 'join' AND task_key = ?", (key_top,)
@@ -2188,7 +2206,7 @@ def test_a_layer_whose_branch_head_cannot_be_resolved_errors_at_no_cost(
                 Criterion(claim="claim", witness=f"tests/test_{spec_id}.py::t")
             ],
         )
-        for spec_id in ("ER-0008", "ER-0010")
+        for spec_id in ("ER-0008", "ER-0009", "ER-0010")
     }
     agent_calls_d: list = []
     agent_d = _scripted(
@@ -2205,6 +2223,7 @@ def test_a_layer_whose_branch_head_cannot_be_resolved_errors_at_no_cost(
 
     assert stack_d.join is not None
     assert stack_d.join.error is not None
+    assert "saffron/MID2" in stack_d.join.error
     join_row_d = ledger._db.execute(
         "SELECT * FROM end_reviews WHERE lens = 'join' AND task_key = ?", (key_top2,)
     ).fetchone()
@@ -2222,13 +2241,23 @@ def test_a_layer_whose_branch_head_cannot_be_resolved_errors_at_no_cost(
         for r in by_key_d[key].reviews:
             assert r.error is None
 
+    # --- the top layer's branch is gone: the bottom is reviewed, and the
+    # join names the top ---
+    spec_t = spec_mid.model_copy(update={"id": "ER-0011", "body": "body ER-0011"})
+    agent_calls_t: list = []
+    agent_t = _scripted(agent_calls_t, [_turn(_block([])), _turn(_block([]))])
+    kwargs_t = _end_review_kwargs(mirror, _open_cell_double([]), agent_t)
+    kwargs_t["resolve"] = end_review.branch_heads(mirror, url)
+    stack_t = end_review.run_end_review(
+        ledger, str(batch_t), 100.0, {"ER-0011": spec_t}, **kwargs_t
+    )
+    assert len(agent_calls_t) == 2
+    assert stack_t.join is not None
+    assert stack_t.join.error is not None
+    assert "saffron/TOP" in stack_t.join.error
+    assert stack_t.join.cost_usd == 0.0
+
     ledger.close()
-
-
-def _w1_origin(tmp_path: Path, monkeypatch) -> tuple[Path, str, str]:
-    """A second real origin, built the same way `_resolver_origin` is, for
-    the branch-head witness's own six stacks."""
-    return _resolver_origin(tmp_path, monkeypatch)
 
 
 def test_an_end_review_grades_each_layer_at_its_branch_head_after_package(
@@ -2241,7 +2270,7 @@ def test_an_end_review_grades_each_layer_at_its_branch_head_after_package(
     import saffron.end_review as end_review
     from saffron.phases import package as package_phase
 
-    origin, root_sha, base_sha = _w1_origin(tmp_path, monkeypatch)
+    origin, root_sha, base_sha = _resolver_origin(tmp_path, monkeypatch)
 
     def branch_from(parent_sha: str, name: str, filename: str, content: str) -> str:
         _git(origin, "checkout", "-q", "-b", name, parent_sha)
@@ -2277,7 +2306,7 @@ def test_an_end_review_grades_each_layer_at_its_branch_head_after_package(
     a_u1 = branch_from(base_sha, "saffron/A-UNREBASED", "a-u1.txt", "a-u1\n")
     a_r1 = branch_from(base_sha, "saffron/A-REBASED", "a-r1.txt", "a-r1\n")
     a_m1 = branch_from(base_sha, "saffron/A-MERGED", "a-m1.txt", "a-m1\n")
-    b_p1 = branch_from(base_sha, "saffron/B-PARENT", "b-p1.txt", "b-p1\n")
+    b_p1 = branch_from(base_sha, "saffron/B-PRED", "b-p1.txt", "b-p1\n")
     b_c1 = branch_from(b_p1, "saffron/B-CHILD", "b-c1.txt", "b-c1\n")
     c_x = branch_from(base_sha, "tmp-c-x", "c-x.txt", "c-x\n")
     c_y = branch_from(c_x, "tmp-c-y", "c-y.txt", "c-y\n")
@@ -2421,19 +2450,19 @@ def test_an_end_review_grades_each_layer_at_its_branch_head_after_package(
 
     # --- B: a restacked layer outranks its predecessor's recorded head ---
     batch_b, run_b = new_run()
-    parent = task_with_push(run_b, "W1-0004", "saffron/B-PARENT", b_p1)
+    predecessor = task_with_push(run_b, "W1-0004", "saffron/B-PRED", b_p1)
     child_a = task_with_push(run_b, "W1-0005", "saffron/B-CHILD", b_c1)
     ledger.record_stack_layer(
-        parent, position=1, predecessor_task_id=None, generation=0
+        predecessor, position=1, predecessor_task_id=None, generation=0
     )
     ledger.record_stack_layer(
-        child_a, position=2, predecessor_task_id=parent, generation=0
+        child_a, position=2, predecessor_task_id=predecessor, generation=0
     )
 
-    b_p2 = add_commit("saffron/B-PARENT", "b-p2.txt", "b-p2\n")
+    b_p2 = add_commit("saffron/B-PRED", "b-p2.txt", "b-p2\n")
     b_c2 = cherry_pick_onto(b_c1, b_p2)
     _set_branch(origin, "saffron/B-CHILD", b_c2)
-    # PARENT has no predecessor, so both walks resolve it and each needs
+    # B-PRED has no predecessor, so both walks resolve it and each needs
     # the default branch, fetched only once between the two.
     default_calls.clear()
     stack_b, calls_b, cell_calls_b = run_batch(
@@ -2467,6 +2496,7 @@ def test_an_end_review_grades_each_layer_at_its_branch_head_after_package(
 
     stack_c, calls_c = run_one(batch_c, "W1-0007", end_review.branch_heads(mirror, url))
     assert stack_c.join is None
+    assert stack_c.layers[0].reviews[0].error is None
     prompt_c = _flatten(calls_c[0]["options"]["system_prompt"])
     assert "c-child2" in prompt_c
     assert "c-y" not in prompt_c
@@ -2515,6 +2545,8 @@ def test_an_end_review_grades_each_layer_at_its_branch_head_after_package(
 
     assert key_bot3 in stack_d.fields
     assert key_mid3 in stack_d.fields
+    # D-BOT3 moved past what D-MID3 was built on, so the recorded head wins.
+    assert stack_d.fields[key_mid3].base == d_b1
     assert key_top3 in stack_d.fields
 
     by_key_d = {layer.task_key: layer for layer in stack_d.layers}

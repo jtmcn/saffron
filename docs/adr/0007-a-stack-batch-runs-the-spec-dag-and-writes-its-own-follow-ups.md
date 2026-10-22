@@ -224,8 +224,8 @@ this decision rests on.
   from the top down. Follow-ups are then written from part of the findings.
   The summary names each layer it did not reach, so no follow-up reads as
   covering it.
-- **38** upholds. The join lens reads the stack's pushed top head, not a tree
-  assembled for the review.
+- **38** upholds. The join lens reads the top layer's branch head as fetched
+  when the end review runs, not a tree assembled for the review.
 - **40** upholds. The join lens reads the seams between layers. The residual
   is the seams around the follow-ups and the top layer, which it never sees.
 - **41** upholds. Core's prompts learn no repo's language or tools, and core
