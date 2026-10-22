@@ -164,7 +164,7 @@ layer the reserve did not reach is still there whenever the join ran. A
 layer neither walk reached, or whose resolution failed, is absent. So a
 layer's presence says nothing about whether it was reviewed.
 `run_end_review` returns it (`SA-0302`, Problem 4). `_end_review_error_reviews` builds a
-`StackReview` with no `fields` (`saffron/cli.py:818`).
+`StackReview` with no `fields` (`saffron/cli.py:839`).
 
 **Qualification reads the packaged heads.** `qualify` reads the top and
 bottom layers through `end_review.layer_fields`
@@ -179,19 +179,19 @@ anchors over `base..head`, reads each cited file at `head`, and probes at
 `base` over that range's patch (`:124-152`).
 
 **The follow-up writer reads them too.** `write_follow_ups` reads the top
-and bottom layers through `layer_fields` (`saffron/follow_up.py:242-243`).
+and bottom layers through `layer_fields` (`saffron/follow_up.py:246-247`).
 The stack's test paths come from the bottom head's parent to the top head
-(`:244-248`). The probe check reads the top head (`:285`). The origin's
-fields come from `layer_fields` too (`:305`). The prompt's origin diff is
+(`:248-252`). The probe check reads the top head (`:289`). The origin's
+fields come from `layer_fields` too (`:309`). The prompt's origin diff is
 its head's parent to its head, and so is the range the prompt names
-(`:322-324`, `:165`). The prompt names the origin head and the top head
-(`:144-146`).
+(`:326-328`, `:169`). The prompt names the origin head and the top head
+(`:148-150`).
 
 **The writer cell is seeded at the packaged top head.** `_stack_follow_ups`
 reads the top layer through `layer_fields` before anything else runs
-(`saffron/cli.py:1485`). Each writer cell opens at it (`:1520-1521`).
-`qualify.qualify` is called with no fields (`:1494-1507`). The origin's
-spec id comes from `layer_fields` too (`:1514`), inside each `write`
+(`saffron/cli.py:1563`). Each writer cell opens at it (`:1598-1599`).
+`qualify.qualify` is called with no fields (`:1572-1584`). The origin's
+spec id comes from `layer_fields` too (`:1592`), inside each `write`
 call.
 
 **Inside a batch the two agree.** Each branch still sits at its pushed head
@@ -237,7 +237,7 @@ range is the packaged one, and a batch's follow-ups do not change.
   `pushed_sha`, and `saffron/finish.py` reads it. `SA-0306` moves it to the
   graded head. This spec does not touch it.
 - A follow-up's cell is seeded from its predecessor's branch, fetched
-  fresh (`saffron/cli.py:750-754`), so it stacks on the head the branch
+  fresh (`saffron/cli.py:771-776`), so it stacks on the head the branch
   carries. Only its `stack_layers` row's `predecessor_head` keeps the
   recorded `pushed_sha`.
 - `finish.write_findings` names each finding's `head` as the layer's
