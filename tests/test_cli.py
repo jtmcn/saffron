@@ -5369,9 +5369,16 @@ def test_a_stack_batch_holds_a_quarter_of_its_budget_and_reads_its_stack_at_the_
     assert review_captured["prompts_dir"] == cli.context.PROMPTS_DIR
     assert review_captured["max_turns"] == end_review.LENS_MAX_TURNS
     assert review_captured["budget_usd"] == end_review.LENS_BUDGET_USD
+    assert callable(review_captured["resolve"])
 
     fields = end_review.LayerFields(
-        spec_id="SY-1", branch="b", pr_url="", base="base", head="h" * 40, known=""
+        spec_id="SY-1",
+        branch="b",
+        pr_url="",
+        base="base",
+        head="h" * 40,
+        known="",
+        diff_base="base",
     )
     with review_captured["open_cell"](fields) as container:
         assert isinstance(container, str)
@@ -5579,6 +5586,108 @@ def test_a_stack_batch_holds_a_quarter_of_its_budget_and_reads_its_stack_at_the_
     assert all(
         "unreadable" in line or "review broke" in line for line in end_review_lines
     )
+
+
+def test_a_stack_batchs_end_review_reads_each_layer_at_its_fetched_branch_head(
+    tmp_path, monkeypatch
+):
+    """`_stack_end_review` hands `run_end_review` the resolver
+    `end_review.branch_heads` builds on the pinned mirror and url. It
+    builds this fresh inside `run`, so each end review starts with an
+    empty cache. Asked for a layer, it fetches that layer's branch there
+    and grades the fetched head."""
+    mirror = tmp_path / "mirror"
+    mirror.mkdir()
+    _git(mirror, "init", "-q")
+    (mirror / ".saffron").mkdir()
+    (mirror / ".saffron" / "policy.yaml").write_text(
+        "gates: {}\nthread_env:\n  X: base\n"
+    )
+    (mirror / "CLAUDE.md").write_text("claude at base\n")
+    _git(mirror, "add", "-A")
+    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "base")
+    base_sha = _rev_parse(mirror, "HEAD")
+    (mirror / "layer.txt").write_text("push one\n")
+    _git(mirror, "add", "-A")
+    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "push1")
+    push1 = _rev_parse(mirror, "HEAD")
+    (mirror / "layer.txt").write_text("push one\npush two\n")
+    _git(mirror, "add", "-A")
+    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "push2")
+    push2 = _rev_parse(mirror, "HEAD")
+
+    pinned_url = "https://example.invalid/o/r.git"
+    pinned = task.PinnedBase(mirror=mirror, url=pinned_url, base_sha=base_sha)
+    repo = tmp_path / "operator-repo"
+    repo.mkdir()
+
+    ledger = Ledger(tmp_path / "ledger.db")
+    repo_id = ledger.upsert_repo("r", pinned_url, str(mirror), policy_sha=None)
+    batch_id = ledger.create_batch(100.0)
+    run_id = ledger.create_run(repo_id, pinned.base_sha, batch_id=batch_id)
+    task_id = ledger.create_task(
+        run_id, spec_id="SY-1", spec_sha="s" * 64, branch="saffron/SY-1"
+    )
+    ledger.set_task_package(
+        task_id, "READY_FOR_REVIEW", "saffron/SY-1", push1, "https://h/pull/1"
+    )
+    ledger.record_stack_layer(
+        task_id, position=1, predecessor_task_id=None, generation=0
+    )
+    layer_key = ledger.record_key(task_id)
+    assert layer_key is not None
+
+    fetch_calls: list[tuple[Path, str, str]] = []
+    heads = {"saffron/SY-1": push1}
+
+    def fake_fetch_parent_branch(mirror_arg, url_arg, branch):
+        fetch_calls.append((mirror_arg, url_arg, branch))
+        return heads[branch]
+
+    def fake_fetch_default_branch(mirror_arg, url_arg):
+        return "main", base_sha
+
+    monkeypatch.setattr(
+        cli.package_phase, "fetch_parent_branch", fake_fetch_parent_branch
+    )
+    monkeypatch.setattr(
+        cli.package_phase, "fetch_default_branch", fake_fetch_default_branch
+    )
+
+    captured_resolves: list = []
+    resolved: list = []
+
+    def fake_run_end_review(ledger_arg, batch_key, reserve_usd, specs_arg, **kwargs):
+        resolve = kwargs["resolve"]
+        captured_resolves.append(resolve)
+        resolved.append(resolve(ledger_arg, layer_key))
+        return "sentinel"
+
+    monkeypatch.setattr(cli.end_review, "run_end_review", fake_run_end_review)
+
+    run = cli._stack_end_review(
+        pinned=pinned, repo=repo, ledger=ledger, out_dir=tmp_path / "out"
+    )
+
+    spec = intake.Spec(id="SY-1", title="t", type="chore")
+    result1 = run(str(batch_id), 10.0, {"SY-1": spec})
+    assert result1 == "sentinel"
+
+    # The branch moves between the two end reviews: each must grade the
+    # head it fetches, not one kept from the first review's cache.
+    heads["saffron/SY-1"] = push2
+    result2 = run(str(batch_id), 10.0, {"SY-1": spec})
+    assert result2 == "sentinel"
+
+    assert len(resolved) == 2
+    assert resolved[0].head == push1
+    assert resolved[1].head == push2
+    assert captured_resolves[0] is not captured_resolves[1]
+    for mirror_arg, url_arg, _branch in fetch_calls:
+        assert mirror_arg == pinned.mirror
+        assert url_arg == pinned.url
+
+    ledger.close()
 
 
 def test_a_deadline_earlier_than_now_resolves_to_tomorrow():
@@ -9071,6 +9180,7 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
                 base="z" * 40,
                 head="2" * 40,
                 known="",
+                diff_base="z" * 40,
             )
         if task_key == "k-bot":
             return end_review.LayerFields(
@@ -9080,6 +9190,7 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
                 base="y" * 40,
                 head="1" * 40,
                 known="",
+                diff_base="y" * 40,
             )
         raise KeyError(task_key)
 
