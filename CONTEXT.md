@@ -161,7 +161,8 @@ _Avoid_: "failed" for `INFRASTRUCTURE` (a task fails, a night stops), "finished"
 
 **Stack batch**: A batch started with `saffron batch --stack` (ADR 7). It fixes its
 stack order once, at batch start, and never rescans. Each task stacks on its
-predecessor. One end review reads the stack once the batch stops taking tasks.
+predecessor. One end review reads the stack once the batch stops taking tasks, or later
+for a batch started with `--defer-end-review`.
 _Avoid_: "stack run" (a run is a pin), "spec loop" (the delegate's attended pass).
 
 **Stack order**: A stack batch's fixed order over its queued specs. A spec joins it

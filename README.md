@@ -122,7 +122,8 @@ uv run saffron watch SA-0060 --no-follow
 
 Run a night, unattended. `--until` is a *start no new task after* bound, not a kill, so a
 night ends at the deadline plus at most one task. A `--stack` night then runs its end
-review, paid from the reserve it held back:
+review, paid from the reserve it held back. A `--stack --defer-end-review` night skips the
+end review, follow-ups and finishing layer, and leaves them to a later finish:
 
 ```sh
 CLAUDE_CODE_OAUTH_TOKEN=... uv run saffron batch --repo . --budget 50 --until 06:30
