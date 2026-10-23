@@ -1191,7 +1191,7 @@ def test_a_follow_up_is_written_from_the_heads_and_ranges_the_end_review_graded(
         Mutant(file="tests/test_f.py", find="def test_f", replace="def test_g"),
         "survived",
     )
-    concern = _finding("correctness", "concern", "src/b.py", 1, "ic-concern")
+    concern = _finding("conventions", "concern", "src/b.py", 1, "ic-concern")
     top_group = FollowUpGroup(
         task_key=key_102,
         file="src/b.py",

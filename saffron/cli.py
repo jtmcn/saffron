@@ -1537,9 +1537,9 @@ def _stack_follow_ups(
     that call after `qualify` returns still pools every unaccepted finding
     its walk never reached.
 
-    The top layer, `qualify.qualify` and each `write` call's origin all read
-    `stack.fields` through `qualify.graded_fields`. A layer the end review
-    graded at a moved head then reads that head.
+    The top layer, the join's and each layer's end-review findings, and each
+    `write` call's origin read `stack.fields` through `qualify.graded_fields`.
+    A layer the end review graded at a moved head then reads that head.
     """
 
     def run(batch_key: str, stack: end_review.StackReview) -> list[Candidate]:

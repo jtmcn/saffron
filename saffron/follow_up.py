@@ -250,6 +250,7 @@ def write_follow_ups(
     no cell. `write` and `mint` are the caller's own. Every head and range
     comes from `stack.fields` through `graded_fields`, falling back to
     `end_review.layer_fields`'s packaged head for a layer absent from it.
+    An in-cell concern's line names its packaged head instead.
     """
     qualification = qualify(stack.layers, stack.join)
     emit(f"{len(qualification.pool)} qualified findings joined no group")

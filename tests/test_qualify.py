@@ -1295,3 +1295,6 @@ def test_findings_are_anchored_and_probed_over_the_range_the_end_review_graded(
         for g in result_bottom.groups
     }
     assert groups_bottom[(te2_key_b, "src/c.py")] == ["join-review", "te2-review"]
+    # The join's bottom falls back to TE-1's packaged range, not the top's.
+    assert calls_bottom[0]["base_sha"] == built_bottom.shas["M"]
+    assert "+a2_new" in calls_bottom[0]["patch"]
