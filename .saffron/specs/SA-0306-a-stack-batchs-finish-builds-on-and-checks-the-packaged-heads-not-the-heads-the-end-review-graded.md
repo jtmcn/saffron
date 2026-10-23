@@ -184,7 +184,7 @@ and the follow-up writer read those fields. The finish still reads the
 packaged heads. This spec has it read the graded ones. `SA-0305` then
 builds `saffron finish <batch id> --repo .` on what this spec adds.
 
-Every line below was read in `saffron/` as it stands at `e8f5529e`.
+Every line below was read in `saffron/` as it stands at `db225faa`.
 `SA-0301`, `SA-0302` and `SA-0303` edit `saffron/cli.py` before this
 spec runs, so find each function there by name. None of them edits
 `saffron/finish.py` or `saffron/report/stack.py`.
@@ -203,52 +203,52 @@ Its docstring says so (`:156`), and so does the module docstring
 (`:3-5`).
 
 **The publish judges and checks against `pushed_sha`.** `publish_finish`
-hands `verify` the top layer's `pushed_sha` as its `base` (`:374`). It then
+hands `verify` the top layer's `pushed_sha` as its `base` (`saffron/finish.py:374`). It then
 reads each layer's remote head and escalates when it is not that layer's
 `pushed_sha`, naming both (`:383-389`). Its docstring says so (`:364-366`).
 A branch the loop's review commits moved therefore escalates, though the
 end review graded it there.
 
 **Each finding names `pushed_sha`.** `_layer_findings` sets `head` to the
-layer's `pushed_sha` (`:259`). Every `qualifications` entry carries it
-(`:270-282`), and so does a generation-1 layer's critic entry (`:283-284`,
+layer's `pushed_sha` (`saffron/finish.py:259`). Every `qualifications` entry carries it
+(`:261-282`), and so does a generation-1 layer's critic entry (`:283-284`,
 `_left_by_critic` at `:230-250`). `write_findings` calls `_layer_findings`
 once per layer (`:306-307`). A follow-up that added no layer names its own
 row's `pushed_sha` (`:314-317`). A `qualifications` row holds the
-end-review lenses (`END_LENSES`, `saffron/end_review.py:35-38`), the join,
+end-review lenses (`END_LENSES`, `saffron/end_review.py:43-46`), the join,
 and the in-cell lenses of `review.LENSES` (`saffron/phases/review.py:41-46`).
 `SA-0303` qualifies an in-cell concern over the packaged range, citing the
 packaged head. So only an end-review or join row was graded at the
 graded head.
 
 **No generation-1 layer is graded.** `run_stack_batch` calls `end_review`
-before `follow_ups` (`saffron/batch.py:863-867`). So `StackReview.fields`
+before `follow_ups` (`saffron/batch.py:914-918`). So `StackReview.fields`
 never holds a follow-up's layer, and a critic entry never meets a graded
 head.
 
 **The batch builds both callables from one resolve.** `_batch` builds
 `_stack_end_review` and `_stack_finish` in the same `--stack` branch
-(`saffron/cli.py:2116-2118`, `:2148-2154`). It hands them to
-`run_stack_batch` as `end_review` and `finish` (`:2198`, `:2205`).
+(`saffron/cli.py:2208-2210`, `:2242-2248`). It hands them to
+`run_stack_batch` as `end_review` and `finish` (`:2292`, `:2299`).
 `run_stack_batch` calls `end_review` and later `finish` (`SA-0304`'s
-context, `saffron/batch.py:852-909`). `_stack_finish` calls
+context, `saffron/batch.py:898-958`). `_stack_finish` calls
 `finish.write_findings`, `finish.commit_finish` and `finish.publish_finish`
-inside its callable (`saffron/cli.py:958`, `:966-968`, `:989-999`). The
+inside its callable (`saffron/cli.py:1033`, `:1041-1043`, `:1064-1074`). The
 end review's callable is typed to return `object`
-(`saffron/cli.py:823`). One existing test's fake `run_end_review` returns a
-bare `object()` and asserts the batch hands it back unchanged
-(`tests/test_cli.py:5258`, `:5280`, `:5359`).
+(`saffron/cli.py:844`). One existing test's fake `run_end_review` returns a
+bare `object()` (`tests/test_cli.py:5258`, `:5274-5280`). The test asserts
+the batch hands it back unchanged (`:5359`).
 
 **`_batch` already binds a local named `heads`.** It is the shared commit
-cache of the cite and the review (`saffron/cli.py:2121`). It maps a pair of
+cache of the cite and the review (`saffron/cli.py:2214`). It maps a pair of
 strings to a sha, and it is not this mapping.
 
 **The stack view reads the newest batch.** `write_stack_view` renders
 `stack_view` of `ledger.latest_batch_id()` (`saffron/report/stack.py:264-272`).
-Its docstring says "the newest batch" (`:265-270`). A finish that runs
+Its docstring says "the newest batch" (`:267-271`). A finish that runs
 after a later batch would render that later batch. `SA-0305` calls it
 with the id of the batch it finishes. `_batch` calls it after
-`run_stack_batch` returns (`saffron/cli.py:2210`), when its own batch is
+`run_stack_batch` returns (`saffron/cli.py:2283-2304`), when its own batch is
 the newest.
 
 ## Problem
@@ -282,8 +282,8 @@ the newest.
    which falls back to `ledger.latest_batch_id()`. `_batch` keeps calling
    it without one.
 5. **Four docstrings go false, so edit them.** `finish.py`'s module
-   docstring (`:3-5`), `commit_finish`'s (`:156`), `publish_finish`'s
-   (`:364-366`) and `write_stack_view`'s (`saffron/report/stack.py:265-270`).
+   docstring (`saffron/finish.py:1-13`), `commit_finish`'s (`:147-163`), `publish_finish`'s
+   (`:347-368`) and `write_stack_view`'s (`saffron/report/stack.py:264-271`).
 
 ## Out of scope
 
@@ -293,15 +293,15 @@ the newest.
 - **A follow-up that added no layer.** `write_findings` names its own
   row's `pushed_sha` (`saffron/finish.py:316`). The end review grades no
   follow-up, so `heads` holds no entry for one.
-- **The check of each pull request's base branch, and `link_stack`.**
+- **The check of each pull request's base branch, and `link_stack`**.
   Both read branches, not heads (`saffron/finish.py:391-424`, `:46-86`).
-- **The finishing row.** `record_stack_finish` records the finishing
+- **The finishing row**. `record_stack_finish` records the finishing
   commit's own sha (`saffron/finish.py:434`, `:445`), which does not move.
 - **ADR 7.** Its paragraph "The finishing layer's parent is the top
   layer's recorded head" and its dated amendment
-  (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:136-145`)
+  (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:139-148`)
   are the operator's. `docs/adr/**` is `protected`, and the amendment
-  lands by hand in this spec's pull request.
+  landed by hand with this spec's own pull request.
 
 ## Notes for the agent
 
@@ -328,7 +328,7 @@ Under `--defer-end-review` (`SA-0301`) `finish` is `None`, so nothing is
 wrapped.
 
 **Name the new dict apart from `heads`.** `_batch`'s `heads` is the commit
-cache, typed by a pair of strings (`saffron/cli.py:2121`). A second binding
+cache, typed by a pair of strings (`saffron/cli.py:2214`). A second binding
 of that name fails the `types` gate or shadows the cache.
 
 **Existing tests that change.** Two fakes in `tests/test_cli.py` take a
