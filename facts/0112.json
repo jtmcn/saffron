@@ -1,0 +1,1 @@
+{"at": "2026-10-23T18:51:35.383770+00:00", "batch_key": "47", "kind": "task_package", "payload": {"added": 815, "branch": "saffron/SA-0303", "pr_url": "https://github.com/jtmcn/saffron/pull/939", "pushed_sha": "4f53899cb922aa5d666a70550248067757746fb8", "removed": 72, "state": "READY_FOR_REVIEW"}, "repo": "saffron", "task_key": "afc210f65d64e2a6a64fe146b84a4799"}
