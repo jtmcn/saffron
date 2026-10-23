@@ -1336,9 +1336,9 @@ class Ledger:
 
     def latest_batch_id(self) -> int:
         """The high-water mark on `batches.batch_id`, `max_run_id`'s shape
-        one table over. `run_stack_batch` reads it once `run_batch` returns,
-        since a stop reason carries no id and `create_batch` never hands one
-        back through it."""
+        one table over. `write_stack_view` reads it after a stack batch
+        returns, since a stop reason carries no id. `run_stack_batch` holds its
+        own batch id and reads none."""
         row = self._db.execute(
             "SELECT COALESCE(MAX(batch_id), 0) AS high_water FROM batches"
         ).fetchone()
