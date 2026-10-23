@@ -899,6 +899,29 @@ def _stack_end_review(
     return run
 
 
+def _keeping_graded_heads(
+    inner: Callable[[str, float, Mapping[str, Spec]], object],
+    heads: dict[str, str],
+) -> Callable[[str, float, Mapping[str, Spec]], object]:
+    """Wraps an `end_review` callable so `heads` holds every graded layer's
+    own head once it returns (`SA-0304`, `DESIGN.md` §5.7).
+
+    Calls `inner`, and when its result is a `StackReview`, copies
+    `{task_key: fields.head}` for each of its own `fields` entries into
+    `heads`. Copies nothing from any other result, and returns `inner`'s
+    result unchanged either way.
+    """
+
+    def run(batch_key: str, reserve_usd: float, specs: Mapping[str, Spec]) -> object:
+        result = inner(batch_key, reserve_usd, specs)
+        if isinstance(result, end_review.StackReview):
+            for task_key, fields in result.fields.items():
+                heads[task_key] = fields.head
+        return result
+
+    return run
+
+
 # What `saffron finish` reads to run a deferred batch's end review (SA-0305).
 DEFERRED_NAME = "deferred.json"
 
@@ -1015,22 +1038,25 @@ def _stack_finish(
     out_dir: Path,
     pooled: Sequence[follow_up.Pooled],
     repo: Path,
+    heads: Mapping[str, str],
 ) -> Callable[[int, list[int]], object]:
-    """`run_stack_batch`'s `finish` callable (ADR 7). Writes `findings.json`
-    first, in its own `try` guarding `Exception`, with the same `pooled`
-    `_stack_follow_ups` filled. A `GitError` or `ValueError` from
-    `finish.commit_finish` is printed and swallowed here too, so the
-    night's exit code stays its stop reason's. Any other raise from the
-    commit reaches `main`. A real commit is then judged and pushed through
-    `finish.publish_finish`, inside its own `try` guarding `Exception`,
-    since a push can come before a raise. Only a line that reports a push
-    leads to `finish.link_stack`, and every other path says it linked nothing.
+    """`run_stack_batch`'s `finish` callable (ADR 7). Reads `heads` on each
+    call and hands it to all three calls below. Writes `findings.json`,
+    with the same `pooled` `_stack_follow_ups` filled, in its own `try`
+    guarding `Exception`. A `GitError` or `ValueError` from
+    `finish.commit_finish` is printed and swallowed too. Any other raise
+    reaches `main`. A real commit is judged and pushed through
+    `finish.publish_finish`, in its own `try` guarding `Exception`, since
+    a push can come before a raise. A line reporting a push leads to
+    `finish.link_stack`, else nothing is linked.
     """
 
     def run_finish(batch_id: int, unrun: list[int]) -> object:
         dest = out_dir / "finish" / str(batch_id) / finish.FINDINGS_NAME
         try:
-            finish.write_findings(ledger, batch_id, unrun, dest, pooled=pooled)
+            finish.write_findings(
+                ledger, batch_id, unrun, dest, pooled=pooled, heads=heads
+            )
         except Exception as exc:
             print(f"finish: {type(exc).__name__}: {exc}")
         else:
@@ -1039,7 +1065,12 @@ def _stack_finish(
         workdir = out_dir / "finish" / str(batch_id) / "tree"
         try:
             sha = finish.commit_finish(
-                ledger, batch_id, unrun, mirror=pinned.mirror, workdir=workdir
+                ledger,
+                batch_id,
+                unrun,
+                mirror=pinned.mirror,
+                workdir=workdir,
+                heads=heads,
             )
         except (git_mirror.GitError, ValueError) as exc:
             print(f"finish: {type(exc).__name__}: {exc}")
@@ -1071,6 +1102,7 @@ def _stack_finish(
                 verify=verify,
                 gh=_guarded_gh([]),
                 workdir=out_dir / "finish" / str(batch_id) / "push",
+                heads=heads,
             )
         except Exception as exc:
             print(f"finish: publish stopped: {type(exc).__name__}: {exc}")
@@ -2196,6 +2228,9 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                     out_dir=out_dir,
                     stack_base=stack_base,
                 )
+                # The heads this batch's own end review grades, read later
+                # by `_stack_finish` in place of a layer's own `pushed_sha`.
+                graded_heads: dict[str, str] = {}
                 assert writer_usd is not None  # set whenever `args.stack` is
                 stack_end_review = (
                     _stack_deferred_end_review(
@@ -2205,8 +2240,11 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                         writer_usd=writer_usd,
                     )
                     if args.defer_end_review
-                    else _stack_end_review(
-                        pinned=pinned, repo=repo, ledger=ledger, out_dir=out_dir
+                    else _keeping_graded_heads(
+                        _stack_end_review(
+                            pinned=pinned, repo=repo, ledger=ledger, out_dir=out_dir
+                        ),
+                        graded_heads,
                     )
                 )
                 # One shared commit cache: a cite and the review right
@@ -2245,6 +2283,7 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                         out_dir=out_dir,
                         pooled=pooled,
                         repo=repo,
+                        heads=graded_heads,
                     )
             else:
                 # Updated by every rescan, so `_batch_runner`'s `repo_id`

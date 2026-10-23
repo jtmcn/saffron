@@ -9951,7 +9951,9 @@ def test_a_stack_batch_writes_its_findings_from_the_pooled_list_its_writer_fille
 
     calls: list[tuple] = []
 
-    def _recording_write_findings(ledger, batch_id, unrun, dest, *, pooled=()):
+    def _recording_write_findings(
+        ledger, batch_id, unrun, dest, *, pooled=(), heads=()
+    ):
         calls.append(("findings", batch_id, unrun, dest, list(pooled)))
 
     def _recording_commit_finish(ledger, batch_id, unrun, *, mirror, workdir, **kw):
@@ -10072,7 +10074,7 @@ def test_a_stack_batch_publishes_its_finish_through_the_finishing_suite(
     verify_result: dict[str, int] = {}
 
     def _fake_publish_finish(
-        ledger, batch_id, sha, *, mirror, url, slug, verify, gh, workdir
+        ledger, batch_id, sha, *, mirror, url, slug, verify, gh, workdir, heads=()
     ):
         publish_calls.append(
             {
@@ -10174,6 +10176,96 @@ def test_a_stack_batch_publishes_its_finish_through_the_finishing_suite(
         printed = capsys.readouterr().out
         assert "finish: no layer, so nothing committed" in printed
     assert len(publish_calls) == before
+
+
+def test_a_stack_batchs_finish_reads_the_heads_its_end_review_graded(
+    tmp_path, monkeypatch
+):
+    """`cli._keeping_graded_heads` wraps the in-batch `_stack_end_review`
+    callable. When its result is a `StackReview`, each `fields` entry's
+    `head` is copied by task key into the mapping `_stack_finish` reads
+    on every call. `run_stack_batch` gets back the review unchanged,
+    whether or not `fields` holds anything."""
+    from saffron import end_review as end_review_module
+    from saffron import finish as finish_module
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+
+    def _fields(spec_id: str, head: str) -> end_review_module.LayerFields:
+        return end_review_module.LayerFields(
+            spec_id=spec_id,
+            branch=f"saffron/{spec_id}",
+            pr_url=f"https://example.invalid/pr/{spec_id}",
+            base="b" * 40,
+            head=head,
+            known="",
+            diff_base="c" * 40,
+        )
+
+    graded = end_review_module.StackReview(
+        join=None,
+        layers=[],
+        fields={"k1": _fields("TE-1", "1" * 40), "k2": _fields("TE-2", "2" * 40)},
+    )
+
+    captured: dict = {}
+
+    def _fake_run_stack_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        captured["result"] = kwargs["end_review"]("7", 10.5, {})
+        kwargs["finish"](3, [5, 6])
+        return "DRAINED"
+
+    monkeypatch.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
+
+    finish_heads: dict[str, dict] = {}
+
+    def _fake_write_findings(ledger, batch_id, unrun, dest, *, pooled=(), heads):
+        finish_heads["findings"] = dict(heads)
+        return dest
+
+    def _fake_commit_finish(ledger, batch_id, unrun, *, mirror, workdir, heads):
+        finish_heads["commit"] = dict(heads)
+        return "c" * 40
+
+    def _fake_publish_finish(
+        ledger, batch_id, sha, *, mirror, url, slug, verify, gh, workdir, heads
+    ):
+        finish_heads["publish"] = dict(heads)
+        return []
+
+    monkeypatch.setattr(finish_module, "write_findings", _fake_write_findings)
+    monkeypatch.setattr(finish_module, "commit_finish", _fake_commit_finish)
+    monkeypatch.setattr(finish_module, "publish_finish", _fake_publish_finish)
+
+    with monkeypatch.context() as m:
+        m.setattr(cli, "_stack_end_review", lambda **kwargs: lambda *a: graded)
+        _readiness_passes(m, tmp_path)
+        home = tmp_path / "home"
+        assert main(["--home", str(home), "batch", "--stack"]) == 0
+
+    assert captured["result"] is graded
+    expected = {"k1": "1" * 40, "k2": "2" * 40}
+    assert finish_heads == {
+        "findings": expected,
+        "commit": expected,
+        "publish": expected,
+    }
+
+    # No `fields`: every call still reads `heads`, left empty.
+    finish_heads.clear()
+    bare = end_review_module.StackReview(join=None, layers=[])
+    with monkeypatch.context() as m:
+        m.setattr(cli, "_stack_end_review", lambda **kwargs: lambda *a: bare)
+        _readiness_passes(m, tmp_path)
+        home2 = tmp_path / "home2"
+        assert main(["--home", str(home2), "batch", "--stack"]) == 0
+
+    assert captured["result"] is bare
+    assert finish_heads == {"findings": {}, "commit": {}, "publish": {}}
 
 
 def test_a_stack_batch_links_its_pushed_stack_through_a_repo_bound_gh(

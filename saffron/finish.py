@@ -1,8 +1,9 @@
 """The stack batch's finishing layer (ADR 7).
 
 Reads a batch's layers and every spec text it will write. Checks each
-path's shape and hash before touching git, then cuts a worktree atop the
-top layer's own head. Once that worktree exists, each pending path is
+path's shape and hash before touching git, then cuts a worktree. It sits
+atop the top layer's own head, or an end review's own graded head named
+in `heads` (`DESIGN.md` §5.7). Once that worktree exists, each pending path is
 checked again, this time against the tree itself, right before its own
 write: a symlink on that path below the worktree makes the finish refuse
 the write rather than follow the link out of the worktree. It also writes the batch's own
@@ -18,7 +19,7 @@ import hashlib
 import json
 import re
 import stat
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from saffron.cell.runtime import CellRuntimeError
@@ -151,9 +152,11 @@ def commit_finish(
     *,
     mirror: Path,
     workdir: Path,
+    heads: Mapping[str, str] = {},
     emit: Callable[[str], None] = print,
 ) -> str | None:
-    """One commit in `mirror`, atop the top layer's recorded `pushed_sha`.
+    """One commit in `mirror`, atop the top layer's own entry in `heads`
+    when named, else its recorded `pushed_sha`.
 
     Writes each layer's and each task in `unrun`'s latest spec text, and
     moves no spec into `done/` (ADR 7, amended). Raises `ValueError` naming
@@ -180,7 +183,9 @@ def commit_finish(
             continue
         pending.append(_checked(row))
 
-    git_mirror.add_worktree(mirror, top["pushed_sha"], workdir)
+    git_mirror.add_worktree(
+        mirror, heads.get(top["task_key"], top["pushed_sha"]), workdir
+    )
     try:
         for path, text in pending:
             _refuse_symlink(workdir, path)
@@ -250,13 +255,17 @@ def _left_by_critic(
     ]
 
 
-def _layer_findings(ledger: Ledger, layer, pooled: Sequence[Pooled]) -> list[dict]:
+def _layer_findings(
+    ledger: Ledger, layer, pooled: Sequence[Pooled], heads: Mapping[str, str]
+) -> list[dict]:
     """One layer's own entries: each kept `qualifications` row, remapped
     through `pooled`, then its own critic's findings when it is a
-    follow-up layer (generation 1, ADR 7)."""
+    follow-up layer (generation 1, ADR 7). A row whose lens is not an
+    in-cell lens (`review.LENSES`) takes the layer's own entry in `heads`
+    when named. Only an end-review or join row was ever read at that head.
+    Every other row, critic entries included, keeps `pushed_sha`."""
     task_key = layer["task_key"]
     spec_id = layer["spec_id"]
-    head = layer["pushed_sha"]
     entries: list[dict] = []
     for row in ledger.qualifications(layer["task_id"]):
         outcome = row["outcome"]
@@ -267,6 +276,11 @@ def _layer_findings(ledger: Ledger, layer, pooled: Sequence[Pooled]) -> list[dic
             outcome, reason = ("pooled", match.reason) if match else ("follow_up", "")
         else:
             reason = row["reason"]
+        head = (
+            layer["pushed_sha"]
+            if row["lens"] in review.LENSES
+            else heads.get(task_key, layer["pushed_sha"])
+        )
         entries.append(
             {
                 "spec_id": spec_id,
@@ -281,7 +295,9 @@ def _layer_findings(ledger: Ledger, layer, pooled: Sequence[Pooled]) -> list[dic
             }
         )
     if layer["generation"] == 1:
-        entries.extend(_left_by_critic(ledger, layer["task_id"], spec_id, head))
+        entries.extend(
+            _left_by_critic(ledger, layer["task_id"], spec_id, layer["pushed_sha"])
+        )
     return entries
 
 
@@ -292,11 +308,13 @@ def write_findings(
     dest: Path,
     *,
     pooled: Sequence[Pooled] = (),
+    heads: Mapping[str, str] = {},
 ) -> Path:
     """The batch's own backlog pool, one object of `batch`, `findings` and
     `follow_ups` (design section 4). `findings` walks each layer in position
     order, then each follow-up that ran and added no layer, in task order.
-    `follow_ups` names each such follow-up's latest spec text.
+    `follow_ups` names each such follow-up's latest spec text. A layer's
+    end-review and join entries take its own entry in `heads` when named.
     Writes `dest`, making its directory, and returns it."""
     layers = ledger.stack_layers(batch_id)
     layer_task_ids = {layer["task_id"] for layer in layers}
@@ -304,7 +322,7 @@ def write_findings(
 
     findings: list[dict] = []
     for layer in layers:
-        findings.extend(_layer_findings(ledger, layer, pooled))
+        findings.extend(_layer_findings(ledger, layer, pooled, heads))
 
     follow_up_rows = [
         row
@@ -355,23 +373,25 @@ def publish_finish(
     verify: Callable[[str, str], int],
     gh: package_phase.GhRunner,
     workdir: Path,
+    heads: Mapping[str, str] = {},
 ) -> list[str]:
     """Judge `sha` with the finishing suite, then push it and open its draft
     pull request (ADR 7). Every check below runs before the one push, in
     order, and each returns one line starting `ESCALATE` on its own failure.
 
     A temporary ref names `sha` for `verify`'s own span, since a gate-only
-    cell's seed can only fetch a branch. Every layer's remote head is then
-    read against its own `pushed_sha`, and every pull request's base against
-    its predecessor's branch, bottom to top. Only then is `sha` pushed to
-    its own branch, recorded, and handed to `gh pr create`.
+    cell's seed can only fetch a branch. Each layer's remote head is read
+    against its own entry in `heads`, else its `pushed_sha`. Each pull
+    request's base is read against its predecessor's branch, bottom to
+    top. Only then is `sha` pushed, recorded, and handed to `gh pr create`.
     """
     layers = ledger.stack_layers(batch_id)
     top = layers[-1]
+    top_head = heads.get(top["task_key"], top["pushed_sha"])
     ref = f"refs/heads/saffron-finish/{batch_id}"
     git_mirror._git(mirror, "update-ref", ref, sha)
     try:
-        new_failures = verify(sha, top["pushed_sha"])
+        new_failures = verify(sha, top_head)
     except (package_phase.PackageError, CellRuntimeError) as exc:
         return [f"{ESCALATE}the finishing suite did not finish: {exc}"]
     finally:
@@ -381,12 +401,11 @@ def publish_finish(
 
     default = package_phase.default_branch(url, cwd=mirror)
     for layer in layers:
+        graded = heads.get(layer["task_key"], layer["pushed_sha"])
         head = package_phase.remote_sha(url, layer["branch"], cwd=mirror)
-        if head != layer["pushed_sha"]:
+        if head != graded:
             got = head if head else "nothing"
-            return [
-                f"{ESCALATE}{layer['branch']} is at {got}, not {layer['pushed_sha']}"
-            ]
+            return [f"{ESCALATE}{layer['branch']} is at {got}, not {graded}"]
 
     by_key = {layer["task_key"]: layer for layer in layers}
     for layer in layers:

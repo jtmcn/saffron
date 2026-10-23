@@ -262,14 +262,20 @@ def _predecessor_text(predecessor: str | None, head: str | None) -> str:
 
 
 def write_stack_view(
-    out_dir: Path, ledger: Ledger, specs: dict[str, Spec]
+    out_dir: Path,
+    ledger: Ledger,
+    specs: dict[str, Spec],
+    *,
+    batch_id: int | None = None,
 ) -> Path | None:
-    """Render the newest batch's stack view into `index.html`, 0 included.
+    """Render one batch's stack view into `index.html`, 0 included.
 
-    Writes nothing, and leaves `queue.json` untouched, when the newest
-    batch has no `stack_layers` row.
+    Renders `batch_id` when named, else the newest batch. Writes nothing,
+    and leaves `queue.json` untouched, when that batch has no
+    `stack_layers` row.
     """
-    view = stack_view(ledger, ledger.latest_batch_id(), specs)
+    resolved_id = batch_id if batch_id is not None else ledger.latest_batch_id()
+    view = stack_view(ledger, resolved_id, specs)
     if view is None:
         return None
     out_dir.mkdir(parents=True, exist_ok=True)
