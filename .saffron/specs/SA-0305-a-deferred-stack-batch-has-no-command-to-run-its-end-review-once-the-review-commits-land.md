@@ -133,8 +133,9 @@ review commits land. Runs 32, 33, 35, 44 and 45 each found most of its
 findings already fixed on the branches. This is the last of the six specs
 that item splits into, and it adds the command the other five build
 toward. Every line cited below was read in `saffron/` as it stands at
-`e8f5529e`, which holds none of the specs' code. `SA-0301` to `SA-0304` and `SA-0306`
-each edit `saffron/cli.py` first, so find each function there by name.
+`a8ec9d97`, the head of `saffron/SA-0306`, which holds all five specs'
+code. `SA-0301` to `SA-0304` and `SA-0306` each edit `saffron/cli.py`
+first, so find each function there by name.
 
 **What the five specs below give this spec.**
 
@@ -163,18 +164,18 @@ each edit `saffron/cli.py` first, so find each function there by name.
   `write_stack_view` takes a `batch_id` keyword.
 
 **`_batch` builds the stack adapters.** Under `--stack` it builds them once
-the scan resolves (`saffron/cli.py:2108-2154`). `_stack_review` and
-`_stack_cite` share one commit cache there (`:2121`). That covers
+the scan resolves (`saffron/cli.py:2126-2287`). `_stack_review` and
+`_stack_cite` share one commit cache there (`:2250-2262`). That covers
 `_stack_runner`, `_stack_end_review`, `_stack_review`, `_stack_cite`,
 `_stack_revise`, `_stack_mint`, `_stack_base_alive`, `_stack_follow_ups`
 with `cap_usd=writer_usd`, `_stack_open_prs` and `_stack_finish`. It then
-calls `run_stack_batch` (`:2189-2207`) and writes the stack view
-(`:2210`). `_stack_base_alive` takes the pinned base positionally
-(`:713`). `_stack_open_prs` takes the repo's slug (`:1585`), which
-`_resolve_queue` reads with `package_phase.github_slug(url)` (`:1702-1705`).
-`_batch` maps a stop reason to an exit code at `:2231-2247`.
+calls `run_stack_batch` (`:2322-2340`). It then writes the stack view
+(`:2343`). `_stack_base_alive` takes the pinned base positionally
+(`:734`). `_stack_open_prs` takes the repo's slug (`:1700`), which
+`_resolve_queue` reads with `package_phase.github_slug(url)` (`:1818`).
+`_batch` maps a stop reason to an exit code at `:2322-2379`.
 `run_stack_batch` takes `readiness_check` with no default
-(`saffron/batch.py:428`).
+(`saffron/batch.py:448`).
 
 **The ledger already reads most of the resume.** `batch_budget` returns a
 batch's budget, or `None` for an id with no row (`saffron/ledger.py:1419`).
@@ -185,27 +186,27 @@ layers, lowest position first, each with `task_id`, `spec_id`,
 returns the batch's finishing row, or `None` (`:1816`). A stack base is a
 task with no `stack_layers` row of its own. The bottom layer's
 `predecessor_key` names it, and `finish.publish_finish` reads its branch
-through `tasks.record_key` (`saffron/finish.py:396-403`).
+through `tasks.record_key` (`saffron/finish.py:415-422`).
 
 **An end review cannot be recorded twice for one layer.** The
 `end_reviews` table's primary key is `(task_key, lens)`
 (`saffron/ledger.py:255-262`). `_apply` inserts each `end_review` fact
 with a plain `INSERT` (`:929-933`). `review_stack` records each layer's
-rows after that layer's lenses run (`saffron/end_review.py:354-369`). So a
+rows after that layer's lenses run (`saffron/end_review.py:479-545`). So a
 second end review over a layer that holds any row pays for that layer's
 lenses, then raises on its first write. `_stack_end_review` catches the
-raise and files the rest `error` (`saffron/cli.py:869-872`).
+raise and files the rest `error` (`saffron/cli.py:894-897`).
 
 **`_batch` probes readiness before its scan.** It calls
 `preflight.check_readiness` on the resolved `--repo`, `_mirror_path(repo,
 args.home)`, a scratch directory, the home and the token
-(`saffron/cli.py:1996-2002`). The probe checks the token, the mirror, the
+(`saffron/cli.py:2110-2117`). The probe checks the token, the mirror, the
 origin and the default branch. It then checks the policy, the disk and
 the images, and returns the first step that fails (`saffron/preflight.py:500-512`).
 
 **A command that runs a cell is guarded.** `saffron regate` runs through
-`_guarding_sigterm` (`saffron/cli.py:324`), which turns a SIGTERM into exit
-143 after teardown (`:498-521`).
+`_guarding_sigterm` (`saffron/cli.py:345`), which turns a SIGTERM into exit
+143 after teardown (`:519-542`).
 
 ## Problem
 
@@ -234,7 +235,7 @@ turns an unexpected raise into `saffron:` and exit 2.
    layer's task, and its `spec_sha` is that task's. Its `path` is
    `Path("<spec id>.md")`. Nothing in the tail reads a predecessor's path,
    since the runner and the spec sessions read only `predecessor.spec.id`
-   (`saffron/cli.py:677`, `:692`). `position` is that
+   (`saffron/cli.py:689-716`). `position` is that
    row's position. `layer_branches` is `scheduler._branch` of each layer's
    spec id, plus the stack base task's `branch` when the bottom layer has
    a `predecessor_key`. `specs` is every spec in `deferred.json`, each read
@@ -257,13 +258,13 @@ turns an unexpected raise into `saffron:` and exit 2.
    - `CLAUDE.md` gains this command's line in its command list, below
      `saffron package` (`CLAUDE.md:64`).
    - `CLAUDE.md` says a `--stack` night runs its end review from its
-     reserve (`:76-77`). Add that a night started with
+     reserve (`:77-78`). Add that a night started with
      `--defer-end-review` defers it to `saffron finish`, which spends that
      reserve.
    - `CLAUDE.md` names the commands that need `CLAUDE_CODE_OAUTH_TOKEN`
-     (`:82`). Add `saffron finish`.
-   - `saffron/cli.py`'s module docstring lists every subcommand
-     (`saffron/cli.py:1-3`), so it gains `finish`.
+     (`:85`). Add `saffron finish`.
+   - `saffron/cli.py`'s module docstring gains `finish`. It lists every
+     subcommand (`saffron/cli.py:1-3`).
 
 ## Out of scope
 
@@ -338,9 +339,9 @@ run. Drive each case, each end-review status included, with its own home. For th
 missing row, copy the batch's `finish/<id>` directory to `finish/99`, set
 that file's `batch_id` to 99, and run `finish 99`. For the three end-review statuses, record one row on the
 top layer with `Ledger.record_end_review`. For the finishing row, use
-`Ledger.record_stack_finish`. Unset the token with `monkeypatch.delenv`
-inside a `monkeypatch.context()`, since an autouse fixture sets it
-(`tests/test_cli.py:60-65`).
+`Ledger.record_stack_finish`. An autouse fixture sets the token
+(`tests/test_cli.py:62-65`). Unset it with `monkeypatch.delenv` inside a
+`monkeypatch.context()`.
 
 **Measured on a prototype at `45305c7a`.** A commit below it stubbed
 `StackResume` and the `resume` keyword. It also stubbed the `heads`
