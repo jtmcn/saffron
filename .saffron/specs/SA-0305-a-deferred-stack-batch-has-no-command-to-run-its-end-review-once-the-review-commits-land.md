@@ -3,7 +3,7 @@ id: SA-0305
 title: A deferred stack batch has no command to run its end review, follow-ups and finish once the review commits land
 type: feature
 priority: 2
-depends_on: [SA-0303, SA-0304, SA-0306]
+depends_on: [SA-0306, SA-0304]
 estimated_lines: 395
 estimate_measured: true
 touches:
