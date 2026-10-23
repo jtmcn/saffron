@@ -8,7 +8,7 @@ and a module-scope import would fail collection under `revert`.
 from __future__ import annotations
 
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
@@ -16,7 +16,7 @@ import pytest
 from saffron import probe as probe_check
 from saffron.agents.findings import Finding, Severity
 from saffron.cell import session
-from saffron.end_review import LayerReview
+from saffron.end_review import LayerFields, LayerReview, layer_fields
 from saffron.gates.contract import GateResult
 from saffron.intake import Mutant
 from saffron.ledger import Ledger
@@ -325,8 +325,11 @@ def _install_probe_double(
 
 @dataclass
 class _Built:
-    """One built fixture. `run` calls `qualify` with the same eight
-    keywords every test needs to check were forwarded, by identity."""
+    """One built fixture. `run` calls `qualify` with the same nine
+    keywords every test needs to check were forwarded, by identity.
+    `fields` is built fresh each call, from `layer_fields` over whatever
+    `self.layers` holds right now. A test that narrows `self.layers`
+    between calls then gets a matching `fields` mapping too."""
 
     ledger: Ledger
     layers: list[LayerReview]
@@ -342,11 +345,17 @@ class _Built:
     note: object
     join_review: review.LensReview | None = None
 
-    def run(self, qualify_fn):
+    def run(self, qualify_fn, fields: dict[str, LayerFields] | None = None):
+        if fields is None:
+            fields = {
+                layer.task_key: layer_fields(self.ledger, layer.task_key)
+                for layer in self.layers
+            }
         return qualify_fn(
             self.ledger,
             self.layers,
             self.join_review,
+            fields=fields,
             mirror=self.mirror,
             repo=self.repo,
             gates_dir=self.gates_dir,
@@ -983,3 +992,306 @@ def test_a_path_the_mirror_cannot_read_raises_out_of_qualify(tmp_path, monkeypat
 
     rows = built.ledger.qualifications(te2_task_id)
     assert [r["claim"] for r in rows] == ["r-absent", "r-c", "r-c-link"]
+
+
+def _graded_fixture(tmp_path: Path, monkeypatch) -> _Built:
+    """`A` seeds `alpha`/`beta`/`gamma`. `M` adds `m.py`, a file neither
+    layer ever touches. `H1` and `H2` are the packaged heads TE-1 and TE-2
+    pushed. A graded branch forks off `H1`: `R1` adds TE-1's own review
+    line, `H2b` restacks `H2`'s own change on it, `R2` adds TE-2's. The end
+    review graded TE-1 at `R1` and TE-2 at `R2`, each ahead of its own
+    packaged head.
+    """
+    config = tmp_path / "gitconfig"
+    config.write_text("[diff]\n    context = 0\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    mirror = tmp_path / "mirror"
+    mirror.mkdir()
+    _git(mirror, "init", "-q")
+
+    def commit(message: str) -> str:
+        _git(mirror, "add", "-A")
+        _git(mirror, "commit", "-q", "-m", message)
+        return _git(mirror, "rev-parse", "HEAD").strip()
+
+    alpha = [f"a{i}" for i in range(1, 8)]
+    beta = [f"b{i}" for i in range(1, 8)]
+    gamma = [f"g{i}" for i in range(1, 8)]
+    _write(mirror, "src/a.py", alpha)
+    _write(mirror, "src/b.py", beta)
+    _write(mirror, "src/c.py", gamma)
+    shas = {"A": commit("A")}
+
+    _write(mirror, "src/m.py", ["m1"])
+    shas["M"] = commit("M")
+
+    alpha_h1 = [*alpha[:1], "a2_new", *alpha[2:]]
+    _write(mirror, "src/a.py", alpha_h1)
+    shas["H1"] = commit("H1")
+
+    beta_h2 = [*beta[:1], "b2_new", *beta[2:]]
+    gamma_h2 = [*gamma[:1], "g2_new", *gamma[2:]]
+    _write(mirror, "src/b.py", beta_h2)
+    _write(mirror, "src/c.py", gamma_h2)
+    shas["H2"] = commit("H2")
+
+    _git(mirror, "checkout", "-q", shas["H1"])
+    _write(mirror, "src/a.py", [*alpha_h1, "a8_review"])
+    shas["R1"] = commit("R1")
+
+    _write(mirror, "src/b.py", beta_h2)
+    _write(mirror, "src/c.py", gamma_h2)
+    shas["H2b"] = commit("H2b")
+
+    _write(mirror, "src/c.py", [*gamma_h2, "g8_review"])
+    shas["R2"] = commit("R2")
+
+    _git(mirror, "checkout", "-q", shas["H2"])
+
+    ledger = Ledger(tmp_path / "ledger.db", record=MemoryRecord())
+    repo_id = ledger.upsert_repo(
+        "acme", "https://example/o", "/m.git", policy_sha="p" * 64
+    )
+    run1 = ledger.create_run(repo_id, base_sha=shas["A"])
+    task1 = ledger.create_task(
+        run1, spec_id="TE-1", spec_sha="s" * 64, branch="saffron/TE-1"
+    )
+    run2 = ledger.create_run(repo_id, base_sha=shas["A"])
+    task2 = ledger.create_task(
+        run2, spec_id="TE-2", spec_sha="s" * 64, branch="saffron/TE-2"
+    )
+    for run_id in (run1, run2):
+        ledger.record_gate_result(
+            GateResult(gate="tests", status="pass", tool="pytest 8.0", collected=[]),
+            run_id=run_id,
+        )
+
+    ledger.set_task_package(
+        task1, "READY_FOR_REVIEW", "saffron/TE-1", shas["H1"], "https://pr/1"
+    )
+    ledger.set_task_package(
+        task2, "READY_FOR_REVIEW", "saffron/TE-2", shas["H2"], "https://pr/2"
+    )
+    ledger.record_stack_layer(task1, position=1, predecessor_task_id=None, generation=1)
+    ledger.record_stack_layer(
+        task2, position=2, predecessor_task_id=task1, generation=1
+    )
+
+    te1_key = _key(ledger, task1)
+    te2_key = _key(ledger, task2)
+
+    te1_findings = [
+        _finding("spec", "concern", "src/a.py", 2, "te1-a2"),
+        _finding("spec", "concern", "src/m.py", 1, "te1-m"),
+        _finding(
+            "spec",
+            "blocker",
+            "src/a.py",
+            8,
+            "te1-review",
+            Mutant(file="src/a.py", find="a8_review", replace="a8_x"),
+        ),
+    ]
+    te2_findings = [
+        _finding("spec", "concern", "src/b.py", 2, "te2-b2"),
+        _finding("spec", "concern", "src/m.py", 1, "te2-m"),
+        _finding(
+            "spec",
+            "blocker",
+            "src/c.py",
+            8,
+            "te2-review",
+            Mutant(file="src/c.py", find="g8_review", replace="g8_x"),
+        ),
+    ]
+    join_findings = [
+        _finding("join", "concern", "src/c.py", 8, "join-review"),
+        _finding("join", "concern", "src/m.py", 1, "join-m"),
+        _finding(
+            "join",
+            "blocker",
+            "src/b.py",
+            2,
+            "join-b2",
+            Mutant(file="src/b.py", find="b2_new", replace="b2_x"),
+        ),
+    ]
+    # Both under a lens in `review.LENSES`. `ic-packaged` cites `H2`'s own
+    # change. `ic-review` cites `R2`'s line, which no packaged diff carries.
+    in_cell_concerns = [
+        _finding("correctness", "concern", "src/b.py", 2, "ic-packaged"),
+        _finding("correctness", "concern", "src/c.py", 8, "ic-review"),
+    ]
+
+    ledger.record_findings(task2, in_cell_concerns)
+    ledger.record_findings(task2, te2_findings)
+    ledger.record_findings(task1, te1_findings)
+
+    layers = [
+        LayerReview(te2_key, [review.LensReview("spec", te2_findings)]),
+        LayerReview(te1_key, [review.LensReview("spec", te1_findings)]),
+    ]
+    join_review = review.LensReview("join", join_findings)
+
+    return _Built(
+        ledger,
+        layers,
+        mirror,
+        shas,
+        [],
+        repo=Path("/repo-sentinel"),
+        gates_dir=Path("/gates-sentinel"),
+        thread_env={"SENTINEL": "1"},
+        test_paths=["tests/**"],
+        gates={"tests": Path("/gates-sentinel/tests")},
+        created=set(),
+        note=lambda step, ok, detail: None,
+        join_review=join_review,
+    )
+
+
+def _install_recording_probe(monkeypatch, calls: list[dict]) -> None:
+    """Every probed finding survives. Records each call's `spec.base_sha`
+    and `patch`, which range a call was read over."""
+
+    def fake(targets, **kw):
+        calls.append({"base_sha": kw["spec"].base_sha, "patch": kw["patch"]})
+        entries = []
+        for p in review.distinct_probes(targets):
+            entries.append({"probe": p.model_dump(), "reason": ""})
+        for f in targets:
+            if f.probe is not None:
+                review.apply_probe_verdict(f, "survived")
+        return entries
+
+    monkeypatch.setattr(session, "probe_findings", fake)
+
+
+def test_findings_are_anchored_and_probed_over_the_range_the_end_review_graded(
+    tmp_path, monkeypatch
+):
+    """`qualify.qualify` takes `fields`, the end review's own grading, as a
+    required keyword, and reads every range from it through
+    `qualify.graded_fields`: the join's from the bottom layer's `diff_base`
+    to the top layer's graded `head`, and each layer's own end-review
+    findings the same way. A layer's in-cell REVIEW concerns keep the
+    packaged range instead, since their line numbers were recorded there.
+    A layer missing from `fields` falls back to the packaged range too,
+    in both the per-layer walk and the join.
+    """
+    from saffron.qualify import graded_fields, qualify
+
+    built = _graded_fixture(tmp_path, monkeypatch)
+    te2_key, te1_key = built.layers[0].task_key, built.layers[1].task_key
+    calls: list[dict] = []
+    _install_recording_probe(monkeypatch, calls)
+
+    fields = {
+        te1_key: replace(
+            layer_fields(built.ledger, te1_key),
+            base=built.shas["H1"],
+            diff_base=built.shas["M"],
+            head=built.shas["R1"],
+        ),
+        te2_key: replace(
+            layer_fields(built.ledger, te2_key),
+            base=built.shas["H1"],
+            diff_base=built.shas["R1"],
+            head=built.shas["R2"],
+        ),
+    }
+
+    result = built.run(qualify, fields=fields)
+
+    groups = {
+        (g.task_key, g.file): [f.finding.claim for f in g.findings]
+        for g in result.groups
+    }
+    assert groups == {
+        (te2_key, "src/b.py"): ["join-b2", "te2-b2", "ic-packaged"],
+        (te2_key, "src/c.py"): ["join-review", "te2-review"],
+        (te1_key, "src/a.py"): ["te1-a2", "te1-review"],
+    }
+    pool = {(q.task_key, q.finding.claim): q.outcome for q in result.pool}
+    assert pool == {
+        (te2_key, "join-m"): "unanchored",
+        (te2_key, "te2-m"): "unanchored",
+        (te2_key, "ic-review"): "unanchored",
+        (te1_key, "te1-m"): "unanchored",
+    }
+
+    assert len(calls) == 3
+    assert calls[0]["base_sha"] == built.shas["M"]
+    assert "+g8_review" in calls[0]["patch"]
+    assert "+a8_review" in calls[0]["patch"]
+    assert calls[1]["base_sha"] == built.shas["R1"]
+    assert "+g8_review" in calls[1]["patch"]
+    assert "+a8_review" not in calls[1]["patch"]
+    assert calls[2]["base_sha"] == built.shas["M"]
+    assert "+a8_review" in calls[2]["patch"]
+
+    assert graded_fields(built.ledger, fields, te1_key) == fields[te1_key]
+    assert graded_fields(built.ledger, fields, te2_key) == fields[te2_key]
+    assert graded_fields(built.ledger, {}, te1_key) == layer_fields(
+        built.ledger, te1_key
+    )
+
+    # A top layer missing from `fields` moves both the join and TE-2's own
+    # walk to the packaged range, so neither anchors its review line.
+    fresh_top = tmp_path / "missing-top"
+    fresh_top.mkdir()
+    built_top = _graded_fixture(fresh_top, monkeypatch)
+    te2_key_t, te1_key_t = built_top.layers[0].task_key, built_top.layers[1].task_key
+    calls_top: list[dict] = []
+    _install_recording_probe(monkeypatch, calls_top)
+    fields_top = {
+        te1_key_t: replace(
+            layer_fields(built_top.ledger, te1_key_t),
+            base=built_top.shas["H1"],
+            diff_base=built_top.shas["M"],
+            head=built_top.shas["R1"],
+        )
+    }
+    result_top = built_top.run(qualify, fields=fields_top)
+    pool_top = {(q.task_key, q.finding.claim): q.outcome for q in result_top.pool}
+    assert pool_top[(te2_key_t, "join-review")] == "unanchored"
+    assert pool_top[(te2_key_t, "te2-review")] == "unanchored"
+    assert pool_top[(te2_key_t, "join-m")] == "unanchored"
+    assert pool_top[(te2_key_t, "te2-m")] == "unanchored"
+    assert pool_top[(te2_key_t, "ic-review")] == "unanchored"
+    groups_top = {
+        (g.task_key, g.file): [f.finding.claim for f in g.findings]
+        for g in result_top.groups
+    }
+    assert groups_top == {
+        (te1_key_t, "src/a.py"): ["te1-a2", "te1-review"],
+        (te2_key_t, "src/b.py"): ["join-b2", "te2-b2", "ic-packaged"],
+    }
+
+    # A bottom layer missing from `fields`: TE-1's own walk falls back to
+    # the packaged range, so its review-line finding is no longer anchored.
+    fresh_bottom = tmp_path / "missing-bottom"
+    fresh_bottom.mkdir()
+    built_bottom = _graded_fixture(fresh_bottom, monkeypatch)
+    te2_key_b, te1_key_b = (
+        built_bottom.layers[0].task_key,
+        built_bottom.layers[1].task_key,
+    )
+    calls_bottom: list[dict] = []
+    _install_recording_probe(monkeypatch, calls_bottom)
+    fields_bottom = {
+        te2_key_b: replace(
+            layer_fields(built_bottom.ledger, te2_key_b),
+            base=built_bottom.shas["H1"],
+            diff_base=built_bottom.shas["R1"],
+            head=built_bottom.shas["R2"],
+        )
+    }
+    result_bottom = built_bottom.run(qualify, fields=fields_bottom)
+    pool_bottom = {(q.task_key, q.finding.claim): q.outcome for q in result_bottom.pool}
+    assert pool_bottom[(te1_key_b, "te1-review")] == "unanchored"
+    groups_bottom = {
+        (g.task_key, g.file): [f.finding.claim for f in g.findings]
+        for g in result_bottom.groups
+    }
+    assert groups_bottom[(te2_key_b, "src/c.py")] == ["join-review", "te2-review"]

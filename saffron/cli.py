@@ -1536,6 +1536,10 @@ def _stack_follow_ups(
     runs. A broken policy then costs one line and no cell. A raise from
     that call after `qualify` returns still pools every unaccepted finding
     its walk never reached.
+
+    The top layer, `qualify.qualify` and each `write` call's origin all read
+    `stack.fields` through `qualify.graded_fields`. A layer the end review
+    graded at a moved head then reads that head.
     """
 
     def run(batch_key: str, stack: end_review.StackReview) -> list[Candidate]:
@@ -1560,7 +1564,7 @@ def _stack_follow_ups(
             repo_id = ledger.resolve_repo_id(pinned.url)
             if repo_id is None:
                 raise ValueError(f"no repo recorded for {pinned.url}")
-            top = end_review.layer_fields(ledger, stack.layers[0].task_key)
+            top = qualify.graded_fields(ledger, stack.fields, stack.layers[0].task_key)
 
             created: set[str] = set()
 
@@ -1573,6 +1577,7 @@ def _stack_follow_ups(
                     ledger,
                     layers,
                     join,
+                    fields=stack.fields,
                     mirror=pinned.mirror,
                     repo=repo,
                     gates_dir=exported,
@@ -1589,7 +1594,7 @@ def _stack_follow_ups(
             ) -> spec_review.SpecWriterSession:
                 nonlocal written
                 written = (group.task_key, group.file)
-                origin = end_review.layer_fields(ledger, group.task_key)
+                origin = qualify.graded_fields(ledger, stack.fields, group.task_key)
                 agent = partial(
                     implement.run_agent,
                     spec_id=f"follow-up-{origin.spec_id}",

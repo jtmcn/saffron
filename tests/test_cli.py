@@ -9170,31 +9170,24 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
 
     pinned = task.PinnedBase(mirror=mirror, url=pinned_url, base_sha=base_sha)
 
-    def _fake_layer_fields(ledger_arg, task_key):
-        assert ledger_arg is ledger
-        if task_key == "k-top":
-            return end_review.LayerFields(
-                spec_id="SY-2",
-                branch="saffron/SY-2",
-                pr_url="",
-                base="z" * 40,
-                head="2" * 40,
-                known="",
-                diff_base="z" * 40,
-            )
-        if task_key == "k-bot":
-            return end_review.LayerFields(
-                spec_id="SY-1",
-                branch="saffron/SY-1",
-                pr_url="",
-                base="y" * 40,
-                head="1" * 40,
-                known="",
-                diff_base="y" * 40,
-            )
-        raise KeyError(task_key)
-
-    monkeypatch.setattr(cli.end_review, "layer_fields", _fake_layer_fields)
+    top_fields = end_review.LayerFields(
+        spec_id="SY-2",
+        branch="saffron/SY-2",
+        pr_url="",
+        base="z" * 40,
+        head="2" * 40,
+        known="",
+        diff_base="z" * 40,
+    )
+    bot_fields = end_review.LayerFields(
+        spec_id="SY-1",
+        branch="saffron/SY-1",
+        pr_url="",
+        base="y" * 40,
+        head="1" * 40,
+        known="",
+        diff_base="y" * 40,
+    )
 
     log: list[str] = []
     cell_up_calls: list[dict] = []
@@ -9396,6 +9389,7 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
             end_review.LayerReview("k-top", []),
             end_review.LayerReview("k-bot", []),
         ],
+        fields={"k-top": top_fields, "k-bot": bot_fields},
     )
 
     # The writer's cap is what revisions left of the share, read at call time.
@@ -9460,6 +9454,7 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
     assert qcall["ledger"] is ledger
     assert qcall["layers"] == stack.layers
     assert qcall["join"] is join_sentinel
+    assert qcall["fields"] is stack.fields
     assert qcall["mirror"] == mirror
     assert qcall["repo"] == checkout
     assert qcall["thread_env"] == {"X": "base"}
@@ -9702,6 +9697,114 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
     assert made("7", empty_stack) == []
     assert capsys.readouterr().out == ""
     assert not out_dir.exists()
+
+    ledger.close()
+
+
+def test_a_stack_batchs_follow_up_writer_is_seeded_at_the_top_head_the_end_review_graded(
+    tmp_path, monkeypatch
+):
+    """`_stack_follow_ups` resolves the top layer through
+    `qualify.graded_fields`. Each writer cell then opens at the head the
+    end review graded it at. It opens at `end_review.layer_fields`'s own
+    packaged head instead when `stack.fields` holds none for it."""
+    rig = _follow_ups_mirror(tmp_path)
+    mirror, base_sha = rig.mirror, rig.base_sha
+    pinned_url = "https://github.com/o/r.git"
+
+    ledger = Ledger(tmp_path / "ledger.db")
+    repo_id = ledger.upsert_repo("r", pinned_url, str(mirror), policy_sha=None)
+    pinned = task.PinnedBase(mirror=mirror, url=pinned_url, base_sha=base_sha)
+
+    run_id = ledger.create_run(repo_id, base_sha)
+    task_id = ledger.create_task(run_id, "SY-1", "s" * 64, "saffron/SY-1")
+    ledger.set_task_package(
+        task_id, "READY_FOR_REVIEW", "saffron/SY-1", "2" * 40, "https://pr/1"
+    )
+    ledger.record_stack_layer(
+        task_id, position=1, predecessor_task_id=None, generation=1
+    )
+    key = ledger.record_key(task_id)
+    assert key is not None
+
+    monkeypatch.setattr(cli.runtime, "remove_container", lambda _container: None)
+
+    seeds: list[str] = []
+
+    @contextmanager
+    def _fake_layer_cell(fields, **kwargs):
+        seeds.append(fields.head)
+        yield "fake-container"
+
+    monkeypatch.setattr(cli.end_review, "layer_cell", _fake_layer_cell)
+
+    def _fake_run_spec_writer(container, *, system_prompt, prompt, agent):
+        return spec_review.SpecWriterSession(
+            text="",
+            cost_usd=0.0,
+            error="stub, never written",
+            resets_at=None,
+            session_id="s",
+            num_turns=0,
+            spec_sha=None,
+        )
+
+    monkeypatch.setattr(cli.spec_review, "run_spec_writer", _fake_run_spec_writer)
+
+    qualify_fields_calls: list = []
+
+    def _fake_qualify(ledger_arg, layers, join, **kwargs):
+        qualify_fields_calls.append(kwargs["fields"])
+        return qualify.Qualification(groups=[], pool=[])
+
+    monkeypatch.setattr(cli.qualify, "qualify", _fake_qualify)
+
+    def _fake_write_follow_ups(ledger_arg, stack_arg, *, qualify, write, **kwargs):
+        qualify(stack_arg.layers, stack_arg.join)
+        group = _follow_up_group(key, "src/a.py", ["c"])
+        write(group, "prompt")
+        return []
+
+    monkeypatch.setattr(cli.follow_up, "write_follow_ups", _fake_write_follow_ups)
+
+    graded_head = "3" * 40
+    graded = replace(
+        end_review.layer_fields(ledger, key), head=graded_head, diff_base=graded_head
+    )
+    stack_graded = end_review.StackReview(
+        join=None,
+        layers=[end_review.LayerReview(key, [])],
+        fields={key: graded},
+    )
+    make = cli._stack_follow_ups(
+        pinned=pinned,
+        repo=Path("/repo-sentinel"),
+        ledger=ledger,
+        out_dir=tmp_path / "out-graded",
+        cap_usd=1.0,
+        pooled=[],
+    )
+    make("7", stack_graded)
+    assert seeds == [graded_head]
+    # `qualify.qualify` is handed the stack's own `fields`, not an empty
+    # mapping: a graded entry here must still reach it.
+    assert qualify_fields_calls == [{key: graded}]
+
+    stack_ungraded = end_review.StackReview(
+        join=None, layers=[end_review.LayerReview(key, [])]
+    )
+    make2 = cli._stack_follow_ups(
+        pinned=pinned,
+        repo=Path("/repo-sentinel"),
+        ledger=ledger,
+        out_dir=tmp_path / "out-packaged",
+        cap_usd=1.0,
+        pooled=[],
+    )
+    make2("7", stack_ungraded)
+    assert seeds == [graded_head, "2" * 40]
+    assert qualify_fields_calls == [{key: graded}, stack_ungraded.fields]
+    assert qualify_fields_calls[1] is stack_ungraded.fields
 
     ledger.close()
 
