@@ -1397,8 +1397,8 @@ def test_a_finish_handed_graded_heads_commits_atop_the_top_layers_graded_head(
         mirror=stack.mirror,
         workdir=tmp_path / "work-unnamed",
         heads={
-            by_spec["TE-10"]: "d" * 40,
-            by_spec["TE-7"]: "e" * 40,
+            by_spec["TE-10"]: stack.heads["TE-20-plus"],
+            by_spec["TE-7"]: stack.heads["TE-20-plus"],
         },
     )
     assert sha2 is not None

@@ -904,7 +904,7 @@ def _keeping_graded_heads(
     heads: dict[str, str],
 ) -> Callable[[str, float, Mapping[str, Spec]], object]:
     """Wraps an `end_review` callable so `heads` holds every graded layer's
-    own head once it returns (`SA-0304`, `DESIGN.md` §5.7).
+    own head once it returns (`SA-0306`, `DESIGN.md` §5.7).
 
     Calls `inner`, and when its result is a `StackReview`, copies
     `{task_key: fields.head}` for each of its own `fields` entries into

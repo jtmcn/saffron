@@ -2,8 +2,8 @@
 
 Reads a batch's layers and every spec text it will write. Checks each
 path's shape and hash before touching git, then cuts a worktree. It sits
-atop the top layer's own head, or an end review's own graded head named
-in `heads` (`DESIGN.md` §5.7). Once that worktree exists, each pending path is
+atop the top layer's graded head when `heads` names it, else its recorded
+`pushed_sha` (`DESIGN.md` §5.7). Once that worktree exists, each pending path is
 checked again, this time against the tree itself, right before its own
 write: a symlink on that path below the worktree makes the finish refuse
 the write rather than follow the link out of the worktree. It also writes the batch's own
