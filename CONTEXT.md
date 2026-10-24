@@ -763,13 +763,13 @@ and neither has one whose outcome still waits on the operator. An `EXHAUSTED` or
 `NOT_IMPLEMENTED` task with a pull request is the exception. It counts as settled
 and not merged. Two things can still move it. `reconcile` moves it to `MERGED`,
 and a green re-gate under `saffron adopt` moves it to `READY_FOR_REVIEW`
-(`SA-0313`).
+(`SA-0313`). That re-gate can move a `MERGE_FAILED` task the same way.
 
 **Adopt**: What the operator does with `saffron adopt` to attach a by-hand pull
 request to a spec's newest `NOT_IMPLEMENTED`, `READY_FOR_REVIEW`, `EXHAUSTED` or
 `MERGE_FAILED` task that carries none. It also takes a task that already carries
 that same pull request. Adopt records the pull request's head as the task's
-pushed sha. It re-gates a task in any of those states but
+pushed sha, unless a `READY_FOR_REVIEW` task already holds one. It re-gates a task in any of those states but
 `READY_FOR_REVIEW`, and a green re-gate of that head moves the task to
 `READY_FOR_REVIEW` (`SA-0313`). Otherwise the state stays, and adopt can run
 again on the same pull request. `reconcile` then asks GitHub about it, unless the

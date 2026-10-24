@@ -130,8 +130,9 @@ CLAUDE_CODE_OAUTH_TOKEN=... uv run saffron batch --repo . --budget 50 --until 06
 ```
 
 Ask GitHub what happened to open pull requests, and name one opened by hand as a
-task's own. Adopt re-gates that pull request's head, and a green re-gate moves the
-task to `READY_FOR_REVIEW`. Replay an already-merged PR agent-free:
+task's own. Unless the task is already `READY_FOR_REVIEW`, adopt re-gates that
+pull request's head, and a green re-gate moves the task to `READY_FOR_REVIEW`.
+Replay an already-merged PR agent-free:
 
 ```sh
 uv run saffron reconcile --repo .
