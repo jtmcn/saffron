@@ -48,6 +48,37 @@ def test_reads_the_declared_gates(tmp_path):
     assert policy.gates["coverage"].blocking is False
 
 
+_FORM_POLICY = """
+gates:
+  prose:    { blocking: true, form: true }
+  lint:     { blocking: true }
+  types:    { blocking: true, form: false }
+  coverage: { blocking: false, form: true }
+"""
+
+
+def test_a_gate_declares_itself_a_form_gate_and_defaults_to_none(tmp_path):
+    """b-0bd346, criterion 1: a gate declaration takes a `form` key beside
+    `blocking`. `form: true` loads as a form gate. `form: false`, or no
+    `form` key at all, loads as no form gate. Neither key moves the other:
+    `prose` is blocking and form, `coverage` is form and advisory."""
+    policy, _ = load_policy(
+        write_repo(
+            tmp_path,
+            policy_text=_FORM_POLICY,
+            gates=("prose", "lint", "types", "coverage"),
+        )
+    )
+    assert policy.gates["prose"].form is True
+    assert policy.gates["prose"].blocking is True
+    assert policy.gates["lint"].form is False
+    assert policy.gates["lint"].blocking is True
+    assert policy.gates["types"].form is False
+    assert policy.gates["types"].blocking is True
+    assert policy.gates["coverage"].form is True
+    assert policy.gates["coverage"].blocking is False
+
+
 def test_declaration_order_is_preserved(tmp_path):
     policy, _ = load_policy(write_repo(tmp_path))
     assert list(policy.gates) == [

@@ -7,7 +7,10 @@ from pathlib import Path
 import pytest
 
 from saffron.agents.findings import Finding
+from saffron.gates.baseline import NewFailure
+from saffron.gates.contract import Failure
 from saffron.phases import implement, rebut, review
+from saffron.repos.policy import CORE_GATE_NAMES, GateDeclaration
 
 PROMPTS = Path(rebut.__file__).resolve().parents[1] / "agents" / "prompts"
 CONTEXT_MD = (Path(rebut.__file__).resolve().parents[2] / "CONTEXT.md").read_text()
@@ -164,7 +167,7 @@ def _run(
     reviewed_diff=None,
     spec_body="fix the gap",
 ):
-    def _rerun_gates():
+    def _rerun_gates(_session_id):
         if gate_suites is not None:
             gate_suites.append(True)
         return gates
@@ -1797,3 +1800,34 @@ def test_the_verdict_prompts_offer_contradicted_and_ask_for_both_quotes():
         "You hold no tool that can change anything. Answer now in the "
         "required structured format."
     )
+
+
+def test_form_only_earns_the_repair_turn_for_declared_form_gates_alone():
+    """b-0bd346, criterion 2: `rebut.form_only(new_failures, gates)` is true
+    only when `new_failures` is not empty and every failure's gate is
+    declared in `gates` with `form: true`. A name in `CORE_GATE_NAMES` is
+    never a form gate, no matter what `gates` says: the repo declares
+    which gates are form gates, and core names none (§2.1)."""
+
+    def _nf(gate: str) -> NewFailure:
+        return NewFailure(gate, Failure(file="x.py", code="E1", message="m"))
+
+    form = {"prose": GateDeclaration(form=True)}
+    mixed = {"prose": GateDeclaration(form=True), "lint": GateDeclaration()}
+
+    assert rebut.form_only([], form) is False
+    assert rebut.form_only([_nf("prose")], form) is True
+    assert rebut.form_only([_nf("prose"), _nf("prose")], form) is True
+    # `lint` beside `prose`: declared, but not a form gate.
+    assert rebut.form_only([_nf("prose"), _nf("lint")], mixed) is False
+    # `missing` is not in the mapping at all.
+    assert rebut.form_only([_nf("prose"), _nf("missing")], form) is False
+
+    for name in sorted(CORE_GATE_NAMES):
+        alone = {name: GateDeclaration(form=True)}
+        assert rebut.form_only([_nf(name)], alone) is False, name
+        beside_form = {
+            name: GateDeclaration(form=True),
+            "prose": GateDeclaration(form=True),
+        }
+        assert rebut.form_only([_nf(name), _nf("prose")], beside_form) is False, name

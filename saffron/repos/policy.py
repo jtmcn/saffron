@@ -58,6 +58,9 @@ class GateDeclaration(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     blocking: bool = True
+    # §5.6: a red failure here alone, after REBUT, earns the one repair turn.
+    # Independent of `blocking`: neither key moves the other.
+    form: bool = False
 
 
 class IntegrityPatterns(BaseModel):
