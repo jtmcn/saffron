@@ -53,6 +53,7 @@ from saffron.record.memory import MemoryRecord
 from saffron.repos.mirror import GitError
 from saffron.repos.policy import Policy, load_policy
 from saffron.scheduler import RETIRED_DIRNAME, Candidate, Refusal
+from saffron.scheduler import _branch as spec_branch
 from tests.conftest import HostToolExecInTest
 from tests.test_batch import MintDouble
 from tests.test_preflight import _stub_prepare
@@ -11091,3 +11092,519 @@ def test_a_draft_writes_reviews_and_revises_in_spec_cells_at_the_pinned_base(
     assert writer_calls[-1]["system_prompt"] == spec_review.spec_writer_system_prompt(
         Policy(), prompts_dir=context.PROMPTS_DIR
     )
+
+
+def _deferred_finish_home(tmp_path, name, *, status, layers=True):
+    """A home and batch tree a `--defer-end-review` night left behind
+    (b-8a0c9a), shared by the two `saffron finish` witnesses below.
+    A stack base task carries branch `pr/stack-base` and no batch. A
+    budget-40.0 batch closes `status`, or stays open for `None`, and
+    holds layers `SY-1` on the base and `SY-2` on `SY-1`, unless
+    `layers` is `False`. `SY-1`'s spec sets its own default priority,
+    and `deferred.json` names `reserve_usd` 6.0 and `writer_usd` 3.0.
+    A later, no-layer batch of budget 10.0 closes `BUDGET`, apart from
+    the named batch's own id, budget and status.
+    """
+    home = tmp_path / f"{name}-home"
+    repo = tmp_path / f"{name}-repo"
+    repo.mkdir()
+    mirror = str(tmp_path / f"{name}-mirror.git")
+
+    ledger = Ledger(home / "ledger.db")
+    repo_id = ledger.upsert_repo(
+        "r", "https://github.com/o/r.git", mirror, policy_sha=None
+    )
+
+    base_run = ledger.create_run(repo_id, base_sha="a" * 40)
+    base_task_id = ledger.create_task(base_run, "SB-1", "b" * 64, "pr/stack-base")
+    ledger.set_task_package(
+        base_task_id,
+        "READY_FOR_REVIEW",
+        "pr/stack-base",
+        "d" * 40,
+        "https://github.com/o/r/pull/1",
+    )
+
+    batch_id = ledger.create_batch(40.0)
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40, batch_id=batch_id)
+    sy1_task_id = ledger.create_task(run_id, "SY-1", "1" * 64, spec_branch("SY-1"))
+    ledger.set_task_package(
+        sy1_task_id,
+        "READY_FOR_REVIEW",
+        spec_branch("SY-1"),
+        "e" * 40,
+        "https://github.com/o/r/pull/2",
+    )
+    sy2_task_id = ledger.create_task(run_id, "SY-2", "2" * 64, spec_branch("SY-2"))
+    ledger.set_task_package(
+        sy2_task_id,
+        "READY_FOR_REVIEW",
+        spec_branch("SY-2"),
+        "f" * 40,
+        "https://github.com/o/r/pull/3",
+    )
+    if layers:
+        ledger.record_stack_layer(
+            sy1_task_id, position=1, predecessor_task_id=base_task_id, generation=0
+        )
+        ledger.record_stack_layer(
+            sy2_task_id, position=2, predecessor_task_id=sy1_task_id, generation=0
+        )
+    if status is not None:
+        ledger.close_batch(batch_id, status)
+
+    # A newer batch, so a read keyed on "the newest" rather than
+    # `batch_id` reads this one, never the named batch, instead.
+    newer_batch_id = ledger.create_batch(10.0)
+    ledger.close_batch(newer_batch_id, "BUDGET")
+
+    sy2_task_key = ledger._db.execute(
+        "SELECT record_key FROM tasks WHERE task_id = ?", (sy2_task_id,)
+    ).fetchone()["record_key"]
+    ledger.close()
+
+    sy1_spec = intake.Spec(id="SY-1", title="t", type="chore", priority=3)
+    sy2_spec = intake.Spec(
+        id="SY-2", title="Second layer", type="chore", depends_on=["SY-1"]
+    )
+    specs = {"SY-1": sy1_spec, "SY-2": sy2_spec}
+
+    out_dir = home / "batches" / "v0"
+    deferred_dir = out_dir / "finish" / str(batch_id)
+    deferred_dir.mkdir(parents=True)
+    payload = {
+        "batch_id": batch_id,
+        "reserve_usd": 6.0,
+        "writer_usd": 3.0,
+        "base_sha": "a" * 40,
+        "url": "https://github.com/o/r.git",
+        "mirror": mirror,
+        "repo": str(repo.resolve()),
+        "specs": {
+            spec_id: spec.model_dump(mode="json", exclude_unset=True)
+            for spec_id, spec in specs.items()
+        },
+    }
+    deferred_path = deferred_dir / cli.DEFERRED_NAME
+    deferred_path.write_text(json.dumps(payload))
+
+    return SimpleNamespace(
+        home=home,
+        repo=repo,
+        mirror=mirror,
+        repo_id=repo_id,
+        out_dir=out_dir,
+        batch_id=batch_id,
+        newer_batch_id=newer_batch_id,
+        base_task_id=base_task_id,
+        sy1_task_id=sy1_task_id,
+        sy2_task_id=sy2_task_id,
+        sy2_task_key=sy2_task_key,
+        deferred_path=deferred_path,
+        payload=payload,
+        specs=specs,
+    )
+
+
+def _finish_readiness_passes(monkeypatch):
+    monkeypatch.setattr(
+        cli.preflight,
+        "check_readiness",
+        lambda *a, **k: preflight.Readiness(
+            True,
+            mirror=Path("/pinned-mirror.git"),
+            url="https://github.com/o/r.git",
+            base_sha="a" * 40,
+        ),
+    )
+
+
+def test_saffron_finish_runs_a_deferred_stack_batchs_tail_on_its_own_id_at_its_pinned_base(
+    tmp_path, monkeypatch, capsys
+):
+    """`saffron finish <batch id> --repo <repo>` calls `run_stack_batch`
+    once, with an empty order, the batch's own budget, no `until`, the
+    file's own shares, and a `StackResume` built from the ledger.
+
+    Every adapter is built at the file's pinned base, on the resolved
+    `--repo`. The review and the citation check share one commit cache.
+    The follow-up writer's cap is the file's `writer_usd`. The finish
+    reads the mapping `_keeping_graded_heads` fills. The stack view is
+    written for this batch id, over the file's own specs. Exit code
+    and line follow `_batch`'s own mapping of reason to exit."""
+    fixture = _deferred_finish_home(tmp_path, "finish-runs", status="UNTIL")
+    top_key = fixture.sy2_task_key
+    # The newer batch outranks `fixture.batch_id` on "newest".
+    assert fixture.newer_batch_id > fixture.batch_id
+
+    stack_runner_calls: list[dict] = []
+    stack_end_review_calls: list[dict] = []
+    stack_review_calls: list[dict] = []
+    stack_cite_calls: list[dict] = []
+    stack_revise_calls: list[dict] = []
+    stack_mint_calls: list[dict] = []
+    stack_base_alive_calls: list[object] = []
+    stack_follow_ups_calls: list[dict] = []
+    stack_open_prs_calls: list[str] = []
+    stack_finish_calls: list[dict] = []
+    check_readiness_calls: list[dict] = []
+    write_stack_view_calls: list[dict] = []
+    run_stack_batch_calls: list[dict] = []
+
+    def _fake_stack_runner(**kwargs):
+        # Resolved now, while the real ledger behind `repo_id` is still
+        # open. `main` closes it before this test ever reads the call.
+        kwargs["resolved_repo_id"] = kwargs["repo_id"]()
+        stack_runner_calls.append(kwargs)
+        return "runner-sentinel"
+
+    def _fake_stack_end_review(**kwargs):
+        stack_end_review_calls.append(kwargs)
+
+        def run(batch_key, reserve_usd, specs):
+            return end_review.StackReview(
+                join=None,
+                layers=[],
+                fields={
+                    top_key: end_review.LayerFields(
+                        spec_id="SY-2",
+                        branch=spec_branch("SY-2"),
+                        pr_url="https://github.com/o/r/pull/3",
+                        base="a" * 40,
+                        head="e" * 40,
+                        known="",
+                        diff_base="a" * 40,
+                    )
+                },
+            )
+
+        return run
+
+    def _fake_stack_review(**kwargs):
+        stack_review_calls.append(kwargs)
+        return "review-sentinel"
+
+    def _fake_stack_cite(**kwargs):
+        stack_cite_calls.append(kwargs)
+        return "cite-sentinel"
+
+    def _fake_stack_revise(**kwargs):
+        stack_revise_calls.append(kwargs)
+        return "revise-sentinel"
+
+    def _fake_stack_mint(**kwargs):
+        stack_mint_calls.append(kwargs)
+        return "mint-sentinel"
+
+    def _fake_stack_base_alive(pinned_arg):
+        stack_base_alive_calls.append(pinned_arg)
+        return "alive-sentinel"
+
+    def _fake_stack_follow_ups(**kwargs):
+        stack_follow_ups_calls.append(kwargs)
+        return "follow-ups-sentinel"
+
+    def _fake_stack_open_prs(slug):
+        stack_open_prs_calls.append(slug)
+        return "open-prs-sentinel"
+
+    def _fake_stack_finish(**kwargs):
+        stack_finish_calls.append(kwargs)
+        return "finish-sentinel"
+
+    def _fake_check_readiness(repo_arg, mirror_arg, *, scratch, home, token):
+        check_readiness_calls.append(
+            {"repo": repo_arg, "mirror": mirror_arg, "home": home}
+        )
+        return preflight.Readiness(
+            True,
+            mirror=Path("/pinned-mirror.git"),
+            url="https://github.com/o/r.git",
+            base_sha="a" * 40,
+        )
+
+    def _fake_write_stack_view(out_dir_arg, ledger_arg, specs_arg, *, batch_id):
+        write_stack_view_calls.append(
+            {"out_dir": out_dir_arg, "specs": specs_arg, "batch_id": batch_id}
+        )
+
+    def _fake_run_stack_batch(order, ledger_arg, budget_usd, until, runner, **kwargs):
+        run_stack_batch_calls.append(
+            {
+                "order": order,
+                "ledger": ledger_arg,
+                "budget_usd": budget_usd,
+                "until": until,
+                "runner": runner,
+                **kwargs,
+            }
+        )
+        kwargs["end_review"](str(fixture.batch_id), kwargs["reserve_usd"], {})
+        return "DRAINED"
+
+    monkeypatch.setattr(cli, "_stack_runner", _fake_stack_runner)
+    monkeypatch.setattr(cli, "_stack_end_review", _fake_stack_end_review)
+    monkeypatch.setattr(cli, "_stack_review", _fake_stack_review)
+    monkeypatch.setattr(cli, "_stack_cite", _fake_stack_cite)
+    monkeypatch.setattr(cli, "_stack_revise", _fake_stack_revise)
+    monkeypatch.setattr(cli, "_stack_mint", _fake_stack_mint)
+    monkeypatch.setattr(cli, "_stack_base_alive", _fake_stack_base_alive)
+    monkeypatch.setattr(cli, "_stack_follow_ups", _fake_stack_follow_ups)
+    monkeypatch.setattr(cli, "_stack_open_prs", _fake_stack_open_prs)
+    monkeypatch.setattr(cli, "_stack_finish", _fake_stack_finish)
+    monkeypatch.setattr(cli.preflight, "check_readiness", _fake_check_readiness)
+    monkeypatch.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
+    monkeypatch.setattr(cli, "write_stack_view", _fake_write_stack_view)
+
+    monkeypatch.chdir(fixture.repo.parent)
+    argv = [
+        "--home",
+        str(fixture.home),
+        "finish",
+        str(fixture.batch_id),
+        "--repo",
+        fixture.repo.name,
+    ]
+    assert main(argv) == 0
+    out = capsys.readouterr().out
+    assert "finish: DRAINED" in out
+
+    [call] = run_stack_batch_calls
+    resume = call["resume"]
+    assert resume.batch_id == fixture.batch_id
+    assert resume.budget_usd == 40.0
+    assert resume.stop_reason == "UNTIL"
+    assert resume.top.task_id == fixture.sy2_task_id
+    assert resume.top.spec == fixture.specs["SY-2"]
+    assert resume.top.spec_sha == "2" * 64
+    assert resume.top.path == Path("SY-2.md")
+    assert resume.position == 2
+    assert resume.layer_branches == frozenset(
+        {spec_branch("SY-1"), spec_branch("SY-2"), "pr/stack-base"}
+    )
+    assert resume.specs == fixture.specs
+
+    assert call["order"] == []
+    assert call["budget_usd"] == 40.0
+    assert call["until"] is None
+    assert call["reserve_usd"] == 6.0
+    assert call["writer_usd"] == 3.0
+    with pytest.raises(AssertionError):
+        call["readiness_check"]()
+    assert call["stack_base_alive"] == "alive-sentinel"
+    assert call["follow_ups"] == "follow-ups-sentinel"
+    assert call["open_prs"] == "open-prs-sentinel"
+    assert call["mint"] == "mint-sentinel"
+    assert call["revise"] == "revise-sentinel"
+    assert call["cite"] == "cite-sentinel"
+    assert call["runner"] == "runner-sentinel"
+
+    pinned = task.PinnedBase(
+        mirror=Path(fixture.payload["mirror"]),
+        url=fixture.payload["url"],
+        base_sha=fixture.payload["base_sha"],
+    )
+
+    [runner_kwargs] = stack_runner_calls
+    assert runner_kwargs["pinned"] == pinned
+    assert runner_kwargs["repo"] == fixture.repo.resolve()
+    assert runner_kwargs["resolved_repo_id"] == fixture.repo_id
+    assert "stack_base" not in runner_kwargs
+
+    [review_kwargs] = stack_end_review_calls
+    assert review_kwargs["pinned"] == pinned
+    assert review_kwargs["repo"] == fixture.repo.resolve()
+
+    [spec_review_kwargs] = stack_review_calls
+    assert spec_review_kwargs["pinned"] == pinned
+    assert spec_review_kwargs["repo"] == fixture.repo.resolve()
+    assert "stack_base" not in spec_review_kwargs
+
+    [cite_kwargs] = stack_cite_calls
+    assert cite_kwargs["pinned"] == pinned
+    assert "stack_base" not in cite_kwargs
+    assert cite_kwargs["heads"] is spec_review_kwargs["heads"]
+    assert cite_kwargs["heads"] == {}
+
+    [revise_kwargs] = stack_revise_calls
+    assert revise_kwargs["pinned"] == pinned
+    assert revise_kwargs["repo"] == fixture.repo.resolve()
+    assert "stack_base" not in revise_kwargs
+
+    [mint_kwargs] = stack_mint_calls
+    assert mint_kwargs["pinned"] == pinned
+    assert mint_kwargs["repo"] == fixture.repo.resolve()
+
+    assert stack_base_alive_calls == [pinned]
+
+    [follow_ups_kwargs] = stack_follow_ups_calls
+    assert follow_ups_kwargs["pinned"] == pinned
+    assert follow_ups_kwargs["repo"] == fixture.repo.resolve()
+    assert follow_ups_kwargs["cap_usd"] == 3.0
+
+    assert stack_open_prs_calls == ["o/r"]
+
+    [finish_kwargs] = stack_finish_calls
+    assert finish_kwargs["pinned"] == pinned
+    assert finish_kwargs["repo"] == fixture.repo.resolve()
+    assert finish_kwargs["pooled"] is follow_ups_kwargs["pooled"]
+    assert finish_kwargs["heads"] == {top_key: "e" * 40}
+
+    [check_call] = check_readiness_calls
+    assert check_call["repo"] == fixture.repo.resolve()
+    assert check_call["mirror"] == cli._mirror_path(
+        fixture.repo.resolve(), fixture.home
+    )
+    assert check_call["home"] == fixture.home
+
+    [view_call] = write_stack_view_calls
+    assert view_call["out_dir"] == fixture.out_dir
+    assert view_call["specs"] == fixture.specs
+    assert view_call["batch_id"] == fixture.batch_id
+
+    expected = {
+        "BUDGET": (0, "finish: BUDGET"),
+        "UNTIL": (0, "finish: UNTIL"),
+        "INCOMPLETE": (2, "finish: INCOMPLETE"),
+        "INFRASTRUCTURE": (2, "finish: infrastructure failed"),
+    }
+    for reason, (exit_code, line) in expected.items():
+        monkeypatch.setattr(
+            cli, "run_stack_batch", lambda *a, _reason=reason, **k: _reason
+        )
+        assert main(argv) == exit_code
+        out = capsys.readouterr().out
+        assert line in out
+
+
+def test_saffron_finish_refuses_a_batch_it_cannot_finish_before_any_cell(
+    tmp_path, monkeypatch, capsys
+):
+    """`saffron finish` refuses before any cell opens. It refuses a
+    missing or mismatched `deferred.json`. It refuses a batch id with
+    no row, no `status`, or no layer. It refuses a batch that already
+    holds an end-review row or a finishing row. It refuses an unset
+    `CLAUDE_CODE_OAUTH_TOKEN` and a failed readiness probe.
+
+    Each case prints one line starting `saffron: finish refused:` that
+    names why, exits 2, and never calls `run_stack_batch`. The readiness
+    case names the probe's own step and detail."""
+    run_calls: list[object] = []
+    monkeypatch.setattr(
+        cli, "run_stack_batch", lambda *a, **k: run_calls.append(1) or "DRAINED"
+    )
+    _finish_readiness_passes(monkeypatch)
+
+    def _refused(home, batch_id, repo):
+        exit_code = main(
+            ["--home", str(home), "finish", str(batch_id), "--repo", str(repo)]
+        )
+        out = capsys.readouterr().out
+        assert exit_code == 2
+        assert not run_calls
+        refusals = [
+            line
+            for line in out.splitlines()
+            if line.startswith("saffron: finish refused:")
+        ]
+        assert len(refusals) == 1
+        return refusals[0]
+
+    # No `deferred.json` at all.
+    fixture = _deferred_finish_home(tmp_path, "no-file", status="UNTIL")
+    fixture.deferred_path.unlink()
+    _refused(fixture.home, fixture.batch_id, fixture.repo)
+
+    # `deferred.json`'s own `batch_id` differs from the one on the command line.
+    fixture = _deferred_finish_home(tmp_path, "wrong-id", status="UNTIL")
+    rewritten = dict(fixture.payload, batch_id=fixture.batch_id + 1)
+    fixture.deferred_path.write_text(json.dumps(rewritten))
+    _refused(fixture.home, fixture.batch_id, fixture.repo)
+
+    # The resolved `--repo` is not the file's own `repo`.
+    fixture = _deferred_finish_home(tmp_path, "wrong-repo", status="UNTIL")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    _refused(fixture.home, fixture.batch_id, elsewhere)
+
+    # A relative `--repo` that resolves to the file's own `repo` is
+    # not refused: the comparison reads the resolved path, not the arg.
+    fixture = _deferred_finish_home(tmp_path, "relative-match", status="UNTIL")
+    before = len(run_calls)
+    with monkeypatch.context() as relative_m:
+        relative_m.chdir(fixture.repo.parent)
+        exit_code = main(
+            [
+                "--home",
+                str(fixture.home),
+                "finish",
+                str(fixture.batch_id),
+                "--repo",
+                fixture.repo.name,
+            ]
+        )
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "saffron: finish refused:" not in out
+    assert len(run_calls) == before + 1
+    run_calls.clear()
+
+    # No `batches` row for the id the command line names.
+    fixture = _deferred_finish_home(tmp_path, "no-row", status="UNTIL")
+    other_dir = fixture.out_dir / "finish" / "99"
+    shutil.copytree(fixture.out_dir / "finish" / str(fixture.batch_id), other_dir)
+    other_payload = dict(fixture.payload, batch_id=99)
+    (other_dir / cli.DEFERRED_NAME).write_text(json.dumps(other_payload))
+    _refused(fixture.home, 99, fixture.repo)
+
+    # A row with no `status`, never closed.
+    fixture = _deferred_finish_home(tmp_path, "no-status", status=None)
+    _refused(fixture.home, fixture.batch_id, fixture.repo)
+
+    # A batch with no layer.
+    fixture = _deferred_finish_home(tmp_path, "no-layer", status="UNTIL", layers=False)
+    _refused(fixture.home, fixture.batch_id, fixture.repo)
+
+    # A layer already holds an end-review row, one case per status.
+    for review_status in ("reviewed", "error", "not_reached"):
+        fixture = _deferred_finish_home(
+            tmp_path, f"end-review-{review_status}", status="UNTIL"
+        )
+        ledger = Ledger(fixture.home / "ledger.db")
+        ledger.record_end_review(
+            fixture.sy2_task_id,
+            lens="spec",
+            status=review_status,
+            cost_usd=0.0,
+            error=None,
+        )
+        ledger.close()
+        _refused(fixture.home, fixture.batch_id, fixture.repo)
+
+    # The batch already holds a finishing row.
+    fixture = _deferred_finish_home(tmp_path, "already-finished", status="UNTIL")
+    ledger = Ledger(fixture.home / "ledger.db")
+    ledger.record_stack_finish(
+        fixture.batch_id, branch=spec_branch("SY-2"), head_sha="e" * 40, pr_url=None
+    )
+    ledger.close()
+    _refused(fixture.home, fixture.batch_id, fixture.repo)
+
+    # `CLAUDE_CODE_OAUTH_TOKEN` is unset, with a readiness probe that
+    # would otherwise pass. Only the explicit check can catch this one.
+    fixture = _deferred_finish_home(tmp_path, "no-token", status="UNTIL")
+    with monkeypatch.context() as m:
+        m.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+        line = _refused(fixture.home, fixture.batch_id, fixture.repo)
+    assert "CLAUDE_CODE_OAUTH_TOKEN" in line
+
+    # The readiness probe itself fails, named by its own step and detail.
+    fixture = _deferred_finish_home(tmp_path, "readiness-fails", status="UNTIL")
+    monkeypatch.setattr(
+        cli.preflight,
+        "check_readiness",
+        lambda *a, **k: preflight.Readiness(False, "mirror", "could not be fetched"),
+    )
+    line = _refused(fixture.home, fixture.batch_id, fixture.repo)
+    assert "mirror" in line
+    assert "could not be fetched" in line

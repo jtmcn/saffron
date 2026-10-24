@@ -1,6 +1,6 @@
 """`saffron`: cell, batch, draft, next-id, queue, reconcile, regate, adopt,
-package, watch, fold, migrate, chains, serve, replay. `ratify` and `gc` are
-still unbuilt (§4.2.1, §4.5)."""
+package, finish, watch, fold, migrate, chains, serve, replay. `ratify` and
+`gc` are still unbuilt (§4.2.1, §4.5)."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from functools import partial
 from pathlib import Path
+from typing import cast
 
 from saffron import (
     draft,
@@ -30,7 +31,13 @@ from saffron import (
     spec_review,
 )
 from saffron.agents import context
-from saffron.batch import run_batch, run_stack_batch, writer_left
+from saffron.batch import (
+    StackResume,
+    StopReason,
+    run_batch,
+    run_stack_batch,
+    writer_left,
+)
 from saffron.cell import runtime, worktree
 from saffron.cell.session import (
     _SAFFRON_ROOT,
@@ -205,6 +212,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     package_parser.add_argument("--repo", type=Path, default=Path.cwd())
 
+    finish_parser = subcommands.add_parser(
+        "finish",
+        help="run a deferred stack batch's tail: its end review, "
+        "follow-ups and finishing commit, read at each branch's own "
+        "current head at origin. Pushes nothing itself, so push every "
+        "review commit and restack first (b-8a0c9a)",
+    )
+    finish_parser.add_argument(
+        "batch_id", type=int, help="the batch id --defer-end-review deferred"
+    )
+    finish_parser.add_argument("--repo", type=Path, default=Path.cwd())
+
     watch_parser = subcommands.add_parser(
         "watch", help="follow one task's event log, or every task's, agent-free"
     )
@@ -349,6 +368,9 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "package":
             return _package(args, ledger, out_dir)
+
+        if args.command == "finish":
+            return _guarding_sigterm(lambda: _finish(args, ledger, out_dir))
 
         if args.command == "watch":
             return _watch(args, out_dir)
@@ -1953,6 +1975,14 @@ def _no_candidates_to_rescan() -> list[Candidate]:
     return []
 
 
+def _resume_checks_no_readiness() -> preflight.Readiness:
+    """`run_stack_batch`'s `readiness_check` under a `StackResume`
+    (`saffron finish`). A resume skips it, since `_finish` already ran
+    the probe before any adapter was built. Reaching this is a bug in
+    `run_stack_batch`, not an operator's problem."""
+    raise AssertionError("a stack batch resume never checks readiness")
+
+
 def _stack_admission_shares(budget_usd: float) -> tuple[float, float]:
     """The reserve and the writer share of `budget_usd`, read from
     `end_review.RESERVE_SHARE` and `follow_up.WRITER_SHARE` at call time.
@@ -2376,6 +2406,201 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         print(f"batch: readiness failed at {readiness.step}: {readiness.detail}")
     else:
         print("batch: infrastructure failed")
+    return 2
+
+
+_FINISH_REFUSED = "saffron: finish refused:"
+
+
+def _finish(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
+    """`saffron finish <batch id> --repo .`: run a deferred stack batch's
+    own tail (backlog item b-8a0c9a, ADR 7). It runs the end review, the
+    follow-ups and the finishing commit, each against a layer's branch at
+    its current head at origin. It pushes nothing itself. Push every
+    review commit and restack first, so this grades the right heads.
+
+    It refuses before any cell opens, naming why in one line that starts
+    `saffron: finish refused:`, and exits 2. The readiness probe runs
+    last, the way `_batch` runs it.
+    """
+    repo = args.repo.resolve()
+    deferred_path = out_dir / "finish" / str(args.batch_id) / DEFERRED_NAME
+    if not deferred_path.is_file():
+        print(f"{_FINISH_REFUSED} no {DEFERRED_NAME} at {deferred_path}")
+        return 2
+    try:
+        payload = json.loads(deferred_path.read_text())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        print(f"{_FINISH_REFUSED} {deferred_path} could not be read: {exc}")
+        return 2
+
+    if payload.get("batch_id") != args.batch_id:
+        print(
+            f"{_FINISH_REFUSED} {deferred_path} names batch "
+            f"{payload.get('batch_id')}, not {args.batch_id}"
+        )
+        return 2
+    file_repo = Path(payload["repo"]).resolve()
+    if file_repo != repo:
+        print(f"{_FINISH_REFUSED} {deferred_path} names repo {file_repo}, not {repo}")
+        return 2
+
+    status_row = ledger._db.execute(
+        "SELECT status FROM batches WHERE batch_id = ?", (args.batch_id,)
+    ).fetchone()
+    if status_row is None:
+        print(f"{_FINISH_REFUSED} no batch {args.batch_id} in the ledger")
+        return 2
+    status = status_row["status"]
+    if status is None:
+        print(f"{_FINISH_REFUSED} batch {args.batch_id} has no status yet")
+        return 2
+
+    layers = ledger.stack_layers(args.batch_id)
+    if not layers:
+        print(f"{_FINISH_REFUSED} batch {args.batch_id} holds no layer")
+        return 2
+    held_reviews = ledger.end_reviews(args.batch_id)
+    if held_reviews:
+        row = held_reviews[0]
+        print(
+            f"{_FINISH_REFUSED} batch {args.batch_id} already holds an end "
+            f"review ({row['task_key']} {row['lens']} {row['status']})"
+        )
+        return 2
+    if ledger.stack_finish(args.batch_id) is not None:
+        print(f"{_FINISH_REFUSED} batch {args.batch_id} already finished")
+        return 2
+
+    token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
+    if not token:
+        print(f"{_FINISH_REFUSED} CLAUDE_CODE_OAUTH_TOKEN is unset")
+        return 2
+
+    with tempfile.TemporaryDirectory() as scratch:
+        readiness = preflight.check_readiness(
+            repo,
+            _mirror_path(repo, args.home),
+            scratch=Path(scratch),
+            home=args.home,
+            token=token,
+        )
+    if not readiness.ok:
+        print(
+            f"{_FINISH_REFUSED} readiness failed at {readiness.step}: "
+            f"{readiness.detail}"
+        )
+        return 2
+
+    pinned = PinnedBase(
+        mirror=Path(payload["mirror"]), url=payload["url"], base_sha=payload["base_sha"]
+    )
+    specs: dict[str, Spec] = {
+        spec_id: Spec.model_validate(data) for spec_id, data in payload["specs"].items()
+    }
+
+    top_row = layers[-1]
+    top_spec_sha_row = ledger._db.execute(
+        "SELECT spec_sha FROM tasks WHERE task_id = ?", (top_row["task_id"],)
+    ).fetchone()
+    top = Candidate(
+        path=Path(f"{top_row['spec_id']}.md"),
+        spec=specs[top_row["spec_id"]],
+        spec_sha=top_spec_sha_row["spec_sha"],
+        task_id=top_row["task_id"],
+    )
+    layer_branches = {_branch(row["spec_id"]) for row in layers}
+    bottom = layers[0]
+    if bottom["predecessor_key"] is not None:
+        # The stack base's own task (ADR 7), read by its record key the
+        # way `finish.publish_finish` reads one.
+        base_row = ledger._db.execute(
+            "SELECT branch FROM tasks WHERE record_key = ?",
+            (bottom["predecessor_key"],),
+        ).fetchone()
+        if base_row is not None:
+            layer_branches.add(base_row["branch"])
+
+    resume = StackResume(
+        batch_id=args.batch_id,
+        budget_usd=cast("float", ledger.batch_budget(args.batch_id)),
+        stop_reason=cast("StopReason", status),
+        top=top,
+        position=top_row["position"],
+        layer_branches=frozenset(layer_branches),
+        specs=specs,
+    )
+
+    stack_runner = _stack_runner(
+        pinned=pinned,
+        repo_id=lambda: ledger.resolve_repo_id(pinned.url),
+        repo=repo,
+        ledger=ledger,
+        out_dir=out_dir,
+    )
+    # The heads this tail's own end review grades, read by `_stack_finish`
+    # in place of a layer's own `pushed_sha` (`SA-0306`).
+    graded_heads: dict[str, str] = {}
+    stack_end_review = _keeping_graded_heads(
+        _stack_end_review(pinned=pinned, repo=repo, ledger=ledger, out_dir=out_dir),
+        graded_heads,
+    )
+    # One shared commit cache: a cite and the review right after it read
+    # the same fetch, never two (`SA-0295`).
+    heads: dict[tuple[str, str | None], str] = {}
+    stack_review = _stack_review(pinned=pinned, repo=repo, out_dir=out_dir, heads=heads)
+    stack_cite = _stack_cite(pinned=pinned, heads=heads)
+    stack_revise = _stack_revise(pinned=pinned, repo=repo, out_dir=out_dir)
+    stack_mint = _stack_mint(pinned=pinned, repo=repo, ledger=ledger)
+    stack_base_alive = _stack_base_alive(pinned)
+    pooled: list[follow_up.Pooled] = []
+    follow_ups = _stack_follow_ups(
+        pinned=pinned,
+        repo=repo,
+        ledger=ledger,
+        out_dir=out_dir,
+        cap_usd=payload["writer_usd"],
+        pooled=pooled,
+    )
+    open_prs = _stack_open_prs(package_phase.github_slug(pinned.url))
+    stack_finish = _stack_finish(
+        pinned=pinned,
+        ledger=ledger,
+        out_dir=out_dir,
+        pooled=pooled,
+        repo=repo,
+        heads=graded_heads,
+    )
+
+    stop = run_stack_batch(
+        [],
+        ledger,
+        resume.budget_usd,
+        None,
+        stack_runner,
+        readiness_check=_resume_checks_no_readiness,
+        reserve_usd=payload["reserve_usd"],
+        writer_usd=payload["writer_usd"],
+        end_review=stack_end_review,
+        review=stack_review,
+        cite=stack_cite,
+        mint=stack_mint,
+        revise=stack_revise,
+        follow_ups=follow_ups,
+        open_prs=open_prs,
+        finish=stack_finish,
+        stack_base_alive=stack_base_alive,
+        resume=resume,
+    )
+    write_stack_view(out_dir, ledger, specs, batch_id=args.batch_id)
+
+    if stop == "INCOMPLETE":
+        print("finish: INCOMPLETE")
+        return 2
+    if stop != "INFRASTRUCTURE":
+        print(f"finish: {stop}")
+        return 0
+    print("finish: infrastructure failed")
     return 2
 
 
