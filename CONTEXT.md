@@ -180,7 +180,8 @@ _Avoid_: "parent" (that is a `depends_on` entry, and a predecessor need not be o
 **Stack base**: A parent outside a stack order whose newest waiting task has a
 pushed branch and a pull request, from an earlier batch or cell. A stack batch stacks its first layer
 on that branch, and links nothing. An order has at most one. It is the qualifying parent whose
-chain holds the most others (`SA-0265`, `SA-0267`, `SA-0312`).
+chain holds the most other parents outside the order, counted across the whole order. Its
+chain's branches are exempt from the overlap refusal (`SA-0265`, `SA-0267`, `SA-0312`).
 _Avoid_: "base" alone (that is `base_sha`), "root".
 
 **Layer**: A task in a stack batch that reached `READY_FOR_REVIEW`. It is one
@@ -774,7 +775,7 @@ _Avoid_: "merge queue" (GitHub's feature, which this is not).
 
 **Stacked branch**: A dependent task's branch, cut from its deepest open parent's branch
 rather than `base_sha`, because dependencies are satisfied at `READY_FOR_REVIEW`. That
-parent's `depends_on` chain holds every other open parent (`SA-0312`). In a stack
+parent's `depends_on` chain holds every other open parent of this one spec (`SA-0312`). In a stack
 batch a task is cut from its predecessor's head instead, which need not be its parent.
 A dependency there is met by a layer below it in the same stack, by the stack base,
 or by the default branch.

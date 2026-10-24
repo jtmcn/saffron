@@ -44,8 +44,10 @@ Amended 2026-10-10, `SA-0265` and `SA-0267`: one such entry is allowed if it is 
 parent whose newest waiting task has a pushed branch and a pull request. The
 first layer is cut from the base's branch, and the base's task is its predecessor.
 Amended by `SA-0312`: the base is the qualifying parent whose chain holds
-the most other such parents. A parent on its chain needs no place in the
-plan. A spec naming a parent off that chain is refused. A refusal names its cause and its remedy. A spec offered with no
+the most other such parents, counted across the whole plan. A parent on its
+chain needs no place in the plan. A spec naming a parent outside the plan
+and off that chain is refused. Outside a stack batch, each spec counts only
+its own open parents. A refusal names its cause and its remedy. A spec offered with no
 predecessor first asks whether the stack base's branch is still there. If the
 ref is gone, every remaining spec on it is refused by name. That is no abort,
 and the night drains. A fetch that fails for another reason is still an abort.
