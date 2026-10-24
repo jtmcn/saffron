@@ -255,6 +255,7 @@ turns, spend, idle, completion, and wall clock. "Attempt 3" without a phase is
 ambiguous, so name both. A gate suite's number is the one exception. It counts the
 gate suites judged in a task, so the suite re-run after REBUT continues the
 repair loop's count. After a loop that reached 2, that re-run is attempt 3, labelled REBUT.
+A repair turn on form gates after REBUT adds one more re-run, attempt 4 there, also labelled REBUT.
 _Avoid_: "iteration", "round", "pass", "retry", "try".
 
 **Plan checkpoint**: The `plan.json` write and host-side validation that opens the
