@@ -157,15 +157,17 @@ class StackBase:
     """A stack order's parent outside it: an earlier batch's or cell's own
     open pull request (ADR 7, `DESIGN.md` §4.2.1, backlog item b-e0e1cf).
 
-    `task_id` is that pull request's own task. It names no task of this
-    order, and is read for its branch and its pushed head. `_resolve_stack_base`
-    chooses one, from the newest waiting task of the lowest-id parent that
-    qualifies (`SA-0267`).
+    `task_id` is that pull request's own task, read for its branch and
+    its pushed head. `_resolve_stack_base` chooses the deepest qualifying
+    parent (`SA-0267`, b-1572e7). `chain_branches` is `_branch` of every
+    other external parent its own chain reaches. It is defaulted, so a
+    caller naming only the first three fields still builds an equal one.
     """
 
     spec_id: str
     task_id: int
     branch: str
+    chain_branches: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -227,42 +229,73 @@ def _branch(spec_id: str) -> str:
     return f"saffron/{spec_id}"
 
 
-def _ancestor_branches(spec_id: str, parent_of: dict[str, str]) -> frozenset[str]:
-    """Every branch a candidate's stack is cut from, K=1 walked transitively
-    (backlog item 59). `parent_of` maps a spec id to its `depends_on[0]` —
-    the sole stacking candidate at each link, the same slot
-    `task._resolve_stacked_on` stacks on — built only from specs this scan
-    actually found, so a spec with no `depends_on` and a spec absent from the
-    directory look identical here: neither is a key.
+def _reachable(spec_id: str, edges: Mapping[str, Sequence[str]]) -> frozenset[str]:
+    """Every spec id a `depends_on` walk reaches from `spec_id`, through
+    every entry and every link (backlog item 59, widened past K=1 for
+    b-1572e7). `edges` maps a spec id to its whole `depends_on` list,
+    built only from specs this scan found.
 
-    A stacked child is cut from its parent's branch head, so a linear stack's
-    every ancestor's changes are already in the child's own tree by
-    construction — there is nothing to conflict with, at any depth, not just
-    one hop up.
-
-    The walk follows slot zero only, one link at a time, and stops the
-    instant it reaches a spec `parent_of` does not know about — a retired
-    parent (in `specs/done/`, not the scanned directory) or a dangling
-    `depends_on` (already the dependency gate's own refusal to make). Either
-    way there is no further chain to read, so the walk ends quietly rather
-    than raising on a missing key.
-
-    `visited` guards against a cycle: nothing validates `depends_on` for
-    cycles at parse time, so a hand-written pair that depends on each other
-    would otherwise walk forever. The moment the next parent is already on
-    the path just walked, the walk stops instead of repeating it.
+    The walk stops at a spec `edges` does not know about. That covers a
+    retired parent and a dangling `depends_on` alike, so it ends rather
+    than raising on a missing key. `visited` guards the cycle nothing
+    validates against at parse time.
     """
-    branches: set[str] = set()
+    reached: set[str] = set()
     visited = {spec_id}
-    current = spec_id
-    while current in parent_of:
-        parent = parent_of[current]
-        if parent in visited:
-            break
-        visited.add(parent)
-        branches.add(_branch(parent))
-        current = parent
-    return frozenset(branches)
+    stack = list(edges.get(spec_id, ()))
+    while stack:
+        current = stack.pop()
+        if current in visited:
+            continue
+        visited.add(current)
+        reached.add(current)
+        stack.extend(edges.get(current, ()))
+    return frozenset(reached)
+
+
+def _ancestor_branches(
+    spec_id: str, edges: Mapping[str, Sequence[str]]
+) -> frozenset[str]:
+    """Every branch a candidate's stack is cut from: `_reachable`'s ids,
+    each turned into its branch.
+
+    A stacked child is cut from its parent's branch head. A linear
+    stack's every ancestor's changes are already in the child's own tree
+    by construction. There is nothing to conflict with, at any depth or
+    any entry.
+    """
+    return frozenset(_branch(dep) for dep in _reachable(spec_id, edges))
+
+
+def _deepest_open_parent(
+    parents: frozenset[str],
+    candidates: frozenset[str],
+    edges: Mapping[str, Sequence[str]],
+) -> tuple[str | None, frozenset[str]]:
+    """Among `candidates`, the one whose own `depends_on` chain reaches
+    the most of `parents`, walked over every entry and every link in
+    `edges`. Also returns every member of `parents` that chain never
+    reaches (b-1572e7). A tie goes to the lower id.
+
+    `candidates` equals `parents` for `_refuse`'s own call. A stack
+    order's `_resolve_stack_base` instead narrows `candidates` to the
+    parents that can serve as a `StackBase`, while still counting reach
+    over every external parent.
+    """
+    if not candidates:
+        return None, frozenset(parents)
+    chosen: str | None = None
+    chosen_reach: frozenset[str] = frozenset()
+    for candidate in sorted(candidates):
+        reach = frozenset(
+            other
+            for other in parents
+            if other != candidate and _depends_on_path(candidate, other, edges)
+        )
+        if chosen is None or len(reach) > len(chosen_reach):
+            chosen, chosen_reach = candidate, reach
+    off_chain = frozenset(parents) - {chosen} - chosen_reach
+    return chosen, off_chain
 
 
 def _open_prs(repo_slug: str, gh: GhRunner) -> list[dict]:
@@ -892,6 +925,7 @@ def _refuse(
     protected: Sequence[str],
     markers: Sequence[tuple[str, str]],
     ancestor_branches: frozenset[str],
+    edges: Mapping[str, Sequence[str]],
     check_dependencies: bool = True,
 ) -> tuple[RefusalKind, str] | None:
     """The kind and reason of the first §4.2.1 refusal this candidate earns, or
@@ -929,6 +963,7 @@ def _refuse(
         return None
 
     unmet = []
+    open_deps: list[str] = []
     for dep in candidate.spec.depends_on:
         reason = _dependency_refusal(
             dep,
@@ -939,12 +974,28 @@ def _refuse(
         )
         if reason is not None:
             unmet.append(reason)
+        elif dep not in merged_anywhere and dep not in retired:
+            open_deps.append(dep)
     if unmet:
         # The count, not just the first reason: an operator who clears one
         # dependency and rediscovers the next tomorrow has lost a night to a
         # line that could have said there were two.
         suffix = f" (+{len(unmet) - 1} more unmet)" if len(unmet) > 1 else ""
         return "depends_on", unmet[0] + suffix
+
+    # A fourth `depends_on` site (b-1572e7): this candidate's own open
+    # parents must lie on one chain too. A stack order pools that check.
+    if len(open_deps) > 1:
+        open_set = frozenset(open_deps)
+        deepest, off_chain = _deepest_open_parent(open_set, open_set, edges)
+        if off_chain:
+            verb = "is" if len(off_chain) == 1 else "are"
+            return (
+                "depends_on",
+                f"depends_on {', '.join(sorted(off_chain))} {verb} outside "
+                f"{deepest}'s depends_on chain, and no taken spec may stack "
+                "on two unrelated open parents",
+            )
 
     return None
 
@@ -1002,15 +1053,19 @@ def _resolve_stack_base(
     kept: list[Candidate],
     kept_ids: frozenset[str],
     on_default_branch: frozenset[str],
-) -> tuple[StackBase | None, dict[str, tuple[str, str]], frozenset[str]]:
-    """The order's one `StackBase`, every non-qualifying external parent's
-    cause, and every *other* qualifying id the lowest-id tie-break passed
-    over (`SA-0267`).
+    edges: Mapping[str, Sequence[str]],
+) -> tuple[
+    StackBase | None, dict[str, tuple[str, str]], frozenset[str], frozenset[str]
+]:
+    """The order's one `StackBase`, every non-qualifying external
+    parent's cause, and every *other* qualifying id left off its chain.
+    Also the ids of every spec that chain reaches (`SA-0267`, b-1572e7).
 
-    "External" means named by a kept spec's own `depends_on`, outside the
-    kept ids and off the default branch. Read only from `kept`, so a spec
-    gate 0 already refused names no parent here. The lowest qualifying id,
-    as a string, wins. The rest come back too, for `build_queue` to refuse.
+    "External" means named by a kept spec, outside the kept ids and off
+    the default branch. The deepest qualifying one wins: its own chain
+    reaches the most *other* external parents, counted across the whole
+    order, lower id breaking a tie. The rest come back too, to refuse or
+    to carry.
     """
     external = {
         dep
@@ -1019,12 +1074,12 @@ def _resolve_stack_base(
         if dep not in kept_ids and dep not in on_default_branch
     }
     if not external:
-        return None, {}, frozenset()
+        return None, {}, frozenset(), frozenset()
     if repo_id is None:
         causes = {
             dep: (f"{dep} has no task recorded", _RUN_TO_PR_FIRST) for dep in external
         }
-        return None, causes, frozenset()
+        return None, causes, frozenset(), frozenset()
 
     pr_url_by_task = {
         int(row["task_id"]): row["pr_url"] or ""
@@ -1040,20 +1095,32 @@ def _resolve_stack_base(
             causes[dep] = result
 
     if not qualifying:
-        return None, causes, frozenset()
-    chosen_id = min(qualifying)
-    return qualifying[chosen_id], causes, frozenset(qualifying) - {chosen_id}
+        return None, causes, frozenset(), frozenset()
+    chosen_id, off_chain = _deepest_open_parent(
+        frozenset(external), frozenset(qualifying), edges
+    )
+    assert chosen_id is not None
+    # The chosen base's whole chain, not only the external ids it reaches.
+    # An intermediate spec no kept spec names is still on the base's branch.
+    chain_ids = _reachable(chosen_id, edges)
+    base = qualifying[chosen_id]
+    base = replace(base, chain_branches=frozenset(_branch(dep) for dep in chain_ids))
+    other_qualifying = off_chain & frozenset(qualifying)
+    return base, causes, other_qualifying, chain_ids
 
 
-def _second_stack_base_reason(stack_base_id: str, other_id: str) -> str:
-    """Why a spec naming `other_id` is refused although `other_id` itself
-    qualifies as a stack base: `stack_base_id` already won the lowest-id
-    tie-break, and a stack order has at most one (`SA-0265`, `SA-0267`)."""
+def _second_stack_base_reason(stack_base_id: str, other_ids: Sequence[str]) -> str:
+    """Why a spec naming one of `other_ids` is refused although each still
+    qualifies as a stack base: `stack_base_id` already won the deepest-chain
+    tie-break, and a stack order has at most one (`SA-0265`, `SA-0267`,
+    b-1572e7)."""
+    others = ", ".join(sorted(other_ids))
+    verb = "is" if len(other_ids) == 1 else "are"
     return (
-        f"depends_on {other_id} is outside the stack order and not on the "
-        f"default branch, and {stack_base_id} is already this batch's "
-        "stack base by the lower id — merge it first, or run the spec in "
-        "a later stack batch"
+        f"depends_on {others} {verb} outside the stack order and not on "
+        f"the default branch, and {stack_base_id} is already this batch's "
+        "stack base, off whose chain they sit — merge it first, or run the "
+        "spec in a later stack batch"
     )
 
 
@@ -1068,9 +1135,9 @@ def _stack_dependency_reason(
     """Why `candidate` never became ready in `_stack_order`.
 
     Names each `depends_on` entry that is neither taken into the order nor
-    on the default branch, and no other entry (`SA-0267`). For the first
-    missing entry, in `depends_on` order, naming `other_qualifying`'s
-    second stack base wins over `causes`' plain cause and remedy.
+    on the default branch, and no other entry (`SA-0267`). Every missing
+    entry that is a second stack base off the chosen one's chain is named
+    together, ahead of any single `causes` entry (b-1572e7).
     """
     missing = [
         dep
@@ -1082,10 +1149,11 @@ def _stack_dependency_reason(
         f"depends_on {', '.join(missing)} {verb} outside the stack order "
         "and not on the default branch"
     )
+    off_chain = [dep for dep in missing if dep in other_qualifying]
+    if off_chain and stack_base_id is not None:
+        return _second_stack_base_reason(stack_base_id, off_chain)
     causes = causes or {}
     for dep in missing:
-        if dep in other_qualifying and stack_base_id is not None:
-            return _second_stack_base_reason(stack_base_id, dep)
         if dep in causes:
             cause, remedy = causes[dep]
             return f"{reason} — {cause}, so {remedy}"
@@ -1262,16 +1330,9 @@ def build_queue(
     retired, retired_failures = _retired_ids(directory)
     open_prs = _open_prs(repo_slug, gh) if repo_slug is not None else []
 
-    # `spec_id` -> `depends_on[0]`, the sole stacking candidate at each link
-    # (backlog item 59), built only from what this scan actually found — a
-    # spec with an empty `depends_on` and a spec absent from the directory
-    # are indistinguishable to `_ancestor_branches`, and both are meant to
-    # end the walk rather than raise on a missing key.
-    parent_of = {
-        discovered.spec.id: discovered.spec.depends_on[0]
-        for discovered in specs
-        if discovered.spec.depends_on
-    }
+    # `spec_id` -> its whole `depends_on` list (item 59, widened for b-1572e7).
+    # A spec with no deps and one absent from the directory look the same here.
+    edges = {discovered.spec.id: discovered.spec.depends_on for discovered in specs}
 
     # Every id this directory declares, live or retired to `done/` — the same
     # union `_dependency_refusal` already treats as satisfied. A marker naming
@@ -1314,7 +1375,8 @@ def build_queue(
             unreadable_retired=len(retired_failures),
             protected=protected,
             markers=markers,
-            ancestor_branches=_ancestor_branches(candidate.spec.id, parent_of),
+            ancestor_branches=_ancestor_branches(candidate.spec.id, edges),
+            edges=edges,
             check_dependencies=not stack,
         )
         if refused is None and candidate.spec.id in removed_name_held:
@@ -1334,19 +1396,28 @@ def build_queue(
     if stack:
         on_default_branch = retired | merged_anywhere
         kept_ids = frozenset(c.spec.id for c in kept)
-        stack_base, causes, other_qualifying = _resolve_stack_base(
-            ledger, repo_id, kept, kept_ids, on_default_branch
+        stack_base, causes, other_qualifying, chain_ids = _resolve_stack_base(
+            ledger, repo_id, kept, kept_ids, on_default_branch, edges
         )
-        satisfied = on_default_branch | (
-            {stack_base.spec_id} if stack_base is not None else frozenset()
+        # The external parents on the chosen base's own chain need no
+        # place in the order either. Its branch already carries their work.
+        satisfied = (
+            on_default_branch
+            | chain_ids
+            | ({stack_base.spec_id} if stack_base is not None else frozenset())
         )
         stack_base_id = stack_base.spec_id if stack_base is not None else None
 
         ordered, order_refusals = _stack_order(
             kept, satisfied, causes, other_qualifying, stack_base_id
         )
+        # The base is carried when a taken spec names it, or a parent on
+        # its own chain, not only the base's bare id.
+        carries = (
+            ({stack_base.spec_id} | chain_ids) if stack_base is not None else set()
+        )
         if stack_base is not None and any(
-            stack_base.spec_id in c.spec.depends_on for c in ordered
+            set(c.spec.depends_on) & carries for c in ordered
         ):
             ordered = [replace(c, stack_base=stack_base) for c in ordered]
         return ordered, refusals + order_refusals
