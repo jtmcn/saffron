@@ -299,25 +299,25 @@ or fails on origin's branch, and a failed fetch raises, so adopt exits 2.
 **Four tests at base assert the old behaviour, and you edit each.**
 
 - `test_adopt_writes_the_url_gh_names_onto_the_specs_newest_task`
-  (`tests/test_cli.py:2197`) asserts `state`, `branch` and `pushed_sha`
-  unchanged. Its `gh` fake answers `--jq .url` only (`tests/test_cli.py:2183-2194`).
+  (`tests/test_cli.py:2622`) asserts `state`, `branch` and `pushed_sha`
+  unchanged. Its `gh` fake answers `--jq .url` only (`tests/test_cli.py:2608-2619`).
 - `test_adopt_refuses_with_exit_one_and_writes_nothing`
-  (`tests/test_cli.py:2291`) holds the taken set and `len(others) == 25`.
+  (`tests/test_cli.py:2716`) holds the taken set and `len(others) == 25`.
   With `MERGE_FAILED` taken that count is 24. Its tasks that carry a url
   are refused before gh at base, and it asserts no gh call. Now gh is
   asked, and a different url refuses.
 - `test_an_adopted_pull_request_is_a_fact_the_fold_keeps`
-  (`tests/test_cli.py:2411`) asserts `pushed_sha` unchanged.
+  (`tests/test_cli.py:2836`) asserts `pushed_sha` unchanged.
 - `test_a_merged_adopted_pull_request_admits_the_child_of_a_not_implemented_parent`
-  (`tests/test_cli.py:2475`) says adopt alone changes nothing. It asserts
+  (`tests/test_cli.py:2900`) says adopt alone changes nothing. It asserts
   no `pushed_sha` after the merge, which becomes the adopted head. Give it
   a red re-gate, so the child stays refused until the merge.
 
 **The scans in criterion 1 need the parent's spec file.** A plain scan
 reads the parent's tasks at its current `spec_sha`. Seed the parent's task
 with the sha `intake.load_spec` returns for that file, as the test at
-`tests/test_cli.py:2494` does. `build_queue(..., stack=True)` returns the
-`StackBase` on the child's candidate (`saffron/scheduler.py:155-168`).
+`tests/test_cli.py:2919` does. `build_queue(..., stack=True)` returns the
+`StackBase` on the child's candidate (`saffron/scheduler.py:156-170`).
 Before the adopt, both scans must refuse the child for each state. The
 stack scan reads a pushed sha only as forty or sixty-four lowercase hex digits
 (`saffron/scheduler.py:983`), so give the fake head that shape.
