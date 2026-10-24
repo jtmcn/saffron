@@ -151,8 +151,9 @@ _Avoid_: "session" (that means an agent session), "cycle", "sweep", "run".
 `INCOMPLETE`. Why a night ended, written on the batch when it closes and absent
 while it is still running. An absent one means in flight, not unknown. Never a
 task's end state: these describe the night, and `DRAINED` says the queue emptied,
-not that anything in it succeeded. `INFRASTRUCTURE` is the breaker firing, and
-it is the only one of the five that says the machine rather than the work was
+not that anything in it succeeded. `INFRASTRUCTURE` is the breaker firing, a
+failed readiness probe, or a PACKAGE raise on a task in `READY_FOR_REVIEW`. It
+is the only one of the five that says the machine rather than the work was
 wrong. `INCOMPLETE` is a night that left a task in flight: that task reached no
 end state, which is not the same as failing. It outranks the other ordinary
 reasons, and `INFRASTRUCTURE` outranks it.
@@ -166,8 +167,8 @@ for a batch started with `--defer-end-review`.
 _Avoid_: "stack run" (a run is a pin), "spec loop" (the delegate's attended pass).
 
 **Stack order**: A stack batch's fixed order over its queued specs. A spec joins it
-once every `depends_on` entry is already in the order, on the default branch, or the
-stack base. Among
+once every `depends_on` entry is already in the order or on the default branch. The
+stack base itself counts, and so does a spec on its chain. Among
 ready specs the lowest `priority` goes first, then the lowest id. A spec the order
 never takes is refused before any cell starts.
 
@@ -175,11 +176,13 @@ never takes is refused before any cell starts.
 `READY_FOR_REVIEW`. For the first layer it is the stack base's task, if the order
 has a base. The task is cut from the predecessor's head and targets its
 branch. A task with no predecessor is cut from `base_sha`.
-_Avoid_: "parent" (that is `depends_on[0]`, and a predecessor need not be one).
+_Avoid_: "parent" (that is a `depends_on` entry, and a predecessor need not be one).
 
 **Stack base**: A parent outside a stack order whose newest waiting task has a
 pushed branch and a pull request, from an earlier batch or cell. A stack batch stacks its first layer
-on that branch, and links nothing. An order has at most one (`SA-0265`, `SA-0267`).
+on that branch, and links nothing. An order has at most one. It is the qualifying parent whose
+chain holds the most other parents outside the order, counted across the whole order. Its
+chain's branches are exempt from the overlap refusal (`SA-0265`, `SA-0267`, `SA-0312`).
 _Avoid_: "base" alone (that is `base_sha`), "root".
 
 **Layer**: A task in a stack batch that reached `READY_FOR_REVIEW`. It is one
@@ -255,6 +258,7 @@ turns, spend, idle, completion, and wall clock. "Attempt 3" without a phase is
 ambiguous, so name both. A gate suite's number is the one exception. It counts the
 gate suites judged in a task, so the suite re-run after REBUT continues the
 repair loop's count. After a loop that reached 2, that re-run is attempt 3, labelled REBUT.
+A repair turn on form gates after REBUT adds one more re-run, attempt 4 there, also labelled REBUT.
 _Avoid_: "iteration", "round", "pass", "retry", "try".
 
 **Plan checkpoint**: The `plan.json` write and host-side validation that opens the
@@ -415,6 +419,12 @@ _Avoid_: "re-verification", which judges a packaged commit for PACKAGE or the fi
 Advisory gates are reported in the PR body and stop nothing. State which when it
 matters. `coverage` being advisory is a design decision, not an oversight.
 _Avoid_: "soft fail", "warning", "non-fatal".
+
+**Form gate**: A gate the repo declares `form: true` in `.saffron/policy.yaml`.
+Its failures concern how the code reads, not what it does. A core gate is never
+one. Only REBUT reads the declaration: a re-run after REBUT whose every new
+failure sits in a form gate earns one repair turn (§5.6, `SA-0311`).
+_Avoid_: "style gate", "cosmetic gate".
 
 **Baseline**: The gate results recorded against a run's `base_sha` at batch start.
 Per repo, and never compared across repos.
@@ -752,23 +762,32 @@ _Avoid_: "accept", "merge" (merging is what the train does, later, if green), an
 `PLAN_REJECTED` or `SPEC_WITHHELD`. A task the scheduler re-queues has not settled,
 and neither has one whose outcome still waits on the operator. An `EXHAUSTED` or
 `NOT_IMPLEMENTED` task with a pull request is the exception. It counts as settled
-and not merged, and only `reconcile` can still move it, to `MERGED`.
+and not merged. Two things can still move it. `reconcile` moves it to `MERGED`,
+and a green re-gate under `saffron adopt` moves it to `READY_FOR_REVIEW`
+(`SA-0313`). That re-gate can move a `MERGE_FAILED` task the same way.
 
 **Adopt**: What the operator does with `saffron adopt` to attach a by-hand pull
-request to a spec's newest `NOT_IMPLEMENTED`, `READY_FOR_REVIEW` or `EXHAUSTED`
-task that carries none. `reconcile` then asks GitHub about it, and a merge makes
-the task `MERGED` and admits its dependents (`SA-0264`).
+request to a spec's newest `NOT_IMPLEMENTED`, `READY_FOR_REVIEW`, `EXHAUSTED` or
+`MERGE_FAILED` task that carries none. It also takes a task that already carries
+that same pull request. Adopt records the pull request's head as the task's
+pushed sha, unless a `READY_FOR_REVIEW` task already holds one. It re-gates a task in any of those states but
+`READY_FOR_REVIEW`, and a green re-gate of that head moves the task to
+`READY_FOR_REVIEW` (`SA-0313`). Otherwise the state stays, and adopt can run
+again on the same pull request. `reconcile` then asks GitHub about it, unless the
+task stayed `MERGE_FAILED`. A merge makes the task `MERGED` and admits its
+dependents (`SA-0264`).
 _Avoid_: "import", "link" (linking is what `gh stack link` does to a stack).
 
 **Merge train**: The serial post-approval process: rebase onto current `main`,
 re-run the full gate suite on the merged result, merge only if green.
 _Avoid_: "merge queue" (GitHub's feature, which this is not).
 
-**Stacked branch**: A dependent task's branch, cut from its parent's branch rather
-than `base_sha`, because dependencies are satisfied at `READY_FOR_REVIEW`. In a stack
+**Stacked branch**: A dependent task's branch, cut from its deepest open parent's branch
+rather than `base_sha`, because dependencies are satisfied at `READY_FOR_REVIEW`. That
+parent's `depends_on` chain holds every other open parent of this one spec (`SA-0312`). In a stack
 batch a task is cut from its predecessor's head instead, which need not be its parent.
-A dependency there is met by a layer below it in the same stack, by the stack base,
-or by the default branch.
+A dependency there is met by a layer below it, or by the default branch. The stack
+base itself meets one, and so does a spec on its chain.
 
 **Retired spec**: A spec the operator moved to `.saffron/specs/done/`, asserting
 that its work is in the default branch. Not offered to the scan. It admits a

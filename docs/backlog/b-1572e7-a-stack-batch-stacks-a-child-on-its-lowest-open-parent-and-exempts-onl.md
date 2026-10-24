@@ -4,7 +4,7 @@ title: A stack batch stacks a child on its lowest open parent and exempts only `
 status: open
 tier: 2
 filed: 2026-10-23
-specs: []
+specs: [SA-0312]
 prs: [943]
 commits: []
 cites: [§4.2.1]

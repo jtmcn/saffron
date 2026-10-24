@@ -35,7 +35,7 @@ GitHub issues remain in use only for research/evidence records under
   command at `--home "$SAFFRON_HISTORY_HOME"`. `SA-0285` added the field and
   `SA-0272` runs it.
 - **`consumes`** is optional and empty by default. Each entry is a
-  repo-relative `path` or `path:name` that `depends_on[0]` produces. A spec
+  repo-relative `path` or `path:name` that a `depends_on` parent produces. A spec
   that declares it needs a `depends_on`. `run_task` resolves each entry at
   the tree base before the cell starts and refuses the task on a miss.
   Load refuses an entry that is empty, or whose path or name is empty once

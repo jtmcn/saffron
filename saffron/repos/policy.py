@@ -159,6 +159,33 @@ class WitnessPatterns(BaseModel):
         return value
 
 
+class CitationPatterns(BaseModel):
+    """What a definition line looks like here, for the citation check.
+
+    Each entry is a Python `re` pattern holding `{name}`, matched at a
+    line's start once `{name}` is filled in. None declared finds none.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    definitions: list[str] = Field(default_factory=list)
+
+    @field_validator("definitions")
+    @classmethod
+    def _each_is_checkable(cls, values: list[str]) -> list[str]:
+        for value in values:
+            if "{name}" not in value:
+                raise ValueError(f"definition {value!r} has no {{name}} in it")
+            try:
+                re.compile(value.replace("{name}", re.escape("x")))
+            except re.error as exc:
+                raise ValueError(
+                    f"definition {value!r} is not a valid regular expression once "
+                    f"{{name}} is filled in: {exc}"
+                ) from exc
+        return values
+
+
 class Policy(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -170,6 +197,7 @@ class Policy(BaseModel):
     integrity: IntegrityPatterns = Field(default_factory=IntegrityPatterns)
     witness: WitnessPatterns = Field(default_factory=WitnessPatterns)
     thread_env: dict[str, str] = Field(default_factory=dict)
+    citations: CitationPatterns = Field(default_factory=CitationPatterns)
 
     @model_validator(mode="before")
     @classmethod
@@ -232,15 +260,7 @@ def load_policy(repo_dir: Path) -> tuple[Policy, str]:
     except OSError as exc:
         raise PolicyError(f"policy.yaml at {path} could not be read: {exc}") from exc
 
-    try:
-        fields = yaml.safe_load(raw.decode()) or {}
-    except (yaml.YAMLError, UnicodeDecodeError) as exc:
-        raise PolicyError(f"policy.yaml is not valid YAML: {exc}") from exc
-
-    try:
-        policy = Policy.model_validate(fields)
-    except ValidationError as exc:
-        raise PolicyError(f"policy.yaml is invalid: {exc}") from exc
+    policy = parse_policy(raw)
 
     for name, executable in policy.gate_executables(repo_dir).items():
         if not executable.is_file():
@@ -249,3 +269,15 @@ def load_policy(repo_dir: Path) -> tuple[Policy, str]:
             raise PolicyError(f"gate {name!r} at {executable} is not executable")
 
     return policy, hashlib.sha256(raw).hexdigest()
+
+
+def parse_policy(raw: bytes) -> Policy:
+    """`policy.yaml`'s bytes as a `Policy`, with no file or gate read."""
+    try:
+        fields = yaml.safe_load(raw.decode()) or {}
+    except (yaml.YAMLError, UnicodeDecodeError) as exc:
+        raise PolicyError(f"policy.yaml is not valid YAML: {exc}") from exc
+    try:
+        return Policy.model_validate(fields)
+    except ValidationError as exc:
+        raise PolicyError(f"policy.yaml is invalid: {exc}") from exc

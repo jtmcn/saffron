@@ -4,7 +4,7 @@ title: "`cite`'s moved-text check passes a range that drifted and flags a range 
 status: open
 tier: 2
 filed: 2026-10-16
-specs: []
+specs: [SA-0314]
 prs: []
 commits: []
 cites: [§3.2]

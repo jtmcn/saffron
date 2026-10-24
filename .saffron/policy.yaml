@@ -131,3 +131,10 @@ integrity:
     ]
 
 thread_env: {}
+
+# What a definition line looks like here, so the citation check finds the
+# construct a spec's `file:line` names (b-2da959).
+citations:
+  definitions:
+    - '\s*(?:async\s+)?def\s+{name}\b'
+    - '\s*class\s+{name}\b'

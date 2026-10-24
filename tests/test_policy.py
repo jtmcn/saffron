@@ -309,3 +309,43 @@ def test_a_witness_block_is_checked_when_the_policy_loads(tmp_path):
     text = yaml.dump({"gates": {}, "witness": quantified})
     policy, _ = load_policy(write_repo(quantified_dir, policy_text=text, gates=()))
     assert policy.witness.witness_body == quantified["witness_body"]
+
+
+def test_a_citations_block_is_checked_when_the_policy_loads(tmp_path):
+    """`load_policy` reads `citations:` and refuses a bad definition with
+    `PolicyError`. One missing `{name}`, and one that is no regular
+    expression once `{name}` is filled in. An absent block reads empty,
+    and `parse_policy` reads the same bytes with no gate on disk.
+    """
+    from saffron.repos.policy import parse_policy
+
+    good = [r"\s*(?:async\s+)?def\s+{name}\b", r"\s*class\s+{name}\b"]
+    text = yaml.dump({"gates": {}, "citations": {"definitions": good}})
+    good_dir = tmp_path / "good"
+    good_dir.mkdir()
+    policy, _ = load_policy(write_repo(good_dir, policy_text=text, gates=()))
+    assert policy.citations.definitions == good
+    assert parse_policy(text.encode()).citations.definitions == good
+
+    absent_dir = tmp_path / "absent"
+    absent_dir.mkdir()
+    policy, _ = load_policy(write_repo(absent_dir, policy_text="gates: {}\n", gates=()))
+    assert policy.citations.definitions == []
+
+    cases = [
+        ("def foo", "definition 'def foo' has no {name} in it"),
+        (
+            "def {name}((",
+            "definition 'def {name}((' is not a valid regular expression once "
+            "{name} is filled in",
+        ),
+    ]
+    for index, (entry, expected) in enumerate(cases):
+        text = yaml.dump({"gates": {}, "citations": {"definitions": [entry]}})
+        case_dir = tmp_path / str(index)
+        case_dir.mkdir()
+        repo = write_repo(case_dir, policy_text=text, gates=())
+        with pytest.raises(PolicyError, match=re.escape(expected)):
+            load_policy(repo)
+        with pytest.raises(PolicyError, match=re.escape(expected)):
+            parse_policy(text.encode())

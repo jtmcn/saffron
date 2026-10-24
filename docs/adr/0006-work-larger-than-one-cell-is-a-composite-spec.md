@@ -36,7 +36,7 @@ constraints every member inherits. It carries no criteria of its own. Its
 members live in its repo, because dependencies do not cross repos (§4.2).
 
 **The members stack.** Each member after the first names the member before it
-as `depends_on[0]`, the only entry that stacks (§4.2). So they schedule as
+as `depends_on[0]`. A member stacks on its deepest open parent (§4.2, `SA-0312`). So they schedule as
 §4.2 already describes. The composite's list is authoritative. A member whose `depends_on` disagrees with it is refused at
 gate 0 (§4.2.1). Inside a stack batch, every task stacks, and ADR 7 narrows
 the composite review's range to the members' own layers. ADR 7 also lets an
@@ -93,8 +93,8 @@ specs is a non-goal (§1.4).
   refused at gate 0, before its cell spends.
 - **25** upholds. "Composite spec", "member spec" and "composite review" enter
   through `ontology/factory.ttl`, so the vocabulary tests read them.
-- **26** upholds. "Parent" keeps its one referent, a stacked task's
-  `depends_on[0]`. The composite is never called a parent.
+- **26** upholds. "Parent" names a `depends_on` entry. The composite is
+  never called a parent.
 - **28** upholds. It holds once the spec settles anchoring. A name a member produces
   and no later member uses is absent from the last member's diff. An anchor
   tuned to that diff would drop the rubric's second part and leave no error.

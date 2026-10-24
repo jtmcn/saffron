@@ -43,8 +43,11 @@ when any `depends_on` entry is outside the plan and not on the default branch.
 Amended 2026-10-10, `SA-0265` and `SA-0267`: one such entry is allowed if it is the **stack base**, a
 parent whose newest waiting task has a pushed branch and a pull request. The
 first layer is cut from the base's branch, and the base's task is its predecessor.
-With two such parents the lower id is the base, and a spec naming the other
-is refused. A refusal names its cause and its remedy. A spec offered with no
+Amended by `SA-0312`: the base is the qualifying parent whose chain holds
+the most other such parents, counted across the whole plan. A parent on its
+chain needs no place in the plan. A spec naming a parent outside the plan
+and off that chain is refused. Outside a stack batch, each spec counts only
+its own open parents. A refusal names its cause and its remedy. A spec offered with no
 predecessor first asks whether the stack base's branch is still there. If the
 ref is gone, every remaining spec on it is refused by name. That is no abort,
 and the night drains. A fetch that fails for another reason is still an abort.
@@ -54,14 +57,16 @@ composite review's range starts at the first member's predecessor head. The
 layers below that head are its base, as the default branch is outside a stack
 batch. A name a member takes from a layer below is not a join. This narrows ADR
 6's composite review inside a stack batch. Outside a stack batch, §4.2 and ADR
-6 stack as before, on `depends_on[0]`.
+6 stack on the deepest open parent (`SA-0312`).
 
 **A task that misses `READY_FOR_REVIEW` adds no layer.** Its `depends_on`
 descendants are refused with a reason. The batch goes on. A `CellRuntimeError`
 raised by a spec's review or by its task's cell is not a miss. The spec is
 offered again at once on the same predecessor, and the breaker bounds the
 re-offers (`SA-0234`). A `PREFLIGHT_FAILED` outcome is offered again the same
-way (`SA-0261`). A `GATE_ERROR` outcome is still a miss.
+way (`SA-0261`). A raise from the PACKAGE of a task in `READY_FOR_REVIEW`
+is not offered again. For a spec of the order it is a miss (`SA-0316`). A `GATE_ERROR`
+outcome is still a miss.
 
 **Spec review runs inside the batch.**
 
@@ -180,10 +185,10 @@ this decision rests on.
 ## Principles
 
 - **2** departs. A spec whose dependency sits in an unmerged stack outside the
-  plan is refused, unless that dependency is the stack base. Cutting it from
-  its predecessor would drop that code. The residual is a spec whose
-  dependency has no pushed branch or pull request, or is a second base. It
-  waits for a merge, as §4.2 avoided.
+  plan is refused, unless that dependency is the stack base or on its chain.
+  Cutting it from its predecessor would drop that code. The residual is a
+  spec whose dependency has no pushed branch or pull request, or lies off
+  the base's chain. It waits for a merge, as §4.2 avoided.
 - **4** upholds. Every end-review lens and every spec session runs in a critic
   cell. The host decides what qualifies.
 - **6** departs. A follow-up that carries a probe exists to kill it, and
@@ -207,8 +212,7 @@ this decision rests on.
   the ontology entry, so it does not reach this one. The measurement
   below still decides whether this narrowing stays.
 - **26** upholds. "Predecessor" names the task below in the stack. "Parent"
-  keeps its one referent, `depends_on[0]`. The refusal names every
-  `depends_on` entry, not the parent alone.
+  names a `depends_on` entry. The refusal names every entry it refuses on.
 - **27** upholds. It holds once the spec keys a follow-up's anchors and named
   probe to the tree it runs on. A later layer can move both.
 - **28** upholds. It holds once the spec checks qualification against each
