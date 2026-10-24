@@ -6877,6 +6877,38 @@ def test_a_form_gate_red_after_rebut_earns_one_repair_turn_then_the_verdicts(
     ]
     assert rebut_attempts == [(2, 2), (3, 0)]
 
+    from saffron.events import GateResult as GateResultEvent
+
+    rebut_gate_lines = [
+        (e.gate, e.attempt)
+        for e in events
+        if isinstance(e, GateResultEvent)
+        and e.against == "rebuttal"
+        and e.gate in _FORM_GATES
+    ]
+    assert rebut_gate_lines == [(g, 2) for g in _FORM_GATES] + [
+        (g, 3) for g in _FORM_GATES
+    ]
+
+
+def test_a_drifted_rerun_after_the_repair_turn_ends_gate_error(monkeypatch, tmp_path):
+    """b-0bd346: the re-run after the repair turn is judged as the first
+    re-run is. A gate whose `tool` drifted there is the gate breaking, so
+    the task ends `GATE_ERROR` and is charged to nobody."""
+    red = _red_form_suite("format", "lint")
+    drifted = [
+        r.model_copy(update={"tool": "format 2"}) if r.gate == "format" else r
+        for r in _GREEN_FORM_SUITE
+    ]
+    turns = _through_rebut_repair(0.1, _turn("Repaired.", cost=0.1), _FORM_VERDICT)
+    outcome, _events, _rebuttal, _cell = _rebut_repair_drive(
+        monkeypatch,
+        tmp_path,
+        suites=(_GREEN_FORM_SUITE, _GREEN_FORM_SUITE, red, drifted),
+        turns=turns,
+    )
+    assert outcome.state == "GATE_ERROR"
+
 
 def test_a_rebut_red_on_a_form_gate_past_the_budget_runs_no_repair_turn(
     monkeypatch, tmp_path

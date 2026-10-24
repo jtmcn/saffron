@@ -3386,7 +3386,7 @@ def _drive_cell(
         # final `CellOutcome` can read them on every path, not only REBUT's.
         revert_exempt: list[str] = []
         probe_patch_why: str | None = None
-        # `_rebut_gates` below writes these only once a §5.6 repair turn ran.
+        # Written only once a §5.6 repair turn ran.
         repair_turn_why: str | None = None
         repair_session_id: str | None = None
 
@@ -3575,8 +3575,6 @@ def _drive_cell(
                     error = _rebut_repair_turn(
                         resume_session_id, comparison.new_failures
                     )
-                    # Its own name and its own words, apart from the line
-                    # below, so a form-gate mutant cannot match both at once.
                     after_repair = _judge(
                         attempts + 2, against="rebuttal", exempt=revert_exempt
                     )
@@ -3676,7 +3674,7 @@ def _drive_cell(
             if probe_patch_why is not None:
                 result.why = probe_patch_why
             # §5.6's one exception: a repair turn ran and the re-run after it
-            # is still red, so today's "does not re-enter" text is wrong here.
+            # is still red, so run_rebut's "does not re-enter" line is wrong here.
             if repair_turn_why is not None:
                 result.why = repair_turn_why
             rebut_result = result
