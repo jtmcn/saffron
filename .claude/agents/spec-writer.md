@@ -66,7 +66,7 @@ And optionally:
    `SA-0123` both landed within 25 lines of the old 1000-line ceiling. An
    estimate at or above 80% splits into a parent and children with
    `depends_on`. **A split ends this run at step 1.** Write no spec file.
-   Report the parent and each child: its id from `records new-id`, its
+   Report the parent and each child: its id from `saffron next-id`, its
    scope, its `depends_on` and its estimate. The caller dispatches one writer
    per spec. A child names its parent by id, so the parent file need not exist
    first. An estimate under 80% goes on to step 2.
