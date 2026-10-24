@@ -4,7 +4,7 @@ title: "A batch whose PACKAGE raised still exits 0, and a stack batch offers tha
 type: feature
 priority: 2
 depends_on: [SA-0315]
-estimated_lines: 290
+estimated_lines: 345
 estimate_measured: true
 touches:
   - saffron/task.py
@@ -53,22 +53,25 @@ acceptance:
       are a `PackageError` from a
       `READY_FOR_REVIEW` cell, a `CellRuntimeError` from a
       `READY_FOR_REVIEW` cell, and a `CellRuntimeError` in the exhausted
-      mode. A `CellRuntimeError` raised by `run_one_cell` escapes
-      unmarked, and so does a fresh exception that never passed through
-      `run_task`.
+      mode. Three raises escape unmarked. One comes from `run_one_cell`.
+      One comes from the queue-line write of a `GATE_ERROR` cell, which
+      reaches no PACKAGE call. The third is a fresh exception that never
+      passed through `run_task`.
     witness: tests/test_task.py::test_a_raise_that_escapes_run_task_from_package_is_marked_and_kept
     wrong_versions:
       - "`run_task` wraps the raise in a new exception type, so the caller no longer sees a `CellRuntimeError`."
       - "Only a `PackageError` is marked, so run 46's `CellRuntimeError` from re-verification reaches the batch unmarked."
       - "The exhausted mode's `except BaseException` branch re-raises without marking."
       - "Every exception that escapes `run_task` is marked, the cell's own included."
+      - "One `except BaseException` around everything after `run_one_cell` returns marks the raise, so a raise from `append_queue_line` is marked too."
       - "The mark is set on the exception's class rather than on the object, so a fresh `CellRuntimeError` reads as marked."
   - claim: >-
       `run_batch` closes its row `INFRASTRUCTURE`, and returns it, once its
       runner raised a marked exception, whatever reason the loop stopped
       on. The loop still runs every later candidate it would have run. The
       log carries a line naming the command `saffron package <spec id>` for
-      the spec that raised, and for no other spec. The witness drives each
+      the spec that raised, and for no other spec. A later candidate whose
+      runner raised an unmarked exception is not named. The witness drives each
       of the four reasons the loop can stop on besides the breaker:
       `DRAINED`, `BUDGET`, `UNTIL` and `INCOMPLETE`. The `DRAINED` case
       raises a marked `PackageError` and the other three a marked
@@ -80,15 +83,20 @@ acceptance:
       - "`INCOMPLETE` outranks the marked raise, so that case closes `INCOMPLETE`."
       - "Only a marked `CellRuntimeError` is promoted, so a marked `PackageError` drains at exit 0."
       - "The log line names `saffron package` with no spec id, or names every spec the batch started."
+      - "The command line is emitted beside the `raised` line for every runner raise, marked or not."
       - "The returned reason is promoted but the row is closed with the loop's own reason."
   - claim: >-
       A stack batch treats a marked raise from its runner as a miss. It
       calls the runner once for that spec, refuses each spec whose
       `depends_on` reaches it, and closes its row `INFRASTRUCTURE`. Its end
       review and follow-ups still run, and the log names `saffron package
-      <spec id>`. The witness drives both generations. An order spec raises
-      in one batch, and a follow-up raises in a second batch whose order
-      all reached `READY_FOR_REVIEW`.
+      <spec id>`. A resumed tail under `saffron finish` runs the runner
+      once for a follow-up whose raise is marked, and returns
+      `INFRASTRUCTURE`. It still writes nothing to the batch row. The
+      witness drives three batches. An order spec raises in one batch. A
+      follow-up raises in a second batch whose order all reached
+      `READY_FOR_REVIEW`. A follow-up raises in a resumed tail with no
+      `sleep` given.
     witness: tests/test_batch.py::test_a_stack_batch_misses_a_spec_whose_package_raised_and_closes_infrastructure
     wrong_versions:
       - "`wrapped` still offers a marked `CellRuntimeError` again, so the order spec runs twice."
@@ -96,6 +104,7 @@ acceptance:
       - "The reason is promoted before `run_stack_batch` reads it, so the end review's follow-ups never run."
       - "A fresh list of marked raises is kept for the follow-ups' `_drive` call, and only the order's list reaches `_stop`."
       - "The spec's dependents still run, because the miss is never recorded in `missed`."
+      - "The resumed tail returns `_promote_in_flight`'s reason alone, so `saffron finish` exits 0 after a marked raise."
   - claim: >-
       `saffron batch` exits 2 and prints `saffron package <spec id>` when
       `run_task` raised a marked exception, and the batch row closes
@@ -171,21 +180,34 @@ the row `INFRASTRUCTURE` in its `finally` (`:178-185`, `:965-967`).
 
 **`saffron batch` maps the reason to an exit.** It exits 2 for
 `INCOMPLETE` and for `INFRASTRUCTURE`, and 0 for the rest
-(`saffron/cli.py:2387-2400`). Both forms reach that mapping.
+(`saffron/cli.py:2394-2409`). Both forms reach that mapping.
+
+**`saffron finish` runs a resumed tail.** It calls `run_stack_batch` with
+no `sleep` (`saffron/cli.py:2577-2596`), so the default `time.sleep`
+applies (`saffron/batch.py:460`). It exits 2 for `INCOMPLETE` and
+`INFRASTRUCTURE` (`saffron/cli.py:2600`). The resumed tail returns
+`_promote_in_flight`'s reason and closes no row (`saffron/batch.py:959-962`).
+Its `stop_reason` is the row's `status` (`saffron/cli.py:2529`). The tail runs
+follow-ups only when that reason is `DRAINED` (`saffron/batch.py:921`).
 
 **The tests.**
 - `tests/test_task.py`'s `_drive` helper runs `run_task` with
   `run_one_cell` replaced (`:43-118`). `on_cell` writes the task row the
   raise path needs, as `_mint_sy5` does (`:435-446`).
-  `_exhausted_outcome` builds an exhausted-mode outcome, with one
-  anchored blocker and `rebut_result=None` (`:2087-2097`).
+  `test_an_exhausted_package_that_opened_nothing_still_pushes_its_work`
+  builds an exhausted-mode outcome in a nested `_exhausted_outcome`, with
+  one anchored blocker and `rebut_result=None` (`:2087-2097`).
+  A cell that is neither `READY_FOR_REVIEW` nor exhausted-mode reaches no
+  PACKAGE call. It calls `push_unpackaged_work` and then
+  `append_queue_line` (`saffron/task.py:737-776`).
 - `tests/test_batch.py` has `FakeRunner` (`:114`), `FakeClock`,
   `_latest_batch_id`, `_batch_row`, `_ready` and `_candidate`.
   `test_a_task_left_in_flight_outranks_an_ordinary_stop` drives `BUDGET`
   and `UNTIL` behind an in-flight task (`:641-689`). `StackDoubles`
   (`:5158`) offers follow-ups from its `__follow_ups__` row.
   `RaisingStackDoubles` (`:6512`) raises a queued exception per seat and
-  spec id.
+  spec id. `_resumable_batch` (`:7271`) and `_row_window` (`:7314`) build
+  and read a resumable batch.
 - `tests/test_cli.py` has `_readiness_passes` (`:4534`),
   `_fake_batch_resolution` (`:4556`) and `_tasks_and_latest_batch_status`.
   `_mint_then_raise` is a `cli.run_task` stub that mints a task and
@@ -214,7 +236,8 @@ the row `INFRASTRUCTURE` in its `finally` (`:178-185`, `:965-967`).
    unresumed `run_stack_batch` each pass one list to every `_drive` call
    they make and to `_stop`. `run_stack_batch` still reads `_drive`'s own
    reason to decide its follow-ups. The tasks left in flight are still
-   named on the way out.
+   named on the way out. A resumed tail returns `INFRASTRUCTURE` when the
+   list is non-empty, and still writes nothing to the row.
 5. **Docstrings and comments.** `_is_layer`, `_drive`, `wrapped`'s runner
    handler, `_promote_in_flight` and `_stop` say what a marked raise does.
    The module docstring says `Refused` is imported from `saffron.task` for
@@ -230,16 +253,16 @@ the row `INFRASTRUCTURE` in its `finally` (`:178-185`, `:965-967`).
   `READY_FOR_REVIEW` (`saffron/task.py:911-914`). An exhausted-mode
   `CellRuntimeError` is marked and promotes the row, but its task stays
   `EXHAUSTED`. The log still names the command, and that command refuses.
-- A resumed tail under `saffron finish`. It returns
-  `_promote_in_flight`'s reason and closes no row (`saffron/batch.py:959-962`).
 - `saffron/cli.py`. Its exit mapping already reads the reason.
 - `DESIGN.md` §4.2.1 and ADR 7. Their paragraphs change by hand in this
   spec's own pull request.
 
 ## Notes for the agent
 
-Every criterion here is new behaviour, so each declares a witness and no
-mutant. Import `raised_in_package` and `mark_raised_in_package` inside each
+No criterion declares a mutant. The change edits existing branches in
+both modules, but it rewrites the lines a mutant would pin. Such a mutant
+would not match at head, so `witness` reports `skip`. The wrong versions
+under each criterion carry that weight. Import `raised_in_package` and `mark_raised_in_package` inside each
 witness's body, never at module scope. A module-scope import of a name the
 change adds turns the reverted run into a collection error, which `revert`
 reads as `skip`.
@@ -251,7 +274,9 @@ and `raised_in_package` is true. A `READY_FOR_REVIEW` raise needs the task
 row, as `_mint_sy5` writes it. For the exhausted mode, pass `reviews` with
 one anchored blocker and `rebut_result=None` through `_drive`'s
 `**outcome_fields`. Then replace `run_one_cell` with one that raises a
-`CellRuntimeError`, and assert that one is unmarked. Assert a fresh
+`CellRuntimeError`, and assert that one is unmarked. Drive a `GATE_ERROR`
+cell with `append_queue_line` replaced by one that raises a
+`CellRuntimeError`, and assert it escapes unmarked. Assert a fresh
 `CellRuntimeError` is unmarked too.
 
 **Criterion 2's witness.** Build each marked exception with
@@ -265,6 +290,8 @@ first candidate raises and a second candidate follows.
 
 Assert the returned reason, `_batch_row(...)["status"]`, a line holding
 `saffron package <first id>`, and no line holding the second id's command.
+Add a fifth night whose second candidate raises an unmarked
+`CellRuntimeError`. Assert its `raised` line appears and no command names it.
 
 **Criterion 3's witness.** Use `RaisingStackDoubles` with marked
 `CellRuntimeError`s and `sleep=_fail_sleep`. In the first batch, the order
@@ -274,7 +301,15 @@ Assert the runner saw the raising spec once, the dependent was refused
 naming it, and the follow-up ran. Assert the status reads `INFRASTRUCTURE`.
 In the second batch, every order spec reaches `READY_FOR_REVIEW`, and the
 follow-up raises. Assert the runner saw it once, and the status reads
-`INFRASTRUCTURE`.
+`INFRASTRUCTURE`. In the third, build a `DRAINED` resume with
+`_resumable_batch` and pass no `sleep`. Its one follow-up raises. Assert the
+runner saw it once, the return is `INFRASTRUCTURE`, and `_row_window` is
+unchanged.
+
+A deferred stack batch whose order saw a marked raise closes its row
+`INFRASTRUCTURE`. `saffron finish` then reads that `status` and runs the end
+review with no follow-ups. `DESIGN.md` §4.2.1 accepts the same for a row
+closed `INCOMPLETE`.
 
 **Criterion 4's witness.** Follow the plain-batch half of
 `test_a_batch_whose_store_lacks_the_proxy_is_refused_and_mints_no_task_row`,

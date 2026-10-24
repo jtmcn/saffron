@@ -63,9 +63,10 @@ batch. A name a member takes from a layer below is not a join. This narrows ADR
 descendants are refused with a reason. The batch goes on. A `CellRuntimeError`
 raised by a spec's review or by its task's cell is not a miss. The spec is
 offered again at once on the same predecessor, and the breaker bounds the
-re-offers (`SA-0234`). One that escaped from the task's PACKAGE is a miss
-(`SA-0316`). A `PREFLIGHT_FAILED` outcome is offered again the same
-way (`SA-0261`). A `GATE_ERROR` outcome is still a miss.
+re-offers (`SA-0234`). A `PREFLIGHT_FAILED` outcome is offered again the same
+way (`SA-0261`). A raise that escaped from a task's PACKAGE is not offered
+again, and for a spec of the order it is a miss (`SA-0316`). A `GATE_ERROR`
+outcome is still a miss.
 
 **Spec review runs inside the batch.**
 
