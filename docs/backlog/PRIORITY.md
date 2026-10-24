@@ -287,7 +287,7 @@ verdict shares its $10 with the fixes. A task whose gates were green ended
 batch holds the spec writer's share back, then charges the writer again. At
 $134 it could not revise a $45 spec, and no cell ran.
 
-**Placed 2026-10-19**, from the spec loop's run 44: **b-e40d09**, moved up
+**Placed 2026-10-19**, from the spec loop's run 44: ~~**b-e40d09**~~, moved up
 from tier 3, then **b-e7898b**. A host-run probe that survived was dropped
 for want of an anchor, so `SA-0288` packaged past its own blocker. A spec
 that added a refusal refused the specs queued below it, and its cell ended
@@ -359,7 +359,7 @@ the plan's Task 6 rewritten onto **42**. Then Task 11's by-hand documents (~~**3
 ~~**104**~~, ~~**113**~~, ~~**135**~~, and from stack #285: **147**, **146**, ~~**144**~~,
 **149**, **148**, ~~**142**~~, ~~**138**~~, then ~~**152**~~ and ~~**153**~~, and
 from stack #308: ~~**159**~~, **157**, **158**, and from run 6: **172**, and from run 7: ~~**b-b5f379**~~, **b-60732c**, **b-eac388**, **b-bc54d1**, **b-63ac52**, ~~**b-122686**~~, ~~**b-afec7c**~~, and from `SA-0109`'s spec review: **b-7c41e0**, and from run 8: ~~**b-044ae7**~~, **b-65e7e2**, **b-5e443c**, **b-5d5b56**, **b-952c34**, **b-60d804**, **b-4589be**, **b-6f7f8d**, and from the spec-writer
-measurement: **b-281f0a** and **b-08a36a**, and from run 9: ~~**b-17fb8b**~~, ~~**b-a70ec1**~~, ~~**b-ce93aa**~~, ~~**b-461729**~~, and from run 10: ~~**b-865399**~~, ~~**b-1c7019**~~, ~~**b-3e0dbe**~~, and from the spec chain of 2026-09-20: **b-b69bb6**, **b-7d3810**, ~~**b-929465**~~, ~~**b-250dc7**~~. Then **160**, which is what
+measurement: **b-281f0a** and ~~**b-08a36a**~~, and from run 9: ~~**b-17fb8b**~~, ~~**b-a70ec1**~~, ~~**b-ce93aa**~~, ~~**b-461729**~~, and from run 10: ~~**b-865399**~~, ~~**b-1c7019**~~, ~~**b-3e0dbe**~~, and from the spec chain of 2026-09-20: **b-b69bb6**, **b-7d3810**, ~~**b-929465**~~, ~~**b-250dc7**~~. Then **160**, which is what
 item 141's close left. The Gate-only cell's suite is in a file because the
 ledger has no owner column that fits it.
 
@@ -535,7 +535,7 @@ longer retires a spec, so the delegate retires each one and closes its item
 by hand. A step the repo declares would let the finish do both.
 
 **Placed 2026-10-09**, from the spec loop's run 32: **b-910cef**,
-**b-a33889**, **b-180f9f**, **b-8a0c9a**, **b-5abe53**, **b-f10412**, then
+**b-a33889**, **b-180f9f**, ~~**b-8a0c9a**~~, **b-5abe53**, **b-f10412**, then
 **b-25f2b2**. The queue refuses every child of an open stack. A mint or a
 revision that meets a cell runtime failure still misses its layer. A
 resumed row keeps a stale merged head. The end review grades heads from
@@ -570,6 +570,13 @@ passed. PACKAGE leaves a spec's deferred check out of `## Not covered`.
 **Placed 2026-10-20**, from the spec loop's run 45: ~~**b-998bb7**~~ (done, #924). A comment
 split by a blank line passes the `prose` gate's two-line limit.
 
+**Placed 2026-10-23**, from the spec loop's run 46: **b-0bd346**, then
+**b-066901**, **b-1572e7**, **b-cc87b1** and **b-7c1c99**. REBUT ends a task
+`EXHAUSTED` on a gate failure its own fix made. A layer cut from a review
+commit cannot be packaged again. A child stacks on its lowest open parent.
+The writer drafts a follow-up a queued spec owns. One refused /24 stops
+every cell.
+
 ### Tier 3 — real, not urgent
 
 **Placed 2026-10-16**, from the spec loop's run 42: **b-60317d**.
@@ -589,10 +596,14 @@ modules each split a `consumes` or `removes` entry at its colon.
 **b-a64578**, **b-206d2c**. The view's spend after a resume, and a runaway
 row setting a budget floor.
 
+**Placed 2026-10-23**, from the spec loop's run 46: **b-30cbb8**,
+**b-d038df**, **b-25634b**, **b-19dbc9** and **b-1fc93b**. Each is a gap a
+seat or the run found and the stack left alone.
+
 ~~**22**~~, ~~**23**~~, **31**, ~~**19**~~, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, ~~**62**~~, **63**, ~~**64**~~, **75**, **76**, **77**.
 ~~**81**~~, ~~**82**~~, ~~**83**~~, ~~**84**~~, ~~**85**~~, **86**, ~~**87**~~, ~~**89**~~, **90**, **92**, **96**, **99**, **100**, **101**, ~~**105**~~, **106**, ~~**107**~~, **108**. ~~**110**~~, ~~**111**~~, **116**, **121**, **122**, ~~**123**~~, ~~**124**~~, ~~**125**~~, ~~**127**~~, **130**, ~~**131**~~, **132**, ~~**133**~~, **134**, ~~**139**~~. **150**, **151**, **155**, **156**, **174**, **175**, ~~**176**~~, **b-d6bff7**, and from run 7: **b-990bd9**, **b-7431a2**, **b-9eceda**, **b-bc9951**, and from run 8: **b-0281e4**, **b-e9db0e**, **b-397edd**, ~~**b-e0bbbf**~~, and from run 9: **b-0e20e9**, ~~**b-e403c1**~~, **b-98dc4d**, **b-27b9db**, and from the dead-code-gate plan's Task 6: ~~**b-a1bdba**~~, and from run 10: **b-bbf663**, **b-6a9707**, and from the spec chain of 2026-09-20: ~~**b-ea1d13**~~, and from the review of #392: **b-d1d634**, and from PR #393's review: **b-d5d290**, and from `SA-0119`'s review: ~~**b-5fa523**~~, and from writing `SA-0120`: **b-76953a**, **b-9ed36d**, and from run 13: ~~**b-542beb**~~, **b-37924b**,
-**b-b431c1**, **b-ac2f02**, and from run 14: **b-49329e**, ~~**b-111c56**~~, ~~**b-2dea1c**~~, and from ADR 4's review: ~~**b-26315b**~~, **b-e40d09**, ~~**b-ac97c0**~~, **b-07f694**, **b-7c88f8**, and from ADR 5: ~~**b-0adc85**~~, and from comparing Saffron with the superpowers skills: **b-e1afbb**, **b-3732ef**, and from run 15: **b-f4eb52**, **b-f30189**, **b-a90136**, **b-e06dbc**, and from `SA-0135`'s review: **b-32f492**, **b-50b566**, and from run 16: **b-8fb227**, **b-79d951**, **b-9ead75**, **b-e88930**, **b-1e5572**, and from run 17: **b-04d4c2**, and from the stack batch's spec reviews: **b-6a692d**, **b-2d9ae9**, **b-223244**, ~~**b-df59f8**~~, **b-acee54**, **b-6518ba**, **b-6a101f**, **b-7eb5f5**, **b-22ff3f**, **b-589cf6**, and from the 2026-09-27 size pricing: **b-41664e**, and from run 32: **b-4b386f**, **b-d96f14**, ~~**b-f71105**~~, **b-9b94c9**, **b-ff3141**, **b-a99c76**, **b-3a8504**, **b-7f105f**, **b-8c17dc**.
+**b-b431c1**, **b-ac2f02**, and from run 14: **b-49329e**, ~~**b-111c56**~~, ~~**b-2dea1c**~~, and from ADR 4's review: ~~**b-26315b**~~, ~~**b-e40d09**~~, ~~**b-ac97c0**~~, **b-07f694**, **b-7c88f8**, and from ADR 5: ~~**b-0adc85**~~, and from comparing Saffron with the superpowers skills: **b-e1afbb**, **b-3732ef**, and from run 15: **b-f4eb52**, **b-f30189**, **b-a90136**, **b-e06dbc**, and from `SA-0135`'s review: **b-32f492**, **b-50b566**, and from run 16: **b-8fb227**, **b-79d951**, **b-9ead75**, **b-e88930**, **b-1e5572**, and from run 17: **b-04d4c2**, and from the stack batch's spec reviews: **b-6a692d**, **b-2d9ae9**, **b-223244**, ~~**b-df59f8**~~, **b-acee54**, **b-6518ba**, **b-6a101f**, **b-7eb5f5**, **b-22ff3f**, ~~**b-589cf6**~~, and from the 2026-09-27 size pricing: **b-41664e**, and from run 32: **b-4b386f**, **b-d96f14**, ~~**b-f71105**~~, **b-9b94c9**, **b-ff3141**, **b-a99c76**, **b-3a8504**, **b-7f105f**, **b-8c17dc**.
 Item 52's review adds **b-cec9a7**.
 (**65** and **68** are done, and **81**–**85** on 2026-09-08; **80** moved to tier 1 when its evidence arrived, and **69** is ranked there too.
 **91** is done — the spike record landed. **92** was appended un-indexed, which

@@ -2418,3 +2418,87 @@ seat finding the in-cell critic and the end review both passed.
 - Run 45: batch 39's end review drafted `SA-0297` from #919's packaged head,
   redoing two held review commits. **No bucket**, the end review. **Open:**
   b-8a0c9a.
+
+## 2026-10-23, spec loop run 46 (#928 to #944)
+
+- `SA-0299` (#928): no witness held a host-filed survivor that was not a
+  blocker, so moving its clause past the severity check survived. **Bucket
+  3**, adequacy. **Landed:** a review commit on #928.
+- `SA-0299` (#928): a module docstring used "run" as a noun for a cell.
+  **Bucket 3**, conventions. **Landed:** a review commit on #928.
+- `SA-0298` (#929): `issue-tracker.md` said `make check` reads every
+  changed file's working copy, which holds for one hook. **Bucket 3**,
+  contract. **Landed:** a review commit on #929.
+- `SA-0298` (#929): the hook restated a `read_text` helper the repo defines.
+  **Bucket 3**, conventions. **Landed:** a review commit on #929.
+- `SA-0298` (#929): a callable was typed `Any`. **Bucket 3**, conventions.
+  **Landed:** a review commit on #929.
+- `SA-0298` (#929): the witness killed a missing `stages` only by a
+  `KeyError`. **Bucket 3**, adequacy. **Landed:** a review commit on #929.
+- `SA-0298` (#929): `CLAUDE.md:30` still described the old hook. **Bucket
+  3**, contract. **Landed:** a review commit on #929.
+- `SA-0300` (#930): no witness drove a relative `--repo`, and its mutant
+  survived. **Bucket 3**, adequacy. **Landed:** a review commit on #930.
+- `SA-0300` (#930): a docstring said two values are never `None` together,
+  which was false. The end review caught it. **Bucket 3**, contract.
+  **Landed:** a review commit on #930.
+- `SA-0300` (#930): an `issue-tracker.md` example kept the files-only rule.
+  **Bucket 3**, contract. **Landed:** a review commit on #930.
+- `SA-0301` (#932): criterion 3's witness read a usage line naming both
+  flags, so a bad flag pairing survived. **Bucket 3**, adequacy. **Landed:**
+  a review commit on #932.
+- `SA-0301` (#932): a failure line lacked the command's prefix. **Bucket 3**,
+  conventions. **Landed:** a review commit on #932.
+- `SA-0301` (#932): `CONTEXT.md`'s Stack batch entry, `CLAUDE.md:77` and
+  `README.md:124` each said something false after the change. **Bucket 3**,
+  contract. **Landed:** a review commit on #932.
+- `SA-0301` (#932): a docstring overstated its function, and a bare
+  `"deferred.json"` literal restated a name. **Bucket 3**, conventions.
+  **Landed:** a review commit on #932, which adds `DEFERRED_NAME`.
+- `SA-0304` (#934): the resume's budget check was witnessed from one side, so
+  `>` survived. **Bucket 3**, adequacy. **Landed:** a review commit on #934.
+- `SA-0304` (#934): a comment said "closed by a resume" and another said
+  "this night". The tests restated `_spend`. **Bucket 3**, conventions.
+  **Landed:** a review commit on #934.
+- `SA-0302` (#937): three criterion 2 witnesses could not fail, on a middle
+  join, a join that erred on the child and an unasserted candidate list.
+  **Bucket 3**, adequacy. **Landed:** a review commit on #937.
+- `SA-0302` (#937): Section C passed on an `IndexError`, and the recorded
+  head's base went unasserted. **Bucket 3**, adequacy. **Landed:** a review
+  commit on #937.
+- `SA-0302` (#937): a message named no layer, ADR 7 said something false, two
+  docstrings overclaimed, a test aliased a name and one used an avoided word.
+  **Bucket 3**, conventions. **Landed:** a review commit on #937.
+- `SA-0303` (#939): the missing-bottom case never asserted the join's range.
+  **Bucket 3**, adequacy. **Landed:** a review commit on #939.
+- `SA-0303` (#939): the concern witness used one lens, so narrowing the lens
+  set survived. **Bucket 3**, adequacy. **Landed:** a review commit on #939.
+- `SA-0303` (#939): `_stack_follow_ups`' docstring claimed `qualify` reads
+  every head from the graded fields. **Bucket 3**, contract. **Landed:** a
+  review commit on #939.
+- `SA-0303` (#939): two rules held no witness, a base read and a lazy read.
+  **Bucket 3**, adequacy. **Open:** b-d038df.
+- `SA-0306` (#941): the witness named lower layers at fake shas, so two wrong
+  versions died only by a `GitError`. **Bucket 3**, adequacy. **Landed:** a
+  review commit on #941.
+- `SA-0306` (#941): `finish.py`'s module docstring left the head it builds on
+  unclear. **Bucket 3**, contract. **Landed:** a review commit on #941.
+- `SA-0305` (#944): the witness never asserted the spec review or finish
+  adapter, nor that no batch row was made. **Bucket 3**, adequacy.
+  **Landed:** a review commit on #944.
+- `SA-0305` (#944): `INFRASTRUCTURE` printed "infrastructure failed", not its
+  reason, and a refusal said "finished". **Bucket 3**, conventions.
+  **Landed:** a review commit on #944.
+- `SA-0305` (#944): `CLAUDE.md`'s launchd sentence came to name the wrong
+  command. **Bucket 3**, contract. **Landed:** a review commit on #944.
+- `SA-0305` (#944): `_finish` copied `_batch`'s stack adapters line for line.
+  **Bucket 3**, conventions. **Open:** b-25634b.
+- Run 46: REBUT ended `SA-0298` `EXHAUSTED` on prose hits its own fix wrote.
+  **No bucket**, REBUT. **Open:** b-0bd346.
+- Run 46: `saffron package` refused `SA-0302`, a layer cut from a review
+  commit. **No bucket**, PACKAGE. **Open:** b-066901.
+- Run 46: batch 49 stacked `SA-0305` on its lowest open parent and refused it
+  for overlapping its own parent. **No bucket**, the scheduler. **Open:**
+  b-1572e7.
+- Run 46: batch 47's writer drafted `SA-0310`, which a queued spec owned.
+  **No bucket**, the end review. **Open:** b-cc87b1.

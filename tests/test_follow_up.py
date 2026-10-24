@@ -8,7 +8,9 @@ fail collection under `revert`.
 
 from __future__ import annotations
 
+import re
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,7 +19,7 @@ import yaml
 
 from saffron.agents.artifacts import hash_artifact
 from saffron.agents.findings import Finding
-from saffron.end_review import LayerReview, StackReview
+from saffron.end_review import LayerFields, LayerReview, StackReview, layer_fields
 from saffron.intake import Mutant
 from saffron.ledger import Ledger
 from saffron.phases import review
@@ -223,9 +225,14 @@ def _build(tmp_path: Path) -> SimpleNamespace:
 def _stack(built: SimpleNamespace) -> StackReview:
     key_101 = built.ledger.record_key(built.task_101)
     key_102 = built.ledger.record_key(built.task_102)
+    fields = {
+        key_101: layer_fields(built.ledger, key_101),
+        key_102: layer_fields(built.ledger, key_102),
+    }
     return StackReview(
         join=review.LensReview("join", []),
         layers=[LayerReview(key_102, []), LayerReview(key_101, [])],
+        fields=fields,
     )
 
 
@@ -1059,3 +1066,257 @@ def test_a_stack_with_no_layers_writes_nothing_and_raises_nothing(tmp_path):
     )
     assert candidates == []
     assert lines == ["0 qualified findings joined no group"]
+
+
+def _write_with_assigned_id(calls: list):
+    """A `write` double that reads the prompt's own `id:` line, rather
+    than a fixed one: a sub-case that mints after an earlier one has
+    already taken the next few ids needs whatever id `next_spec_id`
+    assigned."""
+
+    def write(group, prompt):
+        from saffron import spec_review
+
+        calls.append((group, prompt))
+        match = re.search(r"^id: (\S+)$", prompt, re.MULTILINE)
+        assert match is not None
+        text = _candidate(match.group(1), touches=(group.file, "tests/test_b.py"))
+        return spec_review.SpecWriterSession(
+            text=text,
+            cost_usd=0.25,
+            error=None,
+            resets_at=None,
+            session_id=f"s{len(calls)}",
+            num_turns=3,
+            spec_sha=hash_artifact(text),
+        )
+
+    return write
+
+
+def _extend_graded(mirror: Path, shas: dict[str, str]) -> None:
+    """Extends `_mirror`'s `base`/`H1`/`H2` with a graded branch forking
+    off `base`. `D` adds a test file, and `H1r` rebases `H1`'s own change
+    onto it. `R1` is the bottom layer's own review commit, `H2r` restacks
+    `H2`'s own change onto it, and `R2` is the top layer's own review
+    commit. Mutates `shas` in place and leaves the working tree at `H2`.
+    """
+
+    def commit(message: str) -> str:
+        _git(mirror, "add", "-A")
+        _git(mirror, "commit", "-q", "-m", message)
+        return _git(mirror, "rev-parse", "HEAD").strip()
+
+    _git(mirror, "checkout", "-q", shas["base"])
+    _write(mirror, "tests/test_d.py", "def test_d(): pass\n")
+    shas["D"] = commit("D")
+
+    _write(mirror, "src/a.py", "alpha_new\n")
+    _write(mirror, "tests/test_a.py", "def test_a(): assert True\n")
+    shas["H1r"] = commit("H1r")
+
+    _write(mirror, "tests/test_e.py", "def test_e(): pass\n")
+    shas["R1"] = commit("R1")
+
+    _write(mirror, "src/b.py", "beta\nbeta_rate\n")
+    _write(mirror, "src/c.py", "gamma gamma\n")
+    _write(mirror, "tests/test_b.py", "def test_b(): pass\n")
+    shas["H2r"] = commit("H2r")
+
+    _write(mirror, "tests/test_f.py", "def test_f(): pass\n")
+    shas["R2"] = commit("R2")
+
+    _git(mirror, "checkout", "-q", shas["H2"])
+
+
+def _graded_fields(
+    built: SimpleNamespace, key_101: str, key_102: str
+) -> dict[str, LayerFields]:
+    bottom = replace(
+        layer_fields(built.ledger, key_101),
+        base=built.shas["H1"],
+        diff_base=built.shas["D"],
+        head=built.shas["R1"],
+    )
+    top = replace(
+        layer_fields(built.ledger, key_102),
+        base=built.shas["H1"],
+        diff_base=built.shas["R1"],
+        head=built.shas["R2"],
+    )
+    return {key_101: bottom, key_102: top}
+
+
+def test_a_follow_up_is_written_from_the_heads_and_ranges_the_end_review_graded(
+    tmp_path, monkeypatch
+):
+    """`write_follow_ups` reads every head and range from `stack.fields`,
+    through `qualify.graded_fields`, with the same packaged-head fallback
+    for a layer `stack.fields` lacks. An in-cell concern's line in the
+    prompt still names the origin's *packaged* head, the head its line
+    number was recorded against. An end-review finding's line names none."""
+    from saffron import follow_up, spec_review
+    from saffron.repos import mirror as mirror_module
+
+    monkeypatch.setattr(spec_review, "SPEC_WRITER_SESSION_USD", 1.0)
+
+    built = _build(tmp_path)
+    _extend_graded(built.mirror, built.shas)
+    key_101 = built.ledger.record_key(built.task_101)
+    key_102 = built.ledger.record_key(built.task_102)
+    fields = _graded_fields(built, key_101, key_102)
+    stack = StackReview(
+        join=review.LensReview("join", []),
+        layers=[LayerReview(key_102, []), LayerReview(key_101, [])],
+        fields=fields,
+    )
+
+    changed_calls: list[tuple[str, str]] = []
+    real_changed_files = mirror_module.changed_files
+
+    def _spy_changed_files(mirror, base, head):
+        changed_calls.append((base, head))
+        return real_changed_files(mirror, base, head)
+
+    monkeypatch.setattr(follow_up, "changed_files", _spy_changed_files)
+
+    # `probe_finding`'s own text exists only at `R2`, the top's graded
+    # head. Reading the packaged `H2` instead drops it, since `H2` lacks it.
+    probe_finding = _finding(
+        "spec",
+        "blocker",
+        "src/b.py",
+        1,
+        "r2-only",
+        Mutant(file="tests/test_f.py", find="def test_f", replace="def test_g"),
+        "survived",
+    )
+    concern = _finding("conventions", "concern", "src/b.py", 1, "ic-concern")
+    top_group = FollowUpGroup(
+        task_key=key_102,
+        file="src/b.py",
+        findings=(_q(key_102, probe_finding), _q(key_102, concern)),
+    )
+    bottom_concern = _finding("spec", "concern", "src/a.py", 1, "bottom-concern")
+    bottom_group = FollowUpGroup(
+        task_key=key_101, file="src/a.py", findings=(_q(key_101, bottom_concern),)
+    )
+
+    qualify_calls: list = []
+    write_calls: list = []
+    mint_calls: list = []
+    pooled: list = []
+    turns = [
+        _candidate("SA-0108", claims=("claim-concern-b",)),
+        _candidate(
+            "SA-0109",
+            touches=("src/a.py", "tests/test_b.py"),
+            claims=("claim-concern-a",),
+        ),
+    ]
+
+    candidates = follow_up.write_follow_ups(
+        built.ledger,
+        stack,
+        batch_key=str(built.batch_id),
+        qualify=_qualify_stub(qualify_calls, [top_group, bottom_group], []),
+        write=_write_stub(write_calls, turns),
+        mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], mint_calls),
+        mirror=built.mirror,
+        specs_dir=built.specs_dir,
+        repo_id=built.repo_id,
+        test_paths=["tests/**"],
+        cap_usd=4.25,
+        emit=lambda line: None,
+        pooled=pooled,
+    )
+
+    assert len(candidates) == 2
+    assert changed_calls == [(built.shas["D"], built.shas["R2"])]
+
+    prompt_top = write_calls[0][1]
+    assert f"{built.shas['R1']}..{built.shas['R2']}" in prompt_top
+    assert f"the origin head {built.shas['R2']}" in prompt_top
+    assert f"the top of the stack, head {built.shas['R2']}" in prompt_top
+    assert f"cites head {built.shas['H2']}" in prompt_top
+    assert "r2-only" in prompt_top
+    assert "ic-concern" in prompt_top
+    # The end-review finding's own line names no head at all.
+    assert "- src/b.py:1: r2-only (probe" in prompt_top
+    assert f"cites head {built.shas['H1']}" not in prompt_top
+    # `R1` lacks this change, `H2r` (the head's parent) already has it:
+    # reading from `H2r` instead of `R1` would drop it from the diff.
+    assert "+beta_rate" in prompt_top
+
+    prompt_bottom = write_calls[1][1]
+    assert f"{built.shas['D']}..{built.shas['R1']}" in prompt_bottom
+    assert f"the origin head {built.shas['R1']}" in prompt_bottom
+    assert f"the top of the stack, head {built.shas['R2']}" in prompt_bottom
+    assert "bottom-concern" in prompt_bottom
+    # `D` lacks this change, `H1r` (the head's parent) already has it:
+    # reading from `H1r` instead of `D` would drop it from the diff.
+    assert "+alpha_new" in prompt_bottom
+
+    # --- a top layer missing from `fields` falls back to the packaged head ---
+    changed_calls.clear()
+    fields_missing_top = {key_101: fields[key_101]}
+    stack_missing_top = StackReview(
+        join=review.LensReview("join", []),
+        layers=[LayerReview(key_102, []), LayerReview(key_101, [])],
+        fields=fields_missing_top,
+    )
+    write_calls_mt: list = []
+    pooled_mt: list = []
+    candidates_mt = follow_up.write_follow_ups(
+        built.ledger,
+        stack_missing_top,
+        batch_key=str(built.batch_id),
+        qualify=_qualify_stub([], [top_group, bottom_group], []),
+        write=_write_with_assigned_id(write_calls_mt),
+        mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
+        mirror=built.mirror,
+        specs_dir=built.specs_dir,
+        repo_id=built.repo_id,
+        test_paths=["tests/**"],
+        cap_usd=4.25,
+        emit=lambda line: None,
+        pooled=pooled_mt,
+    )
+    assert changed_calls == [(built.shas["D"], built.shas["H2"])]
+    # `probe_finding`'s text does not exist at the packaged `H2`, so it is
+    # dropped before a write for the top group is ever attempted.
+    assert any("no longer matches" in p.reason for p in pooled_mt)
+    assert len(candidates_mt) == 2
+    assert "ic-concern" in write_calls_mt[0][1]
+    assert "r2-only" not in write_calls_mt[0][1]
+
+    # --- a bottom layer missing from `fields` falls back to the packaged head ---
+    changed_calls.clear()
+    fields_missing_bottom = {key_102: fields[key_102]}
+    stack_missing_bottom = StackReview(
+        join=review.LensReview("join", []),
+        layers=[LayerReview(key_102, []), LayerReview(key_101, [])],
+        fields=fields_missing_bottom,
+    )
+    write_calls_mb: list = []
+    candidates_mb = follow_up.write_follow_ups(
+        built.ledger,
+        stack_missing_bottom,
+        batch_key=str(built.batch_id),
+        qualify=_qualify_stub([], [top_group, bottom_group], []),
+        write=_write_with_assigned_id(write_calls_mb),
+        mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
+        mirror=built.mirror,
+        specs_dir=built.specs_dir,
+        repo_id=built.repo_id,
+        test_paths=["tests/**"],
+        cap_usd=4.25,
+        emit=lambda line: None,
+        pooled=[],
+    )
+    # `layer_fields`'s own `diff_base` is always the literal `pushed_sha^`,
+    # never pre-resolved, so the fallback hands that literal ref through.
+    assert changed_calls == [(f"{built.shas['H1']}^", built.shas["R2"])]
+    assert len(candidates_mb) == 2
+    prompt_bottom_fallback = write_calls_mb[1][1]
+    assert f"{built.shas['H1']}^..{built.shas['H1']}" in prompt_bottom_fallback

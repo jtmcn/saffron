@@ -162,16 +162,20 @@ def _finishing_commit(mirror: Path, parent: str) -> str:
     )
 
 
-def _hand_push(remote: Path, branch: str, dest: Path) -> None:
+def _hand_push(
+    remote: Path, branch: str, dest: Path, *, filename: str = "intruder.txt"
+) -> str:
     """Clone `remote` at `branch`, commit an intruder's file, and push it
-    back. This is the moved-head half of criterion 2's escalation table."""
+    back. Returns the new head. This is the moved-head half of criterion
+    2's escalation table, and of criterion 3's own moved branches."""
     _git(dest.parent, "clone", "-q", "-b", branch, str(remote), str(dest))
-    (dest / "intruder.txt").write_text("hand pushed\n")
+    (dest / filename).write_text(f"hand pushed via {filename}\n")
     _git(dest, "add", "-A")
     _git(
         dest, "-c", "user.email=h@h", "-c", "user.name=H", "commit", "-qm", "hand push"
     )
     _git(dest, "push", "-q", "origin", branch)
+    return _git(dest, "rev-parse", "HEAD")
 
 
 def _seed_finish_branch(
@@ -1362,6 +1366,219 @@ def test_findings_json_holds_each_layers_findings_and_each_follow_up_that_added_
     assert empty_data == {"batch": empty_batch, "findings": [], "follow_ups": []}
 
 
+def test_a_finish_handed_graded_heads_commits_atop_the_top_layers_graded_head(
+    stack, tmp_path
+):
+    """`commit_finish`'s `heads` names a layer's own graded head by task
+    key. Named for the top layer, the commit sits atop it rather than the
+    top layer's `pushed_sha`. Named only for lower layers, the top layer's
+    `pushed_sha` is still what the commit is built on."""
+    from saffron.finish import commit_finish
+
+    ledger = stack.ledger
+    layers = ledger.stack_layers(stack.batch_b)
+    by_spec = {layer["spec_id"]: layer["task_key"] for layer in layers}
+
+    sha = commit_finish(
+        ledger,
+        stack.batch_b,
+        [],
+        mirror=stack.mirror,
+        workdir=tmp_path / "work-named",
+        heads={by_spec["TE-20"]: stack.heads["TE-20-plus"]},
+    )
+    assert sha is not None
+    assert _git(stack.mirror, "rev-parse", f"{sha}^1") == stack.heads["TE-20-plus"]
+
+    sha2 = commit_finish(
+        ledger,
+        stack.batch_b,
+        [],
+        mirror=stack.mirror,
+        workdir=tmp_path / "work-unnamed",
+        heads={
+            by_spec["TE-10"]: stack.heads["TE-20-plus"],
+            by_spec["TE-7"]: stack.heads["TE-20-plus"],
+        },
+    )
+    assert sha2 is not None
+    assert _git(stack.mirror, "rev-parse", f"{sha2}^1") == stack.heads["TE-20"]
+
+
+def test_each_finding_names_the_head_the_end_review_graded_its_layer_at(
+    stack, tmp_path
+):
+    """`write_findings`'s `heads` replaces a layer's own `pushed_sha` only
+    on an entry whose lens is not an in-cell lens (`review.LENSES`): an
+    end-review or join row. Every in-cell entry, and every critic entry
+    (generation 1 or a plain follow-up), keeps `pushed_sha` regardless."""
+    from saffron.finish import FINDINGS_NAME, write_findings
+    from saffron.phases import review
+
+    ledger = stack.ledger
+    te7 = stack.tasks["TE-7"]
+    te20 = stack.tasks["TE-20"]
+    te22 = stack.tasks["TE-22"]
+    te7_key = ledger.record_key(te7)
+    te20_key = ledger.record_key(te20)
+    assert te7_key is not None
+    assert te20_key is not None
+
+    pooled_finding = Finding(
+        lens="spec", severity="concern", file="p1.py", line=3, claim="c1", anchored=True
+    )
+    pooled = [
+        Pooled(
+            group=FollowUpGroup(
+                task_key=te7_key,
+                file="p1.py",
+                findings=(Qualified(te7_key, pooled_finding, "qualified", ""),),
+            ),
+            reason="cap",
+        )
+    ]
+
+    _qual(
+        ledger,
+        te7,
+        lens="spec",
+        filed="concern",
+        outcome="qualified",
+        file="p1.py",
+        claim="c1",
+    )
+    _qual(
+        ledger,
+        te7,
+        lens="spec",
+        filed="concern",
+        outcome="qualified",
+        file="p2.py",
+        claim="c2",
+    )
+    _qual(
+        ledger,
+        te7,
+        lens="standards",
+        filed="concern",
+        outcome="unanchored",
+        file="p3.py",
+        claim="c3",
+        reason="far",
+    )
+    _qual(
+        ledger,
+        te7,
+        lens="join",
+        filed="blocker",
+        outcome="qualified",
+        file="j1.py",
+        claim="jclaim",
+    )
+    for i, lens in enumerate(review.LENSES):
+        _qual(
+            ledger,
+            te7,
+            lens=lens,
+            filed="concern",
+            outcome="qualified",
+            file=f"incell{i}.py",
+            claim=f"incell-claim-{i}",
+        )
+
+    _qual(
+        ledger,
+        te20,
+        lens="spec",
+        filed="concern",
+        outcome="qualified",
+        file="q20.py",
+        claim="q20claim",
+    )
+    ledger.record_findings(
+        te20,
+        [
+            Finding(
+                lens="correctness",
+                severity="concern",
+                file="k1.py",
+                line=1,
+                claim="k1",
+                anchored=True,
+            )
+        ],
+    )
+    ledger.record_findings(
+        te22,
+        [
+            Finding(
+                lens="correctness",
+                severity="note",
+                file="m.py",
+                line=1,
+                claim="te22 note",
+                anchored=True,
+            )
+        ],
+    )
+
+    dest_a = tmp_path / "a" / FINDINGS_NAME
+    dest_b = tmp_path / "b" / FINDINGS_NAME
+    write_findings(ledger, stack.batch_b, [], dest_a, pooled=pooled)
+    graded_head = "9" * 40
+    graded_head_20 = "8" * 40
+    # TE-20 is named too, so a critic entry that started reading `heads`
+    # for a generation-1 layer would show it here.
+    write_findings(
+        ledger,
+        stack.batch_b,
+        [],
+        dest_b,
+        pooled=pooled,
+        heads={te7_key: graded_head, te20_key: graded_head_20},
+    )
+    findings_a = json.loads(dest_a.read_text())["findings"]
+    findings_b = json.loads(dest_b.read_text())["findings"]
+
+    def _key(entry: dict) -> tuple:
+        return (entry["spec_id"], entry["lens"], entry["outcome"], entry["head"])
+
+    expected_a = {
+        ("TE-7", "spec", "pooled", stack.heads["TE-7"]),
+        ("TE-7", "spec", "follow_up", stack.heads["TE-7"]),
+        ("TE-7", "standards", "unanchored", stack.heads["TE-7"]),
+        ("TE-7", "join", "follow_up", stack.heads["TE-7"]),
+        *{("TE-7", lens, "follow_up", stack.heads["TE-7"]) for lens in review.LENSES},
+        ("TE-20", "spec", "follow_up", stack.heads["TE-20"]),
+        ("TE-20", "correctness", "left_by_critic", stack.heads["TE-20"]),
+        ("TE-22", "correctness", "left_by_critic", None),
+    }
+    assert {_key(e) for e in findings_a} == expected_a
+
+    expected_b = {
+        ("TE-7", "spec", "pooled", graded_head),
+        ("TE-7", "spec", "follow_up", graded_head),
+        ("TE-7", "standards", "unanchored", graded_head),
+        ("TE-7", "join", "follow_up", graded_head),
+        *{("TE-7", lens, "follow_up", stack.heads["TE-7"]) for lens in review.LENSES},
+        # TE-20's own end-review lens takes its named head. Its critic
+        # entry (generation 1) still keeps `pushed_sha`, named or not.
+        ("TE-20", "spec", "follow_up", graded_head_20),
+        ("TE-20", "correctness", "left_by_critic", stack.heads["TE-20"]),
+        ("TE-22", "correctness", "left_by_critic", None),
+    }
+    assert {_key(e) for e in findings_b} == expected_b
+
+    def _graded(entry: dict) -> dict:
+        if entry["spec_id"] == "TE-7" and entry["lens"] not in review.LENSES:
+            return dict(entry, head=graded_head)
+        if entry["spec_id"] == "TE-20" and entry["lens"] not in review.LENSES:
+            return dict(entry, head=graded_head_20)
+        return entry
+
+    assert findings_b == [_graded(entry) for entry in findings_a]
+
+
 def test_a_green_finish_pushes_its_own_branch_and_opens_its_draft_pull_request(
     tmp_path, monkeypatch
 ):
@@ -2021,6 +2238,136 @@ def test_each_escalation_leaves_the_stack_unpushed(tmp_path, monkeypatch):
     assert verify_calls == [(sha, top["head"])]
     assert len(gh.calls) == 3
     _assert_untouched(s, before_remote, before_mirror)
+
+
+def test_a_finish_handed_graded_heads_judges_and_checks_each_layer_at_its_graded_head(
+    tmp_path, monkeypatch
+):
+    """`publish_finish`'s `heads` names each layer's own graded head by
+    task key. `verify` reads the top layer's named head in place of its
+    `pushed_sha`. The moved-branch check reads each layer's named head
+    the same way, falling back to `pushed_sha` for a layer `heads` does
+    not name. A branch found at its own entry does not escalate. One
+    found anywhere else does, naming the head it was checked against."""
+    from saffron.finish import ESCALATE, PUSHED, publish_finish
+
+    _isolate_git(tmp_path, monkeypatch)
+
+    def _run(
+        name: str,
+        *,
+        moved: dict[str, str],
+        named: set[str],
+        extra_move: str | None = None,
+    ):
+        s = _stack(tmp_path / name, 3)
+        rows = s.ledger.stack_layers(s.batch_id)
+        by_spec = {row["spec_id"]: row for row in rows}
+        top = rows[-1]
+        sha = _finishing_commit(s.mirror, top["pushed_sha"])
+
+        moved_to: dict[str, str] = {}
+        for i, (spec_id, filename) in enumerate(moved.items()):
+            row = by_spec[spec_id]
+            moved_to[spec_id] = _hand_push(
+                s.remote, row["branch"], tmp_path / f"{name}-{i}", filename=filename
+            )
+        heads = {by_spec[spec_id]["task_key"]: moved_to[spec_id] for spec_id in named}
+
+        if extra_move is not None:
+            row = by_spec[extra_move]
+            moved_to[extra_move] = _hand_push(
+                s.remote,
+                row["branch"],
+                tmp_path / f"{name}-extra",
+                filename="again.txt",
+            )
+
+        gh = _FakeGh(_bases(rows))
+        verify_calls: list[tuple[str, str]] = []
+
+        def verify(sha_arg: str, base_arg: str) -> int:
+            verify_calls.append((sha_arg, base_arg))
+            return 0
+
+        lines = publish_finish(
+            s.ledger,
+            s.batch_id,
+            sha,
+            mirror=s.mirror,
+            url=s.url,
+            slug=s.slug,
+            verify=verify,
+            gh=gh,
+            workdir=tmp_path / f"{name}-push",
+            heads=heads,
+        )
+        expected_base = heads.get(top["task_key"], top["pushed_sha"])
+        assert verify_calls == [(sha, expected_base)]
+        return s, rows, by_spec, lines, heads, moved_to
+
+    # Every layer moved and named at its own moved head: each check passes
+    # against that head, and the finish pushes.
+    s, rows, by_spec, lines, heads, moved_to = _run(
+        "all-moved",
+        moved={"TE-1": "b.txt", "TE-2": "m.txt", "TE-3": "t.txt"},
+        named={"TE-1", "TE-2", "TE-3"},
+    )
+    branch = f"saffron/batch-{s.batch_id}-finish"
+    assert lines == [
+        f"{PUSHED}{lines[0].split()[1]} to {branch}, draft pull request "
+        "https://github.com/o/r/pull/200"
+    ]
+
+    # The same, named at the first move. The middle branch then moves a
+    # second time, so the check finds it past the head it was graded at.
+    s2, rows2, by_spec2, lines2, heads2, moved_to2 = _run(
+        "middle-moves-again",
+        moved={"TE-1": "b.txt", "TE-2": "m.txt", "TE-3": "t.txt"},
+        named={"TE-1", "TE-2", "TE-3"},
+        extra_move="TE-2",
+    )
+    graded_middle = heads2[by_spec2["TE-2"]["task_key"]]
+    actual_middle = moved_to2["TE-2"]
+    assert actual_middle != graded_middle
+    assert lines2 == [
+        f"{ESCALATE}saffron/TE-2 is at {actual_middle}, not {graded_middle}"
+    ]
+
+    # Only the bottom is named and moved, top and middle untouched: each
+    # check passes, against its own entry or its `pushed_sha`, and it pushes.
+    s3, rows3, by_spec3, lines3, heads3, moved_to3 = _run(
+        "bottom-only-named",
+        moved={"TE-1": "b.txt"},
+        named={"TE-1"},
+    )
+    branch3 = f"saffron/batch-{s3.batch_id}-finish"
+    assert lines3[0].startswith(PUSHED)
+    assert branch3 in lines3[0]
+
+    # The bottom named at its moved head again, the unnamed top also
+    # moved: the top's check falls back to its `pushed_sha` and escalates.
+    s4, rows4, by_spec4, lines4, heads4, moved_to4 = _run(
+        "top-moves-unnamed",
+        moved={"TE-1": "b.txt", "TE-3": "t.txt"},
+        named={"TE-1"},
+    )
+    assert lines4 == [
+        f"{ESCALATE}saffron/TE-3 is at "
+        f"{moved_to4['TE-3']}, not {by_spec4['TE-3']['pushed_sha']}"
+    ]
+
+    # Only the top is named at its moved head: the unnamed bottom's own
+    # move is still checked, against its `pushed_sha`, and it escalates.
+    s5, rows5, by_spec5, lines5, heads5, moved_to5 = _run(
+        "bottom-moves-unnamed",
+        moved={"TE-1": "b.txt", "TE-3": "t.txt"},
+        named={"TE-3"},
+    )
+    assert lines5 == [
+        f"{ESCALATE}saffron/TE-1 is at "
+        f"{moved_to5['TE-1']}, not {by_spec5['TE-1']['pushed_sha']}"
+    ]
 
 
 def _file_diff(path: str, added: list[str]) -> str:

@@ -1,11 +1,12 @@
 ---
 id: b-08a36a
 title: The prose hook reads the index, so `make check` passes on a new spec that has never been staged
-status: open
+status: done
 tier: 2
 filed: 2026-09-19
+closed: 2026-10-23
 specs: [SA-0298]
-prs: [378]
+prs: [378, 929]
 commits: []
 cites: []
 related: [44, b-044ae7, b-281f0a]
@@ -66,3 +67,4 @@ line in each, and leaves the hole open for anyone who does not read them.
 - 2026-10-14: recurred in the spec loop's run 39. `make check` passed a
   review commit whose new docstring the commit hook then refused.
 - 2026-10-20: recurred in the spec loop's run 45. On #919 `make check` exited 0 with `build_queue`'s docstring two lines further over its limit, because the edit was unstaged. The commit hook refused it.
+- 2026-10-23: #929 (`SA-0298`) makes `make check` read the working tree for `prose`.

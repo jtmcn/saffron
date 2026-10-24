@@ -45,3 +45,4 @@ copies. Each case has a test.
 
 - 2026-10-16: filed from the spec loop's run 42.
 - 2026-10-17: the line-0 and reversed range fault added from the spec loop's run 43. The operator chose to fix both copies together.
+- 2026-10-23: recurred in the spec loop's run 46. The batch's own `citation_defects` refused 19 correct citations out of 20 in `SA-0304`. Refreshes for `SA-0305` and `SA-0306` split sentences and widened ranges only to pass it.

@@ -23,7 +23,7 @@ from saffron.cell.worktree import DIFF_FLAGS, git_argv
 from saffron.gates.core.scope import matches
 from saffron.ledger import Ledger
 from saffron.phases import review
-from saffron.qualify import FollowUpGroup, Qualification, Qualified
+from saffron.qualify import FollowUpGroup, Qualification, Qualified, graded_fields
 from saffron.repos.mirror import changed_files, file_at
 from saffron.scheduler import RETIRED_DIRNAME, Candidate
 
@@ -138,9 +138,19 @@ def _prompt(
     origin_spec_id: str,
     origin_text: str,
     origin_diff: str,
+    origin_base: str,
     origin_head: str,
     top_head: str,
+    packaged_head: str | None,
 ) -> str:
+    """`origin_base..origin_head` is the range the end review graded the
+    origin layer at, and `origin_diff` is read over it.
+
+    An in-cell REVIEW concern's line was recorded against the layer's
+    *packaged* head instead. Each such line names `packaged_head`,
+    computed by the caller only when a concern is present. An end-review
+    finding's line names no head at all.
+    """
     lines = [
         f"context: this session drafts a follow-up spec growing out of "
         f"{origin_spec_id}, the origin spec quoted in full below.",
@@ -157,6 +167,8 @@ def _prompt(
     for qualified in findings:
         finding = qualified.finding
         line = f"- {finding.file}:{finding.line}: {finding.claim}"
+        if finding.lens in review.LENSES:
+            line += f" (cites head {packaged_head})"
         if finding.probe is not None:
             line += (
                 f" (probe {finding.probe.file} find={finding.probe.find!r} "
@@ -166,7 +178,7 @@ def _prompt(
         lines.append(line)
     lines.append(f"origin spec text ({origin_spec_id}):")
     lines.append(origin_text)
-    lines.append(f"origin layer diff ({origin_head}^..{origin_head}):")
+    lines.append(f"origin layer diff ({origin_base}..{origin_head}):")
     lines.append(origin_diff)
     return "\n".join(lines)
 
@@ -234,20 +246,22 @@ def write_follow_ups(
 
     Walks `stack.layers` top down through `qualify`'s own grouping. Every
     group that survives the reset, sub-cap, probe and allowed-path checks
-    gets one `write` call. What it returns is validated before it is
-    minted. This function opens no cell. `write` and `mint` are the
-    caller's own.
+    gets one `write` call, its text validated before it is minted. Opens
+    no cell. `write` and `mint` are the caller's own. Every head and range
+    comes from `stack.fields` through `graded_fields`, falling back to
+    `end_review.layer_fields`'s packaged head for a layer absent from it.
+    An in-cell concern's line names its packaged head instead.
     """
     qualification = qualify(stack.layers, stack.join)
     emit(f"{len(qualification.pool)} qualified findings joined no group")
     if not stack.layers:
         return []
 
-    top = end_review.layer_fields(ledger, stack.layers[0].task_key)
-    bottom = end_review.layer_fields(ledger, stack.layers[-1].task_key)
+    top = graded_fields(ledger, stack.fields, stack.layers[0].task_key)
+    bottom = graded_fields(ledger, stack.fields, stack.layers[-1].task_key)
     stack_paths = [
         path
-        for path in changed_files(mirror, f"{bottom.head}^", top.head)
+        for path in changed_files(mirror, bottom.diff_base, top.head)
         if any(matches(path, glob) for glob in test_paths)
     ]
 
@@ -306,7 +320,7 @@ def write_follow_ups(
         allowed = {group.file, *stack_paths}
 
         origin_task_id = _origin_task_id(ledger, repo_id, group.task_key)
-        origin_fields = end_review.layer_fields(ledger, group.task_key)
+        origin_fields = graded_fields(ledger, stack.fields, group.task_key)
         origin_row = ledger.spec_text(origin_task_id)
         origin_text = (
             origin_row["text"]
@@ -314,6 +328,12 @@ def write_follow_ups(
             else _origin_file_text(specs_dir, origin_fields.spec_id)
         )
         origin = intake.parse_spec(origin_text)
+
+        packaged_head = (
+            end_review.layer_fields(ledger, group.task_key).head
+            if any(q.finding.lens in review.LENSES for q in group.findings)
+            else None
+        )
 
         candidate_id = next_spec_id(origin_fields.spec_id, specs_dir, ledger, repo_id)
         prompt = _prompt(
@@ -323,9 +343,11 @@ def write_follow_ups(
             findings=group.findings,
             origin_spec_id=origin_fields.spec_id,
             origin_text=origin_text,
-            origin_diff=_diff(mirror, f"{origin_fields.head}^", origin_fields.head),
+            origin_diff=_diff(mirror, origin_fields.diff_base, origin_fields.head),
+            origin_base=origin_fields.diff_base,
             origin_head=origin_fields.head,
             top_head=top.head,
+            packaged_head=packaged_head,
         )
 
         try:

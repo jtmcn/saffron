@@ -545,6 +545,33 @@ def test_the_queue_page_carries_the_newest_batchs_stack_view_and_only_that(tmp_p
     assert list(empty_dir.iterdir()) == []
 
 
+def test_the_queue_page_carries_the_named_batchs_stack_view_over_the_newest(tmp_path):
+    """`write_stack_view`'s `batch_id` renders that batch's own stack view,
+    even while a newer batch has layers too. An id no batch carries writes
+    nothing, even though the newest batch still has layers."""
+    from saffron.report.stack import render_stack, stack_view, write_stack_view
+
+    ledger, specs, batch_a, batch_b = _build_batches(tmp_path)
+    out_dir = tmp_path / "page"
+
+    written = write_stack_view(out_dir, ledger, specs, batch_id=batch_a)
+    assert written is not None
+    page = written
+
+    view_a = stack_view(ledger, batch_a, specs)
+    assert view_a is not None
+    rendered_a = render_stack(view_a)
+
+    after_write = page.read_text()
+    assert f"</header>\n{rendered_a}<table>" in after_write
+    assert "TE-9" not in after_write
+
+    unknown_id = batch_b + 1000
+    before = page.read_bytes()
+    assert write_stack_view(out_dir, ledger, specs, batch_id=unknown_id) is None
+    assert page.read_bytes() == before
+
+
 def _layer_section_text(rendered: str, spec_id: str) -> str:
     marker = f"<h2>{spec_id}</h2>"
     for section in rendered.split("<section"):

@@ -1,11 +1,12 @@
 ---
 id: b-e40d09
 title: A criterion-probe survivor that does not anchor never reaches REBUT, so a claim the host found unguarded blocks nothing
-status: open
+status: done
 tier: 1
 filed: 2026-09-22
+closed: 2026-10-23
 specs: [SA-0299]
-prs: [914]
+prs: [914, 928]
 commits: []
 cites: [§5.4.1, §5.5]
 related: [b-b431c1, b-2750d5]
@@ -42,3 +43,4 @@ chosen behaviour.
 - 2026-10-19: measured in the spec loop's run 44, and moved to tier 1. On `SA-0288` (#914) the host probed a canned witness result at `saffron/gates/runner.py:330`, and the witness survived. The finding was filed `anchored: false` with `probe_verdict: survived`, since that line sits outside the diff. `review_state` counts only anchored blockers, so no REBUT ran and the task ended `READY_FOR_REVIEW`. Both seats then confirmed the witness could not fail. The evidence is `~/.saffron/batches/v0/SA-0288/findings.json`.
 - 2026-10-20: the anchored case worked in run 45. `SA-0290`'s six criterion-probe survivors all sat in the diff, so REBUT ran, fixed each, and killed each on re-run. The unanchored case is unchanged.
 - 2026-10-20: specced as `SA-0299`. A host-filed survivor reaches REBUT whether or not it anchors, and a lens finding keeps the anchoring rule. The measured `SA-0288` survivor was a wrong version, not a criterion probe, so both forms are in scope.
+- 2026-10-23: #928 (`SA-0299`) sends a host-filed survivor to REBUT whether or not it anchors.

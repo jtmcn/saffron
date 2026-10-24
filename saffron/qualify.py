@@ -190,11 +190,25 @@ def _decide(f: Finding, reasons: dict[tuple[str, str, str], str]) -> tuple[str, 
     return "unverified", reasons.get(key, "")
 
 
+def graded_fields(
+    ledger: Ledger, fields: Mapping[str, end_review.LayerFields], task_key: str
+) -> end_review.LayerFields:
+    """One layer's fields as the end review graded it: `fields[task_key]`
+    when the end review's walk resolved that layer, or
+    `end_review.layer_fields`'s own read of the packaged head for a key
+    neither walk reached."""
+    resolved = fields.get(task_key)
+    return (
+        resolved if resolved is not None else end_review.layer_fields(ledger, task_key)
+    )
+
+
 def qualify(
     ledger: Ledger,
     layers: Sequence[end_review.LayerReview],
     join: review.LensReview | None,
     *,
+    fields: Mapping[str, end_review.LayerFields],
     mirror: Path,
     repo: Path,
     gates_dir: Path,
@@ -208,7 +222,12 @@ def qualify(
     end-review findings and in-cell concerns, top down. Groups and pools
     the findings every range decides across the whole walk, so the join's
     findings and the top layer's own can share one group. A read the mirror
-    cannot answer raises out of it, and ranges walked earlier keep their rows."""
+    cannot answer raises out of it, and ranges walked earlier keep their rows.
+
+    `fields` is the end review's own `StackReview.fields`. The join and
+    each layer's end-review findings read the range `graded_fields` gives
+    for it. A layer's in-cell REVIEW concerns keep the packaged range
+    instead, since their line numbers were recorded against it."""
     groups: dict[tuple[str, str], list[Qualified]] = {}
     pool: list[Qualified] = []
 
@@ -220,15 +239,15 @@ def qualify(
                 pool.append(q)
 
     if join is not None and layers:
-        top = end_review.layer_fields(ledger, layers[0].task_key)
-        bottom = end_review.layer_fields(ledger, layers[-1].task_key)
+        top = graded_fields(ledger, fields, layers[0].task_key)
+        bottom = graded_fields(ledger, fields, layers[-1].task_key)
         top_task_id, _ = _layer_task(ledger, layers[0].task_key)
         _, bottom_run_id = _layer_task(ledger, layers[-1].task_key)
         _fold(
             _qualify_range(
                 ledger,
                 list(join.findings),
-                base=f"{bottom.head}^",
+                base=bottom.diff_base,
                 head=top.head,
                 task_id=top_task_id,
                 task_key=layers[0].task_key,
@@ -248,32 +267,54 @@ def qualify(
 
     for layer in layers:
         task_id, run_id = _layer_task(ledger, layer.task_key)
-        inputs = [f for r in layer.reviews for f in r.findings]
-        inputs += _in_cell_concerns(ledger, task_id)
-        if not inputs:
-            continue
-        fields = end_review.layer_fields(ledger, layer.task_key)
-        _fold(
-            _qualify_range(
-                ledger,
-                inputs,
-                base=f"{fields.head}^",
-                head=fields.head,
-                task_id=task_id,
-                task_key=layer.task_key,
-                run_id=run_id,
-                spec_id=fields.spec_id,
-                branch=fields.branch,
-                mirror=mirror,
-                repo=repo,
-                gates_dir=gates_dir,
-                thread_env=thread_env,
-                test_paths=test_paths,
-                gates=gates,
-                created=created,
-                note=note,
+        end_review_findings = [f for r in layer.reviews for f in r.findings]
+        concerns = _in_cell_concerns(ledger, task_id)
+        if end_review_findings:
+            graded = graded_fields(ledger, fields, layer.task_key)
+            _fold(
+                _qualify_range(
+                    ledger,
+                    end_review_findings,
+                    base=graded.diff_base,
+                    head=graded.head,
+                    task_id=task_id,
+                    task_key=layer.task_key,
+                    run_id=run_id,
+                    spec_id=graded.spec_id,
+                    branch=graded.branch,
+                    mirror=mirror,
+                    repo=repo,
+                    gates_dir=gates_dir,
+                    thread_env=thread_env,
+                    test_paths=test_paths,
+                    gates=gates,
+                    created=created,
+                    note=note,
+                )
             )
-        )
+        if concerns:
+            packaged = end_review.layer_fields(ledger, layer.task_key)
+            _fold(
+                _qualify_range(
+                    ledger,
+                    concerns,
+                    base=packaged.diff_base,
+                    head=packaged.head,
+                    task_id=task_id,
+                    task_key=layer.task_key,
+                    run_id=run_id,
+                    spec_id=packaged.spec_id,
+                    branch=packaged.branch,
+                    mirror=mirror,
+                    repo=repo,
+                    gates_dir=gates_dir,
+                    thread_env=thread_env,
+                    test_paths=test_paths,
+                    gates=gates,
+                    created=created,
+                    note=note,
+                )
+            )
 
     return Qualification(
         groups=[

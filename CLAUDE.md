@@ -62,6 +62,7 @@ uv run saffron queue --repo .              # v0.5: what a batch would run; recon
 uv run saffron reconcile --repo .          # ask GitHub what happened to open pull requests
 uv run saffron regate <task id> --repo .   # judge a pull request's current head with the task's own gates
 uv run saffron package SA-NNNN --repo .    # run PACKAGE alone on a task whose own PACKAGE raised
+uv run saffron finish <batch id> --repo .  # run a deferred stack batch's own end review, follow-ups and finish
 uv run saffron adopt SA-NNNN 502 --repo .  # name a by-hand pull request as a task's own
 uv run saffron watch SA-NNNN               # follow a task's event log; --no-follow for a finished one
 uv run saffron batch --repo . --budget 50 --until 06:30   # v0.6: a night, unattended
@@ -77,12 +78,13 @@ uv run saffron next-id --repo .            # the next free spec id, from the spe
 kill, so a night ends at the deadline plus at most one task (backlog item 67). A `--stack`
 night then runs its end review, paid from the reserve it held back (ADR 7). With
 `--defer-end-review` it skips that review, its follow-ups and its finishing layer, and writes
-`finish/<batch id>/deferred.json` in the batch tree for a later finish (b-8a0c9a). Under launchd it
-needs `PYTHONUNBUFFERED=1`, or a SIGKILL loses whatever output is still buffered, and the
-log is the night's only human-readable record. `docs/host/dev.saffron.batch.plist` and
+`finish/<batch id>/deferred.json` in the batch tree for a later finish (b-8a0c9a).
+`saffron finish <batch id> --repo .` runs that deferred tail later and spends the held
+reserve. Under launchd `saffron batch` needs `PYTHONUNBUFFERED=1`, or a SIGKILL loses
+whatever output is still buffered, and the log is the night's only human-readable record. `docs/host/dev.saffron.batch.plist` and
 `docs/HOST-HARDENING.md` §4a carry the setup.
 
-`saffron cell`, `saffron batch` and `saffron package` need `CLAUDE_CODE_OAUTH_TOKEN` (from
+`saffron cell`, `saffron batch`, `saffron package` and `saffron finish` need `CLAUDE_CODE_OAUTH_TOKEN` (from
 `claude setup-token`) in the environment of the command itself, and nowhere else. `.envrc` deliberately does not load it: direnv would
 export it into every shell in this directory, and from there into any Claude Code session
 started in one. `.env` is no home for it either — `.envrc` loads that with
