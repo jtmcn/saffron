@@ -2502,3 +2502,59 @@ seat finding the in-cell critic and the end review both passed.
   b-1572e7.
 - Run 46: batch 47's writer drafted `SA-0310`, which a queued spec owned.
   **No bucket**, the end review. **Open:** b-cc87b1.
+
+## 2026-10-24, spec loop run 47 (#955 to #957)
+
+- `SA-0311` (#955): the repair re-run's attempt number reached every gate
+  line, and changing it survived criterion 3's witness. **Bucket 3**,
+  adequacy. **Landed:** a review commit on #955.
+- `SA-0311` (#955): four comments restated a spec note, named the wrong
+  writer, said "today's" or said "red" for a new failure. **Bucket 3**,
+  conventions. **Landed:** a review commit on #955.
+- `SA-0311` (#955): the repair turn added a fifth copy of the checkpoint
+  after a failed turn. **Bucket 3**, conventions. **Open:** b-22ed54.
+- `SA-0311` (#955): the post-repair re-run keeps the pre-repair exempt set,
+  and two of its branches have no witness. **Bucket 3**, adequacy.
+  **Open:** b-fa014a.
+- `SA-0312` (#957): criterion 5's declared find matched three lines, so the
+  witness gate never ran its mutant. **Bucket 1**, `witness`. **Landed:** a
+  review commit on #957 for the copy. **Open:** b-a68b24 for the gate.
+- `SA-0312` (#957): the multi-parent path read a parent's newest row in any
+  state, so a dead retry unstacked the child. **Bucket 3**, correctness.
+  **Landed:** a review commit on #957.
+- `SA-0312` (#957): the multi-parent path sent no `changes_requested` for
+  the parent it chose. **Bucket 3**, contract. **Landed:** a review commit
+  on #957.
+- `SA-0312` (#957): witnesses for criteria 1, 4, 5 and 6 each lacked an
+  arrangement, and seven listed wrong versions survived. **Bucket 3**,
+  adequacy. **Landed:** a review commit on #957.
+- `SA-0312` (#957): `_is_ancestor` called `subprocess` directly and leaked
+  `FileNotFoundError` where `GitError` was promised. **Bucket 3**,
+  conventions. **Landed:** a review commit on #957.
+- `SA-0312` (#957): comments said bare "base" and "taken spec", and two
+  docstrings carried process notes. **Bucket 3**, conventions. **Landed:** a
+  review commit on #957.
+- `SA-0312` (#957): the scheduler restates its graph walk, and three modules
+  hold an ancestry check. **Bucket 3**, conventions. **Open:** b-7655f9.
+- `SA-0312` (#957): the multi-parent path ignores the merged or rejected
+  newest row. **Bucket 3**, correctness. **Open:** b-54c8b4.
+- `SA-0314` (#956): names leaked forward through a sentence, and deleting
+  the reset survived. **Bucket 3**, adequacy. **Landed:** a review commit on
+  #956.
+- `SA-0314` (#956): no fixture held a one-line construct, so its span format
+  survived. **Bucket 3**, adequacy. **Landed:** a review commit on #956.
+- `SA-0314` (#956): `_indent` counted spaces only, so a tab-indented body
+  read as one line. **Bucket 3**, correctness. **Landed:** a review commit on
+  #956. **Open:** b-c3688d for the layout rule in core.
+- `SA-0314` (#956): a comment claimed the sentence split never costs a false
+  pass, which a probe disproved. **Bucket 2**, the measured-fact line.
+  **Landed:** a review commit on #956.
+- `SA-0314` (#956): docstrings contradicted themselves, called a defect "the
+  refusal" or sat on the wrong function. **Bucket 3**, conventions.
+  **Landed:** a review commit on #956.
+- `SA-0314` (#956): `_POLICY_PATH` made a fifth copy of the policy path.
+  **Bucket 3**, conventions. **Open:** b-7fa522.
+- Run 47: the finish's three follow-up drafts all failed, two on YAML.
+  **No bucket**, the end review. **Open:** b-781ea4.
+- Run 47: the adopted `SA-0312` kept `EXHAUSTED`, so the finish charged its
+  diff to `SA-0314`. **No bucket**, adopt. **Open:** b-619b7d.
