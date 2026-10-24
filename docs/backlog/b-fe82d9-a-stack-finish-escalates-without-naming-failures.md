@@ -37,3 +37,4 @@ judged into its batch folder, and the log line names the failures.
 - 2026-10-09: recurred in the spec loop's run 32. Batch 20's finish committed
   f69031be, then escalated with 7 new failures at re-verify and named none.
 - 2026-10-19: recurred twice in the spec loop's run 44. Batch 37's finish escalated on 2 new failures and batch 38's on 10. Each `gates` folder was empty, and neither log line named a failure. Both commits wrote back spec text (b-703e64).
+- 2026-10-23: recurred in the spec loop's run 46. Batch 47's finish escalated on "13 new failures" and wrote no gate record under `finish/47/`. A local run of the same commit found one (b-cc87b1).

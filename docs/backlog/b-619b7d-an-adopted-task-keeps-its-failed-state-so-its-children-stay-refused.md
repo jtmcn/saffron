@@ -36,3 +36,4 @@ as `regate` then `adopt`. A test drives each route and starts a child on it.
 ## Record
 
 - 2026-10-19: filed from the spec loop's run 44.
+- 2026-10-23: recurred twice in the spec loop's run 46. `SA-0298` stayed `EXHAUSTED` after `saffron adopt`, so the driver could not stack or size it. The adopted `SA-0302` recorded no pushed sha, so batch 44 refused its child `SA-0303` (b-066901).

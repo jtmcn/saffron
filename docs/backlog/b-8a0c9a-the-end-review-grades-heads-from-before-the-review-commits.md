@@ -1,11 +1,12 @@
 ---
 id: b-8a0c9a
 title: "A stack batch's end review grades the packaged heads, before the loop's review commits"
-status: open
+status: done
 tier: 2
 filed: 2026-10-09
+closed: 2026-10-23
 specs: [SA-0301, SA-0302, SA-0303, SA-0304, SA-0305, SA-0306]
-prs: [789]
+prs: [789, 932, 937, 939, 941, 944, 934]
 commits: []
 cites: []
 related: [b-792ab2, b-d96f14, b-f71105]
@@ -48,3 +49,4 @@ test drives an end review over a layer whose branch moved after PACKAGE.
   real, on `SA-0262` and `SA-0267`. The delegate fixed them before the push.
 - 2026-10-19: recurred in the spec loop's run 44. Batch 38's end review drafted `SA-0296` from the critic's citation note on #911. The delegate held that fix as a local review commit on #911, which the writer could not see. So `SA-0296` (#915) redid it, and the restack conflicted on the same line. Review kept #911's wording.
 - 2026-10-20: recurred in the spec loop's run 45. Batch 39's end review drafted `SA-0297` from #919's packaged head. Its three items were two held review commits and one new finding. The draft was refused before any cell.
+- 2026-10-23: closed by the spec loop's run 46. #932 (`SA-0301`) adds `--defer-end-review`. #937 (`SA-0302`) grades each layer's branch head. #939 (`SA-0303`) and #941 (`SA-0306`) qualify, write and finish at the graded heads. #934 (`SA-0304`) and #944 (`SA-0305`) run a deferred tail later with `saffron finish`.
