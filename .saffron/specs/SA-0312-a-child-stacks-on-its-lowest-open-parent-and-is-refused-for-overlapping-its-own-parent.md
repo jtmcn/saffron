@@ -3,7 +3,7 @@ id: SA-0312
 title: "A child stacks on its lowest open parent, and is refused for overlapping its own parent"
 type: feature
 priority: 2
-estimated_lines: 354
+estimated_lines: 378
 estimate_measured: true
 touches:
   - saffron/scheduler.py
@@ -98,10 +98,11 @@ acceptance:
       - Only the declared parents are exempt, so an undeclared grandparent's pull request refuses the child.
       - Every open pull request is exempt.
   - claim: >-
-      `run_stack_batch` exempts the stack base's chain branches wherever it
-      exempts the base's own branch. A revised spec of the order and a
-      follow-up each overlap the pull request of a spec on the base's
-      chain, and neither is refused. Another open pull request still
+      Within one call of `run_stack_batch`, the order's own pass and the
+      follow-ups that call drives exempt the stack base's chain branches
+      wherever they exempt the base's own branch. A revised spec of the
+      order and a follow-up each overlap the pull request of a spec on the
+      base's chain, and neither is refused. Another open pull request still
       refuses each. The witness drives one revised spec and one follow-up.
     witness: tests/test_batch.py::test_a_revised_spec_and_a_follow_up_are_not_refused_on_a_pull_request_on_the_stack_bases_chain
     mutant:
@@ -116,9 +117,9 @@ acceptance:
       cell, under the `depends_on` kind, in both modes. The reason names
       each open parent off the deepest parent's chain, and no parent on
       it. The deepest is the open parent whose chain holds the most other
-      open parents, with the lower id on a tie. The witness drives one
-      child of four open parents. Two of them form a chain, and the other
-      two lie on none.
+      open parents, with the lower id on a tie. A merged parent is never
+      named. The witness drives one child of five parents. Two open ones
+      form a chain, two more lie on none, and the fifth merged.
     witness: tests/test_scheduler.py::test_a_spec_whose_open_parents_lie_on_no_one_chain_is_refused_naming_the_parents_off_it
     mutant:
       file: saffron/scheduler.py
@@ -129,6 +130,7 @@ acceptance:
       - The reason names every open parent but the deepest.
       - The reason under `stack=True` names only the first parent off the chain.
       - The lowest id is taken as the deepest, so the reason names the wrong parents.
+      - The reason's filter drops the merged parents' check, so a merged parent is named.
   - claim: >-
       `run_task` with no handoff stacks a cell on the deepest open parent,
       by the scan's rule. A parent is open when it has a task that is not
@@ -136,12 +138,16 @@ acceptance:
       A waiting parent with no push is open. `cli._run_cell` reaches this
       with a `gh`, and `cli._batch_runner` without one. Chains and
       retirement come from the specs at `base_sha` in the mirror, never the
-      working copy. When the cell stacks, no `unstacked` line is printed.
-      When the deepest parent has no push, the cell starts unstacked rather
-      than refused. The witness drives both orders of six parents, from the
-      ledger alone and through a `gh`. Three are open on one chain. One is
-      merged, one retired, and one waits with its push in the base. A
-      second arrangement has a deepest parent with no push.
+      working copy, and are read whenever any parent remains. When the cell
+      stacks, no `unstacked` line is printed. A `gh_unreachable` line names
+      each parent GitHub could not be asked about. When the deepest parent
+      has no push, or every parent is merged or retired, the cell starts
+      unstacked rather than refused. The witness drives both orders of six
+      parents, from the ledger alone and through a `gh`. Three are open on
+      one chain. One is merged, one retired, and one waits with its push in
+      the base. A `gh` that cannot be asked about two of the parents names
+      both. Further arrangements have a deepest parent with no push, and a
+      merged parent beside a retired one whose task still waits.
     witness: tests/test_cli.py::test_an_attended_cell_stacks_on_its_deepest_open_parent_read_at_base
     mutant:
       file: saffron/task.py
@@ -157,14 +163,18 @@ acceptance:
       - A retired parent counts as open, so the task is refused.
       - A waiting parent with no push is not open, so the cell stacks on a shallower parent.
       - Each parent the cell does not stack on prints its own `unstacked` line.
+      - Retirement is read only when two parents remain, so the cell stacks on a lone retired parent.
+      - A `gh_unreachable` line is printed only for the parent the cell stacks on.
   - claim: >-
       `run_task` with no handoff returns `Refused` before any cell starts in
       two cases. Its open parents lie on no one chain, and the reason names
       each one off the deepest parent's chain and none on it. Or an open
-      parent on that chain has a pushed head that the deepest parent's
-      fetched head does not contain, and the reason names that parent. The
-      witness drives both cases, from the ledger alone and through a `gh`.
-      The parent off the chain waits with no push.
+      parent on that chain has a branch head, fetched from origin, that the
+      deepest parent's fetched head does not contain. The reason names that
+      parent. A parent whose recorded push is stale but whose fetched head
+      is contained still stacks. The witness drives both refusals and that
+      rebased stack, from the ledger alone and through a `gh`. The parent
+      off the chain waits with no push and no branch.
     witness: tests/test_cli.py::test_an_attended_cell_whose_open_parents_lie_on_no_one_chain_is_refused_before_any_cell
     wrong_versions:
       - The cell stacks on the deepest parent and starts anyway.
@@ -172,6 +182,7 @@ acceptance:
       - The reason names every open parent but the deepest.
       - No head is checked, so a parent declared on the chain but missing from the branch is stacked past.
       - Each parent's head is checked against `base_sha` rather than the deepest parent's head.
+      - Each parent's recorded pushed sha is checked in place of its fetched branch head, so a rebased stack is refused.
   - claim: >-
       A `depends_on` cycle above a candidate still ends the walk. The scan
       returns, and reads both members of the cycle as ancestors.
@@ -268,11 +279,12 @@ picks among parents, so this spec leaves them alone.
 5. **The attended path.** With two or more entries, `_resolve_stacked_on`
    applies the scan's rule. A parent counts only when it has a task, since
    the scan refuses one with none before this point. With a `gh`, it
-   reconciles every entry first. It stacks on the deepest open parent, or
-   starts unstacked when that parent has no push. Each on-chain parent's
-   newest pushed sha must be an ancestor of the deepest parent's fetched
-   head. Off-chain parents, or a missing ancestor, make `run_task` return
-   `Refused` before any cell starts.
+   reconciles every entry first, and names each one it could not ask. It
+   stacks on the deepest open parent, or starts unstacked when that parent
+   has no push. Each on-chain parent's branch head, fetched from origin,
+   must be an ancestor of the deepest parent's fetched head. Off-chain
+   parents, or a missing ancestor, make `run_task` return `Refused` before
+   any cell starts.
 
 ## Out of scope
 
@@ -282,7 +294,11 @@ picks among parents, so this spec leaves them alone.
 - `cli.py` and the `Handoff` a stack batch passes.
 - The head check inside a stack batch or the scan. Only `run_task` fetches
   a parent's head.
-- An on-chain parent with no recorded push. There is no head to check.
+- An on-chain parent with no stackable branch, or whose branch is gone.
+  There is no head to check.
+- The exempt set `saffron finish` seeds for a resumed tail. It holds the
+  layers and the base's own branch only (`saffron/cli.py:2514-2524`).
+  Backlog item b-e39286 owns it, since `cli.py` is forbidden here.
 - The spec loop's driver. Its `_cite_base` and `_depends_on_chain` still
   read slot zero (`.claude/skills/run-saffron-spec-loop/driver.py:2352-2355`,
   `:638-645`). A cell cannot edit that directory.
@@ -300,9 +316,9 @@ holds a test that exists, with one edit named below. The wrong versions
 under each criterion are what its witness must kill. Do not run them
 yourself.
 
-**Four tests assert the old rule.** The `census` gate fails a test that
-is renamed or removed, so keep each name. Rewrite its assertions, and its
-docstring to match them.
+**Five tests and one pinned count carry the old rule.** The `census` gate
+fails a test that is renamed or removed, so keep each name. Rewrite its
+assertions, and its docstring to match them.
 
 - `tests/test_scheduler.py:715`, the second dependency test. Its child's
   open parents lie on no one chain now, so assert the `depends_on`
@@ -311,7 +327,8 @@ docstring to match them.
   (`tests/test_cli.py:1130`) and
   `test_the_adapter_stacks_on_the_first_dependency_only`
   (`tests/test_cli.py:6158`). In each, the first entry has no task, so it
-  is not open. Each now stacks on the second entry's pushed head.
+  is not open. Each now stacks on the second entry's pushed head. Give
+  each a real base commit, since the base is now read.
 - `test_a_third_partys_overlap_still_refuses_a_stacked_child`
   (`tests/test_scheduler.py:616`). Its assertions hold, and its docstring
   names `depends_on[0]` alone.
@@ -329,19 +346,25 @@ that build one keep working. The attended refusal travels as an exception
 that `run_task` turns into `Refused`. A `Refused` return from
 `_resolve_stacked_on` failed the `ty` hook, since tests in
 `tests/test_cli.py` unpack its tuple. Keep every `Preflight` emit inside
-`_resolve_stacked_on`, and emit only for the parent it settles on.
+`_resolve_stacked_on`. Emit `unstacked` and `changes_requested` only for
+the parent it settles on. Emit `gh_unreachable` for each parent GitHub could
+not be asked about.
 `tests/test_package.py:1596-1606` reads that function's body for stream
 writes. `saffron/events.py` names it as the source of those lines.
 
 **Reading the base.** Filter the parents by the ledger and the mirror
-first. Export `.saffron` at `base_sha` only when two or more remain. A
+first. Export `.saffron` at `base_sha` whenever any parent remains. A
 `GitError` from that export propagates, as `run_task` promises.
 `_recorded_spec_text` already exports it from the mirror
 (`saffron/task.py:356-428`). `scheduler._retired_ids` reads `done/` the way
-the scan does. A push is in `base_sha` when `git merge-base --is-ancestor`
-finds it there, the check `cli._pushed_landed` makes. The adapter test at
-`tests/test_cli.py:6173` passes a `base_sha` no repository holds. Its one
-parent with a task needs no export.
+the scan does.
+
+**Ancestry, as `cli._pushed_landed` asks it** (`saffron/cli.py:512-537`).
+First `rev-parse --verify --quiet` checks that the commit exists. Exit 1
+there means a missing commit, so not landed or not contained. Then
+`merge-base --is-ancestor` answers. Exit 0 means yes and exit 1 means no.
+Any other exit from either raises `GitError`. Both the landed check and the
+head check use this.
 
 **Prose.** An edited sentence in an old docstring or comment is a new
 `prose` hit. Keep each one under 25 words, each comment to two lines and
@@ -360,8 +383,10 @@ file. The batch witness can follow
 `tests/test_scheduler.py`, so add nothing at its module scope.
 
 **Measured on a prototype at `af2831e8`.** It passed all seven witnesses
-and `make check`. Each new witness failed at `af2831e8`. Its source diff
-measured 1415 changed tokens. Every wrong version above was applied as an
+and `make check`. The probes ran from a cleared bytecode cache. Criterion
+4's mutant also died on a build that routes the base's chain on its own
+line, so the mutated filter holds merged parents alone. Each new witness failed at `af2831e8`. Its source diff
+measured 1510 changed tokens. Every wrong version above was applied as an
 edit, and so was each declared mutant. Each failed its own witness. A dry
 run of batch 49's arrangement refused `SA-0305` for #941 at `af2831e8`.
 With the prototype it took `SA-0305` on stack base `SA-0306`, in three

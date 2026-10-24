@@ -577,6 +577,9 @@ commit cannot be packaged again. A child stacks on its lowest open parent.
 The writer drafts a follow-up a queued spec owns. One refused /24 stops
 every cell.
 
+**Placed 2026-10-23**, from `SA-0312`'s spec review: **b-e39286**. A
+deferred finish exempts the stack base's branch but none on its chain.
+
 ### Tier 3 — real, not urgent
 
 **Placed 2026-10-16**, from the spec loop's run 42: **b-60317d**.

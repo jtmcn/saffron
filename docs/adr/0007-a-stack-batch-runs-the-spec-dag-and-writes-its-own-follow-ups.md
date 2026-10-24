@@ -183,10 +183,10 @@ this decision rests on.
 ## Principles
 
 - **2** departs. A spec whose dependency sits in an unmerged stack outside the
-  plan is refused, unless that dependency is the stack base. Cutting it from
-  its predecessor would drop that code. The residual is a spec whose
-  dependency has no pushed branch or pull request, or is a second base. It
-  waits for a merge, as §4.2 avoided.
+  plan is refused, unless that dependency is the stack base or on its chain.
+  Cutting it from its predecessor would drop that code. The residual is a
+  spec whose dependency has no pushed branch or pull request, or lies off
+  the base's chain. It waits for a merge, as §4.2 avoided.
 - **4** upholds. Every end-review lens and every spec session runs in a critic
   cell. The host decides what qualifies.
 - **6** departs. A follow-up that carries a probe exists to kill it, and

@@ -166,8 +166,8 @@ for a batch started with `--defer-end-review`.
 _Avoid_: "stack run" (a run is a pin), "spec loop" (the delegate's attended pass).
 
 **Stack order**: A stack batch's fixed order over its queued specs. A spec joins it
-once every `depends_on` entry is already in the order, on the default branch, or on the
-stack base's chain. Among
+once every `depends_on` entry is already in the order or on the default branch. The
+stack base itself counts, and so does a spec on its chain. Among
 ready specs the lowest `priority` goes first, then the lowest id. A spec the order
 never takes is refused before any cell starts.
 
@@ -777,8 +777,8 @@ _Avoid_: "merge queue" (GitHub's feature, which this is not).
 rather than `base_sha`, because dependencies are satisfied at `READY_FOR_REVIEW`. That
 parent's `depends_on` chain holds every other open parent of this one spec (`SA-0312`). In a stack
 batch a task is cut from its predecessor's head instead, which need not be its parent.
-A dependency there is met by a layer below it in the same stack, by the stack base,
-or by the default branch.
+A dependency there is met by a layer below it, or by the default branch. The stack
+base itself meets one, and so does a spec on its chain.
 
 **Retired spec**: A spec the operator moved to `.saffron/specs/done/`, asserting
 that its work is in the default branch. Not offered to the scan. It admits a
