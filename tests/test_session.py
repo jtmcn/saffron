@@ -6749,6 +6749,324 @@ def test_a_red_rebuttal_line_names_each_gate_that_failed_anew(monkeypatch, tmp_p
     assert one_results["committed"] == ("pass", 0)
 
 
+# --- b-0bd346: a form-gate-only red re-run after REBUT earns one repair turn ---
+
+_FORM_POLICY = (
+    "gates: {format: {form: true}, lint: {form: true}, tests: {form: false}}\n"
+)
+_FORM_GATES = ("format", "lint", "tests")
+_FORM_TOOLS = {"format": "format 1", "lint": "lint 1", "tests": "tests 1"}
+
+
+def _form_gate_result(gate, status, *, file="x.py", code="E1", message="m"):
+    failures = (
+        [] if status == "pass" else [Failure(file=file, code=code, message=message)]
+    )
+    return GateResult(
+        gate=gate, status=status, tool=_FORM_TOOLS[gate], failures=failures
+    )
+
+
+# Every call names the same `tool` per gate, so no suite drifts.
+_GREEN_FORM_SUITE = [_form_gate_result(gate, "pass") for gate in _FORM_GATES]
+
+
+def _red_form_suite(*gates_down):
+    """`_GREEN_FORM_SUITE`, with each of `gates_down` failing anew instead."""
+    return [
+        _form_gate_result(gate, "fail" if gate in gates_down else "pass")
+        for gate in _FORM_GATES
+    ]
+
+
+def _through_rebut_repair(cost, *after_extraction):
+    """`_through_rebut`'s own six turns, each costing `cost`. Then the
+    rebuttal and extraction turns, each under its own session id, never
+    the implementer's `sess-1`. Then whatever `after_extraction` scripts
+    for the repair turn onward."""
+    return [
+        _turn(_block(_PLAN), cost=cost),
+        _turn(cost=cost),
+        _turn(_block(_BLOCKER), cost=cost),
+        _turn(_block({"findings": []}), cost=cost),
+        _turn(_block({"findings": []}), cost=cost),
+        _turn(_block({"findings": []}), cost=cost),
+        replace(_turn("Fixed it.", cost=cost), session_id="sess-rebuttal"),
+        replace(
+            _turn(structured_output=_CLAIMED_FIX, cost=cost), session_id="sess-extract"
+        ),
+        *after_extraction,
+    ]
+
+
+_FORM_VERDICT = _turn(
+    structured_output={
+        "verdicts": [{"finding": 1, "verdict": "withdrawn", "reason": "fixed"}]
+    }
+)
+
+
+def _rebut_repair_drive(
+    monkeypatch,
+    tmp_path,
+    *,
+    suites,
+    turns,
+    spec=None,
+    rebut_commits=1,
+    after_stub=None,
+):
+    """Drives one cell through REBUT under a policy declaring `format` and
+    `lint` form gates and `tests` not. The b-0bd346 counterpart to
+    `_rebuttal_log`: returns the outcome, the real event log,
+    `rebuttal.json`, and the stubbed `cell` itself."""
+    from saffron.events import read_log
+
+    cell = _stub_the_runtime(monkeypatch, suites=suites, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=rebut_commits)
+    if after_stub is not None:
+        after_stub(cell)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=turns,
+        spec=spec,
+        policy=_FORM_POLICY,
+        gates=_FORM_GATES,
+        use_default_emit=True,
+    )
+    spec_id = (spec or _spec()).spec_id
+    task_dir = tmp_path / "out" / spec_id
+    rebuttal = json.loads((task_dir / "rebuttal.json").read_text())
+    return outcome, list(read_log(task_dir)), rebuttal, cell
+
+
+def test_a_form_gate_red_after_rebut_earns_one_repair_turn_then_the_verdicts(
+    monkeypatch, tmp_path
+):
+    """b-0bd346, criterion 3: a red re-run after REBUT whose new failures
+    sit entirely in declared form gates earns one repair turn before the
+    verdicts. It resumes the extraction turn's own session id, never the
+    implementer's, capped at what the budget has left once REBUT's own
+    cap spend is counted. The gates then re-run once more, green, and the
+    task ends `READY_FOR_REVIEW` after the verdict."""
+    red = _red_form_suite("format", "lint")
+    suites = (_GREEN_FORM_SUITE, _GREEN_FORM_SUITE, red, _GREEN_FORM_SUITE)
+    turns = _through_rebut_repair(0.1, _turn("Repaired.", cost=0.1), _FORM_VERDICT)
+    outcome, events, _rebuttal, cell = _rebut_repair_drive(
+        monkeypatch, tmp_path, suites=suites, turns=turns
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert outcome.spent_usd == pytest.approx(1.0)
+
+    prefix = implement.repair_prompt([]).split("\n\n")[0]
+    repair_index = next(i for i, p in enumerate(cell.turns) if p.startswith(prefix))
+    expected_new = [
+        NewFailure("format", Failure(file="x.py", code="E1", message="m")),
+        NewFailure("lint", Failure(file="x.py", code="E1", message="m")),
+    ]
+    assert cell.turns[repair_index] == implement.repair_prompt(expected_new)
+    assert cell.resumes[repair_index] == "sess-extract"
+    assert cell.turn_options[repair_index]["max_budget_usd"] == pytest.approx(11.20)
+
+    rebut_attempts = [
+        (e.attempt, e.new_failures)
+        for e in events
+        if isinstance(e, Attempt) and e.phase == "REBUT"
+    ]
+    assert rebut_attempts == [(2, 2), (3, 0)]
+
+    from saffron.events import GateResult as GateResultEvent
+
+    rebut_gate_lines = [
+        (e.gate, e.attempt)
+        for e in events
+        if isinstance(e, GateResultEvent)
+        and e.against == "rebuttal"
+        and e.gate in _FORM_GATES
+    ]
+    assert rebut_gate_lines == [(g, 2) for g in _FORM_GATES] + [
+        (g, 3) for g in _FORM_GATES
+    ]
+
+
+def test_a_drifted_rerun_after_the_repair_turn_ends_gate_error(monkeypatch, tmp_path):
+    """b-0bd346: the re-run after the repair turn is judged as the first
+    re-run is. A gate whose `tool` drifted there is the gate breaking, so
+    the task ends `GATE_ERROR` and is charged to nobody."""
+    red = _red_form_suite("format", "lint")
+    drifted = [
+        r.model_copy(update={"tool": "format 2"}) if r.gate == "format" else r
+        for r in _GREEN_FORM_SUITE
+    ]
+    turns = _through_rebut_repair(0.1, _turn("Repaired.", cost=0.1), _FORM_VERDICT)
+    outcome, _events, _rebuttal, _cell = _rebut_repair_drive(
+        monkeypatch,
+        tmp_path,
+        suites=(_GREEN_FORM_SUITE, _GREEN_FORM_SUITE, red, drifted),
+        turns=turns,
+    )
+    assert outcome.state == "GATE_ERROR"
+
+
+def test_a_rebut_red_on_a_form_gate_past_the_budget_runs_no_repair_turn(
+    monkeypatch, tmp_path
+):
+    """b-0bd346, criterion 4: the repair turn runs only while the task's
+    spend, REBUT's own cap spend included, is under `budget_usd`. Eight
+    $0.125 turns come to exactly $1.00. One turn above that the repair
+    turn runs, capped at what is left. Level with it, or below, none
+    runs, and the task ends `EXHAUSTED` with today's line. REBUT still
+    ran past its own budget either way."""
+    prefix = implement.repair_prompt([]).split("\n\n")[0]
+    red = _red_form_suite("format", "lint")
+
+    outcome, _events, _rebuttal, cell = _rebut_repair_drive(
+        monkeypatch,
+        tmp_path / "above",
+        suites=(_GREEN_FORM_SUITE, _GREEN_FORM_SUITE, red, _GREEN_FORM_SUITE),
+        turns=_through_rebut_repair(0.125, _turn("Repaired.", cost=0.1), _FORM_VERDICT),
+        spec=_spec(budget_usd=1.125),
+    )
+    repair_index = next(i for i, p in enumerate(cell.turns) if p.startswith(prefix))
+    assert cell.turn_options[repair_index]["max_budget_usd"] == pytest.approx(0.125)
+
+    for budget in (1.00, 0.50):
+        outcome, _events, rebuttal, cell = _rebut_repair_drive(
+            monkeypatch,
+            tmp_path / f"at-{budget}",
+            suites=(_GREEN_FORM_SUITE, _GREEN_FORM_SUITE, red),
+            turns=_through_rebut_repair(0.125),
+            spec=_spec(budget_usd=budget),
+        )
+        assert outcome.state == "EXHAUSTED"
+        assert not any(p.startswith(prefix) for p in cell.turns)
+        assert "does not re-enter the repair loop" in rebuttal["why"]
+
+
+def test_a_rebut_red_beyond_the_form_gates_runs_no_repair_turn(monkeypatch, tmp_path):
+    """b-0bd346, criterion 5: a red re-run whose new failures hold any gate
+    beyond the declared form ones ends the task `EXHAUSTED`, with no
+    repair turn and no verdict. Named here: `tests`, declared but not
+    form, and `witness`, a core gate never a form one, no matter what the
+    mapping says. `lint` alone still earns the turn."""
+    prefix = implement.repair_prompt([]).split("\n\n")[0]
+
+    beside_declared = _red_form_suite("lint", "tests")
+    outcome, _events, rebuttal, cell = _rebut_repair_drive(
+        monkeypatch,
+        tmp_path / "declared",
+        suites=(_GREEN_FORM_SUITE, _GREEN_FORM_SUITE, beside_declared),
+        turns=_through_rebut_repair(0.1),
+    )
+    assert outcome.state == "EXHAUSTED"
+    assert not any(p.startswith(prefix) for p in cell.turns)
+    assert "does not re-enter the repair loop" in rebuttal["why"]
+
+    # `witness` only in the red suite: a head-only gate skips `suite_drift`
+    # rather than being read as the baseline's own drift.
+    beside_core = _red_form_suite("lint") + [
+        GateResult(
+            gate="witness",
+            status="fail",
+            tool="witness 1",
+            failures=[Failure(file="x.py", code="survived-mutant", message="m")],
+        )
+    ]
+    outcome, _events, rebuttal, cell = _rebut_repair_drive(
+        monkeypatch,
+        tmp_path / "core",
+        suites=(_GREEN_FORM_SUITE, _GREEN_FORM_SUITE, beside_core),
+        turns=_through_rebut_repair(0.1),
+    )
+    assert outcome.state == "EXHAUSTED"
+    assert not any(p.startswith(prefix) for p in cell.turns)
+    assert "does not re-enter the repair loop" in rebuttal["why"]
+
+    alone = _red_form_suite("lint")
+    outcome, _events, _rebuttal, cell = _rebut_repair_drive(
+        monkeypatch,
+        tmp_path / "alone",
+        suites=(_GREEN_FORM_SUITE, _GREEN_FORM_SUITE, alone, _GREEN_FORM_SUITE),
+        turns=_through_rebut_repair(0.1, _turn("Repaired.", cost=0.1), _FORM_VERDICT),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert any(p.startswith(prefix) for p in cell.turns)
+
+
+def test_a_rebut_still_red_after_its_repair_turn_ends_exhausted(monkeypatch, tmp_path):
+    """b-0bd346, criterion 6: the repair turn is the only one. A re-run
+    after it that is still red ends the task `EXHAUSTED`, with no second
+    repair turn and no verdict. Its line names the repair turn, and no
+    longer carries today's "does not re-enter the repair loop" text. Tried
+    both ways: the same gate stays red, and a different one turns red."""
+    prefix = implement.repair_prompt([]).split("\n\n")[0]
+    red = _red_form_suite("lint")
+
+    for still_red, label in (
+        (_red_form_suite("lint"), "same-gate"),
+        (_red_form_suite("tests"), "new-gate"),
+    ):
+        outcome, _events, rebuttal, cell = _rebut_repair_drive(
+            monkeypatch,
+            tmp_path / label,
+            suites=(_GREEN_FORM_SUITE, _GREEN_FORM_SUITE, red, still_red),
+            turns=_through_rebut_repair(0.1, _turn("Repaired.", cost=0.1)),
+        )
+        assert outcome.state == "EXHAUSTED"
+        repair_turns = [p for p in cell.turns if p.startswith(prefix)]
+        assert len(repair_turns) == 1
+        assert "does not re-enter the repair loop" not in rebuttal["why"]
+        assert "repair turn" in rebuttal["why"]
+
+
+def test_a_failed_repair_turn_after_rebut_is_judged_like_any_other(
+    monkeypatch, tmp_path
+):
+    """b-0bd346, criterion 7: a repair turn that fails is judged like one
+    that returns (§4.3). Its dirty work is checkpointed by the host, and
+    its cost still counts. The gates re-run regardless: green goes on to
+    the verdict, and red ends `EXHAUSTED` naming the turn's own error."""
+    red = _red_form_suite("lint")
+
+    def _dirty_until_checkpointed(cell):
+        monkeypatch.setattr(
+            "saffron.cell.worktree.dirty_paths",
+            lambda _c: (
+                ["x.py"] if len(cell.turns) == 9 and not cell.checkpointed else []
+            ),
+        )
+
+    outcome, _events, rebuttal, cell = _rebut_repair_drive(
+        monkeypatch,
+        tmp_path / "red",
+        suites=(_GREEN_FORM_SUITE, _GREEN_FORM_SUITE, red, red),
+        turns=_through_rebut_repair(0.1, _budget_cut_turn(cost=0.5)),
+        after_stub=_dirty_until_checkpointed,
+    )
+    assert outcome.state == "EXHAUSTED"
+    assert cell.checkpointed == [
+        "checkpoint: host-committed — the agent reached its own max_budget_usd"
+    ]
+    assert outcome.spent_usd == pytest.approx(1.30)
+    assert "max_budget_usd" in rebuttal["why"]
+    assert "does not re-enter the repair loop" not in rebuttal["why"]
+
+    outcome, _events, _rebuttal, cell = _rebut_repair_drive(
+        monkeypatch,
+        tmp_path / "green",
+        suites=(_GREEN_FORM_SUITE, _GREEN_FORM_SUITE, red, _GREEN_FORM_SUITE),
+        turns=_through_rebut_repair(0.1, _budget_cut_turn(cost=0.5), _FORM_VERDICT),
+        after_stub=_dirty_until_checkpointed,
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert cell.checkpointed == [
+        "checkpoint: host-committed — the agent reached its own max_budget_usd"
+    ]
+    assert outcome.spent_usd == pytest.approx(1.40)
+
+
 def test_an_errored_or_drifted_rebuttal_re_run_logs_each_gate_with_no_count(
     monkeypatch, tmp_path
 ):

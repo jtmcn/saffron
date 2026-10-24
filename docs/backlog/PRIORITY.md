@@ -580,6 +580,10 @@ every cell.
 **Placed 2026-10-23**, from `SA-0312`'s spec review: **b-e39286**. A
 deferred finish exempts the stack base's branch but none on its chain.
 
+**Placed 2026-10-24**, from the spec loop's run 47: **b-a68b24**, then
+**b-781ea4**. The witness gate passes a mutant whose find matches twice. The
+finish's follow-up drafts fail to parse, so it files nothing.
+
 ### Tier 3 — real, not urgent
 
 **Placed 2026-10-16**, from the spec loop's run 42: **b-60317d**.
@@ -602,6 +606,11 @@ row setting a budget floor.
 **Placed 2026-10-23**, from the spec loop's run 46: **b-30cbb8**,
 **b-d038df**, **b-25634b**, **b-19dbc9** and **b-1fc93b**. Each is a gap a
 seat or the run found and the stack left alone.
+
+**Placed 2026-10-24**, from the spec loop's run 47: **b-0c5afc**,
+**b-fa014a**, **b-22ed54**, **b-c3688d**, **b-7fa522**, **b-54c8b4**,
+**b-7655f9** and **b-2d2014**. Each is a gap a seat or the run found and the
+stack left alone.
 
 ~~**22**~~, ~~**23**~~, **31**, ~~**19**~~, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, ~~**62**~~, **63**, ~~**64**~~, **75**, **76**, **77**.

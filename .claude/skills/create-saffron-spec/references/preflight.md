@@ -73,10 +73,14 @@ writes to where it lands.
 `D cite <spec-path> --base <commit>` resolves every `file:line` the spec quotes
 and reports the ones that moved or no longer exist.
 
-What it cannot see. Its moved-text report is right about one time in four
-(b-61993a), so read each flagged line rather than acting on the list. It passes
-a line zero and a reversed range. After a stack rebase, resolve commit hashes
-and base branch names by hand, because the command reads paths, not history.
+It runs core's own checker (`saffron/spec_citations.py`, SA-0314). That
+checker judges a range by the construct its clause names. The policy at the
+commit declares what opens a construct. A line zero and a reversed range are
+refused before any file is read.
+
+What it cannot see. A clause that names no construct passes, so read each such
+citation by hand. After a stack rebase, resolve commit hashes and base branch
+names by hand, because the command reads paths, not history.
 
 Then re-run every count the spec quotes, and read every sentence that says how
 the code stands today at the base. The command resolves a location. It does not

@@ -3386,6 +3386,9 @@ def _drive_cell(
         # final `CellOutcome` can read them on every path, not only REBUT's.
         revert_exempt: list[str] = []
         probe_patch_why: str | None = None
+        # Written only once a §5.6 repair turn ran.
+        repair_turn_why: str | None = None
+        repair_session_id: str | None = None
 
         if outcome == "REBUTTING":
             ledger.set_task_state(task_id, "REBUTTING")
@@ -3397,17 +3400,64 @@ def _drive_cell(
             overrun = spent >= spec.budget_usd
             before = worktree.head_sha(container)
 
-            def _rebut_gates() -> str | None:
+            def _rebut_repair_turn(
+                resume_session_id: str, new: Sequence[NewFailure]
+            ) -> str | None:
+                """§5.6's one exception: a repair turn for a re-run whose new
+                failures sit entirely in declared form gates. Resumes the id
+                `run_rebut` passed in, not the outer `session_id`, which
+                moves only once `run_rebut` returns. Draws on the task's own
+                remainder, never REBUT's cap, and sets no REPAIRING state."""
+                nonlocal spent, last_cost, repair_session_id
+                remainder = spec.budget_usd - (spent + cap.spent)
+                try:
+                    repaired = agent(
+                        container,
+                        prompt=implement.repair_prompt(new),
+                        options=options | {"max_budget_usd": remainder},
+                        resume=resume_session_id,
+                        emit=emit,
+                        last_cost_usd=last_cost,
+                    )
+                except implement.AgentFailed as failed:
+                    error: str | None = str(failed)
+                    _phase_start("REBUT", "REBUT", f"the repair turn failed — {failed}")
+                    repaired = _failed_turn(failed, resume_session_id)
+                    try:
+                        if worktree.dirty_paths(container):
+                            worktree.commit_dirty(
+                                container, f"checkpoint: host-committed — {failed}"
+                            )
+                            _phase_start(
+                                "REBUT",
+                                "REBUT",
+                                "uncommitted work checkpointed by the host",
+                            )
+                    except runtime.CellRuntimeError as broke:
+                        _phase_start(
+                            "REBUT", "REBUT", f"the host checkpoint failed — {broke}"
+                        )
+                else:
+                    error = None
+                repair_session_id = require_session(
+                    repaired.session_id or resume_session_id
+                )
+                spent += repaired.cost_usd_est
+                last_cost = repaired.cost_usd_est
+                return error
+
+            def _rebut_gates(resume_session_id: str) -> str | None:
                 """§5.6: red after the rebuttal is EXHAUSTED, and REBUT does
-                not re-enter the repair loop. An errored gate is still
-                infrastructure and still not charged to the task (§5.4).
+                not re-enter the repair loop. The one exception: red only
+                on declared form gates earns one repair turn first. An
+                errored gate is still infrastructure, not charged (§5.4).
 
                 Each blocker whose probe survived REVIEW, of any lens, is
                 asked again over the post-rebuttal patch in a gate-only cell.
                 A rebuttal test that kills one can guard a property already
                 true at base, so `revert` spares it (b-4a63b7).
                 """
-                nonlocal revert_exempt, probe_patch_why
+                nonlocal revert_exempt, probe_patch_why, repair_turn_why
                 survived = [
                     f
                     for f in blockers
@@ -3483,6 +3533,23 @@ def _drive_cell(
                         )
                         for entry in entries
                     )
+
+                def _probe_infra_blocked(cmp: SuiteComparison) -> bool:
+                    # An infrastructure fault left the probe unanswered, so
+                    # a lone `revert` failure on rebuttal tests is Saffron's.
+                    return bool(
+                        probe_infra
+                        and cmp.new_failures
+                        and all(
+                            nf.gate == "revert"
+                            and (
+                                prior_collected is None
+                                or nf.failure.file not in prior_collected
+                            )
+                            for nf in cmp.new_failures
+                        )
+                    )
+
                 # The suite after the loop's last, so the count continues
                 # rather than restarting at 1, under its own "rebuttal" (item 47).
                 comparison = _judge(
@@ -3498,21 +3565,37 @@ def _drive_cell(
                 )
                 if comparison.aborted or comparison.drift:
                     return "GATE_ERROR"
-                # An infrastructure fault left the probe unanswered. `revert`
-                # failures on rebuttal tests alone are then Saffron's ceiling.
-                if (
-                    probe_infra
-                    and comparison.new_failures
-                    and all(
-                        nf.gate == "revert"
-                        and (
-                            prior_collected is None
-                            or nf.failure.file not in prior_collected
-                        )
-                        for nf in comparison.new_failures
-                    )
-                ):
+                if _probe_infra_blocked(comparison):
                     return "GATE_ERROR"
+                if (
+                    comparison.new_failures
+                    and rebut.form_only(comparison.new_failures, policy.gates)
+                    and spent + cap.spent < spec.budget_usd
+                ):
+                    error = _rebut_repair_turn(
+                        resume_session_id, comparison.new_failures
+                    )
+                    after_repair = _judge(
+                        attempts + 2, against="rebuttal", exempt=revert_exempt
+                    )
+                    emit(
+                        attempt_event(
+                            after_repair,
+                            spec_id=spec.spec_id,
+                            phase="REBUT",
+                            attempt=attempts + 2,
+                        )
+                    )
+                    if after_repair.aborted or after_repair.drift:
+                        return "GATE_ERROR"
+                    if _probe_infra_blocked(after_repair):
+                        return "GATE_ERROR"
+                    if after_repair.new_failures:
+                        repair_turn_why = "the repair turn left the gates red" + (
+                            f" — {error}" if error else ""
+                        )
+                        return "EXHAUSTED"
+                    return None
                 return "EXHAUSTED" if comparison.new_failures else None
 
             # REBUT's own pools, at any spend. `cap` also says whether one cut a session.
@@ -3590,9 +3673,13 @@ def _drive_cell(
             # naming red gates: the gates never ran at all (§5.6).
             if probe_patch_why is not None:
                 result.why = probe_patch_why
+            # §5.6's one exception: a repair turn ran and the re-run after it
+            # is still red, so run_rebut's "does not re-enter" line is wrong here.
+            if repair_turn_why is not None:
+                result.why = repair_turn_why
             rebut_result = result
             spent += result.cost_usd
-            session_id = result.rebuttal.session_id or session_id
+            session_id = repair_session_id or result.rebuttal.session_id or session_id
             (task_dir / "rebuttal.json").write_text(
                 json.dumps(result.as_dict(blockers), indent=2)
             )

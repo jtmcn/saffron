@@ -1,7 +1,7 @@
 # Saffron as a target repo. Everything here is repo-shaped; none of it is code.
 gates:
-  format: { blocking: true }
-  lint:   { blocking: true }
+  format: { blocking: true, form: true }
+  lint:   { blocking: true, form: true }
   types:  { blocking: true }
   tests:  { blocking: true }
   # Repo-defined, against a surface an agent cannot satisfy by writing plausible
@@ -21,7 +21,7 @@ gates:
   # House style over living Markdown, and comment and docstring length over
   # code. It fails at base as well: each message names its sentence or block,
   # so a task fails only on a hit the base lacks (item b-044ae7).
-  prose: { blocking: true }
+  prose: { blocking: true, form: true }
   # Code no production caller reaches. It fails at base too, so only a task's new
   # failures count; an open spec's `pending_symbols` defers one.
   dead: { blocking: true }

@@ -545,11 +545,11 @@ def run_stack_batch(
     # `record_layer` below. A resume skips the order, so it starts at 1.
     generation = 1 if resume is not None else 0
     # `_branch` of every layer recorded here, plus the stack base's own
-    # branch, or a resume's own set: the exempt set gate 0's checks share.
+    # branch and its whole chain's, the exempt set gate 0's checks share.
     layer_branches: set[str] = (
         set(resume.layer_branches)
         if resume is not None
-        else {stack_base.branch}
+        else {stack_base.branch} | stack_base.chain_branches
         if stack_base is not None
         else set()
     )

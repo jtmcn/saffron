@@ -1,11 +1,12 @@
 ---
 id: b-2da959
 title: "`cite`'s moved-text check passes a range that drifted and flags a range that is right"
-status: open
+status: done
 tier: 2
 filed: 2026-10-16
+closed: 2026-10-24
 specs: [SA-0314]
-prs: []
+prs: [956]
 commits: []
 cites: [§3.2]
 related: [b-d31930]
@@ -46,3 +47,6 @@ copies. Each case has a test.
 - 2026-10-16: filed from the spec loop's run 42.
 - 2026-10-17: the line-0 and reversed range fault added from the spec loop's run 43. The operator chose to fix both copies together.
 - 2026-10-23: recurred in the spec loop's run 46. The batch's own `citation_defects` refused 19 correct citations out of 20 in `SA-0304`. Refreshes for `SA-0305` and `SA-0306` split sentences and widened ranges only to pass it.
+- 2026-10-24: done by `SA-0314` (#956), from the spec loop's run 47. A hand
+  commit on that layer points `driver.py cite` at the core checker, so both
+  copies now share one rule. b-c3688d carries the layout rule left in core.

@@ -1,11 +1,12 @@
 ---
 id: b-1572e7
 title: A stack batch stacks a child on its lowest open parent and exempts only `depends_on[0]` from the overlap refusal
-status: open
+status: done
 tier: 2
 filed: 2026-10-23
+closed: 2026-10-24
 specs: [SA-0312]
-prs: [943]
+prs: [943, 957]
 commits: []
 cites: [§4.2.1]
 related: [b-c94a2f]
@@ -34,3 +35,7 @@ a three-parent spec whose parents are a chain.
 ## Record
 
 - 2026-10-23: filed from the spec loop's run 46.
+- 2026-10-24: done by `SA-0312` (#957), from the spec loop's run 47. The
+  cell ended `EXHAUSTED` on one surviving witness. The delegate fixed it by
+  hand and adopted the branch. The seats' review commits folded the copied
+  fetch tail into one helper.

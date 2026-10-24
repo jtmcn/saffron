@@ -5934,6 +5934,104 @@ def test_a_follow_up_and_a_revised_spec_on_an_earlier_pull_request_are_not_refus
     assert [row["spec_id"] for row in layers] == ["TE-201", "TE-291"]
 
 
+def test_a_revised_spec_and_a_follow_up_are_not_refused_on_a_pull_request_on_the_stack_bases_chain(
+    ledger, repo_id, monkeypatch
+):
+    """Gate 0's open pull request check exempts every branch on the
+    stack base's own chain, not only its own branch (b-1572e7). A
+    revised spec of the order and a follow-up each overlap a pull
+    request on the stack base's chain, and neither is refused.
+    Another open pull request still refuses each."""
+    from saffron import spec_review as spec_review_module
+    from saffron.batch import run_stack_batch
+    from saffron.scheduler import StackBase
+
+    monkeypatch.setattr(spec_review_module, "SPEC_WRITER_SESSION_USD", 1.0)
+    monkeypatch.setattr(spec_review_module, "SPEC_REVIEW_SESSION_USD", 1.0)
+
+    base_run_id = ledger.create_run(repo_id, base_sha="z" * 40)
+    base_task_id = ledger.create_task(
+        base_run_id, spec_id="TE-210", spec_sha="s" * 64, branch="saffron/TE-210"
+    )
+    ledger.record_push(base_task_id, "base-pushed-sha")
+    ledger.set_task_package(
+        base_task_id,
+        "READY_FOR_REVIEW",
+        "saffron/TE-210",
+        "base-pushed-sha",
+        "https://example.invalid/210",
+    )
+    # `TE-210`'s own chain reaches `TE-199`, a further parent named by
+    # neither the order nor the stack base's own bare branch.
+    stack_base = StackBase(
+        spec_id="TE-210",
+        task_id=base_task_id,
+        branch="saffron/TE-210",
+        chain_branches=frozenset({"saffron/TE-199"}),
+    )
+
+    pull_requests = [
+        _pr(1, "saffron/TE-199", "a.py"),  # on the stack base's own chain
+        _pr(2, "saffron/SA-9000", "b.py"),  # unrelated, still refuses
+    ]
+
+    def open_prs() -> list[dict]:
+        return pull_requests
+
+    rows = {
+        "TE-211": {"route": ["revise", "run"], "revised_touches": ["m.py", "a.py"]},
+        "TE-212": {"route": ["revise", "run"], "revised_touches": ["m.py", "b.py"]},
+        "__follow_ups__": [
+            {"id": "TE-391", "touches": ["a.py"]},
+            {"id": "TE-392", "touches": ["b.py"]},
+        ],
+    }
+    doubles = StackDoubles(ledger, repo_id, rows)
+    order = [
+        dataclasses.replace(
+            _candidate("TE-211", budget_usd=1),
+            spec=_candidate("TE-211").spec.model_copy(update={"touches": ["m.py"]}),
+            stack_base=stack_base,
+        ),
+        dataclasses.replace(
+            _candidate("TE-212", budget_usd=1),
+            spec=_candidate("TE-212").spec.model_copy(update={"touches": ["m.py"]}),
+        ),
+    ]
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        30.0,
+        None,
+        doubles.runner,
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        writer_usd=2.0,
+        review=doubles.review,
+        mint=doubles.mint,
+        revise=doubles.revise,
+        end_review=doubles.end_review,
+        follow_ups=doubles.follow_ups,
+        open_prs=open_prs,
+        emit=lines.append,
+    )
+
+    assert reason == "DRAINED"
+
+    refused = {
+        line.split()[0]: line
+        for line in lines
+        if "refused" in line and "/pull/" in line
+    }
+    assert set(refused) == {"TE-212", "TE-392"}
+    assert "/pull/2" in refused["TE-212"]
+    assert "/pull/2" in refused["TE-392"]
+    assert not any("TE-211" in line for line in refused.values())
+    assert not any("TE-391" in line for line in refused.values())
+
+
 def _fail_sleep(seconds: float) -> None:
     raise AssertionError(f"should not sleep for {seconds}")
 

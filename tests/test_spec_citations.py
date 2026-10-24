@@ -11,6 +11,74 @@ import subprocess
 
 import pytest
 
+# The fixture module these tests cite, with 1-based line numbers.
+LIB = [
+    "import os",
+    "",
+    "",
+    "def _diff(mirror, head):",
+    '    """One layer\'s own commit."""',
+    "    return run(mirror, head)",
+    "",
+    "",
+    "def _review_one_layer(",
+    "    ledger,",
+    "    task_key,",
+    "):",
+    "    fields = layer_fields(ledger, task_key)",
+    "",
+    "    diff = _diff(fields.mirror, fields.head)",
+    "    return review(diff)",
+    "",
+    "",
+    "def export_saffron_dir(mirror, sha, dest):",
+    '    """`.saffron/` under `dest`."""',
+    '    archive = dest / "a.tar"',
+    "    extract(archive, dest)",
+    "    return dest",
+    "",
+    "",
+    "class Ledger:",
+    "    def create_batch(self):",
+    "        return 1",
+    "",
+    "",
+    "async def run_stack_batch(ledger):",
+    "    batch = ledger.create_batch()",
+    "    end_review(batch)",
+    "    _print_summary(batch)",
+    "    return batch",
+    "",
+    "# def _print_summary sits below",
+    "def _print_summary(batch):",
+    "    print(batch)",
+    "",
+    "",
+    "def main():",
+    "    _print_summary(None)",
+    "    # IF NOT EXISTS",
+    "",
+    "",
+    "def _rows(x=[",
+    "    1,",
+    "]):",
+    "    return x",
+    "",
+    "",
+    "def _shape(x={",
+    '    "a": 1,',
+    "}):",
+    "    return x",
+    "_diff_cache = {}",
+]
+
+_CITATION_POLICY = (
+    "citations:\n"
+    "  definitions:\n"
+    "    - '\\s*(?:async\\s+)?def\\s+{name}\\b'\n"
+    "    - '\\s*class\\s+{name}\\b'\n"
+)
+
 
 def _git(cwd, *args):
     return subprocess.run(
@@ -27,6 +95,24 @@ def empty_repo(tmp_path, monkeypatch):
     _git(tmp_path, "config", "user.email", "t@example.com")
     _git(tmp_path, "config", "user.name", "t")
     return tmp_path
+
+
+@pytest.fixture
+def cite_repo(empty_repo):
+    """A repo holding `mod/lib.py` (`LIB`), a three-line `pkg/other.py`, and
+    a policy declaring `def`, `async def` and `class` as constructs. Returns
+    `(repo, base)`."""
+    repo = empty_repo
+    (repo / "mod").mkdir()
+    (repo / "mod" / "lib.py").write_text("\n".join(LIB) + "\n")
+    (repo / "pkg").mkdir()
+    (repo / "pkg" / "other.py").write_text("x = 1\ny = 2\nz = 3\n")
+    (repo / ".saffron").mkdir()
+    (repo / ".saffron" / "policy.yaml").write_text(_CITATION_POLICY)
+    _git(repo, "add", "mod/lib.py", "pkg/other.py", ".saffron/policy.yaml")
+    _git(repo, "commit", "-qm", "fixture")
+    base = _git(repo, "rev-parse", "HEAD")
+    return repo, base
 
 
 def test_citation_defects_resolve_each_citation_at_the_given_commit(empty_repo):
@@ -116,6 +202,9 @@ def test_citation_defects_anchor_a_bare_line_number_inside_its_own_paragraph(
 
 
 def test_citation_defects_report_quoted_text_that_sits_on_other_lines(empty_repo):
+    """None of these candidate words name a `def`, `async def` or `class`
+    in `mod/lib.py`. So none of their citations names a construct the file
+    holds, and the construct check refuses nothing here."""
     from saffron.spec_citations import citation_defects
 
     repo = empty_repo
@@ -130,7 +219,9 @@ def test_citation_defects_report_quoted_text_that_sits_on_other_lines(empty_repo
     lines[70] = "theta marker"  # line 71, "theta" found elsewhere (case 6)
     (repo / "mod").mkdir()
     (repo / "mod" / "lib.py").write_text("\n".join(lines) + "\n")
-    _git(repo, "add", "mod/lib.py")
+    (repo / ".saffron").mkdir()
+    (repo / ".saffron" / "policy.yaml").write_text(_CITATION_POLICY)
+    _git(repo, "add", "mod/lib.py", ".saffron/policy.yaml")
     _git(repo, "commit", "-qm", "fixture")
     base = _git(repo, "rev-parse", "HEAD")
 
@@ -158,8 +249,220 @@ def test_citation_defects_report_quoted_text_that_sits_on_other_lines(empty_repo
         "items hold `iota` too.\n"
     )
 
-    assert citation_defects(repo, base, text) == [
-        "mod/lib.py:11-20: quoted text sits at mod/lib.py:3, 7 instead",
-        "mod/lib.py:51-60: quoted text sits at mod/lib.py:9 instead",
-        "mod/lib.py:61-70: quoted text sits at mod/lib.py:71 instead",
+    assert citation_defects(repo, base, text) == []
+
+
+def test_citation_defects_judge_a_citation_by_the_construct_its_clause_names(
+    cite_repo,
+):
+    from saffron.spec_citations import citation_defects
+
+    repo, base = cite_repo
+
+    paragraphs = [
+        "`_review_one_layer` reads those fields (`mod/lib.py:4-15`).",
+        "`_review_one_layer` reads them too (`mod/lib.py:10-16`).",
+        "`export_saffron_dir` writes `.saffron/` under its `dest` "
+        "(`mod/lib.py:17-22`).",
+        "`export_saffron_dir` writes the archive (`mod/lib.py:18-24`).",
+        "`run_stack_batch` creates its row at `mod/lib.py:32`.",
+        "`Ledger` holds the writer (`mod/lib.py:27-28`).",
+        "`Ledger` holds the writer (`mod/lib.py:30-32`).",
+        "The module prints through `_print_summary` (`mod/lib.py:43`).",
+        "After `_review_one_layer` returns, it calls `end_review` (`mod/lib.py:33`).",
+        "`_print_summary` checks `IF NOT EXISTS` (`mod/lib.py:44`).",
+        "`os` is read at `mod/lib.py:20`.",
+        "`_review_one_layer` builds its diff (`mod/lib.py:15`).",
+        "Both `_diff` and `_print_summary` matter (`mod/lib.py:21`).",
+        "`git_mirror.export_saffron_dir(mirror, sha, dest)` writes it "
+        "(`mod/lib.py:17-22`).",
+        "`Ledger.create_batch` returns one (`mod/lib.py:33`).",
+        "`_diff()` builds the patch (`mod/lib.py:20`).",
+        "`_rows` returns them (`mod/lib.py:50`).",
+        "`_shape` returns it (`mod/lib.py:56`).",
+        "`_diff` is cached at `mod/lib.py:57`.",
+        "`run_stack_batch` returns it (`mod/lib.py:38`).",
     ]
+    text = "\n\n".join(paragraphs)
+
+    assert citation_defects(repo, base, text) == [
+        "mod/lib.py:4-15: the construct it names sits at mod/lib.py:9-16",
+        "mod/lib.py:17-22: the construct it names sits at mod/lib.py:19-23",
+        "mod/lib.py:30-32: the construct it names sits at mod/lib.py:26-28",
+        "mod/lib.py:44: the construct it names sits at mod/lib.py:38-39",
+        "mod/lib.py:21: the construct it names sits at mod/lib.py:4-6, 38-39",
+        "mod/lib.py:17-22: the construct it names sits at mod/lib.py:19-23",
+        "mod/lib.py:33: the construct it names sits at mod/lib.py:27-28",
+        "mod/lib.py:20: the construct it names sits at mod/lib.py:4-6",
+        "mod/lib.py:57: the construct it names sits at mod/lib.py:4-6",
+        "mod/lib.py:38: the construct it names sits at mod/lib.py:31-35",
+    ]
+
+
+def test_citation_defects_scope_names_to_each_citations_own_clause(cite_repo):
+    from saffron.spec_citations import citation_defects
+
+    repo, base = cite_repo
+
+    text = (
+        "Every `qualifications` entry carries it (`mod/lib.py:21`), and "
+        "`_diff` sits at `mod/lib.py:4-6`.\n"
+        "\n"
+        "`_print_summary` prints the batch (`mod/lib.py:39`, `:43`).\n"
+        "\n"
+        "`_diff` returns the patch (`mod/lib.py:5`, `:21`).\n"
+        "\n"
+        "`_diff` sits in three places (`mod/lib.py:4`, `:5`, `:21`).\n"
+        "\n"
+        "- `_diff` is the helper\n"
+        "- the import sits at `mod/lib.py:1`\n"
+        "\n"
+        "* `_diff` is the helper\n"
+        "* the import sits at `mod/lib.py:1`\n"
+        "\n"
+        "1. `_diff` is the helper\n"
+        "2. the import sits at `mod/lib.py:1`\n"
+        "\n"
+        "**`_diff` is the helper.** The import sits at `mod/lib.py:1`.\n"
+        "\n"
+        "**`_diff` is the helper.** `mod/lib.py:1` holds the import.\n"
+        "\n"
+        "**`_diff` is the helper.** 1 import sits at `mod/lib.py:1`.\n"
+        "\n"
+        '**`_diff` is the helper.** "The import" sits at `mod/lib.py:1`.\n'
+        "\n"
+        "**`_diff` is the helper.** *The import* sits at `mod/lib.py:1`.\n"
+        "\n"
+        "- the module is `mod/lib.py`\n"
+        "- `_diff` sits at `:4-6`\n"
+        "\n"
+        "The helpers live in `pkg/other.py` and `mod/lib.py`. `_diff` returns "
+        "the patch (`:4-6`).\n"
+        "\n"
+        "The helpers live in `pkg/other.py`. `_diff` in `mod/lib.py` returns "
+        "the patch (`:4-6`).\n"
+        "\n"
+        "See `pkg/other.py:1` and `mod/lib.py:4-6`. `_diff` returns it "
+        "(`:5`).\n"
+        "\n"
+        "`_diff` sits at `mod/lib.py:4-6`, and the `qualifications` entry is "
+        "at `mod/lib.py:21`.\n"
+    )
+
+    assert citation_defects(repo, base, text) == [
+        "mod/lib.py:21: the construct it names sits at mod/lib.py:4-6",
+        "mod/lib.py:21: the construct it names sits at mod/lib.py:4-6",
+    ]
+
+
+def test_citation_defects_name_a_one_line_construct_alone_and_read_a_tab_indented_body(
+    empty_repo,
+):
+    from saffron.spec_citations import citation_defects
+
+    repo = empty_repo
+    (repo / "mod").mkdir()
+    (repo / "mod" / "tiny.py").write_text("x = 1\ndef tiny(): pass\ny = 2\n")
+    (repo / "mod" / "tabs.py").write_text("def gofunc(x):\n\ty = x\n\treturn y\n")
+    (repo / ".saffron").mkdir()
+    (repo / ".saffron" / "policy.yaml").write_text(_CITATION_POLICY)
+    _git(repo, "add", "mod", ".saffron/policy.yaml")
+    _git(repo, "commit", "-qm", "fixture")
+    base = _git(repo, "rev-parse", "HEAD")
+
+    text = (
+        "`tiny` does nothing (`mod/tiny.py:3`).\n"
+        "\n"
+        "`gofunc` returns it (`mod/tabs.py:2-3`).\n"
+    )
+
+    assert citation_defects(repo, base, text) == [
+        "mod/tiny.py:3: the construct it names sits at mod/tiny.py:2"
+    ]
+
+
+def test_citation_defects_read_definition_patterns_from_the_policy_at_the_commit(
+    empty_repo,
+):
+    from saffron.repos.policy import PolicyError
+    from saffron.spec_citations import citation_defects
+
+    repo = empty_repo
+    (repo / "mod").mkdir()
+    (repo / "mod" / "lib.py").write_text("\n".join(LIB) + "\n")
+    _git(repo, "add", "mod/lib.py")
+    _git(repo, "commit", "-qm", "no policy file")
+    no_policy = _git(repo, "rev-parse", "HEAD")
+
+    (repo / ".saffron").mkdir()
+    (repo / ".saffron" / "policy.yaml").write_text("gates: {}\n")
+    _git(repo, "add", ".saffron/policy.yaml")
+    _git(repo, "commit", "-qm", "no citations block")
+    no_citations = _git(repo, "rev-parse", "HEAD")
+
+    (repo / ".saffron" / "policy.yaml").write_text(
+        "citations:\n  definitions:\n    - '\\s*def\\s+{name}\\b'\n"
+    )
+    _git(repo, "add", ".saffron/policy.yaml")
+    _git(repo, "commit", "-qm", "def only")
+    def_only = _git(repo, "rev-parse", "HEAD")
+
+    (repo / ".saffron" / "policy.yaml").write_text(
+        "citations:\n  definitions:\n    - 'def foo'\n"
+    )
+    _git(repo, "add", ".saffron/policy.yaml")
+    _git(repo, "commit", "-qm", "invalid")
+    invalid = _git(repo, "rev-parse", "HEAD")
+
+    text = (
+        "`_review_one_layer` reads those fields (`mod/lib.py:4-15`).\n"
+        "\n"
+        "`Ledger` holds the writer (`mod/lib.py:30-32`).\n"
+    )
+
+    assert citation_defects(repo, no_policy, text) == []
+    assert citation_defects(repo, no_citations, text) == []
+
+    # The commit's own policy decides, never the working tree's.
+    (repo / ".saffron" / "policy.yaml").write_text(_CITATION_POLICY)
+    assert citation_defects(repo, def_only, text) == [
+        "mod/lib.py:4-15: the construct it names sits at mod/lib.py:9-16"
+    ]
+
+    with pytest.raises(PolicyError):
+        citation_defects(repo, invalid, text)
+
+
+def test_citation_count_and_defects_count_each_citation_and_refuse_a_range_before_line_one_or_reversed(
+    empty_repo,
+):
+    from saffron.spec_citations import citation_count_and_defects, citation_defects
+
+    repo = empty_repo
+    (repo / "mod").mkdir()
+    (repo / "mod" / "lib.py").write_text("\n".join(LIB) + "\n")
+    _git(repo, "add", "mod/lib.py")
+    _git(repo, "commit", "-qm", "fixture")
+    base = _git(repo, "rev-parse", "HEAD")
+
+    text = (
+        "See `mod/lib.py:0`, `mod/lib.py:0-3` and `mod/lib.py:6-2`. Then "
+        "`mod/lib.py:1`, `missing.py:0` and `missing.py:3-1`.\n"
+        "\n"
+        "The module `mod/lib.py` starts at `:0` and runs `:9-4`.\n"
+    )
+
+    expected = [
+        "mod/lib.py:0: starts before line 1",
+        "mod/lib.py:0-3: starts before line 1",
+        "mod/lib.py:6-2: ends before it starts",
+        "missing.py:0: starts before line 1",
+        "missing.py:3-1: ends before it starts",
+        "mod/lib.py:0: starts before line 1",
+        "mod/lib.py:9-4: ends before it starts",
+    ]
+
+    count, defects = citation_count_and_defects(repo, base, text)
+    assert count == 8
+    assert defects == expected
+    assert citation_defects(repo, base, text) == expected

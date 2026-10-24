@@ -512,6 +512,20 @@ def _push_parent_branch(repo, branch, *, content="the parent's work\n"):
     return head
 
 
+def _push_stacked_branch(repo, branch, from_ref, *, content=""):
+    """`_push_parent_branch`, cut from `from_ref` rather than the current
+    branch. Left checked out, so a caller can cut the next one from this
+    branch's own head in turn (b-1572e7)."""
+    _git(repo, "checkout", "-q", from_ref)
+    _git(repo, "checkout", "-q", "-b", branch)
+    (repo / f"{branch.replace('/', '-')}.txt").write_text(content or f"{branch}\n")
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", branch)
+    head = _rev_parse(repo, "HEAD")
+    _git(repo, "push", "-q", "origin", branch)
+    return head
+
+
 def _mirror_of(tmp_path, repo, *, name="resolver.git"):
     """The pair `_resolve_stacked_on` needs, built the way `_run_cell` builds
     them: a real bare mirror and the origin url it fetches from."""
@@ -1128,12 +1142,16 @@ def test_an_unstacked_worktree_passes_no_parent_branch_to_package(
 
 
 def test_only_the_first_depends_on_entry_is_a_stacking_candidate(tmp_path):
-    """K=1: a spec with two unmerged parents does not stack on either one it
-    does not name first — `depends_on[1]`'s own resolvable, waiting task and
-    its real pushed branch must not leak into the result just because they
-    could stack too."""
+    """A parent with no task at all counts for nothing (b-1572e7): the
+    first entry names one, so the resolver stacks on the second entry's
+    own real, pushed head instead of staying unstacked."""
     repo = _local_origin(tmp_path)
-    _push_parent_branch(repo, "saffron/SY-2")
+    (repo / ".saffron" / "specs").mkdir(parents=True)
+    (repo / ".saffron" / "specs" / "README.md").write_text("specs live here\n")
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "saffron")
+    head = _push_parent_branch(repo, "saffron/SY-2")
+    base_sha = _rev_parse(repo, "HEAD")
     mirror, url = _mirror_of(tmp_path, repo)
     ledger = Ledger(tmp_path / "l.db")
     repo_id = _seed_repo(tmp_path, ledger, "/o")
@@ -1143,14 +1161,15 @@ def test_only_the_first_depends_on_entry_is_a_stacking_candidate(tmp_path):
     stacked_on, parent_branch = task._resolve_stacked_on(
         ledger,
         repo_id,
-        ["SY-1", "SY-2"],
+        ["SY-1-parent", "SY-2"],
         mirror=mirror,
         url=url,
+        base_sha=base_sha,
         spec_id="SY-1",
         emit=lambda _: None,
     )
 
-    assert (stacked_on, parent_branch) == (None, None)
+    assert (stacked_on, parent_branch) == (head, "saffron/SY-2")
     ledger.close()
 
 
@@ -1363,6 +1382,412 @@ def test_a_parent_branch_that_is_gone_says_so_through_emit(tmp_path):
     # needs, and the part a demotion to `print` takes away.
     assert len(seen) == 1
     assert describe(seen[0]).startswith("unstacked: parent branch saffron/SY-9 is gone")
+    ledger.close()
+
+
+def _chain_spec_text(spec_id, depends_on=()):
+    lines = ["---", f"id: {spec_id}", "title: t", "type: chore", "priority: 3"]
+    if depends_on:
+        lines.append("depends_on:")
+        lines += [f"  - {d}" for d in depends_on]
+    lines += ["---", "", "body"]
+    return "\n".join(lines) + "\n"
+
+
+def _fake_gh_unreachable_for(unreachable_urls):
+    """A `gh pr view` fake that fails for `unreachable_urls` and otherwise
+    answers an undecided open pull request, so no row's state moves."""
+
+    def gh(argv):
+        if argv[3] in unreachable_urls:
+            return subprocess.CompletedProcess(argv, 1, "", "boom")
+        payload = json.dumps(
+            {
+                "state": "OPEN",
+                "reviewDecision": None,
+                "isDraft": True,
+                "headRefOid": None,
+            }
+        )
+        return subprocess.CompletedProcess(argv, 0, payload, "")
+
+    return gh
+
+
+def test_an_attended_cell_stacks_on_its_deepest_open_parent_read_at_base(tmp_path):
+    """`_resolve_stacked_on` applies the scan's deepest-open-parent rule
+    once a spec names two or more parents (b-1572e7). `TE-72` depends on
+    `TE-73`, on `TE-71`, so `TE-72` is deepest, with neither the lowest id
+    nor the highest. `TE-74` merged, `TE-75` is retired though its task
+    waits, and `TE-76`'s push landed in `base_sha`. Driven both orders,
+    from the ledger alone and through a `gh` blind to two parents. Then
+    the deepest parent has no push, or a dead newest row. A shallower
+    parent has no push. A merged parent sits beside a retired one."""
+    repo = _local_origin(tmp_path)
+    landed_sha = _push_parent_branch(repo, "pre-landed", content="already shipped\n")
+    _git(repo, "merge", "-q", "--ff-only", "pre-landed")
+    assert _rev_parse(repo, "HEAD") == landed_sha
+
+    specs_dir = repo / ".saffron" / "specs"
+    specs_dir.mkdir(parents=True)
+    (specs_dir / "README.md").write_text("specs live here\n")
+    (specs_dir / "p71.md").write_text(_chain_spec_text("TE-71"))
+    (specs_dir / "p73.md").write_text(_chain_spec_text("TE-73", depends_on=["TE-71"]))
+    (specs_dir / "p72.md").write_text(_chain_spec_text("TE-72", depends_on=["TE-73"]))
+    done = specs_dir / "done"
+    done.mkdir()
+    (done / "p75.md").write_text(_chain_spec_text("TE-75"))
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "saffron")
+    base_sha = _rev_parse(repo, "HEAD")
+
+    # A real stack, not three siblings: each branch is cut from the
+    # one before it, so the ancestor check later has something to pass.
+    main_branch = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    heads = {}
+    heads["TE-71"] = _push_stacked_branch(repo, "saffron/TE-71", main_branch)
+    heads["TE-73"] = _push_stacked_branch(repo, "saffron/TE-73", "saffron/TE-71")
+    heads["TE-72"] = _push_stacked_branch(repo, "saffron/TE-72", "saffron/TE-73")
+    heads["TE-75"] = _push_stacked_branch(repo, "saffron/TE-75", main_branch)
+    _git(repo, "checkout", "-q", main_branch)
+    mirror, url = _mirror_of(tmp_path, repo)
+
+    for order in (
+        ["TE-71", "TE-72", "TE-73", "TE-74", "TE-75", "TE-76"],
+        ["TE-76", "TE-75", "TE-74", "TE-73", "TE-72", "TE-71"],
+    ):
+        for use_gh in (False, True):
+            ledger = Ledger(tmp_path / f"l-{'-'.join(order)}-{use_gh}.db")
+            repo_id = _seed_repo(tmp_path, ledger, "/o")
+            pr_urls = {
+                spec_id: f"https://example.invalid/pull/{spec_id}"
+                for spec_id in ("TE-71", "TE-72", "TE-73", "TE-76")
+            }
+            for spec_id in ("TE-71", "TE-72", "TE-73"):
+                task_id = _seed_task(
+                    ledger,
+                    repo_id,
+                    spec_id=spec_id,
+                    state="READY_FOR_REVIEW",
+                    pr_url=pr_urls[spec_id],
+                    branch=f"saffron/{spec_id}",
+                )
+                ledger.record_push(task_id, heads[spec_id])
+            _seed_task(ledger, repo_id, spec_id="TE-74", state="MERGED")
+            _seed_task(ledger, repo_id, spec_id="TE-75", state="READY_FOR_REVIEW")
+            landed_task = _seed_task(
+                ledger,
+                repo_id,
+                spec_id="TE-76",
+                state="READY_FOR_REVIEW",
+                pr_url=pr_urls["TE-76"],
+            )
+            ledger.record_push(landed_task, landed_sha)
+
+            seen = []
+            gh = (
+                _fake_gh_unreachable_for({pr_urls["TE-71"], pr_urls["TE-76"]})
+                if use_gh
+                else None
+            )
+            stacked_on, branch = task._resolve_stacked_on(
+                ledger,
+                repo_id,
+                order,
+                mirror=mirror,
+                url=url,
+                base_sha=base_sha,
+                spec_id="SY-1",
+                emit=seen.append,
+                gh=gh,
+            )
+
+            assert (stacked_on, branch) == (heads["TE-72"], "saffron/TE-72")
+            assert [e for e in seen if e.step == "unstacked"] == []
+            if use_gh:
+                unreachable = [e for e in seen if e.step == "gh_unreachable"]
+                assert {e.detail.split("'")[0].split()[-1] for e in unreachable} == {
+                    "TE-71",
+                    "TE-76",
+                }
+            ledger.close()
+
+    def _waiting(ledger, repo_id, spec_id, *, pushed=True, state="READY_FOR_REVIEW"):
+        task_id = _seed_task(ledger, repo_id, spec_id=spec_id, state=state)
+        if pushed:
+            ledger.record_push(task_id, heads[spec_id])
+
+    def _deepest_has_no_push(ledger, repo_id):
+        _waiting(ledger, repo_id, "TE-71")
+        _waiting(ledger, repo_id, "TE-72", pushed=False)
+
+    def _merged_beside_retired(ledger, repo_id):
+        _seed_task(ledger, repo_id, spec_id="TE-74", state="MERGED")
+        _waiting(ledger, repo_id, "TE-75")
+
+    def _shallower_has_no_push(ledger, repo_id):
+        _waiting(ledger, repo_id, "TE-71", pushed=False)
+        _waiting(ledger, repo_id, "TE-72")
+
+    def _deepest_newest_row_dead(ledger, repo_id):
+        _waiting(ledger, repo_id, "TE-71")
+        _waiting(ledger, repo_id, "TE-72")
+        _waiting(ledger, repo_id, "TE-72", pushed=False, state="EXHAUSTED")
+
+    arrangements = (
+        ("d", ["TE-72", "TE-71"], _deepest_has_no_push, (None, None)),
+        ("e", ["TE-74", "TE-75"], _merged_beside_retired, (None, None)),
+        (
+            "f",
+            ["TE-71", "TE-72"],
+            _shallower_has_no_push,
+            (heads["TE-72"], "saffron/TE-72"),
+        ),
+        (
+            "g",
+            ["TE-71", "TE-72"],
+            _deepest_newest_row_dead,
+            (heads["TE-72"], "saffron/TE-72"),
+        ),
+    )
+    for name, order, seed, expected in arrangements:
+        for use_gh in (False, True):
+            ledger = Ledger(tmp_path / f"l-{name}-{use_gh}.db")
+            repo_id = _seed_repo(tmp_path, ledger, "/o")
+            seed(ledger, repo_id)
+            seen = []
+            stacked_on, branch = task._resolve_stacked_on(
+                ledger,
+                repo_id,
+                order,
+                mirror=mirror,
+                url=url,
+                base_sha=base_sha,
+                spec_id="SY-1",
+                emit=seen.append,
+                gh=_fake_gh_unreachable_for(set()) if use_gh else None,
+            )
+
+            assert (stacked_on, branch) == expected, name
+            unstacked = [describe(e) for e in seen if e.step == "unstacked"]
+            if name == "d":
+                assert unstacked == [
+                    "unstacked: TE-72's newest waiting task records no pushed branch"
+                ]
+            else:
+                assert unstacked == [], name
+            ledger.close()
+
+
+def _pushed_saffron_repo(tmp_path, dirname, live_specs, retired_specs=()):
+    """A `_local_origin`-shaped repo whose `.saffron/specs/` is committed
+    and pushed to its own origin, so `preflight.prepare_mirror`'s fetched
+    default-branch head sees it too (b-1572e7). Returns `(repo,
+    main_branch)`. The caller still fetches `base_sha` itself, since every
+    caller here wants it only after its own further pushes."""
+    repo = _repo_with_commit(tmp_path / dirname)
+    remote = tmp_path / f"{dirname}-remote.git"
+    subprocess.run(["git", "clone", "-q", "--bare", str(repo), str(remote)], check=True)
+    _git(repo, "remote", "add", "origin", str(remote))
+    main_branch = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    specs_dir = repo / ".saffron" / "specs"
+    specs_dir.mkdir(parents=True)
+    (specs_dir / "README.md").write_text("specs live here\n")
+    (repo / ".saffron" / "policy.yaml").write_text("protected: []\n")
+    for name, text in live_specs:
+        (specs_dir / name).write_text(text)
+    if retired_specs:
+        done = specs_dir / "done"
+        done.mkdir()
+        for name, text in retired_specs:
+            (done / name).write_text(text)
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "saffron")
+    _git(repo, "push", "-q", "origin", main_branch)
+    return repo, main_branch
+
+
+def test_an_attended_cell_whose_open_parents_lie_on_no_one_chain_is_refused_before_any_cell(
+    tmp_path, monkeypatch, capsys
+):
+    """`run_task` with no handoff returns `Refused` before any cell
+    starts in two cases (b-1572e7). Its open parents lie on no one
+    chain, or an on-chain parent's fetched head is not contained in the
+    deepest parent's. A parent whose recorded push is stale, but whose
+    fetched head is still contained, stacks anyway. Driven from the
+    ledger alone and through a `gh`."""
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
+
+    def _no_cell(*_a, **_k):
+        raise AssertionError("run_one_cell must not run for a refused task")
+
+    # Arrangement A: `TE-91`, on `TE-90`, and `TE-92` lie on no one chain.
+    # `TE-92` waits with no push and no branch.
+    for use_gh in (False, True):
+        repo, main_branch = _pushed_saffron_repo(
+            tmp_path,
+            f"repo-a-{use_gh}",
+            [
+                ("p90.md", _chain_spec_text("TE-90")),
+                ("p91.md", _chain_spec_text("TE-91", depends_on=["TE-90"])),
+            ],
+        )
+        head90 = _push_stacked_branch(repo, "saffron/TE-90", main_branch)
+        head91 = _push_stacked_branch(repo, "saffron/TE-91", "saffron/TE-90")
+        _git(repo, "checkout", "-q", main_branch)
+        args = _namespace(repo, tmp_path)
+        args.spec = _ceiling_spec(tmp_path, depends_on="[TE-90, TE-91, TE-92]")
+
+        ledger = Ledger(tmp_path / f"a-{use_gh}.db")
+        repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
+        task91 = _seed_task(
+            ledger,
+            repo_id,
+            spec_id="TE-91",
+            state="READY_FOR_REVIEW",
+            branch="saffron/TE-91",
+            pr_url="https://example.invalid/pull/91",
+        )
+        ledger.record_push(task91, head91)
+        task90 = _seed_task(ledger, repo_id, spec_id="TE-90", state="READY_FOR_REVIEW")
+        ledger.record_push(task90, head90)
+        _seed_task(ledger, repo_id, spec_id="TE-92", state="READY_FOR_REVIEW")
+
+        monkeypatch.setattr("saffron.task.run_one_cell", _no_cell)
+        if use_gh:
+            gh = _fake_gh_unreachable_for({"https://example.invalid/pull/91"})
+            monkeypatch.setattr("saffron.cli.run_gh", gh)
+        else:
+            monkeypatch.setattr(
+                "saffron.cli.run_gh",
+                lambda _argv: subprocess.CompletedProcess(_argv, 1, "", "no gh"),
+            )
+
+        assert cli._run_cell(args, ledger, tmp_path / "out") == 1
+        printed = capsys.readouterr().out
+        assert "refused" in printed
+        assert "depends_on TE-92 is outside TE-91's depends_on chain" in printed
+        ledger.close()
+
+    # Arrangement B: `TE-93`'s branch was rebased after PACKAGE pushed,
+    # so its fetched head is no longer contained in `TE-94`'s, the deepest.
+    repo, main_branch = _pushed_saffron_repo(
+        tmp_path,
+        "repo-b",
+        [
+            ("p93.md", _chain_spec_text("TE-93")),
+            ("p94.md", _chain_spec_text("TE-94", depends_on=["TE-93"])),
+        ],
+    )
+    head93 = _push_stacked_branch(repo, "saffron/TE-93", main_branch)
+    head94 = _push_stacked_branch(repo, "saffron/TE-94", "saffron/TE-93")
+    # Rebase `TE-93` onto its own later commit, off the stack entirely.
+    _git(repo, "checkout", "-q", "saffron/TE-93")
+    (repo / "rebased.txt").write_text("rebased away\n")
+    _git(repo, "add", "-A")
+    _git(
+        repo,
+        "-c",
+        "user.email=t@t",
+        "-c",
+        "user.name=T",
+        "commit",
+        "--amend",
+        "-qm",
+        "rebased",
+    )
+    rebased_head93 = _rev_parse(repo, "HEAD")
+    assert rebased_head93 != head93
+    _git(repo, "push", "-q", "--force", "origin", "saffron/TE-93")
+    _git(repo, "checkout", "-q", main_branch)
+    args = _namespace(repo, tmp_path)
+    args.spec = _ceiling_spec(tmp_path, depends_on="[TE-93, TE-94]")
+
+    ledger = Ledger(tmp_path / "b.db")
+    repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
+    task93 = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="TE-93",
+        state="READY_FOR_REVIEW",
+        branch="saffron/TE-93",
+    )
+    ledger.record_push(task93, head93)
+    task94 = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="TE-94",
+        state="READY_FOR_REVIEW",
+        branch="saffron/TE-94",
+    )
+    ledger.record_push(task94, head94)
+    monkeypatch.setattr("saffron.task.run_one_cell", _no_cell)
+    monkeypatch.setattr(
+        "saffron.cli.run_gh",
+        lambda _argv: subprocess.CompletedProcess(_argv, 1, "", "no gh"),
+    )
+
+    assert cli._run_cell(args, ledger, tmp_path / "out") == 1
+    printed = capsys.readouterr().out
+    assert "refused" in printed
+    assert "TE-93" in printed
+    ledger.close()
+
+    # Arrangement C: `TE-96`'s recorded `pushed_sha` is stale, but its
+    # fetched head is still an ancestor of `TE-95`'s, cut after the fix.
+    repo, main_branch = _pushed_saffron_repo(
+        tmp_path,
+        "repo-c",
+        [
+            ("p96.md", _chain_spec_text("TE-96")),
+            ("p95.md", _chain_spec_text("TE-95", depends_on=["TE-96"])),
+        ],
+    )
+    stale_head96 = _push_stacked_branch(repo, "saffron/TE-96", main_branch)
+    _git(repo, "checkout", "-q", "saffron/TE-96")
+    (repo / "more.txt").write_text("more review work\n")
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "more")
+    fresh_head96 = _rev_parse(repo, "HEAD")
+    _git(repo, "push", "-q", "origin", "saffron/TE-96")
+    head95 = _push_stacked_branch(repo, "saffron/TE-95", "saffron/TE-96")
+    _git(repo, "checkout", "-q", main_branch)
+    base_sha = _rev_parse(repo, "HEAD")
+    mirror, url = _mirror_of(tmp_path, repo, name="repo-c-mirror.git")
+
+    ledger = Ledger(tmp_path / "c.db")
+    repo_id = _seed_repo(tmp_path, ledger, "/o")
+    task96 = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="TE-96",
+        state="READY_FOR_REVIEW",
+        branch="saffron/TE-96",
+    )
+    ledger.record_push(task96, stale_head96)
+    task95 = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="TE-95",
+        state="READY_FOR_REVIEW",
+        branch="saffron/TE-95",
+    )
+    ledger.record_push(task95, head95)
+
+    stacked_on, branch = task._resolve_stacked_on(
+        ledger,
+        repo_id,
+        ["TE-96", "TE-95"],
+        mirror=mirror,
+        url=url,
+        base_sha=base_sha,
+        spec_id="SY-1",
+        emit=lambda _: None,
+        gh=None,
+    )
+
+    assert (stacked_on, branch) == (head95, "saffron/TE-95")
+    assert fresh_head96 != stale_head96
     ledger.close()
 
 
@@ -6156,12 +6581,16 @@ def test_the_adapter_stacks_a_child_on_its_parents_branch(tmp_path, monkeypatch)
 
 
 def test_the_adapter_stacks_on_the_first_dependency_only(tmp_path, monkeypatch):
-    """K=1: a second dependency is still not a stacking base. The adapter
-    must not widen that rule just because it is new code doing an old job —
-    `depends_on[1]`'s own resolvable, waiting task and its real pushed
-    branch must not leak into the result."""
+    """A parent with no task at all counts for nothing (b-1572e7): the
+    first entry names one, so the adapter stacks on the second entry's
+    own real, pushed head instead of staying unstacked."""
     repo = _local_origin(tmp_path)
-    _push_parent_branch(repo, "saffron/SY-2")
+    (repo / ".saffron" / "specs").mkdir(parents=True)
+    (repo / ".saffron" / "specs" / "README.md").write_text("specs live here\n")
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "saffron")
+    head = _push_parent_branch(repo, "saffron/SY-2")
+    base_sha = _rev_parse(repo, "HEAD")
     mirror, url = _mirror_of(tmp_path, repo)
 
     ledger = Ledger(tmp_path / "l.db")
@@ -6170,7 +6599,7 @@ def test_the_adapter_stacks_on_the_first_dependency_only(tmp_path, monkeypatch):
     ledger.record_push(second, "b" * 40)
 
     runner = cli._batch_runner(
-        pinned=task.PinnedBase(mirror=mirror, url=url, base_sha="a" * 40),
+        pinned=task.PinnedBase(mirror=mirror, url=url, base_sha=base_sha),
         repo_id=lambda: repo_id,
         repo=repo,
         ledger=ledger,
@@ -6201,7 +6630,7 @@ def test_the_adapter_stacks_on_the_first_dependency_only(tmp_path, monkeypatch):
     with pytest.raises(SystemExit):
         runner(candidate)
 
-    assert captured["spec"].stacked_on is None
+    assert captured["spec"].stacked_on == head != "b" * 40
     ledger.close()
 
 

@@ -1,11 +1,12 @@
 ---
 id: b-0bd346
 title: REBUT ends a task `EXHAUSTED` on a gate failure its own fix introduced, with no repair turn
-status: open
+status: done
 tier: 2
 filed: 2026-10-23
+closed: 2026-10-24
 specs: [SA-0311]
-prs: [929]
+prs: [929, 955]
 commits: []
 cites: [§5.5]
 related: [b-b8f0d9, b-619b7d]
@@ -34,3 +35,6 @@ REBUT's own commit introduced does not end `EXHAUSTED` without that turn.
 
 - 2026-10-23: filed from the spec loop's run 46. The REBUT log is
   `~/.saffron/batches/v0/SA-0298/rebuttal.json`.
+- 2026-10-24: done by `SA-0311` (#955), from the spec loop's run 47. The
+  delegate also declared `format`, `lint` and `prose` as form gates in
+  `.saffron/policy.yaml`, a hand commit on that layer.

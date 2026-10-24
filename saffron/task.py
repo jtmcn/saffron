@@ -64,7 +64,7 @@ from saffron.events import (
     Teardown,
     describe,
 )
-from saffron.intake import Spec, SpecError, parse_spec
+from saffron.intake import Spec, SpecError, discover_specs, parse_spec
 from saffron.ledger import Ledger, _ledger_time
 from saffron.phases import package as package_phase
 from saffron.phases.rebut import (
@@ -84,6 +84,7 @@ from saffron.repos import image as repo_image
 from saffron.repos.mirror import (
     GitError,
     UnreadablePath,
+    _run,
     export_saffron_dir,
     file_at,
     has_commit,
@@ -94,6 +95,8 @@ from saffron.repos.policy import load_policy
 from saffron.scheduler import (
     DEPENDENCY_WAITING_STATES,
     _branch,
+    _deepest_open_parent,
+    _retired_ids,
     _unmatched_criterion_path,
     protected_touch_refusal,
     retirement_refusal,
@@ -193,6 +196,242 @@ def spec_ceilings(spec: Spec) -> ResolvedCeilings:
     )
 
 
+class _StackingRefused(Exception):
+    """Raised inside `_resolve_stacked_on` when two or more open parents
+    lie on no one chain (b-1572e7). Also raised when an on-chain
+    parent's fetched head is not an ancestor of the deepest parent's.
+    `run_task` catches this and returns `Refused` before any cell
+    starts."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _is_ancestor(mirror: Path, maybe_ancestor: str, descendant: str) -> bool:
+    """Whether `maybe_ancestor` reaches `descendant` in `mirror`, the way
+    `cli._pushed_landed` asks it. `rev-parse --verify` first, because
+    `merge-base --is-ancestor` alone exits 128 for a missing commit too."""
+    verify = _run(
+        [
+            "git",
+            "-C",
+            str(mirror),
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            f"{maybe_ancestor}^{{commit}}",
+        ]
+    )
+    if verify.returncode == 1:
+        return False
+    if verify.returncode != 0:
+        raise GitError(
+            f"git rev-parse --verify {maybe_ancestor}: {verify.stderr.strip()}"
+        )
+    ancestor = _run(
+        [
+            "git",
+            "-C",
+            str(mirror),
+            "merge-base",
+            "--is-ancestor",
+            maybe_ancestor,
+            descendant,
+        ]
+    )
+    if ancestor.returncode == 0:
+        return True
+    if ancestor.returncode == 1:
+        return False
+    raise GitError(
+        f"git merge-base {maybe_ancestor}..{descendant}: {ancestor.stderr.strip()}"
+    )
+
+
+def _newest_stackable(
+    rows: list[sqlite3.Row], stackable_states: frozenset[str]
+) -> sqlite3.Row | None:
+    """The newest of `rows` in `stackable_states`, the row a parent stacks from."""
+    stackable = [row for row in rows if row["state"] in stackable_states]
+    return stackable[-1] if stackable else None
+
+
+def _fetch_parent_head(
+    branch: str | None,
+    pushed_sha: str | None,
+    *,
+    parent_id: str,
+    mirror: Path,
+    url: str,
+    spec_id: str,
+    emit: Callable[[Event], None],
+) -> tuple[str | None, str | None]:
+    """The fetched head and `branch` of a parent's newest waiting row, or
+    `(None, None)` after an `unstacked` line.
+
+    `ParentGone` is an unstacked cell, not a failure. A deleted branch
+    either merged, so its work is on the default branch, or was
+    abandoned, where the default branch is the safe cut.
+    """
+    # Refused here rather than left to the fetch: a row that evidences no push
+    # has no branch worth fetching, and "branch None is gone" would send an
+    # operator to look for a deleted ref instead of at the row.
+    if not branch or not _RESOLVED_SHA.fullmatch(pushed_sha or ""):
+        emit(
+            Preflight(
+                timestamp=time.time(),
+                spec_id=spec_id,
+                step="unstacked",
+                detail=f"{parent_id}'s newest waiting task records no pushed branch",
+            )
+        )
+        return None, None
+    try:
+        head = package_phase.fetch_parent_branch(mirror, url, branch)
+    except package_phase.ParentGone as gone:
+        emit(
+            Preflight(
+                timestamp=time.time(),
+                spec_id=spec_id,
+                step="unstacked",
+                detail=str(gone),
+            )
+        )
+        return None, None
+    if not _RESOLVED_SHA.fullmatch(head):
+        return None, None
+    return head, branch
+
+
+def _resolve_multi_parent(
+    ledger: Ledger,
+    repo_id: int,
+    depends_on: list[str],
+    *,
+    mirror: Path,
+    url: str,
+    base_sha: str | None,
+    spec_id: str,
+    emit: Callable[[Event], None],
+    gh: GhRunner | None,
+) -> tuple[str | None, str | None]:
+    """`_resolve_stacked_on`'s rule for two or more `depends_on` entries
+    (b-1572e7): the scan's own open-parent rule, applied to every entry.
+
+    A parent with no task counts for nothing, the gap the module
+    docstring names. Once one remains, `.saffron` is exported at
+    `base_sha` to read every live spec's `depends_on` and `specs/done/`.
+    Every open parent must lie on the deepest one's chain, or this
+    raises `_StackingRefused`, as must each fetched head against it.
+    """
+    rows_by_dep: dict[str, list[sqlite3.Row]] = {}
+    for dep in depends_on:
+        if gh is not None:
+            reconciled = reconcile(ledger, repo_id, gh=gh, spec_id=dep)
+            if reconciled.unasked:
+                emit(
+                    Preflight(
+                        timestamp=time.time(),
+                        spec_id=spec_id,
+                        step="gh_unreachable",
+                        detail=(
+                            f"GitHub could not be asked whether {dep}'s "
+                            "pull request merged"
+                        ),
+                    )
+                )
+        rows = ledger.tasks_by_spec_id(repo_id, dep)
+        if rows:
+            rows_by_dep[dep] = rows
+
+    if not rows_by_dep:
+        return None, None
+    if base_sha is None:
+        raise ValueError(
+            "_resolve_stacked_on needs base_sha once a depends_on entry has a task"
+        )
+
+    with tempfile.TemporaryDirectory() as scratch:
+        exported = export_saffron_dir(mirror, base_sha, Path(scratch) / "at-base")
+        specs_dir = exported / ".saffron" / "specs"
+        retired_ids, _retired_failures = _retired_ids(specs_dir)
+        discovered, _failures = discover_specs(specs_dir)
+    edges = {d.spec.id: d.spec.depends_on for d in discovered}
+
+    stackable_states = (
+        _STACKABLE_ON_RECONCILE if gh is not None else DEPENDENCY_WAITING_STATES
+    )
+    stack_rows: dict[str, sqlite3.Row] = {}
+    for dep, rows in rows_by_dep.items():
+        if any(row["state"] == "MERGED" for row in rows):
+            continue
+        if dep in retired_ids:
+            continue
+        if any(
+            row["pushed_sha"] and _is_ancestor(mirror, row["pushed_sha"], base_sha)
+            for row in rows
+        ):
+            continue
+        newest = _newest_stackable(rows, stackable_states)
+        if newest is not None:
+            stack_rows[dep] = newest
+
+    if not stack_rows:
+        return None, None
+
+    open_set = frozenset(stack_rows)
+    chosen, off_chain = _deepest_open_parent(open_set, open_set, edges)
+    assert chosen is not None
+    if off_chain:
+        names = ", ".join(sorted(off_chain))
+        verb = "is" if len(off_chain) == 1 else "are"
+        raise _StackingRefused(
+            f"depends_on {names} {verb} outside {chosen}'s depends_on "
+            "chain, and no spec may stack on two unrelated open parents"
+        )
+
+    chosen_row = stack_rows[chosen]
+    if chosen_row["state"] == "CHANGES_REQUESTED":
+        emit(
+            Preflight(
+                timestamp=time.time(),
+                spec_id=spec_id,
+                step="changes_requested",
+                detail=f"newest task is CHANGES_REQUESTED for {chosen}",
+            )
+        )
+    stacked = _fetch_parent_head(
+        chosen_row["branch"],
+        chosen_row["pushed_sha"],
+        parent_id=chosen,
+        mirror=mirror,
+        url=url,
+        spec_id=spec_id,
+        emit=emit,
+    )
+    head, branch = stacked
+    if head is None:
+        return stacked
+
+    for dep in sorted(open_set - {chosen}):
+        dep_row = stack_rows[dep]
+        dep_branch = dep_row["branch"]
+        if not dep_branch or not _RESOLVED_SHA.fullmatch(dep_row["pushed_sha"] or ""):
+            continue
+        try:
+            dep_head = package_phase.fetch_parent_branch(mirror, url, dep_branch)
+        except package_phase.ParentGone:
+            continue
+        if not _is_ancestor(mirror, dep_head, head):
+            raise _StackingRefused(
+                f"depends_on {dep}'s branch {dep_branch} is not an ancestor "
+                f"of {chosen}'s branch {branch}"
+            )
+
+    return stacked
+
+
 def _resolve_stacked_on(
     ledger: Ledger,
     repo_id: int | None,
@@ -203,61 +442,33 @@ def _resolve_stacked_on(
     spec_id: str,
     emit: Callable[[Event], None] = lambda event: print(describe(event)),
     gh: GhRunner | None = None,
+    base_sha: str | None = None,
 ) -> tuple[str | None, str | None]:
     """The tree sha `CellSpec.stacked_on` should carry and the branch name
     `package()`'s stacking parameter should carry, or `(None, None)`
-    together for an ordinary unstacked cell — never one without the other,
-    since a worktree stacked on a sha whose pull request targets `main` is
-    exactly the defect this spec exists to close (`SA-0026`).
+    together for an ordinary unstacked cell. Never one without the other,
+    since a worktree stacked on a sha whose pull request targets `main`
+    is exactly the defect `SA-0026` closed.
 
-    Only `depends_on[0]` is ever consulted — K=1. A spec naming a second,
-    unmerged parent does not stack on it too: nothing here orders one
-    batch's tasks against each other yet, so a grandchild (or a second
-    unmerged parent) is out of reach by design, not by oversight.
-
-    Given no `GhRunner`, the next rule holds. Among that one parent's task rows in this
-    repo, across every `spec_sha` it has ever carried (`Ledger.tasks_by_spec_id` — this
-    path never reads the parent's spec file, so it has no current sha to filter on, the
-    same reach `scheduler.build_queue`'s `merged_anywhere` already takes), the newest
-    row in a `scheduler.DEPENDENCY_WAITING_STATES` state is "the parent's task": the
-    same waiting-outranks-dead precedence `scheduler._dependency_refusal` gives it. Not
-    the *same* row, though — that function reads only the parent's current `spec_sha`,
-    and a parent whose spec text moved after its pull request opened has a waiting row
-    here and none there. The branch is real either way; it is the gate, not this
-    resolver, that decides whether the dependent runs at all. A parent merged, retired,
-    dead, unrun, or never in the ledger at all has no such row, and this function does
-    not distinguish why — every one of those needs no stacking (its work, if any, is
-    already on the default branch) or was never a candidate the gate should have
-    admitted, which is not this resolver's check to make. Given a `GhRunner`, it
-    reconciles that parent first. A merged or closed newest task unstacks the cell.
-    Otherwise the newest row in `_STACKABLE_ON_RECONCILE` supplies the branch.
-
-    **The ledger supplies the branch; the branch supplies the sha.** A row's
-    `pushed_sha` is PACKAGE's, or (`SA-0069`) a push of work PACKAGE did not
-    package. Each hand-committed review fix moves the branch past it, leaving
-    the recorded sha a tree the parent's pull request no longer shows. Worse,
-    nothing puts that commit where the cell can read it: `ensure_mirror`
-    fetches `+refs/*:refs/*` from the operator's *local checkout* with
-    `--prune`, so a parent branch the
-    operator does not happen to have locally is deleted from the mirror, and
-    the cell's own seed (`worktree.py`) fetches the mirror's default refspec.
-    Fetching the branch here fixes both — it is `fetch_default_branch`'s own
-    argument (`package.py`), one branch over.
-
-    `ParentGone` is an unstacked cell, not a failure: a parent branch that is
-    deleted has either merged, in which case its work is on the default branch
-    already, or been abandoned, in which case cutting from the default branch
-    is the safe answer. Neither is worth killing a run over.
-
-    A `pushed_sha` that is absent, empty, or not a resolved sha still yields
-    `(None, None)` rather than reaching `CellSpec`: `__post_init__`
-    (`SA-0022`) raises `ValueError` on anything else, and an operator's
-    `saffron cell` must not die on a row this path cannot fully
-    trust. A row with no `branch` recorded is treated the same way, since
-    the two values this returns travel together.
+    One entry stacks on its own newest waiting row, by the rule below. Two
+    or more apply `_resolve_multi_parent`'s rule instead (b-1572e7), which
+    needs `base_sha` once any entry has a task. Raises `_StackingRefused`,
+    which `run_task` turns into `Refused` before any cell starts.
     """
     if repo_id is None or not depends_on:
         return None, None
+    if len(depends_on) > 1:
+        return _resolve_multi_parent(
+            ledger,
+            repo_id,
+            depends_on,
+            mirror=mirror,
+            url=url,
+            base_sha=base_sha,
+            spec_id=spec_id,
+            emit=emit,
+            gh=gh,
+        )
     parent_id = depends_on[0]
     if gh is None:
         rows = ledger.tasks_by_spec_id(repo_id, parent_id)
@@ -308,35 +519,17 @@ def _resolve_stacked_on(
                     detail=f"newest task is CHANGES_REQUESTED for {parent_id}",
                 )
             )
-    branch = newest["branch"]
-    # Refused here rather than left to the fetch: a row that evidences no push
-    # has no branch worth fetching, and "branch None is gone" would send an
-    # operator to look for a deleted ref instead of at the row.
-    if not branch or not _RESOLVED_SHA.fullmatch(newest["pushed_sha"] or ""):
-        emit(
-            Preflight(
-                timestamp=time.time(),
-                spec_id=spec_id,
-                step="unstacked",
-                detail=f"{parent_id}'s newest waiting task records no pushed branch",
-            )
-        )
-        return None, None
-    try:
-        head = package_phase.fetch_parent_branch(mirror, url, branch)
-    except package_phase.ParentGone as gone:
-        emit(
-            Preflight(
-                timestamp=time.time(),
-                spec_id=spec_id,
-                step="unstacked",
-                detail=str(gone),
-            )
-        )
-        return None, None
-    if not _RESOLVED_SHA.fullmatch(head):
-        return None, None
-    return head, branch
+    # The branch is fetched rather than `pushed_sha` trusted, since a review
+    # fix moves the branch past the recorded push.
+    return _fetch_parent_head(
+        newest["branch"],
+        newest["pushed_sha"],
+        parent_id=parent_id,
+        mirror=mirror,
+        url=url,
+        spec_id=spec_id,
+        emit=emit,
+    )
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -474,9 +667,9 @@ def run_task(
     Given a `task_id`, `_recorded_spec_text` runs first and rebinds `spec`,
     `spec_sha` and `ceilings` to the task's recorded text (ADR 7). `state`
     on the outcome is PACKAGE's own, not the pre-packaging
-    `READY_FOR_REVIEW`. Returns `Refused` before any cell exists when
-    `spec.consumes` fails to resolve or gate 0 refuses a recorded text. A
-    base the mirror lacks raises `GitError`."""
+    `READY_FOR_REVIEW`. Returns `Refused` before any cell exists: for an
+    unresolved `spec.consumes`, a refused recorded text, or open parents
+    on no one chain (`b-1572e7`). A base the mirror lacks raises `GitError`."""
     if task_id is not None:
         recorded = _recorded_spec_text(ledger, task_id, spec, base)
         if isinstance(recorded, Refused):
@@ -521,23 +714,26 @@ def run_task(
         )
     )
 
-    # Resolved from `depends_on[0]`'s newest waiting task, or `(None, None)`
-    # together for an ordinary unstacked cell (`_resolve_stacked_on`,
-    # `SA-0026`) — the one place a `CellSpec` is built, so this is the only
-    # place either has to be read.
+    # Resolved from the deepest open parent's newest waiting task, or
+    # `(None, None)` for an unstacked cell (`SA-0026`, `b-1572e7`).
     if handoff is not None:
         stacked_on, target_branch = handoff.stacked_on, handoff.target_branch
     else:
-        stacked_on, target_branch = _resolve_stacked_on(
-            ledger,
-            repo_id,
-            spec.depends_on,
-            mirror=base.mirror,
-            url=base.url,
-            spec_id=spec.id,
-            emit=emit,
-            gh=gh,
-        )
+        try:
+            stacked_on, target_branch = _resolve_stacked_on(
+                ledger,
+                repo_id,
+                spec.depends_on,
+                mirror=base.mirror,
+                url=base.url,
+                base_sha=base.base_sha,
+                spec_id=spec.id,
+                emit=emit,
+                gh=gh,
+            )
+        except _StackingRefused as refused:
+            print(f"{spec.id:<10} refused  {refused.reason}")
+            return Refused(reason=refused.reason)
     # Which tree a run was cut from is not recoverable from the exit code, and
     # a stacked run that surprises an operator is one they cannot diagnose.
     # ponytail: a `print`, so `events.jsonl` carries the *negative* stacking

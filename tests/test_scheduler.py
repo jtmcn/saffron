@@ -614,9 +614,9 @@ def test_the_stacking_parents_own_pull_request_is_not_an_overlap(tmp_path, ledge
 
 
 def test_a_third_partys_overlap_still_refuses_a_stacked_child(tmp_path, ledger):
-    """The exemption above is `depends_on[0]`'s branch and nothing else —
-    K=1, the same one `task._resolve_stacked_on` stacks on. Another task's
-    pull request over the same file is the collision the check exists for."""
+    """The exemption above is the candidate's own `depends_on` chain and
+    nothing else. Another task's pull request over the same file, off that
+    chain, is the collision the check exists for."""
     directory = _spec_dir(tmp_path)
     _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-0"])
     _write_spec(directory, "b.md", id="TE-0", touches=["b.py"])
@@ -713,20 +713,12 @@ def test_an_unrelated_open_pull_request_still_refuses_on_overlap(tmp_path, ledge
 
 
 def test_a_second_dependency_is_not_an_ancestor_and_still_refuses(tmp_path, ledger):
-    """§4.2 fixes K=1: only `depends_on[0]` is ever a stacking candidate. A
-    second entry is a dependency the candidate is not cut from, so its
-    changes are not in the candidate's tree and an overlap with its pull
-    request is a real conflict — the ancestor walk must not exempt it just
-    because it happens to sit in the same `depends_on` list.
-
-    `TE-0` (the first, exempted entry) is itself given a parent, `TE-A`, so
-    this also exercises a real two-hop walk rather than one that happens to
-    stop after a single link — a one-hop reading of K=1 would refuse `TE-A`'s
-    own overlap too, which the assertions below rule out before ever reaching
-    `TE-9`'s. `TE-A`'s pull request is listed first, so a walk that wrongly
-    stopped at `TE-0` would return on it before ever inspecting `TE-9`'s."""
-    from saffron.scheduler import _ancestor_branches
-
+    """An open parent's own `depends_on` chain must still reach every
+    other open parent (b-1572e7). `TE-1` names two open parents, `TE-0`
+    and `TE-9`, and neither's chain reaches the other. So `TE-1` is
+    refused under the `depends_on` kind, naming the second entry. Not
+    `TE-A`, a further ancestor on `TE-0`'s own chain, which a walk
+    reaching every entry now exempts from the superseded overlap check."""
     directory = _spec_dir(tmp_path)
     _write_spec(
         directory,
@@ -753,36 +745,13 @@ def test_a_second_dependency_is_not_an_ancestor_and_still_refuses(tmp_path, ledg
         spec_sha=_sha(directory / "c.md"),
         state="READY_FOR_REVIEW",
     )
-    gh = _fake_gh(
-        [
-            # The grandparent's own pull request, listed first: exempted by
-            # the two-hop walk, so this must not be what the refusal names.
-            {
-                "headRefName": "saffron/TE-A",
-                "url": "ga",
-                "files": [{"path": "shared.py"}],
-            },
-            # The second `depends_on` entry's: not an ancestor, still refused.
-            {
-                "headRefName": "saffron/TE-9",
-                "url": "u9",
-                "files": [{"path": "sibling.py"}],
-            },
-        ]
-    )
 
-    _candidates, refusals = build_queue(
-        directory, repo_id, ledger, repo_slug="o/r", gh=gh
-    )
+    _candidates, refusals = build_queue(directory, repo_id, ledger)
 
     mine = next(r for r in refusals if r.path.name == "a.md")
-    assert "touches overlaps" in mine.reason
-    assert "sibling.py" in mine.reason and "u9" in mine.reason
-    assert "shared.py" not in mine.reason and "ga" not in mine.reason
-    assert _ancestor_branches("TE-1", {"TE-1": "TE-0", "TE-0": "TE-A"}) == {
-        "saffron/TE-0",
-        "saffron/TE-A",
-    }
+    assert mine.kind == "depends_on"
+    assert "TE-9" in mine.reason
+    assert "TE-A" not in mine.reason
 
 
 def test_a_dependency_cycle_does_not_hang_the_ancestor_walk(tmp_path, ledger):
@@ -835,8 +804,8 @@ def test_a_dependency_cycle_does_not_hang_the_ancestor_walk(tmp_path, ledger):
     assert [
         r for r in refusals if r.path.name == "a.md" and "touches overlaps" in r.reason
     ] == []
-    parent_of = {"TE-7": "TE-8", "TE-8": "TE-9", "TE-9": "TE-8"}
-    assert _ancestor_branches("TE-7", parent_of) == {"saffron/TE-8", "saffron/TE-9"}
+    edges = {"TE-7": ["TE-8"], "TE-8": ["TE-9"], "TE-9": ["TE-8"]}
+    assert _ancestor_branches("TE-7", edges) == {"saffron/TE-8", "saffron/TE-9"}
 
 
 def test_an_unscanned_parent_ends_the_walk_without_raising(tmp_path, ledger):
@@ -933,6 +902,83 @@ def test_no_touches_overlap_with_an_open_prs_files_is_not_refused(tmp_path, ledg
 
     assert [c.spec.id for c in candidates] == ["TE-1"]
     assert refusals == []
+
+
+def test_the_overlap_refusal_exempts_every_branch_on_the_chosen_parents_chain(
+    tmp_path, ledger
+):
+    """The overlap refusal exempts the branch of every spec a `depends_on`
+    walk reaches from the candidate, through every entry and every link
+    (b-1572e7). `TE-1` names a shallow parent first and a deep one second.
+    The deep one's own chain reaches a further ancestor. All three open
+    pull requests are exempt. A grandparent neither chain reaches still
+    refuses on overlap. Driven in both modes, since the exemption itself
+    does not depend on `stack`."""
+    directory = _spec_dir(tmp_path)
+    repo_id = _repo(ledger)
+    _write_spec(
+        directory,
+        "a.md",
+        id="TE-1",
+        touches=["shallow.py", "deep.py", "anc.py", "ghost.py"],
+        depends_on=["TE-40", "TE-41"],
+    )
+    _write_spec(directory, "shallow.md", id="TE-40", touches=["sh.py"])
+    _write_spec(
+        directory, "deep.md", id="TE-41", touches=["dp.py"], depends_on=["TE-42"]
+    )
+    _write_spec(directory, "anc.md", id="TE-42", touches=["an.py"])
+    for name, path in (
+        ("TE-40", "shallow.md"),
+        ("TE-41", "deep.md"),
+        ("TE-42", "anc.md"),
+    ):
+        _task_at(
+            ledger,
+            repo_id,
+            spec_id=name,
+            spec_sha=_sha(directory / path),
+            state="READY_FOR_REVIEW",
+        )
+    gh = _fake_gh(
+        [
+            {
+                "headRefName": "saffron/TE-40",
+                "url": "https://example/pull/shallow",
+                "files": [{"path": "shallow.py"}],
+            },
+            {
+                "headRefName": "saffron/TE-41",
+                "url": "https://example/pull/deep",
+                "files": [{"path": "deep.py"}],
+            },
+            {
+                "headRefName": "saffron/TE-42",
+                "url": "https://example/pull/anc",
+                "files": [{"path": "anc.py"}],
+            },
+            {
+                "headRefName": "saffron/GHOST",
+                "url": "https://example/pull/ghost",
+                "files": [{"path": "ghost.py"}],
+            },
+        ]
+    )
+
+    for stack in (False, True):
+        _candidates, refusals = build_queue(
+            directory, repo_id, ledger, repo_slug="o/r", gh=gh, stack=stack
+        )
+        mine = next(r for r in refusals if r.path.name == "a.md")
+        assert "touches overlaps" in mine.reason
+        assert "ghost.py" in mine.reason
+        assert "pull/ghost" in mine.reason
+        assert "shallow.py" not in mine.reason
+        assert "pull/shallow" not in mine.reason
+        assert "deep.py" not in mine.reason
+        assert "pull/deep" not in mine.reason
+        assert "anc.py" not in mine.reason
+        assert "pull/anc" not in mine.reason
 
 
 # ------------------------------------------- refusal: acceptance criteria path
@@ -2052,6 +2098,102 @@ def test_every_unmet_dependency_is_counted_not_just_the_first(tmp_path, ledger):
     assert "+1 more unmet" in reason
 
 
+def test_a_spec_whose_open_parents_lie_on_no_one_chain_is_refused_naming_the_parents_off_it(
+    tmp_path, ledger
+):
+    """A spec whose open parents lie on no one chain is refused before any
+    cell, under the `depends_on` kind, in both modes (b-1572e7). `TE-1`
+    names five parents. `TE-31` (deep) depends on `TE-30`, a real
+    chain of two. `TE-32` and `TE-33` relate to nothing, and `TE-34`
+    merged. The deepest open parent is `TE-31`, whose own chain holds
+    one other open parent. The reason names the two lone ones, and
+    neither `TE-30` nor the merged parent. A tie goes to the lower id."""
+    directory = _spec_dir(tmp_path)
+    repo_id = _repo(ledger)
+
+    def _qualifying_open(path_name, spec_id, digit, *, depends_on=()):
+        _write_spec(
+            directory,
+            path_name,
+            id=spec_id,
+            touches=[f"{spec_id.lower()}.py"],
+            depends_on=list(depends_on),
+        )
+        task_id = _task_at(
+            ledger,
+            repo_id,
+            spec_id=spec_id,
+            spec_sha=_sha(directory / path_name),
+            state="READY_FOR_REVIEW",
+        )
+        set_task_package(
+            ledger,
+            task_id,
+            "READY_FOR_REVIEW",
+            branch=f"saffron/{spec_id}",
+            pushed_sha=str(digit) * 40,
+            pr_url=f"https://example.invalid/{spec_id}",
+        )
+
+    _qualifying_open("base.md", "TE-30", 1)
+    _qualifying_open("deep.md", "TE-31", 2, depends_on=["TE-30"])
+    _qualifying_open("lone1.md", "TE-32", 3)
+    _qualifying_open("lone2.md", "TE-33", 4)
+    _write_spec(directory, "merged.md", id="TE-34", touches=["te34.py"])
+    _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-34",
+        spec_sha=_sha(directory / "merged.md"),
+        state="MERGED",
+    )
+    _write_spec(
+        directory,
+        "a.md",
+        id="TE-1",
+        touches=["a.py"],
+        depends_on=["TE-31", "TE-30", "TE-32", "TE-33", "TE-34"],
+    )
+
+    plain_reason = (
+        "depends_on TE-32, TE-33 are outside TE-31's depends_on chain, and "
+        "no spec may stack on two unrelated open parents"
+    )
+    stack_reason = (
+        "depends_on TE-32, TE-33 are outside the stack order and not on "
+        "the default branch, and TE-31 is already this batch's stack "
+        "base, off whose chain they sit — merge it first, or run the "
+        "spec in a later stack batch"
+    )
+    for stack, expected in ((False, plain_reason), (True, stack_reason)):
+        _candidates, refusals = build_queue(directory, repo_id, ledger, stack=stack)
+        mine = next(r for r in refusals if r.path.name == "a.md")
+        assert mine.kind == "depends_on"
+        assert mine.reason == expected
+
+    # A merged parent beside one with no spec at all: the stack reason
+    # names the missing one alone, never the merged one.
+    _write_spec(
+        directory, "b.md", id="TE-2", touches=["b.py"], depends_on=["TE-34", "TE-99"]
+    )
+    _candidates, refusals = build_queue(directory, repo_id, ledger, stack=True)
+    mine = next(r for r in refusals if r.path.name == "b.md")
+    assert mine.reason.startswith(
+        "depends_on TE-99 is outside the stack order and not on the default branch"
+    )
+
+    # Two chain-less open parents tie, so the lower id is the deepest.
+    _write_spec(
+        directory, "c.md", id="TE-3", touches=["c.py"], depends_on=["TE-33", "TE-32"]
+    )
+    _candidates, refusals = build_queue(directory, repo_id, ledger)
+    mine = next(r for r in refusals if r.path.name == "c.md")
+    assert mine.reason == (
+        "depends_on TE-33 is outside TE-32's depends_on chain, and "
+        "no spec may stack on two unrelated open parents"
+    )
+
+
 # ---------------------------------------------------------------- stack order
 
 
@@ -2331,6 +2473,176 @@ def test_a_stack_order_keeps_every_refusal_but_the_dependency_one(tmp_path, ledg
 
 
 # ------------------------------------------------------------------ stack base
+
+
+def test_a_stack_order_stacks_on_the_deepest_open_parent_whatever_the_depends_on_order(
+    tmp_path, ledger
+):
+    """`build_queue` stacks on the deepest open parent, not the lowest
+    id, the first entry, or the last (b-1572e7). `TE-62` depends on
+    `TE-63`, which depends on `TE-61`, so `TE-62` is deepest, with an id
+    neither lowest nor highest of the three. `TE-64` merged, `TE-65` is
+    retired, and `TE-66`'s push landed while its task still waits. Every
+    order of the six admits the same stack base in stack mode. A second
+    arrangement names the stack base from one child and a chain parent
+    from another, and both carry it. A third refuses the only child
+    naming the stack base, and the other child still carries it.
+    """
+    from saffron.scheduler import StackBase
+
+    def _chain(directory, repo_id):
+        _write_spec(directory, "p61.md", id="TE-61", touches=["p61.py"])
+        _write_spec(
+            directory, "p63.md", id="TE-63", touches=["p63.py"], depends_on=["TE-61"]
+        )
+        _write_spec(
+            directory, "p62.md", id="TE-62", touches=["p62.py"], depends_on=["TE-63"]
+        )
+        for spec_id, path, digit in (
+            ("TE-61", "p61.md", 1),
+            ("TE-63", "p63.md", 3),
+            ("TE-62", "p62.md", 2),
+        ):
+            task_id = _task_at(
+                ledger,
+                repo_id,
+                spec_id=spec_id,
+                spec_sha=_sha(directory / path),
+                state="READY_FOR_REVIEW",
+            )
+            set_task_package(
+                ledger,
+                task_id,
+                "READY_FOR_REVIEW",
+                branch=f"saffron/{spec_id}",
+                pushed_sha=str(digit) * 40,
+                pr_url=f"https://example.invalid/{spec_id}",
+            )
+        _task_at(ledger, repo_id, spec_id="TE-64", spec_sha="s", state="MERGED")
+        done = directory / "done"
+        done.mkdir()
+        _write_spec(done, "p65.md", id="TE-65", touches=["p65.py"])
+        landed_task = _task_at(
+            ledger, repo_id, spec_id="TE-66", spec_sha="s", state="READY_FOR_REVIEW"
+        )
+        landed_sha = "6" * 40
+        set_task_package(ledger, landed_task, "READY_FOR_REVIEW", pushed_sha=landed_sha)
+        return landed_sha
+
+    orders = [
+        ["TE-62", "TE-61", "TE-63", "TE-64", "TE-65", "TE-66"],
+        ["TE-66", "TE-65", "TE-64", "TE-63", "TE-61", "TE-62"],
+        ["TE-61", "TE-62", "TE-63", "TE-64", "TE-65", "TE-66"],
+        ["TE-63", "TE-64", "TE-61", "TE-66", "TE-62", "TE-65"],
+        ["TE-64", "TE-65", "TE-66", "TE-62", "TE-63", "TE-61"],
+        ["TE-65", "TE-62", "TE-66", "TE-61", "TE-64", "TE-63"],
+    ]
+    for i, order in enumerate(orders):
+        for stack in (False, True):
+            root = tmp_path / f"order-{i}-{stack}"
+            root.mkdir()
+            directory = _spec_dir(root)
+            repo_id = _repo(ledger, origin=str(root))
+            landed_sha = _chain(directory, repo_id)
+            _write_spec(
+                directory, "child.md", id="TE-1", touches=["child.py"], depends_on=order
+            )
+
+            candidates, refusals = build_queue(
+                directory,
+                repo_id,
+                ledger,
+                pushed_landed=lambda sha, landed_sha=landed_sha: sha == landed_sha,
+                stack=stack,
+            )
+
+            if stack:
+                by_id = {c.spec.id: c for c in candidates}
+                assert set(by_id) == {"TE-1"}, refusals
+                base = by_id["TE-1"].stack_base
+                assert base is not None
+                assert base.spec_id == "TE-62"
+                assert base.chain_branches == {"saffron/TE-63", "saffron/TE-61"}
+            else:
+                assert [c.spec.id for c in candidates] == ["TE-1"], refusals
+                assert refusals == []
+
+    # A second arrangement: one child names the stack base, one a chain
+    # parent. Both carry the same `StackBase` under `stack=True`.
+    for stack in (False, True):
+        root = tmp_path / f"arr2-{stack}"
+        root.mkdir()
+        directory = _spec_dir(root)
+        repo_id = _repo(ledger, origin=str(root))
+        _chain(directory, repo_id)
+        _write_spec(
+            directory,
+            "names-base.md",
+            id="TE-2",
+            touches=["t2.py"],
+            depends_on=["TE-62"],
+        )
+        _write_spec(
+            directory,
+            "names-chain.md",
+            id="TE-3",
+            touches=["t3.py"],
+            depends_on=["TE-61"],
+        )
+
+        candidates, refusals = build_queue(directory, repo_id, ledger, stack=stack)
+
+        by_id = {c.spec.id: c for c in candidates}
+        assert set(by_id) == {"TE-2", "TE-3"}, refusals
+        if stack:
+            found = by_id["TE-2"].stack_base
+            assert found is not None
+            assert found == StackBase(
+                spec_id="TE-62",
+                task_id=found.task_id,
+                branch="saffron/TE-62",
+                chain_branches=frozenset({"saffron/TE-63", "saffron/TE-61"}),
+            )
+            assert by_id["TE-3"].stack_base == found
+        else:
+            assert by_id["TE-2"].stack_base is None
+            assert by_id["TE-3"].stack_base is None
+
+    # A third arrangement: the only child naming the stack base is refused,
+    # since `TE-99` has no spec. The child naming `TE-61` still carries it.
+    root = tmp_path / "arr3"
+    root.mkdir()
+    directory = _spec_dir(root)
+    repo_id = _repo(ledger, origin=str(root))
+    _chain(directory, repo_id)
+    _write_spec(
+        directory,
+        "names-base.md",
+        id="TE-2",
+        touches=["t2.py"],
+        depends_on=["TE-62", "TE-99"],
+    )
+    _write_spec(
+        directory,
+        "names-chain.md",
+        id="TE-3",
+        touches=["t3.py"],
+        depends_on=["TE-61"],
+    )
+
+    candidates, refusals = build_queue(directory, repo_id, ledger, stack=True)
+
+    by_id = {c.spec.id: c for c in candidates}
+    assert set(by_id) == {"TE-3"}, refusals
+    assert any(r.path.name == "names-base.md" for r in refusals)
+    found = by_id["TE-3"].stack_base
+    assert found is not None
+    assert found == StackBase(
+        spec_id="TE-62",
+        task_id=found.task_id,
+        branch="saffron/TE-62",
+        chain_branches=frozenset({"saffron/TE-63", "saffron/TE-61"}),
+    )
 
 
 def test_a_stack_order_stacks_on_an_earlier_batchs_pushed_pull_request(

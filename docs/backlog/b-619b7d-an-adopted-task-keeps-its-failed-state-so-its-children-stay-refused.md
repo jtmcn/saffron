@@ -37,3 +37,7 @@ as `regate` then `adopt`. A test drives each route and starts a child on it.
 
 - 2026-10-19: filed from the spec loop's run 44.
 - 2026-10-23: recurred twice in the spec loop's run 46. `SA-0298` stayed `EXHAUSTED` after `saffron adopt`, so the driver could not stack or size it. The adopted `SA-0302` recorded no pushed sha, so batch 44 refused its child `SA-0303` (b-066901).
+- 2026-10-24: recurred in the spec loop's run 47. `SA-0312` was adopted as #957 and
+  kept `EXHAUSTED`. So `saffron finish 51` reviewed `SA-0314` against `SA-0311` and
+  charged `SA-0312`'s diff to it. `driver.py size` measured from the same wrong
+  parent. `SA-0313` carries the fix and waits on #957.
