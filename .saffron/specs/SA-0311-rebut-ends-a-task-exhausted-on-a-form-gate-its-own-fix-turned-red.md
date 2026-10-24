@@ -3,7 +3,7 @@ id: SA-0311
 title: REBUT ends a task `EXHAUSTED` on a form gate its own fix turned red, with no repair turn
 type: feature
 priority: 2
-estimated_lines: 355
+estimated_lines: 406
 estimate_measured: true
 touches:
   - saffron/repos/policy.py
@@ -12,6 +12,8 @@ touches:
   - tests/test_policy.py
   - tests/test_rebut.py
   - tests/test_session.py
+  - tests/test_events.py
+  - tests/test_agent_runner.py
 forbidden:
   - DESIGN.md
   - CONTEXT.md
@@ -41,7 +43,6 @@ forbidden:
   - saffron/cli.py
   - saffron/batch.py
   - tests/test_task.py
-  - tests/test_events.py
   - tests/test_scheduler.py
   - tests/test_queued_specs.py
 budget_usd: 52
@@ -79,7 +80,8 @@ acceptance:
       together, both declared form gates. The repair turn's prompt is the
       repair loop's own, over both gates' new failures. Its `max_budget_usd`
       is what the task's budget has left after REBUT's own turns. It
-      resumes the implementer's session, the id REBUT itself resumed. Every gate
+      resumes the session id the rebuttal's extraction turn reported, which
+      the witness makes differ from the id before REBUT. Every gate
       then re-runs once, as a second REBUT attempt line, and is green. The
       verdict session runs after the repair turn, and the task ends
       `READY_FOR_REVIEW`. Its spend counts the repair turn.
@@ -91,6 +93,7 @@ acceptance:
       - The repair turn's cost never reaches the task's spend.
       - The gates do not re-run after the repair turn, so the verdicts read a head no gate judged.
       - The repair turn starts a fresh session instead of resuming the implementer's.
+      - The repair turn resumes the session id from before REBUT, not the one REBUT's turns reported.
   - claim: >-
       The repair turn runs only while the task's spend is under its
       `budget_usd`, REBUT's own turns counted. The witness drives a form
@@ -128,17 +131,21 @@ acceptance:
       - A re-run still red on form gates alone earns a second repair turn.
       - The task keeps today's line, which says REBUT does not re-enter the repair loop.
   - claim: >-
-      A repair turn that fails ends the task `EXHAUSTED` inside `run_rebut`,
-      and nothing escapes it. The witness scripts the repair turn as cut by
-      its own `max_budget_usd`. Its cost reaches the task's spend. No gate
-      re-runs after it and no verdict runs. The task's line names the failed
-      repair turn and carries the turn's own error.
-    witness: tests/test_session.py::test_a_failed_repair_turn_after_rebut_ends_exhausted
+      A repair turn that fails is judged like one that returns, as §4.3
+      asks. No `implement.AgentFailed` from it escapes `run_rebut`. The
+      witness scripts the turn as cut by its own `max_budget_usd`, with work
+      left uncommitted. The host commits that work as a checkpoint, and the
+      turn's cost reaches the task's spend. Every gate then re-runs once. A
+      green re-run goes on to the verdict. A red one ends the task
+      `EXHAUSTED`, with a line naming the failed repair turn and carrying
+      its error. The witness drives both re-runs.
+    witness: tests/test_session.py::test_a_failed_repair_turn_after_rebut_is_judged_like_any_other
     wrong_versions:
       - The failure is not caught, so it escapes `run_rebut` and the cell.
       - The failed turn's cost never reaches the task's spend.
-      - A failed turn is followed by the re-run, so a green suite reaches the verdicts.
-      - The task keeps today's line, which says REBUT does not re-enter the repair loop.
+      - A failed turn ends the task with no re-run, so the work it committed is never judged.
+      - The uncommitted work is left in the tree, so `committed` fails the re-run.
+      - The line for a red re-run omits that the repair turn failed.
 ---
 
 ## Context
@@ -215,23 +222,33 @@ at all. `_no_core_gate_names` refuses each name in `CORE_GATE_NAMES`
    what REBUT's cap has spent, is under `budget_usd`. It resumes the
    implementer's session with `implement.repair_prompt` over the new
    failures. Its `max_budget_usd` is what the budget has left. Its cost
-   joins `spent`. A turn that raises `implement.AgentFailed` ends the task
-   `EXHAUSTED` with no re-run. Its cost still joins `spent`, and its line
-   names the failed repair turn and the error. Otherwise every gate re-runs
-   once, as attempt `attempts + 2`, labelled REBUT. That re-run passes the
+   joins `spent`. A turn that raises `implement.AgentFailed` is handled as
+   `_repair` handles one (`saffron/cell/session.py:2936-2961`). Its dirty
+   work is committed as a host checkpoint, and its cost joins `spent`.
+   `RateLimited` and `runtime.CellRuntimeError` propagate as today. Then
+   every gate re-runs once, as attempt `attempts + 2`, labelled REBUT. That re-run passes the
    same `exempt=revert_exempt` as the first. The `probe_infra` rule
    (`saffron/cell/session.py:3501-3515`) applies to it as to the first, so
    it gives `GATE_ERROR` on the same shape. Green returns `None`, so the
    verdicts run on the repaired head. Aborted or drifted is `GATE_ERROR`,
    as today. Red is `EXHAUSTED`, with no second turn.
-4. **The line.** A task the repair turn left red ends with a line naming
-   that turn. Set it the way `probe_patch_why` overrides `run_rebut`'s line
+4. **The session.** `run_rebut` hands `rerun_gates` the latest session id
+   its rebuttal and extraction turns reported, as `run_rebuttal` moves it
+   (`saffron/phases/rebut.py:187-239`). So `rerun_gates` takes one
+   string argument (`saffron/phases/rebut.py:650`). The repair turn
+   resumes that id. Three fakes pass a zero-argument `rerun_gates` and
+   take one ignored argument instead (`tests/test_rebut.py:167`,
+   `tests/test_agent_runner.py:850`, `tests/test_events.py:2622`).
+   All three files are in `touches`.
+5. **The line.** A task the repair turn left red ends with a line naming
+   that turn. After a failed turn the line also carries its error. Set it the way `probe_patch_why` overrides `run_rebut`'s line
    (`saffron/cell/session.py:3589-3592`). Every other `EXHAUSTED` from the
    re-run keeps today's line, a task too poor to repair included.
-5. **The prose that turns false.** `_rebut_gates`'s docstring
+6. **The prose that turns false.** `_rebut_gates`'s docstring
    (`saffron/cell/session.py:3400-3403`) and `run_rebut`'s
    (`saffron/phases/rebut.py:634-678`) say a red re-run ends the task.
-   Each gains the exception in one sentence.
+   Each gains the exception in one sentence. `_rebut_gates`'s docstring
+   stays within ten lines.
 
 ## Out of scope
 
@@ -262,10 +279,10 @@ line as it is, and keep it the only copy. A mutant applies only where its
 text matches once (`saffron/cell/worktree.py:739-744`). So give the second
 re-run's comparison its own name, and write its return in its own words.
 
-**Which session to resume.** Pass the `session_id` already in scope in
-`_rebut_gates`. It is the implementer's session REBUT resumed, and it moves
-only after `run_rebut` returns (`saffron/cell/session.py:3547-3595`). A resumed
-turn keeps that id, as `saffron/cell/session.py:2558-2562` measured.
+**Which session to resume.** Not the `session_id` in scope in
+`_rebut_gates`. That one moves only after `run_rebut` returns
+(`saffron/cell/session.py:3547-3595`). Resume the id `run_rebut` passes
+in, per item 4.
 
 **The budget line.** `overrun` is read before REBUT
 (`saffron/cell/session.py:3397`). A cell can run one turn past a session's
@@ -323,14 +340,21 @@ budget (`saffron/cell/session.py:3625-3637`). Do not route the turn through
 - Criteria 4, 5 and 6 assert today's line by its clause "does not re-enter
   the repair loop", which `tests/test_rebut.py:334` also pins. Criterion 6
   asserts the clause is absent and "repair turn" is present.
-- Criterion 3 reads the repair turn's `resume` from `cell.resumes`.
+- Criterion 3 reads the repair turn's `resume` from `cell.resumes`. The
+  helper gives the rebuttal and extraction turns their own session ids with
+  `dataclasses.replace`, so the extraction's id differs from the
+  implementer's.
 - Criterion 7 scripts the repair turn with `_budget_cut_turn`
-  (`tests/test_session.py:1331-1345`) at $0.50. The spend is then $1.30.
-  It asserts the line carries `max_budget_usd`, from that turn's error.
+  (`tests/test_session.py:1331-1345`) at $0.50. It stubs
+  `worktree.dirty_paths` dirty once the repair prompt ran and until a
+  checkpoint lands, as `tests/test_session.py:2268-2292` does. It reads
+  `cell.checkpointed`. It drives a green re-run, spend $1.40 with the
+  verdict, and a red one, spend $1.30. The red line carries
+  `max_budget_usd`, from that turn's error.
 
-**What no criterion drives.** Two shapes rest on item 3 alone. One is a
-re-run after the repair turn that aborts or drifts. The other is the
-`probe_infra` rule at that re-run.
+**What no criterion drives.** Three shapes rest on item 3 alone. One is a
+re-run after the repair turn that aborts or drifts. Another is the
+`probe_infra` rule at that re-run. The last is that re-run's `exempt`.
 
 **Existing tests stay green.** The harness's default policy declares no
 gate (`tests/test_session.py:1388`), so no existing drive has a form gate.
@@ -339,9 +363,9 @@ gate (`tests/test_session.py:1388`), so no existing drive has a form gate.
 fields of `Policy`, `IntegrityPatterns` and `WitnessPatterns`, never to a
 gate declaration's. It passed on the prototype.
 
-**Measured on a prototype over `3de63386`.** The prototype was measured
-by the `size` gate's counter. It came to 1417 changed tokens with no test
-path excluded, and 308 with `tests/**` excluded. The first count is 47%
+**Measured on a prototype over `4cd990fc`.** The prototype was measured
+by the `size` gate's counter. It came to 1621 changed tokens with no test
+path excluded, and 370 with `tests/**` excluded. The first count is 54%
 of the `feature` ceiling of 3000. `tests/test_session.py` carried most of it. Each
 witness failed with the source reverted. Each wrong version above,
 applied as an edit, failed its criterion's witness. So did the mutant.
