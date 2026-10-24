@@ -4,7 +4,7 @@ title: "`saffron package` refuses a stack layer cut from its parent's review com
 status: open
 tier: 2
 filed: 2026-10-23
-specs: [SA-0315]
+specs: [SA-0315, SA-0316]
 prs: [937]
 commits: []
 cites: [§5.7]
