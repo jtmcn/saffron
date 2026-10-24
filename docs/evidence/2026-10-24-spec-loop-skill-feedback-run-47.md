@@ -34,7 +34,8 @@ spent $20.66 and committed nothing.
    first, as the parent with most descendants. The batch started `SA-0311`.
 5. **A cell spent 138% of its budget.** `SA-0312` spent $71.76 of $52 over
    two attempts and the batch's spec revision. Attempt 1 had 122 new
-   failures and attempt 2 had one.
+   failures. Attempt 2's session hit its 220-turn ceiling, and its repair
+   turn left one failure.
 6. **The cell-watch mod followed the wrong task (b-2d2014).** Before
    `SA-0311` wrote its log, the watch followed run 46's `SA-0305`. A stop did
    not end it.
