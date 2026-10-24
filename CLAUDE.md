@@ -80,8 +80,8 @@ night then runs its end review, paid from the reserve it held back (ADR 7). With
 `--defer-end-review` it skips that review, its follow-ups and its finishing layer, and writes
 `finish/<batch id>/deferred.json` in the batch tree for a later finish (b-8a0c9a).
 `saffron finish <batch id> --repo .` runs that deferred tail later and spends the held
-reserve. Under launchd it needs `PYTHONUNBUFFERED=1`, or a SIGKILL loses whatever output is still buffered, and the
-log is the night's only human-readable record. `docs/host/dev.saffron.batch.plist` and
+reserve. Under launchd `saffron batch` needs `PYTHONUNBUFFERED=1`, or a SIGKILL loses
+whatever output is still buffered, and the log is the night's only human-readable record. `docs/host/dev.saffron.batch.plist` and
 `docs/HOST-HARDENING.md` §4a carry the setup.
 
 `saffron cell`, `saffron batch`, `saffron package` and `saffron finish` need `CLAUDE_CODE_OAUTH_TOKEN` (from

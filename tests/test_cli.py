@@ -11398,6 +11398,15 @@ def test_saffron_finish_runs_a_deferred_stack_batchs_tail_on_its_own_id_at_its_p
     assert call["revise"] == "revise-sentinel"
     assert call["cite"] == "cite-sentinel"
     assert call["runner"] == "runner-sentinel"
+    assert call["review"] == "review-sentinel"
+    assert call["finish"] == "finish-sentinel"
+    batch_rows = Ledger(fixture.home / "ledger.db")._db.execute(
+        "SELECT batch_id FROM batches ORDER BY batch_id"
+    )
+    assert [row[0] for row in batch_rows] == [
+        fixture.batch_id,
+        fixture.newer_batch_id,
+    ]
 
     pinned = task.PinnedBase(
         mirror=Path(fixture.payload["mirror"]),
@@ -11466,7 +11475,7 @@ def test_saffron_finish_runs_a_deferred_stack_batchs_tail_on_its_own_id_at_its_p
         "BUDGET": (0, "finish: BUDGET"),
         "UNTIL": (0, "finish: UNTIL"),
         "INCOMPLETE": (2, "finish: INCOMPLETE"),
-        "INFRASTRUCTURE": (2, "finish: infrastructure failed"),
+        "INFRASTRUCTURE": (2, "finish: INFRASTRUCTURE"),
     }
     for reason, (exit_code, line) in expected.items():
         monkeypatch.setattr(

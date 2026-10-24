@@ -2469,7 +2469,9 @@ def _finish(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         )
         return 2
     if ledger.stack_finish(args.batch_id) is not None:
-        print(f"{_FINISH_REFUSED} batch {args.batch_id} already finished")
+        print(
+            f"{_FINISH_REFUSED} batch {args.batch_id} already holds a finishing layer"
+        )
         return 2
 
     token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
@@ -2594,14 +2596,8 @@ def _finish(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     )
     write_stack_view(out_dir, ledger, specs, batch_id=args.batch_id)
 
-    if stop == "INCOMPLETE":
-        print("finish: INCOMPLETE")
-        return 2
-    if stop != "INFRASTRUCTURE":
-        print(f"finish: {stop}")
-        return 0
-    print("finish: infrastructure failed")
-    return 2
+    print(f"finish: {stop}")
+    return 2 if stop in ("INCOMPLETE", "INFRASTRUCTURE") else 0
 
 
 def _fold(args: argparse.Namespace) -> int:
