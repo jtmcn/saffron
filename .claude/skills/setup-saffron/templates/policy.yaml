@@ -38,5 +38,9 @@ witness:
   # Each `replace` must leave every matched file importable.
   constants: []
 
+# FILL: a Python `re` per definition line, holding `{name}`, for the citation check.
+citations:
+  definitions: []
+
 # FILL: caps for a thread pool sized from the CPU count.
 thread_env: {}
