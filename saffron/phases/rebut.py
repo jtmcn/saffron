@@ -27,8 +27,10 @@ from saffron.agents import context
 from saffron.agents.findings import Finding
 from saffron.cell.worktree import CriticPatchRejected, CriticPatchUnrepresentable
 from saffron.events import Agent, Event, PhaseStart, describe
+from saffron.gates.baseline import NewFailure
 from saffron.intake import Criterion
 from saffron.phases import implement, review
+from saffron.repos import policy
 
 VERDICT_PROMPT_FILE = "rebut-verdict.md"
 
@@ -182,6 +184,26 @@ def blocker_lines(numbered: Sequence[tuple[int, Finding]]) -> str:
     one. The numbers are global across the phase: a lens is shown only its own
     blockers, but under the numbers the implementer answered."""
     return "\n".join(_blocker_line(n, f) for n, f in numbered)
+
+
+def form_only(
+    new_failures: Sequence[NewFailure], gates: Mapping[str, policy.GateDeclaration]
+) -> bool:
+    """§5.6: whether a red re-run after REBUT earns its one repair turn.
+
+    True only when `new_failures` is not empty and every failure's gate is
+    declared in `gates` with `form=True`. A name in `policy.CORE_GATE_NAMES`
+    is never a form gate, no matter what `gates` says: the repo declares
+    which gates are form gates, and core names none (§2.1).
+    """
+    if not new_failures:
+        return False
+    return all(
+        nf.gate not in policy.CORE_GATE_NAMES
+        and (declared := gates.get(nf.gate)) is not None
+        and declared.form
+        for nf in new_failures
+    )
 
 
 def run_rebuttal(
@@ -647,7 +669,9 @@ def run_rebut(
     max_turns: int,
     budget_usd: float,
     head_moved: Callable[[], bool],
-    rerun_gates: Callable[[], str | None],
+    # Takes the latest session id the rebuttal and extraction turns
+    # reported: the one a form-gate-only repair turn resumes (§5.6).
+    rerun_gates: Callable[[str], str | None],
     # Zero-argument and called at most once, lazily — after `rerun_gates`
     # answers — so the two early returns below never pay for a critic cell a
     # plain argument would have made the caller build regardless.
@@ -675,7 +699,9 @@ def run_rebut(
 
     `rerun_gates` returns a terminal state when the re-run is not green and
     `None` when it is; it runs first because a red re-run ends the task
-    either way (§5.6), and `critic_container` is only ever called after.
+    either way (§5.6), and `critic_container` is only ever called after. The
+    one exception: a red re-run whose failures sit entirely in gates the
+    repo declares `form: true` earns one repair turn before that holds.
     """
     # Numbered from 1: answering "1." for the first of one blocker is the
     # conventional reading, and `run_verdict` requires the verdict set to match
@@ -723,7 +749,7 @@ def run_rebut(
         result.state, result.why = rebut_state(moved=moved, rebuttal=turn, verdicts=[])
         return result
 
-    if stopped := rerun_gates():
+    if stopped := rerun_gates(turn.session_id or session_id):
         result.state = stopped
         result.why = (
             "the gates are red after the rebuttal — REBUT does not re-enter the "
