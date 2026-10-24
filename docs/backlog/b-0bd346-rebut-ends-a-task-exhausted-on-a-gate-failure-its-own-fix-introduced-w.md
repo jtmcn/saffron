@@ -4,7 +4,7 @@ title: REBUT ends a task `EXHAUSTED` on a gate failure its own fix introduced, w
 status: open
 tier: 2
 filed: 2026-10-23
-specs: []
+specs: [SA-0311]
 prs: [929]
 commits: []
 cites: [§5.5]

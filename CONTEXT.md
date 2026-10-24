@@ -416,6 +416,12 @@ Advisory gates are reported in the PR body and stop nothing. State which when it
 matters. `coverage` being advisory is a design decision, not an oversight.
 _Avoid_: "soft fail", "warning", "non-fatal".
 
+**Form gate**: A gate the repo declares `form: true` in `.saffron/policy.yaml`.
+Its failures concern how the code reads, not what it does. A core gate is never
+one. Only REBUT reads the declaration: a re-run after REBUT whose every new
+failure sits in a form gate earns one repair turn (§5.6, `SA-0311`).
+_Avoid_: "style gate", "cosmetic gate".
+
 **Baseline**: The gate results recorded against a run's `base_sha` at batch start.
 Per repo, and never compared across repos.
 
