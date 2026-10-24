@@ -2398,14 +2398,9 @@ def test_cite_anchors_a_bare_line_number_inside_its_own_paragraph(
 def test_cite_reports_a_citation_whose_quoted_text_sits_on_other_lines(
     empty_repo, monkeypatch, capsys
 ):
-    """Nine wrong moved-text checks this kills. It reports whenever the range
-    lacks the text, without checking the file carries it elsewhere. It searches
-    the whole file instead of the range, or reports no line numbers. It skips a
-    bare citation, or reads only a range's first line. It needs every other
-    string absent from the range, not just one present. It reads only the first
-    such string, or skips a sentence holding more than one. It merges two
-    sentences across a period and a digit, so a later sentence wrongly suppresses
-    an earlier report."""
+    """A range off the construct its sentence names reports as the core check does."""
+    from saffron.spec_citations import citation_defects
+
     repo = empty_repo
     monkeypatch.setattr(driver, "REPO", repo)
     lines = [f"L{i}" for i in range(1, 72)]
@@ -2419,7 +2414,11 @@ def test_cite_reports_a_citation_whose_quoted_text_sits_on_other_lines(
     lines[70] = "theta marker"  # line 71, "theta" found elsewhere (case 6)
     (repo / "mod").mkdir()
     (repo / "mod" / "lib.py").write_text("\n".join(lines) + "\n")
-    _git(repo, "add", "mod/lib.py")
+    (repo / ".saffron").mkdir()
+    (repo / ".saffron" / "policy.yaml").write_text(
+        "citations:\n  definitions: ['{name} marker']\n"
+    )
+    _git(repo, "add", "mod/lib.py", ".saffron/policy.yaml")
     _git(repo, "commit", "-qm", "fixture")
     base = _git(repo, "rev-parse", "HEAD")
 
@@ -2449,14 +2448,100 @@ def test_cite_reports_a_citation_whose_quoted_text_sits_on_other_lines(
     )
 
     assert driver.cmd_cite(SimpleNamespace(spec_path=str(spec), base=base)) == 1
+    defects = capsys.readouterr().out.splitlines()[:-1]
+    assert defects == citation_defects(repo, base, spec.read_text())
+    assert defects[0].startswith("mod/lib.py:11-20: ")
+
+
+def _cite_tree(monkeypatch, root):
+    """A queued `SA-0001` file under `root`, with `check`'s ledger stubbed."""
+    specs_dir = root / ".saffron" / "specs"
+    specs_dir.mkdir(parents=True)
+    monkeypatch.setattr(driver, "REPO", root)
+    monkeypatch.setattr(driver, "SPECS_DIR", specs_dir)
+    monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (_StubLedger(), 1, "url"))
+    monkeypatch.setattr(driver, "_past_cells", lambda *a, **k: [])
+    monkeypatch.setattr(driver, "_known_specs", lambda: {"SA-0001": _spec("SA-0001")})
+    spec = specs_dir / "SA-0001-s.md"
+    spec.write_text("Reads `mod.py:2`.\n")
+    return spec
+
+
+def test_cite_and_check_report_what_the_batchs_citation_check_reports(
+    empty_repo, monkeypatch, capsys
+):
+    """`cite` and `check` print what the core check reports for one spec
+    text at one ref, in its words and with its count."""
+    from saffron.spec_citations import citation_count_and_defects
+
+    spec = _cite_tree(monkeypatch, empty_repo)
+    (empty_repo / "mod.py").write_text("a\nalpha\nc\nd\ne\n")
+    _git(empty_repo, "add", "mod.py")
+    _git(empty_repo, "commit", "-qm", "trunk")
+    _git(empty_repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    spec.write_text(
+        "The `alpha` line sits at `mod.py:4`. See `mod.py:0`, `mod.py:5-3`, "
+        "`gone.py:1` and `mod.py:9`.\n\nSee `:2`.\n"
+    )
+    count, defects = citation_count_and_defects(
+        empty_repo, "origin/main", spec.read_text()
+    )
+    assert (count, len(defects)) == (6, 5)
+
+    args = SimpleNamespace(spec_path=str(spec), base="origin/main")
+    assert driver.cmd_cite(args) == 1
+    assert capsys.readouterr().out.splitlines() == [*defects, "6 citation(s) checked"]
+    assert driver.cmd_check(argparse.Namespace(spec_id="SA-0001")) == 1
+    out = capsys.readouterr().out.splitlines()
+    assert [x for x in out if x.startswith("cite: ")] == [f"cite: {d}" for d in defects]
+    assert "blocker: 5 of 6 citation(s) do not resolve at origin/main" in out
+
+
+def test_cite_and_check_print_what_the_core_check_returns_or_raises(
+    tmp_path, monkeypatch, capsys
+):
+    """The driver keeps no rule of its own. A core `GitError` or `PolicyError`
+    is reported as the driver's own error."""
+    import saffron.spec_citations as spec_citations
+    from saffron.repos.mirror import GitError
+    from saffron.repos.policy import PolicyError
+
+    calls, result = [], (7, ["x.py:1: seen"])
+
+    def fake(*args):
+        calls.append(args)
+        if result is None:
+            raise GitError("git ls-tree: sentinel")
+        if isinstance(result, PolicyError):
+            raise result
+        return result
+
+    monkeypatch.setattr(spec_citations, "citation_count_and_defects", fake)
+    monkeypatch.setattr(driver, "citation_count_and_defects", fake, raising=False)
+    spec = _cite_tree(monkeypatch, tmp_path)
+    args = SimpleNamespace(spec_path=str(spec), base="origin/main")
+    check = argparse.Namespace(spec_id="SA-0001")
+    assert driver.cmd_cite(args) == 1
+    assert capsys.readouterr().out == "x.py:1: seen\n7 citation(s) checked\n"
+    assert calls == [(tmp_path, "origin/main", "Reads `mod.py:2`.\n")]
+    assert driver.cmd_check(check) == 1
+    out = capsys.readouterr().out.splitlines()
+    assert "cite: x.py:1: seen" in out
+    assert "blocker: 1 of 7 citation(s) do not resolve at origin/main" in out
+
+    result = None
+    assert driver.cmd_cite(args) == 1
+    assert capsys.readouterr() == ("", "error: git ls-tree: sentinel\n")
+    assert driver.cmd_check(check) == 1
     out = capsys.readouterr().out
-    defects = out.splitlines()[:-1]
-    assert defects == [
-        "mod/lib.py:11-20: quoted text sits at mod/lib.py:3, 7 instead",
-        "mod/lib.py:51-60: quoted text sits at mod/lib.py:9 instead",
-        "mod/lib.py:61-70: quoted text sits at mod/lib.py:71 instead",
-    ]
-    assert out.splitlines()[-1] == "6 citation(s) checked"
+    assert "blocker: cite could not read origin/main: git ls-tree: sentinel" in out
+
+    result = PolicyError("policy.yaml is invalid: sentinel")
+    assert driver.cmd_cite(args) == 1
+    assert capsys.readouterr() == ("", "error: policy.yaml is invalid: sentinel\n")
+    assert driver.cmd_check(check) == 1
+    out = capsys.readouterr().out
+    assert "blocker: cite could not read origin/main: policy.yaml is invalid" in out
 
 
 def _enumerators_repo(repo):
