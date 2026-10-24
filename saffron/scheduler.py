@@ -287,11 +287,7 @@ def _deepest_open_parent(
     chosen: str | None = None
     chosen_reach: frozenset[str] = frozenset()
     for candidate in sorted(candidates):
-        reach = frozenset(
-            other
-            for other in parents
-            if other != candidate and _depends_on_path(candidate, other, edges)
-        )
+        reach = (_reachable(candidate, edges) & parents) - {candidate}
         if chosen is None or len(reach) > len(chosen_reach):
             chosen, chosen_reach = candidate, reach
     off_chain = frozenset(parents) - {chosen} - chosen_reach
@@ -993,7 +989,7 @@ def _refuse(
             return (
                 "depends_on",
                 f"depends_on {', '.join(sorted(off_chain))} {verb} outside "
-                f"{deepest}'s depends_on chain, and no taken spec may stack "
+                f"{deepest}'s depends_on chain, and no spec may stack "
                 "on two unrelated open parents",
             )
 
@@ -1100,8 +1096,8 @@ def _resolve_stack_base(
         frozenset(external), frozenset(qualifying), edges
     )
     assert chosen_id is not None
-    # The chosen base's whole chain, not only the external ids it reaches.
-    # An intermediate spec no kept spec names is still on the base's branch.
+    # The chosen stack base's whole chain, not only the external ids it reaches.
+    # An intermediate spec no kept spec names is still on the stack base's branch.
     chain_ids = _reachable(chosen_id, edges)
     base = qualifying[chosen_id]
     base = replace(base, chain_branches=frozenset(_branch(dep) for dep in chain_ids))
@@ -1399,7 +1395,7 @@ def build_queue(
         stack_base, causes, other_qualifying, chain_ids = _resolve_stack_base(
             ledger, repo_id, kept, kept_ids, on_default_branch, edges
         )
-        # The external parents on the chosen base's own chain need no
+        # The external parents on the chosen stack base's own chain need no
         # place in the order either. Its branch already carries their work.
         satisfied = (
             on_default_branch
@@ -1411,8 +1407,8 @@ def build_queue(
         ordered, order_refusals = _stack_order(
             kept, satisfied, causes, other_qualifying, stack_base_id
         )
-        # The base is carried when a taken spec names it, or a parent on
-        # its own chain, not only the base's bare id.
+        # The stack base is carried when a taken spec names it, or a parent
+        # on its own chain, not only the stack base's bare id.
         carries = (
             ({stack_base.spec_id} | chain_ids) if stack_base is not None else set()
         )

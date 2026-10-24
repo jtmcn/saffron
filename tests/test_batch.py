@@ -5940,7 +5940,7 @@ def test_a_revised_spec_and_a_follow_up_are_not_refused_on_a_pull_request_on_the
     """Gate 0's open pull request check exempts every branch on the
     stack base's own chain, not only its own branch (b-1572e7). A
     revised spec of the order and a follow-up each overlap a pull
-    request on a parent of the base's chain, and neither is refused.
+    request on the stack base's chain, and neither is refused.
     Another open pull request still refuses each."""
     from saffron import spec_review as spec_review_module
     from saffron.batch import run_stack_batch
@@ -5962,7 +5962,7 @@ def test_a_revised_spec_and_a_follow_up_are_not_refused_on_a_pull_request_on_the
         "https://example.invalid/210",
     )
     # `TE-210`'s own chain reaches `TE-199`, a further parent named by
-    # neither the order nor the base's own bare branch.
+    # neither the order nor the stack base's own bare branch.
     stack_base = StackBase(
         spec_id="TE-210",
         task_id=base_task_id,
@@ -5971,7 +5971,7 @@ def test_a_revised_spec_and_a_follow_up_are_not_refused_on_a_pull_request_on_the
     )
 
     pull_requests = [
-        _pr(1, "saffron/TE-199", "a.py"),  # on the base's own chain
+        _pr(1, "saffron/TE-199", "a.py"),  # on the stack base's own chain
         _pr(2, "saffron/SA-9000", "b.py"),  # unrelated, still refuses
     ]
 

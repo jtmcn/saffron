@@ -2103,11 +2103,11 @@ def test_a_spec_whose_open_parents_lie_on_no_one_chain_is_refused_naming_the_par
 ):
     """A spec whose open parents lie on no one chain is refused before any
     cell, under the `depends_on` kind, in both modes (b-1572e7). `TE-1`
-    names five parents. `TE-31` (deep) depends on `TE-30` (base), a real
+    names five parents. `TE-31` (deep) depends on `TE-30`, a real
     chain of two. `TE-32` and `TE-33` relate to nothing, and `TE-34`
     merged. The deepest open parent is `TE-31`, whose own chain holds
     one other open parent. The reason names the two lone ones, and
-    neither the chain's base nor the merged parent."""
+    neither `TE-30` nor the merged parent. A tie goes to the lower id."""
     directory = _spec_dir(tmp_path)
     repo_id = _repo(ledger)
 
@@ -2157,7 +2157,7 @@ def test_a_spec_whose_open_parents_lie_on_no_one_chain_is_refused_naming_the_par
 
     plain_reason = (
         "depends_on TE-32, TE-33 are outside TE-31's depends_on chain, and "
-        "no taken spec may stack on two unrelated open parents"
+        "no spec may stack on two unrelated open parents"
     )
     stack_reason = (
         "depends_on TE-32, TE-33 are outside the stack order and not on "
@@ -2180,6 +2180,17 @@ def test_a_spec_whose_open_parents_lie_on_no_one_chain_is_refused_naming_the_par
     mine = next(r for r in refusals if r.path.name == "b.md")
     assert mine.reason.startswith(
         "depends_on TE-99 is outside the stack order and not on the default branch"
+    )
+
+    # Two chain-less open parents tie, so the lower id is the deepest.
+    _write_spec(
+        directory, "c.md", id="TE-3", touches=["c.py"], depends_on=["TE-33", "TE-32"]
+    )
+    _candidates, refusals = build_queue(directory, repo_id, ledger)
+    mine = next(r for r in refusals if r.path.name == "c.md")
+    assert mine.reason == (
+        "depends_on TE-33 is outside TE-32's depends_on chain, and "
+        "no spec may stack on two unrelated open parents"
     )
 
 
@@ -2472,10 +2483,10 @@ def test_a_stack_order_stacks_on_the_deepest_open_parent_whatever_the_depends_on
     `TE-63`, which depends on `TE-61`, so `TE-62` is deepest, with an id
     neither lowest nor highest of the three. `TE-64` merged, `TE-65` is
     retired, and `TE-66`'s push landed while its task still waits. Every
-    order of the six admits the same base in stack mode. A second
-    arrangement names the base from one child and a chain parent from
-    another, and both carry it. A third adds a second namer, refused on
-    an unrelated ground, and the pair still carries it.
+    order of the six admits the same stack base in stack mode. A second
+    arrangement names the stack base from one child and a chain parent
+    from another, and both carry it. A third refuses the only child
+    naming the stack base, and the other child still carries it.
     """
     from saffron.scheduler import StackBase
 
@@ -2556,7 +2567,7 @@ def test_a_stack_order_stacks_on_the_deepest_open_parent_whatever_the_depends_on
                 assert [c.spec.id for c in candidates] == ["TE-1"], refusals
                 assert refusals == []
 
-    # A second arrangement: one child names the base, one names a chain
+    # A second arrangement: one child names the stack base, one a chain
     # parent. Both carry the same `StackBase` under `stack=True`.
     for stack in (False, True):
         root = tmp_path / f"arr2-{stack}"
@@ -2597,8 +2608,8 @@ def test_a_stack_order_stacks_on_the_deepest_open_parent_whatever_the_depends_on
             assert by_id["TE-2"].stack_base is None
             assert by_id["TE-3"].stack_base is None
 
-    # A third arrangement: a second namer of the base is refused on a
-    # protected path. The surviving pair still carries the base.
+    # A third arrangement: the only child naming the stack base is refused,
+    # since `TE-99` has no spec. The child naming `TE-61` still carries it.
     root = tmp_path / "arr3"
     root.mkdir()
     directory = _spec_dir(root)
@@ -2609,7 +2620,7 @@ def test_a_stack_order_stacks_on_the_deepest_open_parent_whatever_the_depends_on
         "names-base.md",
         id="TE-2",
         touches=["t2.py"],
-        depends_on=["TE-62"],
+        depends_on=["TE-62", "TE-99"],
     )
     _write_spec(
         directory,
@@ -2618,24 +2629,20 @@ def test_a_stack_order_stacks_on_the_deepest_open_parent_whatever_the_depends_on
         touches=["t3.py"],
         depends_on=["TE-61"],
     )
-    _write_spec(
-        directory,
-        "also-names-base.md",
-        id="TE-4",
-        touches=["prot.py"],
-        depends_on=["TE-62"],
-    )
 
-    candidates, refusals = build_queue(
-        directory, repo_id, ledger, protected=["prot.py"], stack=True
-    )
+    candidates, refusals = build_queue(directory, repo_id, ledger, stack=True)
 
     by_id = {c.spec.id: c for c in candidates}
-    assert set(by_id) == {"TE-2", "TE-3"}, refusals
-    assert any(r.path.name == "also-names-base.md" for r in refusals)
-    assert by_id["TE-2"].stack_base is not None
-    assert by_id["TE-2"].stack_base.spec_id == "TE-62"
-    assert by_id["TE-3"].stack_base == by_id["TE-2"].stack_base
+    assert set(by_id) == {"TE-3"}, refusals
+    assert any(r.path.name == "names-base.md" for r in refusals)
+    found = by_id["TE-3"].stack_base
+    assert found is not None
+    assert found == StackBase(
+        spec_id="TE-62",
+        task_id=found.task_id,
+        branch="saffron/TE-62",
+        chain_branches=frozenset({"saffron/TE-63", "saffron/TE-61"}),
+    )
 
 
 def test_a_stack_order_stacks_on_an_earlier_batchs_pushed_pull_request(
