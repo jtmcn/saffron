@@ -11,8 +11,7 @@ import subprocess
 
 import pytest
 
-# The shared fixture module `b-2da959`'s acceptance criteria cite. Line
-# numbers below are 1-based, matching the spec's own citations.
+# The fixture module these tests cite, with 1-based line numbers.
 LIB = [
     "import os",
     "",
@@ -345,11 +344,40 @@ def test_citation_defects_scope_names_to_each_citations_own_clause(cite_repo):
         "\n"
         "See `pkg/other.py:1` and `mod/lib.py:4-6`. `_diff` returns it "
         "(`:5`).\n"
+        "\n"
+        "`_diff` sits at `mod/lib.py:4-6`, and the `qualifications` entry is "
+        "at `mod/lib.py:21`.\n"
     )
 
     assert citation_defects(repo, base, text) == [
         "mod/lib.py:21: the construct it names sits at mod/lib.py:4-6",
         "mod/lib.py:21: the construct it names sits at mod/lib.py:4-6",
+    ]
+
+
+def test_citation_defects_name_a_one_line_construct_alone_and_read_a_tab_indented_body(
+    empty_repo,
+):
+    from saffron.spec_citations import citation_defects
+
+    repo = empty_repo
+    (repo / "mod").mkdir()
+    (repo / "mod" / "tiny.py").write_text("x = 1\ndef tiny(): pass\ny = 2\n")
+    (repo / "mod" / "tabs.py").write_text("def gofunc(x):\n\ty = x\n\treturn y\n")
+    (repo / ".saffron").mkdir()
+    (repo / ".saffron" / "policy.yaml").write_text(_CITATION_POLICY)
+    _git(repo, "add", "mod", ".saffron/policy.yaml")
+    _git(repo, "commit", "-qm", "fixture")
+    base = _git(repo, "rev-parse", "HEAD")
+
+    text = (
+        "`tiny` does nothing (`mod/tiny.py:3`).\n"
+        "\n"
+        "`gofunc` returns it (`mod/tabs.py:2-3`).\n"
+    )
+
+    assert citation_defects(repo, base, text) == [
+        "mod/tiny.py:3: the construct it names sits at mod/tiny.py:2"
     ]
 
 

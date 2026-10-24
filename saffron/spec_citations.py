@@ -32,7 +32,7 @@ class _Citation:
 
 _BACKTICK = re.compile(r"`([^`]+)`")
 _CITE_CONTENT = re.compile(r"^([^:\s]*):(\d+)(?:-(\d+))?$")
-# Approximate, on purpose: this costs a false refusal, never a false pass.
+# Approximate: a wrong split can cost a false refusal or a false pass.
 _SENTENCE_END = re.compile(
     r'[.!?](?=\s+[A-Z0-9`"]|\s*$)' r'|[.!?]\*\*(?=\s+[A-Z0-9`"*])'
 )
@@ -167,7 +167,7 @@ def _range(cite: _Citation) -> str:
 
 
 def _indent(line: str) -> int:
-    return len(line) - len(line.lstrip(" "))
+    return len(line) - len(line.lstrip())
 
 
 def _construct_span(lines: list[str], start_idx: int) -> tuple[int, int]:
@@ -212,7 +212,7 @@ def _construct_defect(
     when its names find no construct, or its range sits inside one, or
     holds one whole. It also passes when a range line outside every found
     construct still quotes one of its names as a whole word. Otherwise the
-    refusal names where each construct sits."""
+    defect names where each construct sits."""
     spans = _name_spans(cite.names, lines, patterns)
     if not spans:
         return None
@@ -256,8 +256,8 @@ def citation_count_and_defects(
     """How many `file:line` citations `text` makes, and the defects among
     them, in text order. `mirror` is any git repository holding `commit`,
     bare or not. A range's shape is checked before any file: no path, then
-    a start below line 1, then an end before its start. A citation whose
-    path then resolves is refused for a missing file or a range past its
+    a start below line 1, then an end before its start. A citation that
+    passes those is then refused for a missing file or a range past its
     end. Otherwise it is judged against the constructs its own clause's
     names open, read from `.saffron/policy.yaml` at `commit`. A commit
     `mirror` lacks raises `GitError`. An invalid policy at `commit` raises
@@ -309,5 +309,6 @@ def citation_count_and_defects(
 
 
 def citation_defects(mirror: Path, commit: str, text: str) -> list[str]:
-    """`citation_count_and_defects`'s defects half."""
+    """`citation_count_and_defects`'s defects half, which judges each
+    citation by the construct its clause names."""
     return citation_count_and_defects(mirror, commit, text)[1]
