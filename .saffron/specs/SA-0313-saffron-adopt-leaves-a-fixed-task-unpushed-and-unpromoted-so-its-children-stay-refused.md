@@ -1,9 +1,9 @@
 ---
 id: SA-0313
-title: "`saffron adopt` leaves a fixed task unpushed and unpromoted, so its children stay refused"
+title: "`saffron adopt` leaves a fixed task unpushed and out of `READY_FOR_REVIEW`, so its children stay refused"
 type: feature
 priority: 2
-estimated_lines: 340
+estimated_lines: 370
 touches:
   - saffron/cli.py
   - tests/test_cli.py
@@ -47,30 +47,35 @@ acceptance:
       For a newest task in `EXHAUSTED`, `NOT_IMPLEMENTED` or `MERGE_FAILED`,
       `saffron adopt` records the pull request's url and its head as the
       task's `pushed_sha` before it re-gates. When that re-gate records zero
-      new failures on that same head, the task moves to `READY_FOR_REVIEW`
-      and adopt exits 0. A child spec that `build_queue` refused before then
-      becomes a candidate, both in a plain scan and in a `stack=True` scan,
-      where its `stack_base` names the adopted task and its branch.
-    witness: tests/test_cli.py::test_adopt_promotes_a_task_whose_regate_is_green_on_the_adopted_head
+      new failures on that same head, adopt moves the task to
+      `READY_FOR_REVIEW` and exits 0. A child spec that `build_queue` refused
+      before then becomes a candidate, both in a plain scan and in a
+      `stack=True` scan, where its `stack_base` names the adopted task and
+      its branch.
+    witness: tests/test_cli.py::test_adopt_moves_a_task_whose_regate_is_green_on_the_adopted_head_to_ready_for_review
     wrong_versions:
-      - "Adopt promotes on `run_regate` returning 0 and never compares the recorded re-gate's head with the adopted head."
       - "Adopt records the url but not the head, so the `stack=True` scan still refuses the child for no pushed sha."
       - "Adopt re-gates before it records the url, so the real `run_regate` would decline a task with no pull request."
       - "`MERGE_FAILED` stays out of the states adopt takes."
-      - "Adopt promotes without re-gating at all."
+      - "Adopt moves the task to `READY_FOR_REVIEW` without re-gating at all."
       - "Adopt re-gates the spec's oldest task rather than its newest."
   - claim: >-
       For each of those three states, adopt keeps the task's state and exits
       0 in three cases. The re-gate records new failures on the adopted
-      head, or records zero on another head, or declines and records
-      nothing. The url and the head are recorded all the same. Adopt prints
-      a line that names the state it kept.
+      head and returns 1. Or it records zero new failures on another head
+      and returns 0. Or it declines, records nothing and returns 1. The url
+      and the head are recorded all the same, and adopt prints a line that
+      names the state it kept. Run again on the same pull request after a
+      red re-gate, adopt records the new head, re-gates again, and on a
+      green re-gate moves the task to `READY_FOR_REVIEW`.
     witness: tests/test_cli.py::test_adopt_keeps_the_state_of_a_task_whose_regate_is_red_declined_or_on_another_head
     wrong_versions:
-      - "Adopt promotes whenever the newest re-gate row records zero new failures, whatever head it names."
-      - "Adopt promotes when `run_regate` declines, reading a missing re-gate row as no new failures."
+      - "Adopt moves the task on `run_regate` returning 0 and never compares the recorded re-gate's head with the adopted head."
+      - "Adopt moves the task whenever the newest re-gate row records zero new failures, whatever head it names."
+      - "Adopt moves the task when `run_regate` declines, reading a missing re-gate row as no new failures."
       - "Adopt exits 1 when the re-gate is red."
       - "Adopt rolls back the url and the head when the re-gate is red."
+      - "Adopt still refuses a task that carries a url, so the second run on the same pull request exits 1."
   - claim: >-
       For a newest task already in `READY_FOR_REVIEW`, adopt records the url
       and the head as its `pushed_sha`, replacing any older one. It runs no
@@ -82,17 +87,19 @@ acceptance:
       - "Adopt records the head only when the row has no `pushed_sha` yet, so an older sha stays."
       - "Adopt records the head only for the three states it re-gates."
   - claim: >-
-      Adopt exits 1 and writes nothing, and runs no re-gate, in six cases.
+      Adopt exits 1 and writes nothing, and runs no re-gate, in seven cases.
       `gh` exits non-zero, or prints no JSON, or its JSON lacks the url, the
       head commit or the head branch. Or the head branch is not the task's
-      `branch`. The line it prints names the pull request number, and for a
-      branch mismatch also both branch names.
+      `branch`. Or the task already carries a url other than the one `gh`
+      names. The line it prints names the pull request number. For a branch
+      mismatch it also names both branches, and for a url mismatch both urls.
     witness: tests/test_cli.py::test_adopt_refuses_a_pull_request_gh_cannot_describe_or_whose_head_is_another_branch
     wrong_versions:
       - "Adopt records the url before it reads the head branch, so a mismatch leaves a written row."
       - "A head branch other than the task's is accepted and written over the task's `branch`."
       - "A missing head commit is recorded as an empty `pushed_sha`."
       - "`gh` printing no JSON raises out of adopt, so the command exits 2."
+      - "A task carrying another url is accepted, and the new url replaces the old one."
   - claim: >-
       For each of the three states adopt re-gates, a re-gate that raises
       makes `saffron adopt` exit 2. The task keeps its state, and the url
@@ -102,14 +109,14 @@ acceptance:
       - "Adopt catches the raise and exits 0 as though the re-gate were red."
       - "Adopt writes nothing until the re-gate returns, so a raise leaves no url and no head."
   - claim: >-
-      Folding the record rebuilds an adopted task's url and head. A
-      promoted `EXHAUSTED` task folds to `READY_FOR_REVIEW`, and a
-      `NOT_IMPLEMENTED` task whose re-gate was red folds to
-      `NOT_IMPLEMENTED`.
-    witness: tests/test_cli.py::test_an_adopted_head_and_promotion_are_facts_the_fold_keeps
+      Folding the record rebuilds an adopted task's url and head. An
+      `EXHAUSTED` task adopt moved to `READY_FOR_REVIEW` folds to
+      `READY_FOR_REVIEW`, and a `NOT_IMPLEMENTED` task whose re-gate was red
+      folds to `NOT_IMPLEMENTED`.
+    witness: tests/test_cli.py::test_an_adopted_head_and_state_move_are_facts_the_fold_keeps
     wrong_versions:
       - "The head is written with a bare `UPDATE` rather than a fact, so the fold drops it."
-      - "The promotion is written with a bare `UPDATE`, so the fold rebuilds `EXHAUSTED`."
+      - "The state move is written with a bare `UPDATE`, so the fold rebuilds `EXHAUSTED`."
   - claim: >-
       A `NOT_IMPLEMENTED` task carrying an adopted pull request still
       moves only on a merge when `reconcile` asks about it.
@@ -126,7 +133,8 @@ finished by hand cannot become a parent its children can run on.
 takes a newest task in `_ADOPTABLE_STATES`, which is `EXHAUSTED`,
 `NOT_IMPLEMENTED` and `READY_FOR_REVIEW` (`saffron/cli.py:2778`). Any other
 state is refused by `newest["state"] not in _ADOPTABLE_STATES`
-(`saffron/cli.py:2798-2803`), before any call to gh. It asks
+(`saffron/cli.py:2798-2803`), before any call to gh. So is a task whose
+`pr_url` is set (`saffron/cli.py:2804-2806`). It asks
 `gh pr view <n> --repo <slug> --json url --jq .url` (`saffron/cli.py:2808-2822`).
 It then calls `ledger.adopt_pull_request` (`saffron/cli.py:2828`). That
 method writes one `task_package` fact carrying the row's own `state`,
@@ -174,33 +182,42 @@ makes its task a parent.
    prints no JSON, or leaves one of the three out or empty. Refuse the same
    way when the head branch is not the task's `branch`. The re-gate fetches
    the task's own branch, and a stack base stacks on it.
-3. **Record the head, then the url.** Call `ledger.record_push` with the
+3. **Run again on the same pull request.** A task that already carries a
+   `pr_url` is no longer refused before gh. When that url equals the one
+   gh names, adopt runs the steps below again. Any other url refuses with
+   exit 1, writing nothing. A re-gate that came back red, declined or
+   raised can then be retried.
+4. **Record the head, then the url.** Call `ledger.record_push` with the
    head commit, then `ledger.adopt_pull_request` with the url. The second
    carries the row's `pushed_sha`, so it now carries the head too. Both
    are facts, so a fold rebuilds them.
-4. **Re-gate the three settled states.** For `EXHAUSTED`,
+5. **Re-gate the three settled states.** For `EXHAUSTED`,
    `NOT_IMPLEMENTED` and `MERGE_FAILED`, call `regate.run_regate` on the
    task, the way `_regate` calls it (`saffron/cli.py:2766-2773`). Then read
-   `ledger.regate(task_id)`. Promote with
-   `ledger.set_task_state(task_id, "READY_FOR_REVIEW")` only when that row
-   names the adopted head and zero new failures. Otherwise keep the state
-   and print an `adopt:` line naming it and why.
-5. **Leave `READY_FOR_REVIEW` alone.** Record the head and the url, and run
+   `ledger.regate(task_id)`. Call
+   `ledger.set_task_state(task_id, "READY_FOR_REVIEW")` only when
+   `run_regate` returned 0 and that row names the adopted head and zero new
+   failures. Otherwise keep the state and print an `adopt:` line naming it
+   and why.
+6. **Leave `READY_FOR_REVIEW` alone.** Record the head and the url, and run
    no re-gate.
-6. **Exit 0 once the url is recorded**, promoted or not. A raise from the
+7. **Exit 0 once the url is recorded**, whether the state moved or not. A raise from the
    re-gate reaches `main`, which exits 2. Dispatch `adopt` through
    `_guarding_sigterm` with `out_dir`, as `regate` is, since adopt now
    starts cells.
 
-Update `_ADOPTABLE_STATES`' comment and `_adopt`'s docstring to match.
+Update `_ADOPTABLE_STATES`' comment, `_adopt`'s docstring and the `adopt`
+help string (`saffron/cli.py:195-197`) to match.
 
 ## Out of scope
 
 - **`saffron/ledger.py`.** It is `elevate_on`, so this spec writes through
   `record_push`, `adopt_pull_request` and `set_task_state` as they stand.
   `adopt_pull_request`'s docstring says an adoption changes nothing but
-  `pr_url` (`saffron/ledger.py:1700-1705`). That goes false here, and the
-  delegate edits it in a review commit.
+  `pr_url` (`saffron/ledger.py:1700-1705`). `set_task_package`'s says a
+  `MERGE_FAILED` task reaches the operator with no pull request
+  (`saffron/ledger.py:1679-1681`). Both go false here, and the delegate
+  edits them in a review commit.
 - **`reconcile` and a kept `MERGE_FAILED` task.** A row whose state is
   outside `PR_PENDING_STATES` and `MERGE_ONLY_STATES` is skipped
   (`saffron/reconcile.py:177-181`). `MERGE_FAILED` is in neither. So a
@@ -209,6 +226,11 @@ Update `_ADOPTABLE_STATES`' comment and `_adopt`'s docstring to match.
 - **The revert exemption.** `run_regate` passes `reverify` no `exempt`
   set (b-6b06e1). A task whose PACKAGE exempted a test can come back red
   under adopt's re-gate, and then keeps its state.
+- **A task whose spec text was recorded.** `run_regate` declines a task
+  whose `ledger.spec_text` holds a row (`saffron/regate.py:55-58`). A stack
+  batch records one for each spec revision (`saffron/batch.py:835-841`).
+  Adopt's re-gate declines such a task, and it keeps its state. This is a
+  known limit, and `saffron/regate.py` stays forbidden.
 - **`ready_task` and a batch whose PACKAGE raised.** `SA-0315` takes the
   rest of b-066901.
 - **`DESIGN.md` and `CONTEXT.md`.** The text this change makes true lands
@@ -216,18 +238,34 @@ Update `_ADOPTABLE_STATES`' comment and `_adopt`'s docstring to match.
 
 ## Notes for the agent
 
-**New code, so no criterion declares a mutant.** The re-gate, the head and
-the promotion do not exist at base, and their spelling is yours. `witness`
+**New code, so no criterion declares a mutant.** None of the re-gate, the
+head or the state move exists at base. Their spelling is yours. `witness`
 will report `skip` for criteria 1 to 6. Criterion 7 is `preserves` over
 `reconcile`, which this spec does not edit.
 
 **Never let a test reach the real `run_regate`.** It builds the repo's
 image and starts cells. Replace `regate.run_regate` in every test that
 reaches a successful adopt. A fake that writes `ledger.record_regate` on
-the ledger it is handed, then returns 0 or 1, drives every case above. For
-criterion 1 the fake also asserts that the row already carries the url and
-the head, as the real one needs. A task that ran a recorded spec text is
-declined by the real one, which criterion 2's decline case stands for.
+the ledger it is handed drives every case above. Return what the real one
+would (`saffron/regate.py:182`): 0 for zero new failures, else 1, and 1
+for a decline that records nothing. Criterion 2's other-head fake records
+zero new failures on another head and returns 0. For criterion 1 the fake
+also asserts that the row already carries the url and the head, as the
+real one needs.
+
+**Move the state on both signals.** `ledger.regate` returns the task's
+newest re-gate row, whoever wrote it (`saffron/ledger.py:1846-1856`). So
+move the task only when `run_regate` returned 0 and that row names the
+adopted head with zero new failures.
+
+**Read the branch from the right method.** `ledger.tasks_by_repo` selects
+`state`, `pr_url` and `pushed_sha` but no branch
+(`saffron/ledger.py:1147-1148`). `ledger.tasks_by_spec_id`
+does (`saffron/ledger.py:1183-1184`).
+
+**A fork's pull request can name a branch of the same name.** The re-gate
+fetches that branch from origin (`saffron/regate.py:147`). It then judges
+or fails on origin's branch, and a failed fetch raises, so adopt exits 2.
 
 **Four tests at base assert the old behaviour, and you edit each.**
 
@@ -236,7 +274,9 @@ declined by the real one, which criterion 2's decline case stands for.
   unchanged. Its `gh` fake answers `--jq .url` only (`tests/test_cli.py:2183-2194`).
 - `test_adopt_refuses_with_exit_one_and_writes_nothing`
   (`tests/test_cli.py:2291`) holds the taken set and `len(others) == 25`.
-  With `MERGE_FAILED` taken that count is 24.
+  With `MERGE_FAILED` taken that count is 24. Its tasks that carry a url
+  are refused before gh at base, and it asserts no gh call. Now gh is
+  asked, and a different url refuses.
 - `test_an_adopted_pull_request_is_a_fact_the_fold_keeps`
   (`tests/test_cli.py:2411`) asserts `pushed_sha` unchanged.
 - `test_a_merged_adopted_pull_request_admits_the_child_of_a_not_implemented_parent`
