@@ -2171,6 +2171,17 @@ def test_a_spec_whose_open_parents_lie_on_no_one_chain_is_refused_naming_the_par
         assert mine.kind == "depends_on"
         assert mine.reason == expected
 
+    # A merged parent beside one with no spec at all: the stack reason
+    # names the missing one alone, never the merged one.
+    _write_spec(
+        directory, "b.md", id="TE-2", touches=["b.py"], depends_on=["TE-34", "TE-99"]
+    )
+    _candidates, refusals = build_queue(directory, repo_id, ledger, stack=True)
+    mine = next(r for r in refusals if r.path.name == "b.md")
+    assert mine.reason.startswith(
+        "depends_on TE-99 is outside the stack order and not on the default branch"
+    )
+
 
 # ---------------------------------------------------------------- stack order
 
