@@ -56,7 +56,7 @@ acceptance:
       through the last line indented past it or a closing `)`, `]` or `}`
       level with it. A blank line inside does not end it. A range passes when it
       lies inside a named construct, holds one whole, or holds a named
-      identifier on a line outside every named construct. Any other range
+      identifier, as a whole word, on a line outside every named construct. Any other range
       is refused with one line naming where each named construct sits. A
       clause that names no construct the file holds is not refused for
       that. A name is a backticked identifier in one of four forms, `x`,
@@ -79,6 +79,7 @@ acceptance:
       - Only the first declared pattern applied, so `Ledger` is never a construct.
       - A dotted name kept whole, so `git_mirror.export_saffron_dir(mirror, sha, dest)` names nothing.
       - A call form not read as a name, so the same citation names nothing.
+      - A name matched as a substring, so `_diff_cache` on line 57 clears the citation of line 57.
       - A call with no arguments not read as a name, so `_diff()` names nothing and line 20 passes.
       - A `]` level with the `def` ends the construct, so the citation of line 50 is refused.
       - A `}` level with the `def` ends the construct, so the citation of line 56 is refused.
@@ -159,8 +160,9 @@ refused 20 citations there, and 19 were right (#933). One said `run_stack_batch`
 
 **It also passes a range that starts below line 1, or ends before it
 starts.** Only the end is checked against the file
-(`saffron/spec_citations.py:156`). A start of 0 slices from index -1 in
-`_moved_lines` (`saffron/spec_citations.py:111-123`), the file's last line.
+(`saffron/spec_citations.py:156`). With a start of 0, `_moved_lines` slices
+`lines[-1:end]` (`saffron/spec_citations.py:111-123`). That is empty unless
+the range ends on the file's last line.
 
 **A sentence runs on past a list item and a bold heading.** A paragraph is
 joined into one line before sentences are split (`saffron/spec_citations.py:63`).
@@ -174,7 +176,8 @@ and `**Heading.** Text` stays one sentence. Refreshes for `SA-0305` and
 `last_path` at each path citation and each plain path, in text order
 (`saffron/spec_citations.py:77-86`). #933 said four bare numbers took "the
 paragraph's first path". In that paragraph `saffron/ledger.py` was both the
-first and the nearest. No test drives two paths in one paragraph.
+first and the nearest. No test puts a bare number after two different
+paths in one paragraph.
 
 **Who calls it.** `_stack_cite` returns
 `citation_defects(pinned.mirror, head, spec_text)` (`saffron/cli.py:1295`).
@@ -182,8 +185,9 @@ The batch's `cite` call refuses a spec on any defect, and a raise is a miss
 raised again (`saffron/batch.py:655-673`). The spec loop's `driver.py cite` keeps
 its own copy until `SA-0317` points it at `citation_count_and_defects`.
 
-**This pull request lands the policy key by hand.** `Policy` refuses an
-unknown key, so the key lands before the cell. `CitationPatterns` holds one
+**This pull request lands the policy key by hand.** Its lines below were
+read at `929067bb`. `Policy` refuses an unknown key, so the key lands
+before the cell. `CitationPatterns` holds one
 field, `definitions`, a list of Python `re` patterns each holding `{name}`
 (`saffron/repos/policy.py:162-186`). `Policy.citations` defaults to an empty
 block (`saffron/repos/policy.py:189-200`). `parse_policy(raw: bytes)` parses
@@ -246,7 +250,11 @@ def citation_count_and_defects(mirror: Path, commit: str, text: str) -> tuple[in
 ```
 
 It returns the citation count and the defects. `citation_defects` keeps its
-signature and returns the second half. `saffron/cli.py` does not change.
+signature and returns `citation_count_and_defects(mirror, commit, text)[1]`.
+`saffron/cli.py` does not change. Rewrite `citation_defects`' docstring,
+which states the quoted-text rule (`saffron/spec_citations.py:126-132`).
+Name the construct rule and the range shapes in their place, within ten
+lines.
 
 ## Out of scope
 
@@ -291,7 +299,7 @@ change does, so `pending_symbols` defers it while the spec is open.
 and assert `== []`, since no clause there names a construct. Its docstring
 says so.
 
-**The shared fixture.** Write one `mod/lib.py` holding these 56 lines, with
+**The shared fixture.** Write one `mod/lib.py` holding these 57 lines, with
 `pkg/other.py` holding three lines. Commit `.saffron/policy.yaml` holding
 this block.
 
@@ -360,6 +368,7 @@ LIB = [
     '    "a": 1,',
     "}):",
     "    return x",
+    "_diff_cache = {}",
 ]
 ```
 
@@ -393,6 +402,8 @@ Both «_diff» and «_print_summary» matter («mod/lib.py:21»).
 «_diff()» builds the patch («mod/lib.py:20»).
 «_rows» returns them («mod/lib.py:50»).
 «_shape» returns it («mod/lib.py:56»).
+«_diff» is cached at «mod/lib.py:57».
+«run_stack_batch» returns it («mod/lib.py:38»).
 ```
 
 ```text
@@ -404,6 +415,8 @@ mod/lib.py:21: the construct it names sits at mod/lib.py:4-6, 38-39
 mod/lib.py:17-22: the construct it names sits at mod/lib.py:19-23
 mod/lib.py:33: the construct it names sits at mod/lib.py:27-28
 mod/lib.py:20: the construct it names sits at mod/lib.py:4-6
+mod/lib.py:57: the construct it names sits at mod/lib.py:4-6
+mod/lib.py:38: the construct it names sits at mod/lib.py:31-35
 ```
 
 **Criterion 2's text.** Paragraphs are split by blank lines. Each list
