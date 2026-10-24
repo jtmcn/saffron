@@ -163,7 +163,7 @@ re-enter the repair loop. A person then fixed three comments by hand.
 
 **What §5.6 says today.** A red re-run after REBUT ends the task
 `EXHAUSTED`, and REBUT does not re-enter the repair loop
-(`DESIGN.md:1257`). The reason it gives is that a fix for a confirmed
+(`DESIGN.md:1261`). The reason it gives is that a fix for a confirmed
 blocker that breaks something else is the most informative failure. A
 comment that breaks the house style is not that failure. The operator
 settled the arm. A red re-run whose every new failure sits in a gate the
@@ -203,7 +203,7 @@ alone, and refuses any other key (`saffron/repos/policy.py:57-60`).
 Measured on `af2831e8`: `Policy.model_validate` on a gate declaring
 `form: true` raises `extra_forbidden`. A policy cannot declare a core gate
 at all. `_no_core_gate_names` refuses each name in `CORE_GATE_NAMES`
-(`saffron/repos/policy.py:32-46`, `:187-196`). A gate declared
+(`saffron/repos/policy.py:32-46`, `:215-224`). A gate declared
 `blocking: false` is advisory, and its failures never reach
 `new_failures` (`saffron/gates/suite.py:245-270`).
 
