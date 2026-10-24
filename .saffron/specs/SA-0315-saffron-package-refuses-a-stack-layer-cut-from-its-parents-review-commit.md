@@ -4,7 +4,8 @@ title: "`saffron package` refuses a stack layer cut from its parent's review com
 type: feature
 priority: 2
 depends_on: [SA-0313]
-estimated_lines: 290
+estimated_lines: 250
+estimate_measured: true
 touches:
   - saffron/task.py
   - tests/test_task.py
@@ -51,10 +52,13 @@ acceptance:
       base or descends from it. The newest qualifying task's branch is
       `parent_branch`. The witness drives a tree base one commit above
       the parent's `pushed_sha` and a tree base equal to the branch head.
-      Three decoys stand beside the parent. A newer task's branch carries
-      the tree base, but its `pushed_sha` is off the tree base's history.
-      A newer task's `pushed_sha` is an ancestor, but its branch does not
-      carry the tree base. An older task qualifies too.
+      Every branch commit reaches origin from a second clone, so the
+      checkout and the mirror lack it until a fetch. Four decoys stand
+      beside the parent. A newer task's branch carries the tree base, but
+      its `pushed_sha` is off the tree base's history. A newer task's
+      `pushed_sha` is an ancestor, but its branch does not carry the tree
+      base. A newer task's `pushed_sha` is its own branch head, a commit
+      above the tree base. An older task qualifies too.
     witness: tests/test_task.py::test_ready_task_stacks_on_the_newest_branch_that_carries_its_tree_base_above_a_pushed_sha
     wrong_versions:
       - The fallback picks the newest task whose branch carries the tree base and never checks its `pushed_sha`.
@@ -62,27 +66,34 @@ acceptance:
       - The fallback picks the oldest qualifying task.
       - The fallback accepts only a tree base equal to the branch head.
       - The fallback accepts only a tree base strictly below the branch head.
+      - The fallback checks that the `pushed_sha` is an ancestor of the branch head rather than of the tree base.
+      - The fallback never fetches. It takes each head from `ls-remote` and runs `merge-base` in the mirror.
+      - The fallback refuses at once when the mirror does not hold the tree base.
+      - The fallback reads `refs/remotes/origin/<branch>` in the mirror rather than fetching from origin.
   - claim: >-
       A tree base that no task's branch at origin carries is still refused,
       and the reason names its first twelve characters. The `tasks` table
-      is left as it was. The witness drives three such tree bases. One sits
-      on a branch the checkout holds but origin does not, which the mirror
-      copies from the checkout. One sits on a branch the checkout holds
-      under the same name as an origin branch that does not carry it. One
-      is a sha no repository holds. A task whose branch origin lacks is
-      skipped, never raised on.
+      is left as it was. A task whose branch origin lacks is skipped, never
+      raised on. The witness drives four such tree bases. Each has a task
+      that records the branch named below, with the parent's `pushed_sha`.
+      One sits on a branch only the checkout holds, which the mirror copies
+      from the checkout. One sits on the checkout's own copy of an origin
+      branch, ahead of where origin's copy stops. One sits on a branch
+      origin held, which the checkout fetched and origin then deleted. One
+      is a sha no repository holds.
     witness: tests/test_task.py::test_ready_task_refuses_a_tree_base_no_branch_at_origin_carries
     wrong_versions:
-      - The fallback reads a task's branch from the mirror's own refs, which `ensure_mirror` copied from the checkout, not from origin.
-      - A branch origin lacks raises `ParentGone` out of `ready_task`.
+      - The fallback reads a task's branch from the mirror's own `refs/heads`, which `ensure_mirror` copied from the checkout, not from origin.
+      - The fallback reads `refs/remotes/origin/<branch>` in the mirror, which still names a branch origin deleted.
+      - The fallback fetches every task's branch without listing origin first, so a branch origin lacks raises `ParentGone` out of `ready_task`.
       - A sha no repository holds raises from `git merge-base`, since its exit 128 is not read as "not carried".
-      - The refusal names the parent's `pushed_sha` rather than the tree base.
   - claim: >-
       Every refusal `ready_task` made before the fallback returns before
       any mirror step. The witness names `mirror_path` and `repo` at paths
       that do not exist. It drives each refusal it drove at base, the
       unmatched tree base excepted, and checks that `mirror_path` still
-      does not exist after each.
+      does not exist after each. Its `spec_sha` case writes a tree base
+      that differs from `base_sha` and that no task pushed.
     witness: tests/test_task.py::test_ready_task_refuses_with_a_reason_and_writes_nothing
     preserves: true
   - claim: >-
@@ -127,8 +138,10 @@ from `base_sha`, it keeps the rows of `ledger.tasks_by_repo` whose
 `pushed_sha` equals `tree_base`. With none, it returns that refusal.
 Otherwise the newest wins, and its branch is read off
 `ledger.tasks_by_spec_id`, since `tasks_by_repo` carries no `branch`
-column. That exact match is `saffron/task.py:987-1001`, its branch read
-`:999-1008`, and the columns `saffron/ledger.py:1147-1152`.
+column. That exact match is `saffron/task.py:989-998`, its branch read
+`:999-1008`, and the columns `saffron/ledger.py:1147-1152`. The refusals
+before it come at `:905-933`, and `_spec_for_task` refuses an unmatched
+`spec_sha` at `:939-941`.
 
 **The rebuild runs no git and touches no disk.** Its docstring says
 nothing in it writes, to the ledger or to disk (`saffron/task.py:897-899`).
@@ -143,8 +156,10 @@ says a `Refused` comes back "before the mirror, the image or the network
 exist" (`:1040-1041`). `saffron package` builds `mirror_path` with
 `_mirror_path(repo, args.home)` and hands it over (`saffron/cli.py:2843-2856`).
 
-**The mirror alone cannot answer.** `ensure_mirror` fetches an existing
-mirror from the checkout with `--prune` (`saffron/repos/mirror.py:74-81`).
+**The mirror alone cannot answer.** `ensure_mirror` clones a new mirror
+from the checkout with `--mirror --no-local`, which copies every ref,
+`refs/remotes/*` included (`saffron/repos/mirror.py:84-92`). It fetches an
+existing mirror from the checkout with `--prune` (`:74-81`).
 A branch the checkout lacks is deleted from the mirror, and a branch the
 checkout holds is the checkout's copy, not origin's. §5.7 says the same
 of the mirror and the working copy. So the tree base can be missing from the
@@ -159,7 +174,8 @@ gives origin's url (`:97-104`).
 - `test_ready_task_refuses_with_a_reason_and_writes_nothing` drives every
   refusal (`tests/test_task.py:2915-3059`). Its last case is an unmatched
   tree base, `"e" * 40`, with `repo` at a path that does not exist
-  (`:3035-3057`).
+  (`:3035-3057`). Its `spec_sha` case writes `tree_base` equal to
+  `base_sha` (`:3025`), so the fallback condition never holds there.
 - The `_rt_*` helpers write ledger rows and files only (`:2460-2560`).
   `_git` and `_commit` build real git (`:967-990`).
 - `test_package_probes_the_host_then_runs_package_on_the_rebuilt_task`
@@ -182,19 +198,26 @@ gives origin's url (`:97-104`).
    - The newest qualifying task wins, and its branch is `parent_branch`.
    - A branch origin lacks disqualifies its task. A sha the mirror cannot
      read disqualifies too.
+   - A failed `git ls-remote` raises, and so does a failed fetch of a
+     branch it listed. Neither is a refusal, since `saffron package` exits
+     1 on a refusal and 2 on infrastructure.
    - With none qualifying, the refusal is today's, naming the tree base's
      first twelve characters.
 3. **Every other refusal stays ahead of the mirror.** No-task, state,
    pull request, file, `spec_sha` and the exact match all return before
    the fallback runs.
 4. **Docstrings.** The docstrings of `ready_task` and `package_ready_task`
-   name the one path that reads the mirror.
+   name the one path that reads the mirror. `ready_task`'s stays within
+   ten lines, the prose gate's cap.
 5. **Existing tests.**
    - Every `ready_task` call in `tests/test_task.py` passes `mirror_path`.
      The three `preserves` witnesses name one under `tmp_path` that does
      not exist and assert it is still absent afterward.
    - The unmatched `"e" * 40` case moves out of the refusal test into
      criterion 2's witness, since it now reaches the fallback.
+   - The refusal test's `spec_sha` case writes a `tree_base` such as
+     `"d" * 40`, so a fallback hoisted above `_spec_for_task` reaches the
+     mirror there and fails.
    - `fake_ready_task` in `tests/test_cli.py` accepts `mirror_path` and
      records it. The test asserts it equals the path `prepare_mirror` got.
 
@@ -212,8 +235,9 @@ The fallback is new code, so criteria 1 and 2 declare a witness and no
 mutant. Criteria 3 to 6 are `preserves` witnesses that exist at base. Each
 one gains `mirror_path` in this change.
 
-**Fetch little.** The home ledger holds 262 tasks with a pushed sha, 248 of
-them `MERGED`, and their branches are mostly deleted. List origin's
+**Fetch little.** Measured off base, in the home ledger on 2026-10-23: 262
+tasks carry a pushed sha, 248 of them `MERGED`, and most of their branches
+are deleted. List origin's
 branches once with `git ls-remote <url> 'refs/heads/*'`. Keep only tasks
 whose branch origin still has. Walk those newest first and fetch each with
 `fetch_parent_branch`. Stop at the first that qualifies. Fetch before the
@@ -223,9 +247,8 @@ then (`ensure_mirror --prune`, `saffron/repos/mirror.py:74-81`).
 **Read exit codes, not exceptions.** `git merge-base --is-ancestor` exits 0
 for yes, 1 for no, and 128 for a commit it cannot read
 (`saffron/cli.py:515-517`). Treat 1 and 128 as "does not qualify" here.
-`git_mirror.has_commit` answers whether a sha is a commit and never raises
-(`saffron/repos/mirror.py:285-294`). A failure of `ensure_mirror` or
-`real_remote` itself still raises. That is infrastructure, and
+A failure of `ensure_mirror`, `real_remote`, `ls-remote` or a listed
+branch's fetch still raises. That is infrastructure, and
 `saffron package` exits 2 on it.
 
 **The fixture for criteria 1 and 2.** Build it from `_git` and `_commit`
@@ -233,22 +256,29 @@ for yes, 1 for no, and 128 for a commit it cannot read
 `_rt_write_patch` and `_rt_seed_records` for the ledger and task directory.
 - Make a bare `origin.git` and a checkout whose `origin` remote is its path.
   `ensure_mirror` clones the checkout, and `real_remote` reads its remote.
-- On `main`, commit `B` and push it.
-- On branch `saffron/RT-2`, commit `P`, then the review commit `R`, then
-  `R2`. Push the branch to origin at `R2`.
+- In the checkout, commit `B` on `main` and push it. The checkout holds
+  nothing else in criterion 1.
+- In a second clone of `origin.git`, commit `P`, the review commit `R`,
+  `R2` and `R3` in a line on `saffron/RT-2`. Commit `X` on `main` after
+  `B`. Push each branch from there, so the mirror lacks these commits
+  until it fetches.
 - A decoy's branch can point origin at an existing commit, such as
-  `git push origin R2:refs/heads/saffron/RT-3`.
-- For criterion 2, a checkout-only branch holds a commit `T` above `P`
-  that origin never receives.
+  `git push origin <R2>:refs/heads/saffron/RT-3`.
+- For criterion 2, the checkout fetches origin first. The checkout-only
+  branch and the checkout's own `saffron/RT-2` each take a commit above
+  `P` that origin never receives. The deleted branch is pushed from the
+  second clone, fetched by the checkout, then removed inside `origin.git`
+  with `git update-ref -d`.
 - Record `pushed_sha` and `branch` with `ledger.set_task_package`, as
   `test_ready_task_stacks_on_the_branch_of_the_task_that_pushed_its_tree_base`
   does.
 - Create tasks oldest first. `tasks_by_repo` orders by `task_id`.
 
-**Kill the wrong versions with the arrangement.** Criterion 1 has a newer
-decoy whose branch carries `R`. Its `pushed_sha` is a sibling of `R` on
-`main`, and it must lose to `RT-2`. So must the newer decoy pushed at
-`P` whose origin branch stops at `P`. In criterion 2, give the
-checkout's own `saffron/RT-2` a commit above `P` that origin's
-`saffron/RT-2` lacks. A version that reads the mirror's ref then accepts
-it, and the witness refuses.
+**Kill the wrong versions with the arrangement.** In criterion 1, the
+parent `RT-2` records `P`. The newer decoys must all lose to it:
+- `RT-3` records `X`, and its origin branch sits at `R2`.
+- `RT-4` records `P`, and its origin branch stops at `P`.
+- `RT-8` records `R3`, and its origin branch sits at `R3`.
+The older `RT-5` records `B`, and its origin branch sits at `R2`. A
+prototype of this fixture killed every wrong version listed under
+criteria 1 and 2.
