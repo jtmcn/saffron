@@ -3,6 +3,7 @@ id: SA-0313
 title: "`saffron adopt` leaves a fixed task unpushed and out of `READY_FOR_REVIEW`, so its children stay refused"
 type: feature
 priority: 2
+depends_on: [SA-0312]
 estimated_lines: 370
 touches:
   - saffron/cli.py

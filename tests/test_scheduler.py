@@ -3552,7 +3552,6 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0298",
         "SA-0311",
         "SA-0312",
-        "SA-0313",
         "SA-0314",
         "SA-0225",
         "SA-0269",
@@ -3630,6 +3629,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0304",
         "SA-0305",
         "SA-0306",
+        "SA-0313",
     ]
     # A precondition, not the glob check: `done/` holds far more specs than the
     # queue above, so that exact list is a check rather than a scan of nothing.
