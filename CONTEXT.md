@@ -151,8 +151,9 @@ _Avoid_: "session" (that means an agent session), "cycle", "sweep", "run".
 `INCOMPLETE`. Why a night ended, written on the batch when it closes and absent
 while it is still running. An absent one means in flight, not unknown. Never a
 task's end state: these describe the night, and `DRAINED` says the queue emptied,
-not that anything in it succeeded. `INFRASTRUCTURE` is the breaker firing, and
-it is the only one of the five that says the machine rather than the work was
+not that anything in it succeeded. `INFRASTRUCTURE` is the breaker firing, a
+failed readiness probe, or a PACKAGE raise on a task in `READY_FOR_REVIEW`. It
+is the only one of the five that says the machine rather than the work was
 wrong. `INCOMPLETE` is a night that left a task in flight: that task reached no
 end state, which is not the same as failing. It outranks the other ordinary
 reasons, and `INFRASTRUCTURE` outranks it.

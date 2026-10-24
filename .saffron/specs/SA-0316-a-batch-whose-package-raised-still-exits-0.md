@@ -4,7 +4,7 @@ title: "A batch whose PACKAGE raised still exits 0, and a stack batch offers tha
 type: feature
 priority: 2
 depends_on: [SA-0315]
-estimated_lines: 345
+estimated_lines: 395
 estimate_measured: true
 touches:
   - saffron/task.py
@@ -47,21 +47,24 @@ risk: standard
 acceptance:
   - claim: >-
       `run_task` marks every exception that escapes it from its
-      `package_phase.package` call, and re-raises that same object with its
-      type unchanged. `saffron.task.raised_in_package(exc)` reads the mark
-      and returns `True` for it. The witness drives three such raises. They
-      are a `PackageError` from a
-      `READY_FOR_REVIEW` cell, a `CellRuntimeError` from a
-      `READY_FOR_REVIEW` cell, and a `CellRuntimeError` in the exhausted
-      mode. Three raises escape unmarked. One comes from `run_one_cell`.
-      One comes from the queue-line write of a `GATE_ERROR` cell, which
-      reaches no PACKAGE call. The third is a fresh exception that never
-      passed through `run_task`.
+      `package_phase.package` call for a `READY_FOR_REVIEW` cell. It
+      re-raises that same object with its type unchanged.
+      `saffron.task.raised_in_package(exc)` reads the mark and returns
+      `True` for it. The witness drives two such raises, a `PackageError`
+      and a `CellRuntimeError`. Six raises escape unmarked, each the same
+      object. One is a `CellRuntimeError` from the PACKAGE call in the
+      exhausted mode. One is a `CellRuntimeError` from
+      `push_unpackaged_work` after the exhausted mode's `package` refused.
+      One comes from `run_one_cell`. One comes from the queue-line write
+      of a `GATE_ERROR` cell, which reaches no PACKAGE call. The last two
+      are a fresh `CellRuntimeError` and a fresh `PackageError`.
     witness: tests/test_task.py::test_a_raise_that_escapes_run_task_from_package_is_marked_and_kept
     wrong_versions:
       - "`run_task` wraps the raise in a new exception type, so the caller no longer sees a `CellRuntimeError`."
       - "Only a `PackageError` is marked, so run 46's `CellRuntimeError` from re-verification reaches the batch unmarked."
-      - "The exhausted mode's `except BaseException` branch re-raises without marking."
+      - "The exhausted mode's `except BaseException` branch marks its raise too, so a batch logs a `saffron package` command that refuses an `EXHAUSTED` task."
+      - "`raised_in_package` is true for any `PackageError`."
+      - "The exhausted mode's push is wrapped in a handler that marks its raise."
       - "Every exception that escapes `run_task` is marked, the cell's own included."
       - "One `except BaseException` around everything after `run_one_cell` returns marks the raise, so a raise from `append_queue_line` is marked too."
       - "The mark is set on the exception's class rather than on the object, so a fresh `CellRuntimeError` reads as marked."
@@ -70,8 +73,11 @@ acceptance:
       runner raised a marked exception, whatever reason the loop stopped
       on. The loop still runs every later candidate it would have run. The
       log carries a line naming the command `saffron package <spec id>` for
-      the spec that raised, and for no other spec. A later candidate whose
-      runner raised an unmarked exception is not named. The witness drives each
+      the spec that raised, and for no other spec. That spec keeps its
+      `raised` line beside the command line. A later candidate whose runner
+      raised an unmarked `CellRuntimeError` or `PackageError` gets its
+      `raised` line and no command line. Two marked raises in a row still
+      fire the breaker, so a third candidate never runs. The witness drives each
       of the four reasons the loop can stop on besides the breaker:
       `DRAINED`, `BUDGET`, `UNTIL` and `INCOMPLETE`. The `DRAINED` case
       raises a marked `PackageError` and the other three a marked
@@ -84,6 +90,9 @@ acceptance:
       - "Only a marked `CellRuntimeError` is promoted, so a marked `PackageError` drains at exit 0."
       - "The log line names `saffron package` with no spec id, or names every spec the batch started."
       - "The command line is emitted beside the `raised` line for every runner raise, marked or not."
+      - "The command line replaces the `raised` line for a marked raise."
+      - "A marked raise is not counted toward the breaker, so a third candidate runs after two marked raises."
+      - "`raised_in_package` is true for any `PackageError`, so a `PackageError` from the stack runner's fetch is named."
       - "The returned reason is promoted but the row is closed with the loop's own reason."
   - claim: >-
       A stack batch treats a marked raise from its runner as a miss. It
@@ -221,13 +230,15 @@ follow-ups only when that reason is `DRAINED` (`saffron/batch.py:921`).
    `raised_in_package(exc: BaseException) -> bool` to `saffron/task.py`.
    The mark lives on the exception object itself. Mark in both `except`
    branches around the `package_phase.package` call, before each
-   `raise`. Keep `raise` bare, so the same object and traceback escape.
+   `raise`, and only when the cell reached `READY_FOR_REVIEW`. An
+   exhausted-mode raise stays unmarked and keeps today's behaviour. Keep `raise` bare, so the same object and traceback escape.
 2. **Note it in `_drive`.** `_drive` takes one more list from its caller,
    owned beside `in_flight`. When the runner raised and
    `raised_in_package(exc)` is true, append the spec id. Do not take a
-   marked `CellRuntimeError` back out of `started`. Emit one line naming
-   the spec and the command `saffron package <spec id>`. Keep the abort
-   count and the orphan attach as they are.
+   marked `CellRuntimeError` back out of `started`. Beside the `raised`
+   line, which stays as it is, emit one more line naming the spec and the
+   command `saffron package <spec id>`. Keep the abort count and the
+   orphan attach as they are.
 3. **Make it a miss in `wrapped`.** A marked `CellRuntimeError` from the
    runner is recorded in `missed` and removed from `remaining`, as any
    other raise is. An unmarked one keeps today's handling.
@@ -249,13 +260,18 @@ follow-ups only when that reason is `DRAINED` (`saffron/batch.py:921`).
 - An exhausted-mode `PackageError`. It is caught, and
   `package_phase.push_unpackaged_work` pushes the branch
   (`saffron/task.py:674-708`), so it never reaches the batch.
-- A task `saffron package` refuses. It refuses a task not in
-  `READY_FOR_REVIEW` (`saffron/task.py:911-914`). An exhausted-mode
-  `CellRuntimeError` is marked and promotes the row, but its task stays
-  `EXHAUSTED`. The log still names the command, and that command refuses.
+- An exhausted-mode raise that escapes `run_task`. It stays unmarked, so
+  a batch handles it as today. `saffron package` refuses a task not in
+  `READY_FOR_REVIEW` (`saffron/task.py:911-914`), so naming the command
+  for it would send the operator to a refusal.
+- `saffron cell`. A PACKAGE raise there still exits 2 through `main` and
+  names no `saffron package` command.
+- The `_batch` docstring names two causes of `INFRASTRUCTURE`
+  (`saffron/cli.py:2110-2114`). A PACKAGE raise is now a third, but
+  `cli.py` is forbidden here, so that docstring stays stale.
 - `saffron/cli.py`. Its exit mapping already reads the reason.
-- `DESIGN.md` §4.2.1 and ADR 7. Their paragraphs change by hand in this
-  spec's own pull request.
+- `DESIGN.md` §4.2.1, ADR 7 and the `CONTEXT.md` entry for the batch stop
+  reason. They change by hand in this spec's own pull request.
 
 ## Notes for the agent
 
@@ -269,15 +285,18 @@ reads as `skip`.
 
 **Criterion 1's witness.** Drive `run_task` three times with
 `package_phase.package` replaced by a function that raises a prepared
-exception. Assert `excinfo.value is` that exception, its type is unchanged,
-and `raised_in_package` is true. A `READY_FOR_REVIEW` raise needs the task
-row, as `_mint_sy5` writes it. For the exhausted mode, pass `reviews` with
-one anchored blocker and `rebut_result=None` through `_drive`'s
-`**outcome_fields`. Then replace `run_one_cell` with one that raises a
+exception. Assert `excinfo.value is` that exception and its type is
+unchanged. `raised_in_package` is true for the two `READY_FOR_REVIEW`
+raises and false for the exhausted one. A `READY_FOR_REVIEW` raise needs
+the task row, as `_mint_sy5` writes it. For the exhausted mode, pass
+`reviews` with one anchored blocker and `rebut_result=None` through
+`_drive`'s `**outcome_fields`. Then let the exhausted mode's `package`
+return a refusal and `push_unpackaged_work` raise, and assert that raise
+escapes unmarked. Then replace `run_one_cell` with one that raises a
 `CellRuntimeError`, and assert that one is unmarked. Drive a `GATE_ERROR`
 cell with `append_queue_line` replaced by one that raises a
 `CellRuntimeError`, and assert it escapes unmarked. Assert a fresh
-`CellRuntimeError` is unmarked too.
+`CellRuntimeError` and a fresh `PackageError` are unmarked too.
 
 **Criterion 2's witness.** Build each marked exception with
 `mark_raised_in_package`, then hand it to `FakeRunner`. In each case the
@@ -290,8 +309,18 @@ first candidate raises and a second candidate follows.
 
 Assert the returned reason, `_batch_row(...)["status"]`, a line holding
 `saffron package <first id>`, and no line holding the second id's command.
-Add a fifth night whose second candidate raises an unmarked
-`CellRuntimeError`. Assert its `raised` line appears and no command names it.
+In the `DRAINED` case, assert the first spec's `raised` line too. Match
+it on its exception type and message, so the command line cannot stand in.
+Add two more batches whose first candidate raises marked and whose second
+raises unmarked, once a `CellRuntimeError` and once a `PackageError`.
+Assert each second spec's `raised` line appears and no command names it.
+Add a last batch of three candidates whose first two raise marked. Assert
+it returns `INFRASTRUCTURE` and the third never ran.
+
+A `PackageError` reaches the batch from outside PACKAGE too. The stack
+runner's `fetch_parent_branch` raises one before any cell
+(`saffron/cli.py:797`), and so can the check `_stack_base_alive` builds
+(`saffron/cli.py:756-762`). Neither is marked, so neither is named.
 
 **Criterion 3's witness.** Use `RaisingStackDoubles` with marked
 `CellRuntimeError`s and `sleep=_fail_sleep`. In the first batch, the order
@@ -319,10 +348,10 @@ printed output holds `saffron package SY-1`, and the row reads
 `INFRASTRUCTURE`. The `--stack` form shares the same exit mapping, and
 criterion 3 drives its batch.
 
-Criterion 1's set is every exception the PACKAGE call lets escape. Its
-witness drives `PackageError` and `CellRuntimeError`. A
-`KeyboardInterrupt` takes the same `except BaseException` branch and is
-marked too, but no witness drives it. `_drive` catches only `Exception`,
+Criterion 1's set is every exception the PACKAGE call lets escape for a
+`READY_FOR_REVIEW` cell. Its witness drives `PackageError` and
+`CellRuntimeError`. A `KeyboardInterrupt` takes the same `except
+BaseException` branch and is marked too, but no witness drives it. `_drive` catches only `Exception`,
 so a batch never reads that mark.
 
 Criterion 3's witness raises a marked `CellRuntimeError` alone. A marked
@@ -330,4 +359,4 @@ Criterion 3's witness raises a marked `CellRuntimeError` alone. A marked
 the same `_stop` that criterion 2 drives with one.
 
 The marked raise still counts toward the breaker, as every raise does
-(`saffron/batch.py:298`). Leave that count alone.
+(`saffron/batch.py:298`). Leave that count alone. Criterion 2 drives it.

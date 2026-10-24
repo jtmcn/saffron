@@ -179,7 +179,8 @@ factory:standard a factory:RiskTier . factory:elevated a factory:RiskTier .
 
 ## How a night ended (§4.2.1). Not a task's end state: these describe the batch,
 ## and a batch that drained is not a batch that passed — every task in it may
-## have failed. INFRASTRUCTURE is the breaker, and it is the only one of the
+## have failed. INFRASTRUCTURE is the breaker, a failed readiness probe or a
+## PACKAGE raise on a reviewable task, and it is the only one of the
 ## five that says the machine rather than the work was wrong. INCOMPLETE is a
 ## night that left a task in flight: no end state at all, which is not a
 ## failure the morning can read (backlog item 70).
