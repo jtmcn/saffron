@@ -284,8 +284,10 @@ Design notes:
                        any cell existed, such as N1's host probe (§5.1)
   NOT_IMPLEMENTED  ◀── IMPLEMENT produced no commit. Measured, never reported —
                        a dead seam here would have returned an earned state.
-                       Leaves only for `MERGED`, when `reconcile` reads that a
-                       pull request `saffron adopt` attached merged (`SA-0264`)
+                       Leaves for `MERGED`, when `reconcile` reads that a
+                       pull request `saffron adopt` attached merged (`SA-0264`).
+                       Also for `READY_FOR_REVIEW`, when `saffron adopt`'s
+                       re-gate of that pull request's head is green (`SA-0313`)
   GATE_ERROR       ◀── a gate errored, the two suites drifted, the critic cell
                        met a binary stub the export cannot carry, a verdict
                        session never started, or a stack batch's spec session
@@ -303,10 +305,12 @@ Design notes:
                        attempt's commits net to no change (§5.5).
                        Also from REBUTTING: a REBUT pool refused a session
                        and the rebuttal was left unjudged.
-                       Its blockers stand (§5.6). Leaves only for `MERGED`,
+                       Its blockers stand (§5.6). Leaves for `MERGED`,
                        when `reconcile` reads that the draft PACKAGE opened
                        for it, or a pull request `saffron adopt` attached,
-                       merged (§5.7)
+                       merged (§5.7). Also for `READY_FOR_REVIEW`, when
+                       `saffron adopt`'s re-gate is green, as is a
+                       `MERGE_FAILED` task's (`SA-0313`)
   RATE_LIMITED     ◀── any turn, on a `rejected` window: the provider's ceiling,
                        not the task's. Deliberately not EXHAUSTED — nothing was
                        learned about the spec, and the retry is free (N2, §5.1)
@@ -1282,7 +1286,7 @@ Host-side, deterministic:
 
 **A stacked task has two bases, and they answer different questions**. `base_sha` stays the run's pin. Gates, policy and the `.saffron/` export are read from it whether the task is stacked or not. So two tasks queued the same night are still measured against one declaration. `tree_base` is what the worktree is built on and the patch is exported against: `base_sha` for an ordinary task, and the parent's branch head for a stacked one. `patch.json` records both, because PACKAGE has to apply the patch against the tree it is relative to while reading its policy from the pin. Collapsing them was the defect the three specs building stacking each had to avoid in turn (`SA-0022`, `SA-0025`, `SA-0026`).
 
-**The parent's head is fetched, never remembered**. A task row's `pushed_sha` is written once, by PACKAGE, and a branch moves afterwards. Every review fix an operator commits by hand puts it ahead. The ledger is asked *which branch*. The branch is asked which commit, freshly, at both ends. It is asked once when the cell is built and again at PACKAGE. At PACKAGE, a parent that merged in the meantime falls back to the default branch. A parent that is gone is `MERGE_FAILED`, rather than a pull request opened against a branch that is not there. Nothing else puts the parent's objects in the mirror. `ensure_mirror` fetches from the *local working copy* and prunes. So a parent branch that is not checked out in the operator's working copy is deleted from the mirror between one task and the next.
+**The parent's head is fetched, never remembered**. A task row's `pushed_sha` is written by PACKAGE, or by `saffron adopt` from a pull request's head (`SA-0313`). A branch moves afterwards. Every review fix an operator commits by hand puts it ahead. The ledger is asked *which branch*. The branch is asked which commit, freshly, at both ends. It is asked once when the cell is built and again at PACKAGE. At PACKAGE, a parent that merged in the meantime falls back to the default branch. A parent that is gone is `MERGE_FAILED`, rather than a pull request opened against a branch that is not there. Nothing else puts the parent's objects in the mirror. `ensure_mirror` fetches from the *local working copy* and prunes. So a parent branch that is not checked out in the operator's working copy is deleted from the mirror between one task and the next.
 
 #### v1: one squashed commit, a draft PR, and re-verification of every packaged commit
 

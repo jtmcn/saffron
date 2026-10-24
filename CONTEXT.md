@@ -764,9 +764,13 @@ and neither has one whose outcome still waits on the operator. An `EXHAUSTED` or
 and not merged, and only `reconcile` can still move it, to `MERGED`.
 
 **Adopt**: What the operator does with `saffron adopt` to attach a by-hand pull
-request to a spec's newest `NOT_IMPLEMENTED`, `READY_FOR_REVIEW` or `EXHAUSTED`
-task that carries none. `reconcile` then asks GitHub about it, and a merge makes
-the task `MERGED` and admits its dependents (`SA-0264`).
+request to a spec's newest `NOT_IMPLEMENTED`, `READY_FOR_REVIEW`, `EXHAUSTED` or
+`MERGE_FAILED` task that carries none. Adopt records the pull request's head as
+the task's pushed sha. It re-gates a task in any of those states but
+`READY_FOR_REVIEW`, and a green re-gate of that head moves the task to
+`READY_FOR_REVIEW` (`SA-0313`). Otherwise the state stays. `reconcile` then asks
+GitHub about it, and a merge makes the task `MERGED` and admits its dependents
+(`SA-0264`).
 _Avoid_: "import", "link" (linking is what `gh stack link` does to a stack).
 
 **Merge train**: The serial post-approval process: rebase onto current `main`,
