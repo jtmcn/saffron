@@ -166,8 +166,8 @@ for a batch started with `--defer-end-review`.
 _Avoid_: "stack run" (a run is a pin), "spec loop" (the delegate's attended pass).
 
 **Stack order**: A stack batch's fixed order over its queued specs. A spec joins it
-once every `depends_on` entry is already in the order, on the default branch, or the
-stack base. Among
+once every `depends_on` entry is already in the order, on the default branch, or on the
+stack base's chain. Among
 ready specs the lowest `priority` goes first, then the lowest id. A spec the order
 never takes is refused before any cell starts.
 
@@ -175,11 +175,12 @@ never takes is refused before any cell starts.
 `READY_FOR_REVIEW`. For the first layer it is the stack base's task, if the order
 has a base. The task is cut from the predecessor's head and targets its
 branch. A task with no predecessor is cut from `base_sha`.
-_Avoid_: "parent" (that is `depends_on[0]`, and a predecessor need not be one).
+_Avoid_: "parent" (that is a `depends_on` entry, and a predecessor need not be one).
 
 **Stack base**: A parent outside a stack order whose newest waiting task has a
 pushed branch and a pull request, from an earlier batch or cell. A stack batch stacks its first layer
-on that branch, and links nothing. An order has at most one (`SA-0265`, `SA-0267`).
+on that branch, and links nothing. An order has at most one. It is the qualifying parent whose
+chain holds the most others (`SA-0265`, `SA-0267`, `SA-0312`).
 _Avoid_: "base" alone (that is `base_sha`), "root".
 
 **Layer**: A task in a stack batch that reached `READY_FOR_REVIEW`. It is one
@@ -771,8 +772,9 @@ _Avoid_: "import", "link" (linking is what `gh stack link` does to a stack).
 re-run the full gate suite on the merged result, merge only if green.
 _Avoid_: "merge queue" (GitHub's feature, which this is not).
 
-**Stacked branch**: A dependent task's branch, cut from its parent's branch rather
-than `base_sha`, because dependencies are satisfied at `READY_FOR_REVIEW`. In a stack
+**Stacked branch**: A dependent task's branch, cut from its deepest open parent's branch
+rather than `base_sha`, because dependencies are satisfied at `READY_FOR_REVIEW`. That
+parent's `depends_on` chain holds every other open parent (`SA-0312`). In a stack
 batch a task is cut from its predecessor's head instead, which need not be its parent.
 A dependency there is met by a layer below it in the same stack, by the stack base,
 or by the default branch.
