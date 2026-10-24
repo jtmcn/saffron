@@ -40,7 +40,6 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-import subprocess
 import tempfile
 import time
 from collections.abc import Callable
@@ -85,6 +84,7 @@ from saffron.repos import image as repo_image
 from saffron.repos.mirror import (
     GitError,
     UnreadablePath,
+    _run,
     export_saffron_dir,
     file_at,
     has_commit,
@@ -201,8 +201,7 @@ class _StackingRefused(Exception):
     lie on no one chain (b-1572e7). Also raised when an on-chain
     parent's fetched head is not an ancestor of the deepest parent's.
     `run_task` catches this and returns `Refused` before any cell
-    starts. A plain exception rather than a `Refused` return, since
-    every caller here unpacks a two-tuple."""
+    starts."""
 
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
@@ -211,10 +210,9 @@ class _StackingRefused(Exception):
 
 def _is_ancestor(mirror: Path, maybe_ancestor: str, descendant: str) -> bool:
     """Whether `maybe_ancestor` reaches `descendant` in `mirror`, the way
-    `cli._pushed_landed` asks it. Copied rather than imported, since
-    `cli.py` is forbidden to this spec. `rev-parse --verify` first, because
+    `cli._pushed_landed` asks it. `rev-parse --verify` first, because
     `merge-base --is-ancestor` alone exits 128 for a missing commit too."""
-    verify = subprocess.run(
+    verify = _run(
         [
             "git",
             "-C",
@@ -223,10 +221,7 @@ def _is_ancestor(mirror: Path, maybe_ancestor: str, descendant: str) -> bool:
             "--verify",
             "--quiet",
             f"{maybe_ancestor}^{{commit}}",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
+        ]
     )
     if verify.returncode == 1:
         return False
@@ -234,7 +229,7 @@ def _is_ancestor(mirror: Path, maybe_ancestor: str, descendant: str) -> bool:
         raise GitError(
             f"git rev-parse --verify {maybe_ancestor}: {verify.stderr.strip()}"
         )
-    ancestor = subprocess.run(
+    ancestor = _run(
         [
             "git",
             "-C",
@@ -243,10 +238,7 @@ def _is_ancestor(mirror: Path, maybe_ancestor: str, descendant: str) -> bool:
             "--is-ancestor",
             maybe_ancestor,
             descendant,
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
+        ]
     )
     if ancestor.returncode == 0:
         return True
@@ -257,26 +249,35 @@ def _is_ancestor(mirror: Path, maybe_ancestor: str, descendant: str) -> bool:
     )
 
 
-def _fetch_branch(
+def _newest_stackable(
+    rows: list[sqlite3.Row], stackable_states: frozenset[str]
+) -> sqlite3.Row | None:
+    """The newest of `rows` in `stackable_states`, the row a parent stacks from."""
+    stackable = [row for row in rows if row["state"] in stackable_states]
+    return stackable[-1] if stackable else None
+
+
+def _fetch_parent_head(
+    branch: str | None,
+    pushed_sha: str | None,
     *,
-    rows: list[sqlite3.Row],
     parent_id: str,
     mirror: Path,
     url: str,
     spec_id: str,
     emit: Callable[[Event], None],
 ) -> tuple[str | None, str | None]:
-    """The fetched head and branch for `rows[-1]`, once the multi-parent
-    path chose it.
+    """The fetched head and `branch` of a parent's newest waiting row, or
+    `(None, None)` after an `unstacked` line.
 
     `ParentGone` is an unstacked cell, not a failure. A deleted branch
     either merged, so its work is on the default branch, or was
     abandoned, where the default branch is the safe cut.
     """
-    newest = rows[-1]
-    branch = newest["branch"]
-    # A row with no evidenced push has nothing worth fetching.
-    if not branch or not _RESOLVED_SHA.fullmatch(newest["pushed_sha"] or ""):
+    # Refused here rather than left to the fetch: a row that evidences no push
+    # has no branch worth fetching, and "branch None is gone" would send an
+    # operator to look for a deleted ref instead of at the row.
+    if not branch or not _RESOLVED_SHA.fullmatch(pushed_sha or ""):
         emit(
             Preflight(
                 timestamp=time.time(),
@@ -361,7 +362,7 @@ def _resolve_multi_parent(
     stackable_states = (
         _STACKABLE_ON_RECONCILE if gh is not None else DEPENDENCY_WAITING_STATES
     )
-    open_deps: list[str] = []
+    stack_rows: dict[str, sqlite3.Row] = {}
     for dep, rows in rows_by_dep.items():
         if any(row["state"] == "MERGED" for row in rows):
             continue
@@ -372,13 +373,14 @@ def _resolve_multi_parent(
             for row in rows
         ):
             continue
-        if any(row["state"] in stackable_states for row in rows):
-            open_deps.append(dep)
+        newest = _newest_stackable(rows, stackable_states)
+        if newest is not None:
+            stack_rows[dep] = newest
 
-    if not open_deps:
+    if not stack_rows:
         return None, None
 
-    open_set = frozenset(open_deps)
+    open_set = frozenset(stack_rows)
     chosen, off_chain = _deepest_open_parent(open_set, open_set, edges)
     assert chosen is not None
     if off_chain:
@@ -386,29 +388,37 @@ def _resolve_multi_parent(
         verb = "is" if len(off_chain) == 1 else "are"
         raise _StackingRefused(
             f"depends_on {names} {verb} outside {chosen}'s depends_on "
-            "chain, and no taken spec may stack on two unrelated open parents"
+            "chain, and no spec may stack on two unrelated open parents"
         )
 
-    head, branch = _fetch_branch(
-        rows=rows_by_dep[chosen],
+    chosen_row = stack_rows[chosen]
+    if chosen_row["state"] == "CHANGES_REQUESTED":
+        emit(
+            Preflight(
+                timestamp=time.time(),
+                spec_id=spec_id,
+                step="changes_requested",
+                detail=f"newest task is CHANGES_REQUESTED for {chosen}",
+            )
+        )
+    stacked = _fetch_parent_head(
+        chosen_row["branch"],
+        chosen_row["pushed_sha"],
         parent_id=chosen,
         mirror=mirror,
         url=url,
         spec_id=spec_id,
         emit=emit,
     )
+    head, branch = stacked
     if head is None:
-        return None, None
+        return stacked
 
     for dep in sorted(open_set - {chosen}):
-        stackable_rows = [
-            row
-            for row in rows_by_dep[dep]
-            if row["branch"] and _RESOLVED_SHA.fullmatch(row["pushed_sha"] or "")
-        ]
-        if not stackable_rows:
+        dep_row = stack_rows[dep]
+        dep_branch = dep_row["branch"]
+        if not dep_branch or not _RESOLVED_SHA.fullmatch(dep_row["pushed_sha"] or ""):
             continue
-        dep_branch = stackable_rows[-1]["branch"]
         try:
             dep_head = package_phase.fetch_parent_branch(mirror, url, dep_branch)
         except package_phase.ParentGone:
@@ -419,7 +429,7 @@ def _resolve_multi_parent(
                 f"of {chosen}'s branch {branch}"
             )
 
-    return head, branch
+    return stacked
 
 
 def _resolve_stacked_on(
@@ -440,12 +450,10 @@ def _resolve_stacked_on(
     since a worktree stacked on a sha whose pull request targets `main`
     is exactly the defect `SA-0026` closed.
 
-    One entry stacks by the original rule, inline below, untouched. Two
+    One entry stacks on its own newest waiting row, by the rule below. Two
     or more apply `_resolve_multi_parent`'s rule instead (b-1572e7), which
-    needs `base_sha` once any entry has a task. Every caller but a
-    handful of single-entry tests supplies it. Raises `_StackingRefused`,
-    which `run_task` turns into `Refused` before any cell starts, rather
-    than returning one, since every caller here unpacks a tuple.
+    needs `base_sha` once any entry has a task. Raises `_StackingRefused`,
+    which `run_task` turns into `Refused` before any cell starts.
     """
     if repo_id is None or not depends_on:
         return None, None
@@ -476,6 +484,7 @@ def _resolve_stacked_on(
         if not rows:
             return None, None
         # A merged or closed newest task unstacks. Else the newest stackable row stacks.
+        # An older pending row shares that branch, so it would restack on the merge.
         newest_task = rows[-1]
         stackable = [row for row in rows if row["state"] in _STACKABLE_ON_RECONCILE]
         if newest_task["state"] in {"MERGED", "REJECTED"} or not stackable:
@@ -510,35 +519,17 @@ def _resolve_stacked_on(
                     detail=f"newest task is CHANGES_REQUESTED for {parent_id}",
                 )
             )
-    branch = newest["branch"]
-    # Refused here rather than left to the fetch: a row that evidences no push
-    # has no branch worth fetching, and "branch None is gone" would send an
-    # operator to look for a deleted ref instead of at the row.
-    if not branch or not _RESOLVED_SHA.fullmatch(newest["pushed_sha"] or ""):
-        emit(
-            Preflight(
-                timestamp=time.time(),
-                spec_id=spec_id,
-                step="unstacked",
-                detail=f"{parent_id}'s newest waiting task records no pushed branch",
-            )
-        )
-        return None, None
-    try:
-        head = package_phase.fetch_parent_branch(mirror, url, branch)
-    except package_phase.ParentGone as gone:
-        emit(
-            Preflight(
-                timestamp=time.time(),
-                spec_id=spec_id,
-                step="unstacked",
-                detail=str(gone),
-            )
-        )
-        return None, None
-    if not _RESOLVED_SHA.fullmatch(head):
-        return None, None
-    return head, branch
+    # The branch is fetched rather than `pushed_sha` trusted, since a review
+    # fix moves the branch past the recorded push.
+    return _fetch_parent_head(
+        newest["branch"],
+        newest["pushed_sha"],
+        parent_id=parent_id,
+        mirror=mirror,
+        url=url,
+        spec_id=spec_id,
+        emit=emit,
+    )
 
 
 @dataclass(frozen=True, kw_only=True)
