@@ -4,7 +4,7 @@ title: "Two modules each decide where a `CONTEXT.md` first sentence ends, and on
 status: open
 tier: 3
 filed: 2026-10-24
-specs: []
+specs: [SA-0317]
 prs: []
 commits: []
 cites: []
