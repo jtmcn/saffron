@@ -5804,6 +5804,53 @@ def test_a_batch_whose_store_lacks_the_proxy_is_refused_and_mints_no_task_row(
     assert f"build -t {proxy.PROXY_TAG}" in printed
 
 
+def test_saffron_batch_exits_2_and_names_the_package_command_when_package_raised(
+    tmp_path, monkeypatch, capsys
+):
+    """Unlike the proxy-image failure above, readiness here passes.
+    `cli.run_task` mints a task row, then raises a `CellRuntimeError`
+    `mark_raised_in_package` marks. That is the same mark `run_task` itself
+    sets on a raise escaping its own PACKAGE call on a `READY_FOR_REVIEW`
+    cell. `saffron batch` exits 2, prints `saffron package SY-1`, and the
+    batch row closes `INFRASTRUCTURE` (`b-066901`)."""
+    # Imported here, not at module scope (see `test_a_raise_that_escapes_
+    # run_task_from_package_is_marked_and_kept`'s own comment in `test_task.py`).
+    from saffron.task import mark_raised_in_package
+
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
+    _readiness_passes(monkeypatch, tmp_path)
+
+    candidate = Candidate(
+        path=Path("SY-1.md"),
+        spec=intake.Spec(id="SY-1", title="t", type="chore"),
+        spec_sha="s" * 64,
+        task_id=None,
+    )
+    monkeypatch.setattr(
+        cli,
+        "_resolve_queue",
+        lambda *a, **k: _fake_batch_resolution(tmp_path, candidates=[candidate]),
+    )
+
+    def _mint_then_raise_marked(spec, spec_sha, *, base, repo, ledger, out_dir, **_kw):
+        rid = ledger.upsert_repo(repo.name, base.url, str(base.mirror), policy_sha=None)
+        run_id = ledger.create_run(rid, base.base_sha)
+        ledger.create_task(run_id, spec.id, spec_sha, f"saffron/{spec.id}")
+        exc = runtime.CellRuntimeError("the proxy could not be started")
+        mark_raised_in_package(exc)
+        raise exc
+
+    monkeypatch.setattr(cli, "run_task", _mint_then_raise_marked)
+
+    home = tmp_path / "home"
+    out = main(["--home", str(home), "batch", "--repo", str(tmp_path)])
+    printed = capsys.readouterr().out
+
+    assert out == 2
+    assert "saffron package SY-1" in printed
+    assert _tasks_and_latest_batch_status(home) == (1, "INFRASTRUCTURE")
+
+
 def test_saffron_batch_runs_a_night_with_the_defaults_4_2_1_fixes(
     tmp_path, monkeypatch
 ):

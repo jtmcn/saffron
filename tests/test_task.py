@@ -2260,6 +2260,203 @@ def test_an_exhausted_package_that_opened_nothing_still_pushes_its_work(
     assert push_calls_4 == []
 
 
+def test_a_raise_that_escapes_run_task_from_package_is_marked_and_kept(
+    tmp_path, monkeypatch
+):
+    """`run_task` marks every exception that escapes it from its own
+    `package_phase.package` call for a `READY_FOR_REVIEW` cell. The mark is
+    `saffron.task.mark_raised_in_package`, and the same object re-raises
+    with its type unchanged. `saffron.task.raised_in_package(exc)` reads
+    the mark. An exhausted-mode raise, a `run_one_cell` raise, a
+    `GATE_ERROR` cell's own `append_queue_line` raise, and a fresh,
+    never-raised exception, all read as unmarked (`b-066901`)."""
+    # Imported here, not at module scope, or the reverted run collects as
+    # an error, which `revert` reads as `skip` rather than `fail`.
+    from saffron.cell.runtime import CellRuntimeError
+    from saffron.task import mark_raised_in_package, raised_in_package
+
+    out_dir = tmp_path / "out"
+
+    def _mint(task_id: int, spec_id: str) -> Callable[[dict], None]:
+        def _on_cell(kwargs: dict) -> None:
+            ledger = kwargs["ledger"]
+            repo_id = ledger.upsert_repo(spec_id, f"o-{spec_id}", f"m-{spec_id}", None)
+            run_id = ledger.create_run(repo_id, "a" * 40)
+            ledger._db.execute(
+                "INSERT INTO tasks "
+                "(task_id, run_id, spec_id, spec_sha, state, branch, record_key) "
+                "VALUES (?, ?, ?, ?, 'READY_FOR_REVIEW', ?, ?)",
+                (
+                    task_id,
+                    run_id,
+                    spec_id,
+                    "a" * 64,
+                    f"saffron/{spec_id}",
+                    f"seed-{spec_id}",
+                ),
+            )
+            ledger._db.commit()
+
+        return _on_cell
+
+    # 1) A `READY_FOR_REVIEW` cell whose `package()` raises `PackageError`.
+    package_error = package_phase.PackageError("gh is unavailable")
+
+    def _package_raises_package_error(*a, **k):
+        raise package_error
+
+    monkeypatch.setattr(package_phase, "package", _package_raises_package_error)
+    with pytest.raises(package_phase.PackageError) as excinfo1:
+        _drive(
+            tmp_path,
+            monkeypatch,
+            spec_id="MK-1",
+            state="READY_FOR_REVIEW",
+            task_id=201,
+            out_dir=out_dir,
+            on_cell=_mint(201, "MK-1"),
+        )
+    assert excinfo1.value is package_error
+    assert type(excinfo1.value) is package_phase.PackageError
+    assert raised_in_package(excinfo1.value)
+
+    # 2) A `READY_FOR_REVIEW` cell whose `package()` raises `CellRuntimeError`.
+    runtime_error = CellRuntimeError("the proxy could not be started")
+
+    def _package_raises_runtime_error(*a, **k):
+        raise runtime_error
+
+    monkeypatch.setattr(package_phase, "package", _package_raises_runtime_error)
+    with pytest.raises(CellRuntimeError) as excinfo2:
+        _drive(
+            tmp_path,
+            monkeypatch,
+            spec_id="MK-2",
+            state="READY_FOR_REVIEW",
+            task_id=202,
+            out_dir=out_dir,
+            on_cell=_mint(202, "MK-2"),
+        )
+    assert excinfo2.value is runtime_error
+    assert type(excinfo2.value) is CellRuntimeError
+    assert raised_in_package(excinfo2.value)
+
+    # 3) The exhausted mode: `package()` refuses, `push_unpackaged_work`
+    # raises, and that raise stays unmarked.
+    blocker = Finding(
+        lens="correctness",
+        severity="blocker",
+        file="a.py",
+        line=1,
+        claim="broken",
+        anchored=True,
+    )
+
+    def _package_refuses(*a, **k):
+        return package_phase.PackageResult(state="EXHAUSTED", note="conflicts")
+
+    push_error = CellRuntimeError("the registry could not be reached")
+
+    def _push_raises(*a, **k):
+        raise push_error
+
+    monkeypatch.setattr(package_phase, "package", _package_refuses)
+    monkeypatch.setattr(package_phase, "push_unpackaged_work", _push_raises)
+    with pytest.raises(CellRuntimeError) as excinfo3:
+        _drive(
+            tmp_path,
+            monkeypatch,
+            spec_id="MK-3",
+            state="EXHAUSTED",
+            task_id=203,
+            out_dir=out_dir,
+            reviews=[LensReview(lens="correctness", findings=[blocker])],
+            rebut_result=None,
+        )
+    assert excinfo3.value is push_error
+    assert not raised_in_package(excinfo3.value)
+
+    # 3b) The exhausted mode: `package()` itself raises a `CellRuntimeError`,
+    # caught by `except BaseException`, and that raise stays unmarked too.
+    exhausted_runtime_error = CellRuntimeError("the registry could not be reached")
+
+    def _package_raises_runtime_error_exhausted(*a, **k):
+        raise exhausted_runtime_error
+
+    monkeypatch.setattr(
+        package_phase, "package", _package_raises_runtime_error_exhausted
+    )
+    with pytest.raises(CellRuntimeError) as excinfo3b:
+        _drive(
+            tmp_path,
+            monkeypatch,
+            spec_id="MK-6",
+            state="EXHAUSTED",
+            task_id=2031,
+            out_dir=out_dir,
+            reviews=[LensReview(lens="correctness", findings=[blocker])],
+            rebut_result=None,
+        )
+    assert excinfo3b.value is exhausted_runtime_error
+    assert not raised_in_package(excinfo3b.value)
+
+    # 4) `run_one_cell` itself raises, before any PACKAGE call.
+    run_one_cell_error = CellRuntimeError("seeding the worktree failed")
+
+    def _run_one_cell_raises(*a, **k):
+        raise run_one_cell_error
+
+    monkeypatch.setattr(task_module, "run_one_cell", _run_one_cell_raises)
+    with pytest.raises(CellRuntimeError) as excinfo4:
+        task_module.run_task(
+            _one_spec("MK-4"),
+            "s" * 40,
+            ceilings=_ceilings(),
+            base=_pinned(tmp_path),
+            repo_id=1,
+            repo=tmp_path / "target-repo",
+            ledger=Ledger(tmp_path / "MK-4.db"),
+            out_dir=out_dir,
+            token=None,
+        )
+    assert excinfo4.value is run_one_cell_error
+    assert not raised_in_package(excinfo4.value)
+
+    # 5) A `GATE_ERROR` cell reaches no PACKAGE call: its own
+    # `append_queue_line` raise escapes unmarked too.
+    from saffron.report import index as index_report
+
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note="unused"))
+    append_error = CellRuntimeError("the queue store is locked")
+
+    def _append_raises(*a, **k):
+        raise append_error
+
+    monkeypatch.setattr(index_report, "append_queue_line", _append_raises)
+    with pytest.raises(CellRuntimeError) as excinfo5:
+        _drive(
+            tmp_path,
+            monkeypatch,
+            spec_id="MK-5",
+            state="GATE_ERROR",
+            task_id=205,
+            out_dir=out_dir,
+        )
+    assert excinfo5.value is append_error
+    assert not raised_in_package(excinfo5.value)
+
+    # 6) A fresh exception of either type, never raised, is unmarked too.
+    assert not raised_in_package(package_phase.PackageError("fresh"))
+    assert not raised_in_package(CellRuntimeError("fresh"))
+
+    # `mark_raised_in_package` is the only writer: a fresh instance stays
+    # unmarked until it is handed to it.
+    fresh = RuntimeError("fresh")
+    assert not raised_in_package(fresh)
+    mark_raised_in_package(fresh)
+    assert raised_in_package(fresh)
+
+
 def test_a_task_bound_for_package_reads_its_state_only_once_package_ends(
     tmp_path, monkeypatch
 ):

@@ -547,6 +547,28 @@ class Refused:
     reason: str
 
 
+# The attribute a marked exception carries, private to this module.
+_RAISED_IN_PACKAGE = "_saffron_raised_in_package"
+
+
+def mark_raised_in_package(exc: BaseException) -> None:
+    """Mark `exc` as having escaped `run_task`'s own `package_phase.package`
+    call for a `READY_FOR_REVIEW` cell. The mark lives on the object itself.
+    A bare re-raise of the same instance still carries it wherever a batch
+    next catches it. `run_task` never marks an exhausted-mode raise:
+    `saffron package` refuses a task that is not `READY_FOR_REVIEW`, so
+    naming that command for one would send the operator to a refusal
+    (`b-066901`)."""
+    setattr(exc, _RAISED_IN_PACKAGE, True)
+
+
+def raised_in_package(exc: BaseException) -> bool:
+    """True for an exception `mark_raised_in_package` marked. False for any
+    other, a fresh never-raised one included. The mark lives on the object,
+    never on its type, so a caller cannot read it off the class."""
+    return bool(getattr(exc, _RAISED_IN_PACKAGE, False))
+
+
 def _recorded_spec_text(
     ledger: Ledger, task_id: int, spec: Spec, base: PinnedBase
 ) -> tuple[Spec, str] | Refused | None:
@@ -875,14 +897,18 @@ def run_task(
                     # The cell's own write stopped short of this state
                     # (b-dce9a4), so the raise path writes it here instead.
                     ledger.set_task_state(outcome.task_id, "READY_FOR_REVIEW")
+                    # Marked so a batch can name `saffron package` as the
+                    # fix, not count this as an ordinary abort (`b-066901`).
+                    mark_raised_in_package(exc)
                     raise
                 result = None
                 package_error_note = str(exc)
-            except BaseException:
+            except BaseException as exc:
                 # Any other raise, `KeyboardInterrupt` included, leaves the
                 # same row in flight unless this writes it (b-dce9a4).
                 if not exhausted_package:
                     ledger.set_task_state(outcome.task_id, "READY_FOR_REVIEW")
+                    mark_raised_in_package(exc)
                 raise
             else:
                 print(f"{spec.id:<10} {result.state}  {result.pr_url or result.note}")
