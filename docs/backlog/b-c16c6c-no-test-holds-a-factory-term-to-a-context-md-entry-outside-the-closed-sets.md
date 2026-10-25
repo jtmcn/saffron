@@ -27,9 +27,10 @@ Measured at `2e1efa2b`:
 
 ## Done looks like
 
-- A test holds every `factory:` class and closed-set member to one
-  `CONTEXT.md` entry, or to a stated exclusion. The five missing entries are
-  written.
+- A test holds every `factory:` class to one `CONTEXT.md` entry. It holds
+  every closed-set member to an entry or to its set's entry. A stated exclusion
+  list names any term held to neither. The five missing entries are written, host-side, because
+  `CONTEXT.md` is protected.
 - A definitional `rdfs:comment` is deleted, and its content lives in the entry.
   A comment that records a modelling choice becomes a Turtle comment.
 

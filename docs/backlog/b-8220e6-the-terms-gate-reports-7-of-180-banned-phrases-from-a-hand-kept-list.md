@@ -8,7 +8,7 @@ specs: []
 prs: [963]
 commits: []
 cites: [§5.4, §5.5]
-related: [162, b-541e9a]
+related: [162, 174, b-541e9a, b-f4eb52, b-d5d290]
 ---
 
 ## Problem
@@ -33,6 +33,11 @@ one entry.
 - `terms` parses the `_Avoid_:` lines, and `AVOIDED` is deleted. The gate
   reports `error` on an empty list or a line holding anything but quotes.
 - A test holds a banned phrase to one entry, and a phrase to one kind.
+- A test parses `CONTEXT.md` under the gate's grammar. An `error` from `terms`
+  aborts every attempt though the gate is advisory (`saffron/gates/suite.py`,
+  `aborted_gates`), so a malformed line must fail `make check` first.
+- Item 174's "round" is avoided under three entries, so it becomes confusable.
+  b-f4eb52's exemption arm is ruled out, and its rewording arm stands.
 - `context.py`'s strip pattern names both markers, and the conventions lens
   keeps both lines.
 

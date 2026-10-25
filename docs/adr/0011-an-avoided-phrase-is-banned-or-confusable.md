@@ -55,8 +55,9 @@ that is another term's headword is always confusable.
 one entry's `_Avoid_:` line. A confusable phrase appears under every entry
 whose term it is confused with, and each names its own sense. A test holds both rules.
 
-**An `_Avoid_:` line holds only quoted banned phrases.** It starts its own
-line, and its quotes are its whole content. Any other form of avoided phrase
+**An `_Avoid_:` paragraph holds only quoted banned phrases.** It starts its
+own line, wraps like any paragraph, and its quotes are its whole content. The reason a
+phrase is banned moves into the entry's body. Any other form of avoided phrase
 moves to one of the two lines during triage.
 
 **The `terms` gate reports every banned phrase.** It parses the `_Avoid_:`
@@ -64,14 +65,17 @@ lines of `CONTEXT.md`, and the hand-kept dictionary is deleted. Each hit names
 the one entry and section that ban the phrase. The gate reports `error` when it
 parses no banned phrase, or when an `_Avoid_:` line holds anything but quotes.
 Either case means the list it read is not the list the file states. The gate
-stays advisory, and making it blocking is a separate decision.
+stays advisory, and making it blocking is a separate decision. A test in the
+`tests` gate parses `CONTEXT.md` under the same grammar, so a malformed line
+fails `make check` before a cell runs the gate.
 
 Existing hits stay tolerated by §5.4's baseline subtraction, which counts
 `terms` failures as it counts any gate's. No phrase waits for the tree to be
 clean before the gate takes it.
 
 **The conventions lens judges confusable phrases.** Injection strips both lines
-from every phase, and the conventions lens keeps both. The strip pattern in
+from every phase, and the conventions lens keeps both. A `_Confusable_:` line
+still quotes the word to avoid, so item 162's reason reaches it too. The strip pattern in
 `context.py` names both markers, so neither line depends on the other's
 paragraph break.
 
@@ -90,9 +94,10 @@ refuses a term a settled naming decision retired.
   silence. The grammar is stated, and any other form is an `error`.
 - **29** upholds. Seven phrases were reported and 173 were not, and no rule
   said why. The split states the rule, and the gate follows it.
-- **30** upholds. `domain.md`, `DESIGN.md` §5.5 and `context.py` disagree
-  about who reads the lists. The Decision and the Consequences rewrite the
-  first two to match.
+- **30** departs. `domain.md`, `DESIGN.md` §5.5 and `context.py` disagree
+  about who reads the lists. This change corrects `domain.md`'s false sentence
+  about injection. §5.5 and the `CONTEXT.md` preamble stay stale until
+  b-541e9a lands.
 - **34** upholds. A parser that found no phrase would print `pass` over a tree
   full of them. The gate reports `error` on an empty list instead.
 - **36** upholds. A list missing some phrases is a partial result. The gate
@@ -113,8 +118,12 @@ confusable phrases. The comment on `terms` in `.saffron/policy.yaml` is
 rewritten too. All three files are protected, so these edits are host-side.
 
 A `terms` failure's message carries the phrase but no hash of its sentence, as
-a `prose` message does. One hit removed and another added in one file cancel
-in the subtraction.
+a `prose` message does. One hit of a phrase removed and another of the same
+phrase added in one file cancel in the subtraction.
+
+An `error` aborts the attempt whether the gate is advisory or blocking
+(`saffron/gates/suite.py`, `aborted_gates`). So a malformed `_Avoid_:` line
+would stop every cell. The `make check` test above is what keeps it out.
 
 The commit-time `prek` hook checks `prose` only. A new banned hit reaches the
 gate's result in a cell, and no commit is refused for it.

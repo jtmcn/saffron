@@ -613,9 +613,10 @@ seat or the run found and the stack left alone.
 stack left alone.
 
 **Placed 2026-10-24**, from ADR 11 and the controlled vocabulary review:
-**b-8220e6**, then **b-541e9a**, which apply ADR 11. Then **b-c16c6c**,
-**b-545741**, **b-7aefb8** and **b-8e14fb**, which close gaps between
-`factory.ttl` and `CONTEXT.md`. **b-2227b0** records the parked ADR 12.
+**b-8220e6**, then **b-541e9a**, which apply ADR 11. Then **b-c16c6c** and
+**b-545741**, which close gaps between `factory.ttl` and `CONTEXT.md`.
+**b-7aefb8** is a property inside `factory.ttl`, and **b-8e14fb** its place
+in `policy.yaml`. **b-2227b0**, closed as parked, records a draft ADR.
 
 ~~**22**~~, ~~**23**~~, **31**, ~~**19**~~, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, ~~**62**~~, **63**, ~~**64**~~, **75**, **76**, **77**.

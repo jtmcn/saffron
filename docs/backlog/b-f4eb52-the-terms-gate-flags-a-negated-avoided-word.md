@@ -8,7 +8,7 @@ specs: []
 prs: []
 commits: []
 cites: [§5.4]
-related: [b-440f17]
+related: [b-440f17, b-8220e6]
 ---
 
 ## Problem
@@ -35,3 +35,6 @@ words to rule them out or by rewording `intake.py:133`.
 - 2026-09-27: `terms` failed at base on every cell of the spec loop's run 19.
 - 2026-09-28: run 20's baseline reported `terms=fail` at base from
   `saffron/intake.py:134` ("Never a ticket").
+- 2026-10-24: ADR 11 (#963) gives a banned phrase no correct use in the
+  gate's scope. That rules out the exemption arm of Done, and the rewording
+  arm stands (b-8220e6).

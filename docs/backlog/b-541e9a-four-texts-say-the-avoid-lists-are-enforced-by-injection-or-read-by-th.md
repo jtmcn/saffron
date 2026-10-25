@@ -17,9 +17,9 @@ ADR 11 gives each kind of avoided phrase its own reader. The `terms` gate
 reports banned phrases, and the conventions lens judges confusable ones. Four
 texts still say otherwise:
 
-- `docs/agents/domain.md`, "Keeping the model in sync", says §5.3's injection
-  enforces the lists. `saffron/agents/context.py` strips them from every phase
-  but the conventions lens (item 162).
+- `docs/agents/domain.md`, "Keeping the model in sync", said §5.3's injection
+  enforces the lists, while `saffron/agents/context.py` strips them (item 162).
+  #963 corrected that sentence. It still describes the seven-phrase gate.
 - `DESIGN.md` §5.5 says the conventions lens reads the `_Avoid_` lists.
 - The `CONTEXT.md` preamble calls the `_Avoid_` lists "the load-bearing part".
 - The comment on `terms` in `.saffron/policy.yaml` calls its list "curated".

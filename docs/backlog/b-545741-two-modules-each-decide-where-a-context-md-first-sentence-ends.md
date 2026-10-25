@@ -24,8 +24,10 @@ writes by.
 
 ## Done looks like
 
-The test imports `definition_sentence` and keeps no rule of its own. A fixture
-entry with no trailing period proves the two now agree.
+The test imports `definition_sentence` and keeps no rule of its own. Today an
+entry with no trailing period makes `definition_sentence` raise `ValueError`,
+and `context_enumeration` reads the whole remainder instead. A fixture entry
+with no trailing period makes both raise.
 
 ## Record
 
