@@ -3732,8 +3732,8 @@ def test_package_probes_the_host_then_runs_package_on_the_rebuilt_task(
 
     calls = []
 
-    def fake_ready_task(spec_id, *, repo, repo_id, ledger, out_dir):
-        calls.append(("ready_task", spec_id, repo, repo_id))
+    def fake_ready_task(spec_id, *, repo, repo_id, ledger, out_dir, mirror_path):
+        calls.append(("ready_task", spec_id, repo, repo_id, mirror_path))
         return ready
 
     monkeypatch.setattr(task, "ready_task", fake_ready_task)
@@ -3838,8 +3838,9 @@ def test_package_probes_the_host_then_runs_package_on_the_rebuilt_task(
     ]
 
     network_name = "saffron-hostprobe-SY-PKG"
-    assert calls[0][1:] == ("SY-PKG", resolved_repo, repo_id)
-    assert calls[1][1:] == (resolved_repo, cli._mirror_path(resolved_repo, home))
+    expected_mirror_path = cli._mirror_path(resolved_repo, home)
+    assert calls[0][1:] == ("SY-PKG", resolved_repo, repo_id, expected_mirror_path)
+    assert calls[1][1:] == (resolved_repo, expected_mirror_path)
     assert calls[2][1] == resolved_repo
     assert calls[3][1] == network_name
     assert calls[4][1:] == (network_name, (), {"subnet": claimed_subnet})
