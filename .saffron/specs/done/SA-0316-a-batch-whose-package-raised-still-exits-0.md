@@ -214,13 +214,13 @@ follow-ups only when that reason is `DRAINED` (`saffron/batch.py:921`).
   `test_a_task_left_in_flight_outranks_an_ordinary_stop` drives `BUDGET`
   and `UNTIL` behind an in-flight task (`:641-689`). `StackDoubles`
   (`:5158`) offers follow-ups from its `__follow_ups__` row.
-  `RaisingStackDoubles` (`:6512`) raises a queued exception per seat and
-  spec id. `_resumable_batch` (`:7271`) and `_row_window` (`:7314`) build
+  `RaisingStackDoubles` (`:6610`) raises a queued exception per seat and
+  spec id. `_resumable_batch` (`:7369`) and `_row_window` (`:7412`) build
   and read a resumable batch.
-- `tests/test_cli.py` has `_readiness_passes` (`:4534`),
-  `_fake_batch_resolution` (`:4556`) and `_tasks_and_latest_batch_status`.
+- `tests/test_cli.py` has `_readiness_passes` (`:5671`),
+  `_fake_batch_resolution` (`:5693`) and `_tasks_and_latest_batch_status`.
   `_mint_then_raise` is a `cli.run_task` stub that mints a task and
-  raises (`:4654-4660`). It sits in
+  raises (`:5791-5795`). It sits in
   `test_a_batch_whose_store_lacks_the_proxy_is_refused_and_mints_no_task_row`.
 
 ## Problem
@@ -320,7 +320,7 @@ it returns `INFRASTRUCTURE` and the third never ran.
 A `PackageError` reaches the batch from outside PACKAGE too. The stack
 runner's `fetch_parent_branch` raises one before any cell
 (`saffron/cli.py:797`), and so can the check `_stack_base_alive` builds
-(`saffron/cli.py:756-762`). Neither is marked, so neither is named.
+(`saffron/cli.py:759-770`). Neither is marked, so neither is named.
 
 **Criterion 3's witness.** Use `RaisingStackDoubles` with marked
 `CellRuntimeError`s and `sleep=_fail_sleep`. In the first batch, the order
