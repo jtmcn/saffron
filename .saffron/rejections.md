@@ -2558,3 +2558,44 @@ seat finding the in-cell critic and the end review both passed.
   **No bucket**, the end review. **Open:** b-781ea4.
 - Run 47: the adopted `SA-0312` kept `EXHAUSTED`, so the finish charged its
   diff to `SA-0314`. **No bucket**, adopt. **Open:** b-619b7d.
+
+## 2026-10-25, spec loop run 48 (#961, #964, #966)
+
+- `SA-0313` (#961): criterion 4's branch-mismatch case never asserted the
+  pull request number, and dropping it survived. **Bucket 3**, adequacy.
+  **Landed:** a review commit on #961.
+- `SA-0313` (#961): comments carried `(step N)` suffixes and the reserved
+  noun "run", a test wrapped `_FakeRegate` for nothing, and `pr_url` was
+  read through `ledger._db`. **Bucket 3**, conventions. **Landed:** a
+  review commit on #961.
+- `SA-0313` (#961): a comment in `_adopt` had a space before its period.
+  **Bucket 1**, `prose`. **Landed:** the run 48 closing PR.
+- `SA-0313` (#961): `_adopted_pull_request` raises on JSON that is not an
+  object, so adopt exits 2 where it should refuse. **Bucket 3**,
+  correctness. **Open:** b-87001a.
+- `SA-0315` (#964): two docstrings said the mirror is read only on a
+  refusal and that `ready_task` never raises. **Bucket 3**, contract.
+  **Landed:** a review commit on #964.
+- `SA-0315` (#964): a docstring cited `ledger.py` by line, and two tests
+  carried one snapshot closure. **Bucket 3**, conventions. **Landed:** a
+  review commit on #964.
+- `SA-0315` (#964): `ready_task`'s docstring called the mirror path a
+  read, though the fallback writes it. **Bucket 3**, contract. **Landed:**
+  the run 48 closing PR.
+- `SA-0315` (#964): `qualify.py` cites a `task.py` line range that now
+  holds a docstring. **Bucket 1**, `cite`. **Open:** b-f0e351.
+- `SA-0316` (#966): criterion 3's witness never read the stack batch's log
+  for `saffron package`, and dropping that line survived both test files.
+  **Bucket 3**, adequacy. **Landed:** a review commit on #966.
+- `SA-0316` (#966): the new log tag reused the name `finish`, a docstring
+  called a function a type, test names split across comment lines, and one
+  helper was written twice. **Bucket 3**, conventions. **Landed:** a
+  review commit on #966.
+- `SA-0316` (#966): a comment said a marked raise is not counted as an
+  abort, though `_drive` counts every raise. **Bucket 3**, contract.
+  **Landed:** the run 48 closing PR.
+- Run 48: each finish re-raised findings at PACKAGE's head that review
+  commits had fixed. **No bucket**, the end review. **Open:** b-1b05be.
+- Run 48: a host-filed probe ran a `preserves` witness that never imports
+  the mutated file, and filed a false blocker. **Bucket 1**, `witness`.
+  **Open:** b-b9365d.

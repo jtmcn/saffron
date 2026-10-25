@@ -1,11 +1,12 @@
 ---
 id: b-619b7d
 title: "`saffron adopt` keeps a task `EXHAUSTED`, refuses `MERGE_FAILED`, and nothing moves a fixed task back to waiting, so its children stay refused"
-status: open
+status: done
 tier: 2
 filed: 2026-10-19
+closed: 2026-10-25
 specs: [SA-0313]
-prs: []
+prs: [961]
 commits: []
 cites: [§4.2.1]
 related: [b-dc5212, b-6b06e1]
@@ -41,3 +42,6 @@ as `regate` then `adopt`. A test drives each route and starts a child on it.
   kept `EXHAUSTED`. So `saffron finish 51` reviewed `SA-0314` against `SA-0311` and
   charged `SA-0312`'s diff to it. `driver.py size` measured from the same wrong
   parent. `SA-0313` carries the fix and waits on #957.
+- 2026-10-25: done in #961 (`SA-0313`), from the spec loop's run 48. `saffron adopt` records
+  the adopted head as a `task_push` fact and moves the task to `READY_FOR_REVIEW` on a
+  green re-gate.
