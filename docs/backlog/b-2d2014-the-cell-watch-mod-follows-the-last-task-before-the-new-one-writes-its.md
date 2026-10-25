@@ -26,3 +26,6 @@ The watch waits for a task the batch names, and a stop ends it.
 ## Record
 
 - 2026-10-24: filed from the spec loop's run 47.
+- 2026-10-25: recurred three times in the spec loop's run 48. Each time the watch
+  attached to a new task, it first reported the previous task as packaged and the new
+  one as started.

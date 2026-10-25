@@ -2260,6 +2260,203 @@ def test_an_exhausted_package_that_opened_nothing_still_pushes_its_work(
     assert push_calls_4 == []
 
 
+def test_a_raise_that_escapes_run_task_from_package_is_marked_and_kept(
+    tmp_path, monkeypatch
+):
+    """`run_task` marks every exception that escapes it from its own
+    `package_phase.package` call for a `READY_FOR_REVIEW` cell. The mark is
+    `saffron.task.mark_raised_in_package`, and the same object re-raises
+    with its type unchanged. `saffron.task.raised_in_package(exc)` reads
+    the mark. An exhausted-mode raise, a `run_one_cell` raise, a
+    `GATE_ERROR` cell's own `append_queue_line` raise, and a fresh,
+    never-raised exception, all read as unmarked (`b-066901`)."""
+    # Imported here, not at module scope, or the reverted run collects as
+    # an error, which `revert` reads as `skip` rather than `fail`.
+    from saffron.cell.runtime import CellRuntimeError
+    from saffron.task import mark_raised_in_package, raised_in_package
+
+    out_dir = tmp_path / "out"
+
+    def _mint(task_id: int, spec_id: str) -> Callable[[dict], None]:
+        def _on_cell(kwargs: dict) -> None:
+            ledger = kwargs["ledger"]
+            repo_id = ledger.upsert_repo(spec_id, f"o-{spec_id}", f"m-{spec_id}", None)
+            run_id = ledger.create_run(repo_id, "a" * 40)
+            ledger._db.execute(
+                "INSERT INTO tasks "
+                "(task_id, run_id, spec_id, spec_sha, state, branch, record_key) "
+                "VALUES (?, ?, ?, ?, 'READY_FOR_REVIEW', ?, ?)",
+                (
+                    task_id,
+                    run_id,
+                    spec_id,
+                    "a" * 64,
+                    f"saffron/{spec_id}",
+                    f"seed-{spec_id}",
+                ),
+            )
+            ledger._db.commit()
+
+        return _on_cell
+
+    # 1) A `READY_FOR_REVIEW` cell whose `package()` raises `PackageError`.
+    package_error = package_phase.PackageError("gh is unavailable")
+
+    def _package_raises_package_error(*a, **k):
+        raise package_error
+
+    monkeypatch.setattr(package_phase, "package", _package_raises_package_error)
+    with pytest.raises(package_phase.PackageError) as excinfo1:
+        _drive(
+            tmp_path,
+            monkeypatch,
+            spec_id="MK-1",
+            state="READY_FOR_REVIEW",
+            task_id=201,
+            out_dir=out_dir,
+            on_cell=_mint(201, "MK-1"),
+        )
+    assert excinfo1.value is package_error
+    assert type(excinfo1.value) is package_phase.PackageError
+    assert raised_in_package(excinfo1.value)
+
+    # 2) A `READY_FOR_REVIEW` cell whose `package()` raises `CellRuntimeError`.
+    runtime_error = CellRuntimeError("the proxy could not be started")
+
+    def _package_raises_runtime_error(*a, **k):
+        raise runtime_error
+
+    monkeypatch.setattr(package_phase, "package", _package_raises_runtime_error)
+    with pytest.raises(CellRuntimeError) as excinfo2:
+        _drive(
+            tmp_path,
+            monkeypatch,
+            spec_id="MK-2",
+            state="READY_FOR_REVIEW",
+            task_id=202,
+            out_dir=out_dir,
+            on_cell=_mint(202, "MK-2"),
+        )
+    assert excinfo2.value is runtime_error
+    assert type(excinfo2.value) is CellRuntimeError
+    assert raised_in_package(excinfo2.value)
+
+    # 3) The exhausted mode: `package()` refuses, `push_unpackaged_work`
+    # raises, and that raise stays unmarked.
+    blocker = Finding(
+        lens="correctness",
+        severity="blocker",
+        file="a.py",
+        line=1,
+        claim="broken",
+        anchored=True,
+    )
+
+    def _package_refuses(*a, **k):
+        return package_phase.PackageResult(state="EXHAUSTED", note="conflicts")
+
+    push_error = CellRuntimeError("the registry could not be reached")
+
+    def _push_raises(*a, **k):
+        raise push_error
+
+    monkeypatch.setattr(package_phase, "package", _package_refuses)
+    monkeypatch.setattr(package_phase, "push_unpackaged_work", _push_raises)
+    with pytest.raises(CellRuntimeError) as excinfo3:
+        _drive(
+            tmp_path,
+            monkeypatch,
+            spec_id="MK-3",
+            state="EXHAUSTED",
+            task_id=203,
+            out_dir=out_dir,
+            reviews=[LensReview(lens="correctness", findings=[blocker])],
+            rebut_result=None,
+        )
+    assert excinfo3.value is push_error
+    assert not raised_in_package(excinfo3.value)
+
+    # 3b) The exhausted mode: `package()` itself raises a `CellRuntimeError`,
+    # caught by `except BaseException`, and that raise stays unmarked too.
+    exhausted_runtime_error = CellRuntimeError("the registry could not be reached")
+
+    def _package_raises_runtime_error_exhausted(*a, **k):
+        raise exhausted_runtime_error
+
+    monkeypatch.setattr(
+        package_phase, "package", _package_raises_runtime_error_exhausted
+    )
+    with pytest.raises(CellRuntimeError) as excinfo3b:
+        _drive(
+            tmp_path,
+            monkeypatch,
+            spec_id="MK-6",
+            state="EXHAUSTED",
+            task_id=2031,
+            out_dir=out_dir,
+            reviews=[LensReview(lens="correctness", findings=[blocker])],
+            rebut_result=None,
+        )
+    assert excinfo3b.value is exhausted_runtime_error
+    assert not raised_in_package(excinfo3b.value)
+
+    # 4) `run_one_cell` itself raises, before any PACKAGE call.
+    run_one_cell_error = CellRuntimeError("seeding the worktree failed")
+
+    def _run_one_cell_raises(*a, **k):
+        raise run_one_cell_error
+
+    monkeypatch.setattr(task_module, "run_one_cell", _run_one_cell_raises)
+    with pytest.raises(CellRuntimeError) as excinfo4:
+        task_module.run_task(
+            _one_spec("MK-4"),
+            "s" * 40,
+            ceilings=_ceilings(),
+            base=_pinned(tmp_path),
+            repo_id=1,
+            repo=tmp_path / "target-repo",
+            ledger=Ledger(tmp_path / "MK-4.db"),
+            out_dir=out_dir,
+            token=None,
+        )
+    assert excinfo4.value is run_one_cell_error
+    assert not raised_in_package(excinfo4.value)
+
+    # 5) A `GATE_ERROR` cell reaches no PACKAGE call: its own
+    # `append_queue_line` raise escapes unmarked too.
+    from saffron.report import index as index_report
+
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note="unused"))
+    append_error = CellRuntimeError("the queue store is locked")
+
+    def _append_raises(*a, **k):
+        raise append_error
+
+    monkeypatch.setattr(index_report, "append_queue_line", _append_raises)
+    with pytest.raises(CellRuntimeError) as excinfo5:
+        _drive(
+            tmp_path,
+            monkeypatch,
+            spec_id="MK-5",
+            state="GATE_ERROR",
+            task_id=205,
+            out_dir=out_dir,
+        )
+    assert excinfo5.value is append_error
+    assert not raised_in_package(excinfo5.value)
+
+    # 6) A fresh exception of either type, never raised, is unmarked too.
+    assert not raised_in_package(package_phase.PackageError("fresh"))
+    assert not raised_in_package(CellRuntimeError("fresh"))
+
+    # `mark_raised_in_package` is the only writer: a fresh instance stays
+    # unmarked until it is handed to it.
+    fresh = RuntimeError("fresh")
+    assert not raised_in_package(fresh)
+    mark_raised_in_package(fresh)
+    assert raised_in_package(fresh)
+
+
 def test_a_task_bound_for_package_reads_its_state_only_once_package_ends(
     tmp_path, monkeypatch
 ):
@@ -2540,6 +2737,13 @@ def _rt_write_patch(
     )
 
 
+def _rt_tasks_snapshot(ledger: Ledger) -> list[tuple]:
+    """Every row of `tasks`, sorted, so a refusal can show it wrote nothing."""
+    return sorted(
+        tuple(row) for row in ledger._db.execute("SELECT * FROM tasks").fetchall()
+    )
+
+
 def _rt_set_mtime(path: Path, when: float) -> None:
     os.utime(path, (when, when))
 
@@ -2688,6 +2892,7 @@ def test_ready_task_rebuilds_every_field_package_reads_from_the_cells_record(
     )
     _rt_set_mtime(notes_path, plan_epoch + 1.0)
 
+    mirror_path = tmp_path / "mirror-unused.git"
     monkeypatch.setenv("TZ", "JST-9")
     time.tzset()
     try:
@@ -2697,6 +2902,7 @@ def test_ready_task_rebuilds_every_field_package_reads_from_the_cells_record(
             repo_id=repo_id,
             ledger=ledger,
             out_dir=out_dir,
+            mirror_path=mirror_path,
         )
     finally:
         monkeypatch.delenv("TZ", raising=False)
@@ -2717,6 +2923,7 @@ def test_ready_task_rebuilds_every_field_package_reads_from_the_cells_record(
     assert outcome.effective_risk == "elevated"
     assert result.parent_branch is None
     assert result.spec.id == "RT-1"
+    assert not mirror_path.exists()
     ledger.close()
 
 
@@ -2772,17 +2979,20 @@ def test_ready_task_stacks_on_the_branch_of_the_task_that_pushed_its_tree_base(
     _rt_write_patch(task_dir, base_sha="a" * 40, tree_base=tree_base, head_sha="c" * 40)
     _rt_seed_records(task_dir)
 
+    mirror_path = tmp_path / "mirror-unused.git"
     result = task_module.ready_task(
         "RT-1",
         repo=tmp_path / "target-repo",
         repo_id=repo_id,
         ledger=ledger,
         out_dir=out_dir,
+        mirror_path=mirror_path,
     )
 
     assert isinstance(result, task_module.ReadyTask)
     assert result.parent_branch == "saffron/RT-2"
     assert result.outcome.effective_risk == "elevated"
+    assert not mirror_path.exists()
     ledger.close()
 
 
@@ -2813,7 +3023,12 @@ def test_ready_task_reads_the_spec_text_the_task_ran(tmp_path):
     task1 = _rt_task(ledger, repo_id, spec_id="RT-1", spec_sha=done_sha)
     ledger.set_task_state(task1, "READY_FOR_REVIEW")
     result1 = task_module.ready_task(
-        "RT-1", repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
+        "RT-1",
+        repo=repo,
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir,
+        mirror_path=tmp_path / "mirror-unused.git",
     )
     assert isinstance(result1, task_module.ReadyTask)
     assert result1.spec.title == "Done version"
@@ -2822,7 +3037,12 @@ def test_ready_task_reads_the_spec_text_the_task_ran(tmp_path):
     task2 = _rt_task(ledger, repo_id, spec_id="RT-1", spec_sha=live_sha)
     ledger.set_task_state(task2, "READY_FOR_REVIEW")
     result2 = task_module.ready_task(
-        "RT-1", repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
+        "RT-1",
+        repo=repo,
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir,
+        mirror_path=tmp_path / "mirror-unused.git",
     )
     assert isinstance(result2, task_module.ReadyTask)
     assert result2.spec.title == "Live version"
@@ -2837,7 +3057,12 @@ def test_ready_task_reads_the_spec_text_the_task_ran(tmp_path):
     )
     ledger.set_task_state(task3, "READY_FOR_REVIEW")
     result3 = task_module.ready_task(
-        "RT-1", repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
+        "RT-1",
+        repo=repo,
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir,
+        mirror_path=tmp_path / "mirror-unused.git",
     )
     assert isinstance(result3, task_module.ReadyTask)
     assert result3.spec.title == "Recorded version"
@@ -2890,6 +3115,7 @@ def test_ready_task_reads_a_record_older_than_the_cells_baseline_as_absent(tmp_p
         repo_id=repo_id,
         ledger=ledger,
         out_dir=out_dir,
+        mirror_path=tmp_path / "mirror-unused.git",
     )
     assert isinstance(result, task_module.ReadyTask)
     assert result.outcome.rebut_result is None
@@ -2904,6 +3130,7 @@ def test_ready_task_reads_a_record_older_than_the_cells_baseline_as_absent(tmp_p
         repo_id=repo_id,
         ledger=ledger,
         out_dir=out_dir,
+        mirror_path=tmp_path / "mirror-unused.git",
     )
     assert isinstance(result_absent, task_module.ReadyTask)
     assert result_absent.outcome.rebut_result is None
@@ -2915,31 +3142,40 @@ def test_ready_task_reads_a_record_older_than_the_cells_baseline_as_absent(tmp_p
 def test_ready_task_refuses_with_a_reason_and_writes_nothing(tmp_path):
     """Every refusal names why, and leaves the `tasks` table exactly as it
     found it. The causes: no task for the spec, a wrong state, an open
-    pull request, a missing or stale file, an unmatched `spec_sha`, and
-    an unmatched `tree_base`."""
+    pull request, a missing or stale file, and an unmatched `spec_sha`.
+    None of them ever touches `mirror_path`, the one path the `tree_base`
+    fallback reads."""
     ledger, repo_id = _rt_ledger(tmp_path)
     repo = tmp_path / "target-repo"
     out_dir = tmp_path / "out"
+    mirror_path = tmp_path / "mirror-unused.git"
 
-    def _snapshot() -> list[tuple]:
-        return sorted(
-            tuple(row) for row in ledger._db.execute("SELECT * FROM tasks").fetchall()
-        )
-
-    before = _snapshot()
+    before = _rt_tasks_snapshot(ledger)
     result = task_module.ready_task(
-        "RT-0", repo=repo, repo_id=None, ledger=ledger, out_dir=out_dir
+        "RT-0",
+        repo=repo,
+        repo_id=None,
+        ledger=ledger,
+        out_dir=out_dir,
+        mirror_path=mirror_path,
     )
     assert isinstance(result, Refused)
     assert "RT-0" in result.reason
-    assert _snapshot() == before
+    assert _rt_tasks_snapshot(ledger) == before
+    assert not mirror_path.exists()
 
     result = task_module.ready_task(
-        "RT-0", repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
+        "RT-0",
+        repo=repo,
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir,
+        mirror_path=mirror_path,
     )
     assert isinstance(result, Refused)
     assert "RT-0" in result.reason
-    assert _snapshot() == before
+    assert _rt_tasks_snapshot(ledger) == before
+    assert not mirror_path.exists()
 
     other_states = [s for s in get_args(TaskState) if s != "READY_FOR_REVIEW"]
     for n, state in enumerate(other_states):
@@ -2949,25 +3185,37 @@ def test_ready_task_refuses_with_a_reason_and_writes_nothing(tmp_path):
         newer = _rt_task(ledger, repo_id, spec_id=spec_id, spec_sha="a" * 64)
         ledger.set_task_state(newer, state)
 
-        before = _snapshot()
+        before = _rt_tasks_snapshot(ledger)
         result = task_module.ready_task(
-            spec_id, repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
+            spec_id,
+            repo=repo,
+            repo_id=repo_id,
+            ledger=ledger,
+            out_dir=out_dir,
+            mirror_path=mirror_path,
         )
         assert isinstance(result, Refused)
         assert state in result.reason
-        assert _snapshot() == before
+        assert _rt_tasks_snapshot(ledger) == before
+        assert not mirror_path.exists()
 
     pr_task = _rt_task(ledger, repo_id, spec_id="RT-PR", spec_sha="a" * 64)
     ledger.set_task_package(
         pr_task, "READY_FOR_REVIEW", "saffron/RT-PR", "c" * 40, "https://example/pr/1"
     )
-    before = _snapshot()
+    before = _rt_tasks_snapshot(ledger)
     result = task_module.ready_task(
-        "RT-PR", repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
+        "RT-PR",
+        repo=repo,
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir,
+        mirror_path=mirror_path,
     )
     assert isinstance(result, Refused)
     assert "https://example/pr/1" in result.reason
-    assert _snapshot() == before
+    assert _rt_tasks_snapshot(ledger) == before
+    assert not mirror_path.exists()
 
     file_spec = "RT-FILE"
     spec_sha = hashlib.sha256(_RT_TEXT.encode()).hexdigest()
@@ -2988,13 +3236,19 @@ def test_ready_task_refuses_with_a_reason_and_writes_nothing(tmp_path):
     _clear(task_dir)
     _rt_write_patch(task_dir, base_sha="a" * 40, tree_base="a" * 40, head_sha="c" * 40)
     (task_dir / "findings.json").write_text("[]")
-    before = _snapshot()
+    before = _rt_tasks_snapshot(ledger)
     result = task_module.ready_task(
-        file_spec, repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
+        file_spec,
+        repo=repo,
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir,
+        mirror_path=mirror_path,
     )
     assert isinstance(result, Refused)
     assert "baseline.json" in result.reason
-    assert _snapshot() == before
+    assert _rt_tasks_snapshot(ledger) == before
+    assert not mirror_path.exists()
 
     for name in ("patch.diff", "patch.json", "findings.json"):
         for mode in ("missing", "stale"):
@@ -3011,49 +3265,282 @@ def test_ready_task_refuses_with_a_reason_and_writes_nothing(tmp_path):
                 baseline_mtime = (task_dir / "baseline.json").stat().st_mtime
                 _rt_set_mtime(target, baseline_mtime - 10)
 
-            before = _snapshot()
+            before = _rt_tasks_snapshot(ledger)
             result = task_module.ready_task(
-                file_spec, repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
+                file_spec,
+                repo=repo,
+                repo_id=repo_id,
+                ledger=ledger,
+                out_dir=out_dir,
+                mirror_path=mirror_path,
             )
             assert isinstance(result, Refused)
             assert name in result.reason
-            assert _snapshot() == before
+            assert _rt_tasks_snapshot(ledger) == before
+            assert not mirror_path.exists()
 
+    # An unresolved `spec_sha`, paired with a `tree_base` that differs
+    # from `base_sha`: `_spec_for_task` must still refuse first.
     sha_task_id = _rt_task(ledger, repo_id, spec_id="RT-SHA", spec_sha="f" * 64)
     ledger.set_task_state(sha_task_id, "READY_FOR_REVIEW")
     sha_dir = out_dir / "RT-SHA"
-    _rt_write_patch(sha_dir, base_sha="a" * 40, tree_base="a" * 40, head_sha="c" * 40)
+    _rt_write_patch(sha_dir, base_sha="a" * 40, tree_base="d" * 40, head_sha="c" * 40)
     _rt_seed_records(sha_dir)
-    before = _snapshot()
+    before = _rt_tasks_snapshot(ledger)
     result = task_module.ready_task(
-        "RT-SHA", repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
+        "RT-SHA",
+        repo=repo,
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir,
+        mirror_path=mirror_path,
     )
     assert isinstance(result, Refused)
     assert "f" * 12 in result.reason
-    assert _snapshot() == before
+    assert _rt_tasks_snapshot(ledger) == before
+    assert not mirror_path.exists()
 
-    orphan_sha = hashlib.sha256(_RT_TEXT.encode()).hexdigest()
-    orphan_task_id = _rt_task(ledger, repo_id, spec_id="RT-ORPHAN", spec_sha=orphan_sha)
-    ledger.record_spec_text(
-        orphan_task_id,
-        origin="revision",
-        spec_id="RT-ORPHAN",
-        path=".saffron/specs/RT-ORPHAN.md",
-        text=_RT_TEXT,
+    ledger.close()
+
+
+# --- SA-0315: `ready_task`'s `tree_base` fallback reads the mirror -----
+
+
+def _rt_parent_chain(tmp_path: Path) -> tuple[Path, dict[str, str]]:
+    """The bare origin, the checkout `ready_task`'s mirror is cut from,
+    and the `B -> P -> R -> R2 -> R3` line with `B -> X` beside it.
+    A second clone pushes every commit past `B` straight to origin.
+    The checkout, and the mirror cut from it, lack each one until a
+    fetch names its branch."""
+    origin = tmp_path / "origin.git"
+    _git(tmp_path, "init", "-q", "--bare", "-b", "main", str(origin))
+
+    checkout = tmp_path / "checkout"
+    _git(tmp_path, "clone", "-q", str(origin), str(checkout))
+    (checkout / "b.txt").write_text("b\n")
+    b_sha = _commit(checkout, "B")
+    _git(checkout, "push", "-q", "origin", "main")
+
+    second = tmp_path / "second"
+    _git(tmp_path, "clone", "-q", str(origin), str(second))
+    _git(second, "checkout", "-q", "-b", "line")
+    (second / "p.txt").write_text("p\n")
+    p_sha = _commit(second, "P")
+    (second / "r.txt").write_text("r\n")
+    r_sha = _commit(second, "R")
+    (second / "r2.txt").write_text("r2\n")
+    r2_sha = _commit(second, "R2")
+    (second / "r3.txt").write_text("r3\n")
+    r3_sha = _commit(second, "R3")
+    _git(second, "checkout", "-q", "main")
+    (second / "x.txt").write_text("x\n")
+    x_sha = _commit(second, "X")
+    _git(second, "push", "-q", "origin", "main")
+    for branch, sha in (
+        ("saffron/RT-2", r2_sha),
+        ("saffron/RT-3", r2_sha),
+        ("saffron/RT-5-old", r2_sha),
+        ("saffron/RT-4", p_sha),
+        ("saffron/RT-8", r3_sha),
+    ):
+        _git(second, "push", "-q", "origin", f"{sha}:refs/heads/{branch}")
+
+    return checkout, {
+        "B": b_sha,
+        "P": p_sha,
+        "R": r_sha,
+        "R2": r2_sha,
+        "R3": r3_sha,
+        "X": x_sha,
+    }
+
+
+def test_ready_task_stacks_on_the_newest_branch_that_carries_its_tree_base_above_a_pushed_sha(
+    tmp_path,
+):
+    """The fallback walks every `pushed_sha`-carrying task newest first.
+    The parent `RT-2` wins over four newer decoys and an older match.
+    `RT-3`'s branch carries `tree_base`, but its own `pushed_sha` sits
+    off its history. `RT-4`'s `pushed_sha` is an ancestor, but its
+    branch never reaches `tree_base`. `RT-8`'s `pushed_sha` is
+    `tree_base`'s own descendant. `RT-5` also qualifies, but is older.
+    Driven once with `tree_base` one commit above the parent's
+    `pushed_sha`, and once equal to its branch head."""
+    checkout, shas = _rt_parent_chain(tmp_path)
+    ledger, repo_id = _rt_ledger(tmp_path)
+
+    def _decoy(spec_id: str, spec_sha: str, pushed_sha: str, branch: str) -> None:
+        tid = _rt_task(ledger, repo_id, spec_id=spec_id, spec_sha=spec_sha)
+        ledger.set_task_package(tid, "READY_FOR_REVIEW", branch, pushed_sha, "")
+
+    # Oldest first: `tasks_by_repo` orders by `task_id`, and the newest
+    # of these decoys must still lose to the parent `RT-2`.
+    _decoy("RT-5", "o" * 64, shas["B"], "saffron/RT-5-old")
+    _decoy("RT-2", "p" * 64, shas["P"], "saffron/RT-2")
+    _decoy("RT-3", "q" * 64, shas["X"], "saffron/RT-3")
+    _decoy("RT-4", "r" * 64, shas["P"], "saffron/RT-4")
+    _decoy("RT-8", "s" * 64, shas["R3"], "saffron/RT-8")
+
+    mirror_path = tmp_path / "mirror.git"
+    spec_sha = hashlib.sha256(_RT_TEXT.encode()).hexdigest()
+    for label, tree_base in (("r", shas["R"]), ("r2", shas["R2"])):
+        task_id = _rt_task(ledger, repo_id, spec_id="RT-1", spec_sha=spec_sha)
+        ledger.record_spec_text(
+            task_id,
+            origin="revision",
+            spec_id="RT-1",
+            path=".saffron/specs/RT-1.md",
+            text=_RT_TEXT,
+        )
+        ledger.set_task_state(task_id, "READY_FOR_REVIEW")
+
+        out_dir = tmp_path / f"out-{label}"
+        task_dir = out_dir / "RT-1"
+        _rt_write_patch(
+            task_dir, base_sha="a" * 40, tree_base=tree_base, head_sha="c" * 40
+        )
+        _rt_seed_records(task_dir)
+
+        result = task_module.ready_task(
+            "RT-1",
+            repo=checkout,
+            repo_id=repo_id,
+            ledger=ledger,
+            out_dir=out_dir,
+            mirror_path=mirror_path,
+        )
+        assert isinstance(result, task_module.ReadyTask)
+        assert result.parent_branch == "saffron/RT-2"
+
+    ledger.close()
+
+
+def _rt_unreachable_branches(tmp_path: Path) -> tuple[Path, dict[str, str]]:
+    """The bare origin and checkout for the refusal witness below, with
+    three branches that origin no longer carries: one the checkout
+    alone ever held, one the checkout's own copy outran, and one origin
+    has since deleted."""
+    origin = tmp_path / "origin2.git"
+    _git(tmp_path, "init", "-q", "--bare", "-b", "main", str(origin))
+
+    checkout = tmp_path / "checkout2"
+    _git(tmp_path, "clone", "-q", str(origin), str(checkout))
+    (checkout / "b.txt").write_text("b\n")
+    b_sha = _commit(checkout, "B")
+    _git(checkout, "push", "-q", "origin", "main")
+
+    second = tmp_path / "second2"
+    _git(tmp_path, "clone", "-q", str(origin), str(second))
+
+    # Checkout-only: never reaches origin at all.
+    _git(checkout, "checkout", "-q", "-b", "saffron/RT-ONLY")
+    (checkout / "q.txt").write_text("q\n")
+    q_sha = _commit(checkout, "Q")
+    _git(checkout, "checkout", "-q", "main")
+
+    # Stale-ahead: origin keeps `S1`, the checkout's own copy runs on to `S2`.
+    _git(second, "checkout", "-q", "-b", "saffron/RT-STALE")
+    (second / "s1.txt").write_text("s1\n")
+    s1_sha = _commit(second, "S1")
+    _git(second, "push", "-q", "origin", "saffron/RT-STALE")
+    _git(
+        checkout,
+        "fetch",
+        "-q",
+        "origin",
+        "saffron/RT-STALE:refs/heads/saffron/RT-STALE",
     )
-    ledger.set_task_state(orphan_task_id, "READY_FOR_REVIEW")
-    orphan_dir = out_dir / "RT-ORPHAN"
-    unresolved_tree_base = "e" * 40
-    _rt_write_patch(
-        orphan_dir, base_sha="a" * 40, tree_base=unresolved_tree_base, head_sha="c" * 40
+    _git(checkout, "checkout", "-q", "saffron/RT-STALE")
+    (checkout / "s2.txt").write_text("s2\n")
+    s2_sha = _commit(checkout, "S2")
+    _git(checkout, "checkout", "-q", "main")
+
+    # Deleted: origin held it, the checkout fetched it, then origin dropped it.
+    _git(second, "checkout", "-q", "main")
+    _git(second, "checkout", "-q", "-b", "saffron/RT-GONE")
+    (second / "d.txt").write_text("d\n")
+    d_sha = _commit(second, "D")
+    _git(second, "push", "-q", "origin", "saffron/RT-GONE")
+    _git(
+        checkout,
+        "fetch",
+        "-q",
+        "origin",
+        "saffron/RT-GONE:refs/remotes/origin/saffron/RT-GONE",
     )
-    _rt_seed_records(orphan_dir)
-    before = _snapshot()
-    result = task_module.ready_task(
-        "RT-ORPHAN", repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
+    _git(origin, "update-ref", "-d", "refs/heads/saffron/RT-GONE")
+
+    return checkout, {"B": b_sha, "Q": q_sha, "S1": s1_sha, "S2": s2_sha, "D": d_sha}
+
+
+def test_ready_task_refuses_a_tree_base_no_branch_at_origin_carries(tmp_path):
+    """Four `tree_base` values that no branch at origin carries all
+    refuse, naming each one's own first twelve characters, and leave
+    the `tasks` table untouched. One sits on a branch only the checkout
+    ever held. One sits on the checkout's own branch, ahead of where
+    origin's copy stops. One sits on a branch origin has since deleted.
+    One is an unknown sha. With the checkout's `origin` remote pointed
+    at a path that does not exist, `ready_task` raises instead."""
+    checkout, shas = _rt_unreachable_branches(tmp_path)
+    ledger, repo_id = _rt_ledger(tmp_path)
+
+    def _decoy(spec_id: str, branch: str) -> None:
+        tid = _rt_task(ledger, repo_id, spec_id=spec_id, spec_sha="e" * 64)
+        ledger.set_task_package(tid, "READY_FOR_REVIEW", branch, shas["B"], "")
+
+    _decoy("RT-C1", "saffron/RT-ONLY")
+    _decoy("RT-C2", "saffron/RT-STALE")
+    _decoy("RT-C3", "saffron/RT-GONE")
+
+    mirror_path = tmp_path / "mirror2.git"
+    spec_sha = hashlib.sha256(_RT_TEXT.encode()).hexdigest()
+    cases = (
+        ("only", shas["Q"]),
+        ("stale", shas["S2"]),
+        ("gone", shas["D"]),
+        ("unknown", "f" * 40),
     )
-    assert isinstance(result, Refused)
-    assert "e" * 12 in result.reason
-    assert _snapshot() == before
+    for label, tree_base in cases:
+        task_id = _rt_task(ledger, repo_id, spec_id="RT-1", spec_sha=spec_sha)
+        ledger.record_spec_text(
+            task_id,
+            origin="revision",
+            spec_id="RT-1",
+            path=".saffron/specs/RT-1.md",
+            text=_RT_TEXT,
+        )
+        ledger.set_task_state(task_id, "READY_FOR_REVIEW")
+
+        out_dir = tmp_path / f"out-{label}"
+        task_dir = out_dir / "RT-1"
+        _rt_write_patch(
+            task_dir, base_sha="a" * 40, tree_base=tree_base, head_sha="c" * 40
+        )
+        _rt_seed_records(task_dir)
+
+        before = _rt_tasks_snapshot(ledger)
+        result = task_module.ready_task(
+            "RT-1",
+            repo=checkout,
+            repo_id=repo_id,
+            ledger=ledger,
+            out_dir=out_dir,
+            mirror_path=mirror_path,
+        )
+        assert isinstance(result, Refused)
+        assert tree_base[:12] in result.reason
+        assert "no branch at origin carries it" in result.reason
+        assert _rt_tasks_snapshot(ledger) == before
+
+    _git(checkout, "remote", "set-url", "origin", str(tmp_path / "does-not-exist"))
+    with pytest.raises(GitError):
+        task_module.ready_task(
+            "RT-1",
+            repo=checkout,
+            repo_id=repo_id,
+            ledger=ledger,
+            out_dir=tmp_path / "out-unknown",
+            mirror_path=mirror_path,
+        )
 
     ledger.close()

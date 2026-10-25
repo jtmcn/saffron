@@ -152,12 +152,12 @@ Its signature takes `spec_id`, `repo`, `repo_id`, `ledger` and `out_dir`
 (`saffron/task.py:889-896`).
 
 **`package_ready_task` already holds the mirror path.** It takes
-`mirror_path` (`saffron/task.py:1027-1036`). It calls `ready_task` first,
+`mirror_path` (`saffron/task.py:1223-1232`). It calls `ready_task` first,
 returns a `Refused` untouched, and only then calls
-`preflight.prepare_mirror(repo, mirror_path)` (`:1046-1052`). Its docstring
+`preflight.prepare_mirror(repo, mirror_path)` (`:1242-1248`). Its docstring
 says a `Refused` comes back "before the mirror, the image or the network
-exist" (`:1040-1041`). `saffron package` builds `mirror_path` with
-`_mirror_path(repo, args.home)` and hands it over (`saffron/cli.py:2843-2856`).
+exist" (`:1236-1237`). `saffron package` builds `mirror_path` with
+`_mirror_path(repo, args.home)` and hands it over (`saffron/cli.py:2937-2946`).
 
 **The mirror alone cannot answer.** `ensure_mirror` clones a new mirror
 from the checkout with `--mirror --no-local`, which copies every ref,
@@ -183,8 +183,8 @@ gives origin's url (`:97-104`).
   `_git` and `_commit` build real git (`:967-990`).
 - `test_package_probes_the_host_then_runs_package_on_the_rebuilt_task`
   replaces `ready_task` with `fake_ready_task(spec_id, *, repo, repo_id,
-  ledger, out_dir)` (`tests/test_cli.py:2599-2603`). It checks the first
-  call's arguments at `:2705`.
+  ledger, out_dir)` (`tests/test_cli.py:3735-3737`). It checks the first
+  call's arguments at `:3841`.
 
 ## Problem
 
@@ -249,7 +249,7 @@ whose branch origin still has. Walk those newest first and fetch each with
 ancestry checks, since the tree base can be missing from the mirror until
 then (`ensure_mirror --prune`, `saffron/repos/mirror.py:74-81`).
 
-**Mirror `_pushed_landed`** (`saffron/cli.py:512-538`). Check each sha first
+**Mirror `_pushed_landed`** (`saffron/cli.py:515-541`). Check each sha first
 with `git rev-parse --verify --quiet <sha>^{commit}`. Exit 1 means the
 mirror lacks it, which disqualifies the task, and any other failure raises.
 Then run `git merge-base --is-ancestor`. Exit 0 qualifies, exit 1

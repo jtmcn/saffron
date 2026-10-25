@@ -23,7 +23,13 @@ multi-repo (v2, §9), and stamping a corpse `ORPHANED` (that is the batch
 corpse a dead scan left behind).
 
 `Refused` is imported from `saffron.task` for its type alone. Importing a
-type is not importing the driver that builds it.
+type is not importing the driver that builds it. `raised_in_package` is
+imported too. It reads a mark on an exception and drives nothing, so it
+tells a raise `run_task` marked from any other.
+That mark names a raise escaping `run_task`'s own PACKAGE call for a
+`READY_FOR_REVIEW` cell. A marked raise is never offered again, and it
+closes the batch row `INFRASTRUCTURE` no matter what else the night did
+(`b-066901`).
 """
 
 from __future__ import annotations
@@ -43,7 +49,7 @@ from saffron.ledger import Ledger
 from saffron.preflight import Readiness
 from saffron.reconcile import IN_FLIGHT_STATES
 from saffron.scheduler import Candidate, _branch, open_pr_refusal
-from saffron.task import Refused
+from saffron.task import Refused, raised_in_package
 
 if TYPE_CHECKING:
     from saffron.end_review import StackReview
@@ -154,6 +160,9 @@ def run_batch(
     # `(spec_id, state)`. Owned here, not in `_drive`, so a night that raises
     # after leaving one in flight still names it on the way out (item 70).
     in_flight: list[tuple[str, str]] = []
+    # Spec ids whose runner raised a `raised_in_package` mark, in order.
+    # Non-empty promotes the final reason to `INFRASTRUCTURE` (`b-066901`).
+    package_raised: list[str] = []
     stopped: StopReason | None = None
     try:
         reason, _aborts = _drive(
@@ -168,11 +177,12 @@ def run_batch(
             readiness_check=readiness_check,
             emit=emit,
             in_flight=in_flight,
+            package_raised=package_raised,
             after_attach=after_attach,
             reserve_usd=reserve_usd,
             sleep=sleep,
         )
-        stopped = _stop(ledger, batch_id, reason, in_flight, emit)
+        stopped = _stop(ledger, batch_id, reason, in_flight, package_raised, emit)
         return stopped
     finally:
         if stopped is None:
@@ -182,7 +192,7 @@ def run_batch(
             # not catch, or an operator's Ctrl-C at 3am. An open row is the
             # one state indistinguishable from a night still running, and it
             # is what §6's morning queue reads.
-            _stop(ledger, batch_id, "INFRASTRUCTURE", in_flight, emit)
+            _stop(ledger, batch_id, "INFRASTRUCTURE", in_flight, package_raised, emit)
 
 
 def writer_left(ledger: Ledger, batch_id: int, writer_usd: float) -> float:
@@ -205,6 +215,7 @@ def _drive(
     readiness_check: Callable[[], Readiness] | None,
     emit: Callable[[str], None],
     in_flight: list[tuple[str, str]],
+    package_raised: list[str],
     after_attach: Callable[[Candidate, CellOutcome, int], None] | None = None,
     reserve_usd: float = 0.0,
     writer_usd: float = 0.0,
@@ -217,7 +228,10 @@ def _drive(
     stays the one call to `close_batch`. `readiness_check=None` skips §4.4
     step 1 outright, for a second pass that already ran it once.
     `consecutive_aborts` is taken from the caller rather than always starting
-    at zero, so a second pass carries the first one's standing count."""
+    at zero, so a second pass carries the first one's standing count.
+    `package_raised`, owned by the caller beside `in_flight`, gains a spec id
+    for each raise `raised_in_package` marks. Such a raise is never offered
+    again, and a second line names `saffron package <spec id>` (`b-066901`)."""
     if readiness_check is not None:
         readiness = readiness_check()
         if not readiness.ok:
@@ -227,7 +241,7 @@ def _drive(
             return "INFRASTRUCTURE", consecutive_aborts
 
     # By spec id, or a re-offered `Candidate` starts twice. With `sleep` set, one that ended
-    # `RATE_LIMITED`, in `_OFFERED_AGAIN` or raised `CellRuntimeError` is taken back out.
+    # `RATE_LIMITED`, in `_OFFERED_AGAIN` or raised an unmarked `CellRuntimeError` is taken back out.
     started: set[str] = set()
     # Each rescan replaces this rather than merging, so a spec the latest
     # scan no longer offers does not run because an earlier one did.
@@ -300,7 +314,16 @@ def _drive(
             # Otherwise a night that died here leaves a stop reason and no cause.
             emit(f"{candidate.spec.id:<10} raised {type(exc).__name__}: {exc}")
             ledger.attach_orphan_runs_to_batch(batch_id, high_water)
-            if isinstance(exc, CellRuntimeError) and sleep is not None:
+            marked = raised_in_package(exc)
+            if marked:
+                # Not gone, only unpackaged. Named beside the `raised` line
+                # above, never instead of it (`b-066901`).
+                package_raised.append(candidate.spec.id)
+                emit(
+                    f"{candidate.spec.id:<10} unpackaged  "
+                    f"saffron package {candidate.spec.id}"
+                )
+            if isinstance(exc, CellRuntimeError) and sleep is not None and not marked:
                 # The runtime broke, not the spec. Offered again at once,
                 # bounded only by the breaker above (b-60a399).
                 started.discard(candidate.spec.id)
@@ -390,8 +413,11 @@ def _is_layer(result: CellOutcome | Refused) -> bool:
     """`run_stack_batch`'s one predicate. A result adds a layer only when it
     is a `CellOutcome` in `READY_FOR_REVIEW`. Anything else is a miss:
     `EXHAUSTED`, any other state, or a `Refused`. `wrapped()` keeps
-    `RATE_LIMITED`, `PROVIDER_UNREACHABLE`, `PREFLIGHT_FAILED` and a
-    `CellRuntimeError` queued rather than record a miss."""
+    `RATE_LIMITED`, `PROVIDER_UNREACHABLE`, `PREFLIGHT_FAILED` and an
+    unmarked `CellRuntimeError` queued rather than record a miss. A
+    `CellRuntimeError` `raised_in_package` marks is a miss like any other
+    raise. PACKAGE already ran its cell, so queuing it again would waste
+    that (`b-066901`)."""
     return isinstance(result, CellOutcome) and result.state == "READY_FOR_REVIEW"
 
 
@@ -625,7 +651,7 @@ def run_stack_batch(
         if review is not None:
             if candidate.spec.id not in task_ids:
                 # Minted once per spec, never for a follow-up, already seeded.
-                # A raise here is always a miss, even a `CellRuntimeError`, which `review` and `runner` offer again (b-60a399).
+                # A raise here is always a miss, even an unmarked `CellRuntimeError`, which `review` and `runner` offer again (b-60a399).
                 assert mint is not None
                 try:
                     task_id = mint(candidate)
@@ -843,8 +869,11 @@ def run_stack_batch(
         try:
             result = runner(candidate, pred)
         except Exception as exc:
-            # A raise from `runner` is a miss unless it is a `CellRuntimeError`.
-            if not is_follow_up and not isinstance(exc, CellRuntimeError):
+            # A raise from `runner` is a miss unless it is an unmarked
+            # `CellRuntimeError` (`b-066901`).
+            if not is_follow_up and (
+                not isinstance(exc, CellRuntimeError) or raised_in_package(exc)
+            ):
                 missed[candidate.spec.id] = frozenset({candidate.spec.id})
                 remaining.remove(original)
             raise
@@ -863,6 +892,9 @@ def run_stack_batch(
         return result
 
     in_flight: list[tuple[str, str]] = []
+    # Spec ids whose runner raised a `raised_in_package` mark, across both
+    # the order's pass and its follow-ups' (`b-066901`).
+    package_raised: list[str] = []
     batch_id = (
         resume.batch_id
         if resume is not None
@@ -887,6 +919,7 @@ def run_stack_batch(
                 readiness_check=readiness_check,
                 emit=emit,
                 in_flight=in_flight,
+                package_raised=package_raised,
                 after_attach=record_layer,
                 reserve_usd=reserve_usd,
                 writer_usd=writer_usd,
@@ -937,6 +970,7 @@ def run_stack_batch(
                         readiness_check=None,
                         emit=emit,
                         in_flight=in_flight,
+                        package_raised=package_raised,
                         after_attach=record_layer,
                         reserve_usd=0.0,
                         sleep=sleep,
@@ -958,23 +992,26 @@ def run_stack_batch(
             finish(batch_id, unrun_task_ids)
         if resume is not None:
             # The row is already closed. Only the reason is this call's to
-            # give back, promoted for anything a follow-up left in flight.
-            return _promote_in_flight(reason, in_flight, emit)
-        stopped = _stop(ledger, batch_id, reason, in_flight, emit)
+            # give back, promoted for anything left in flight or marked.
+            return _promote_in_flight(reason, in_flight, package_raised, emit)
+        stopped = _stop(ledger, batch_id, reason, in_flight, package_raised, emit)
         return stopped
     finally:
         if stopped is None and resume is None:
-            _stop(ledger, batch_id, "INFRASTRUCTURE", in_flight, emit)
+            _stop(ledger, batch_id, "INFRASTRUCTURE", in_flight, package_raised, emit)
 
 
 def _promote_in_flight(
     reason: StopReason,
     in_flight: list[tuple[str, str]],
+    package_raised: list[str],
     emit: Callable[[str], None],
 ) -> StopReason:
-    """Name every task this call left in flight, promoting `reason` to
-    `INCOMPLETE` whenever `in_flight` is non-empty and `reason` is not
-    already `INFRASTRUCTURE`.
+    """Name every task this call left in flight or unpackaged. `reason`
+    becomes `INCOMPLETE` whenever `in_flight` is non-empty and `reason` is
+    not already `INFRASTRUCTURE`. Then, whenever `package_raised` is non-empty,
+    `reason` becomes `INFRASTRUCTURE` outright, whatever it was. That list
+    names a runner raise `raised_in_package` marks (`b-066901`).
 
     `INFRASTRUCTURE` outranks `INCOMPLETE`, which outranks every ordinary
     reason, never the other way (backlog item 70, `DESIGN.md` §4.2.1).
@@ -984,6 +1021,8 @@ def _promote_in_flight(
         emit(f"{spec_id:<10} left in flight in {state}")
     if in_flight and reason != "INFRASTRUCTURE":
         reason = "INCOMPLETE"
+    if package_raised:
+        reason = "INFRASTRUCTURE"
     return reason
 
 
@@ -992,14 +1031,15 @@ def _stop(
     batch_id: int,
     reason: StopReason,
     in_flight: list[tuple[str, str]],
+    package_raised: list[str],
     emit: Callable[[str], None],
 ) -> StopReason:
-    """Promote `reason` for anything left in flight, then close the batch
-    row with it. `run_batch` calls this once. An unresumed `run_stack_batch`
-    calls it once, for the reason its own `_drive` call, or calls, returned,
-    and in its own `finally` on a raise. A resume calls it never. The row
-    it would close is already closed. It stays the single call to
-    `close_batch`."""
-    reason = _promote_in_flight(reason, in_flight, emit)
+    """Promote `reason` for anything left in flight, or for any marked
+    raise in `package_raised`, then close the batch row with it. `run_batch`
+    calls this once. An unresumed `run_stack_batch` calls it once, for the
+    reason its own `_drive` call, or calls, returned, and in its own
+    `finally` on a raise. A resume calls it never. The row it would close
+    is already closed. It stays the single call to `close_batch`."""
+    reason = _promote_in_flight(reason, in_flight, package_raised, emit)
     ledger.close_batch(batch_id, reason)
     return reason
