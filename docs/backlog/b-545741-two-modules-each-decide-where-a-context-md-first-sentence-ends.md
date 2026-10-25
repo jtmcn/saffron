@@ -31,4 +31,4 @@ with no trailing period makes both raise.
 
 ## Record
 
-- 2026-10-24: found in the third review of the parked ADR 12 (b-2227b0).
+- 2026-10-24: found in the third review of the parked draft ADR (b-2227b0).

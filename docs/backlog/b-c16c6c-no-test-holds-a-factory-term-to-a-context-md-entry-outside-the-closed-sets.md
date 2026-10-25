@@ -29,12 +29,12 @@ Measured at `2e1efa2b`:
 
 - A test holds every `factory:` class to one `CONTEXT.md` entry. It holds
   every closed-set member to an entry or to its set's entry. A stated exclusion
-  list names any term held to neither. The five missing entries are written, host-side, because
-  `CONTEXT.md` is protected.
+  list names any term held to neither. The five missing entries are written,
+  host-side, because `CONTEXT.md` is protected.
 - A definitional `rdfs:comment` is deleted, and its content lives in the entry.
   A comment that records a modelling choice becomes a Turtle comment.
 
 ## Record
 
-- 2026-10-24: filed from the three reviews of the parked ADR 12 (b-2227b0),
+- 2026-10-24: filed from the three reviews of the parked draft ADR (b-2227b0),
   which named this as the cheaper path that closes the measured gap.
