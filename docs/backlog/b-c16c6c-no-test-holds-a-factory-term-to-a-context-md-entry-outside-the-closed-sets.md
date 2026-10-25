@@ -4,7 +4,7 @@ title: "No test holds a `factory:` term to a `CONTEXT.md` entry outside the clos
 status: open
 tier: 3
 filed: 2026-10-24
-specs: []
+specs: [SA-0318]
 prs: []
 commits: []
 cites: [§4.6]
