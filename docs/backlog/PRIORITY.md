@@ -584,6 +584,11 @@ deferred finish exempts the stack base's branch but none on its chain.
 **b-781ea4**. The witness gate passes a mutant whose find matches twice. The
 finish's follow-up drafts fail to parse, so it files nothing.
 
+**Placed 2026-10-25**, from the spec loop's run 48: **b-1b05be**, then
+**b-009d51** and **b-b9365d**. The finish re-raises findings that review
+commits fixed. A chain child is refused for citations its parent moved. A
+host-filed probe runs a witness that never imports the mutated file.
+
 ### Tier 3 — real, not urgent
 
 **Placed 2026-10-16**, from the spec loop's run 42: **b-60317d**.
@@ -611,6 +616,10 @@ seat or the run found and the stack left alone.
 **b-fa014a**, **b-22ed54**, **b-c3688d**, **b-7fa522**, **b-54c8b4**,
 **b-7655f9** and **b-2d2014**. Each is a gap a seat or the run found and the
 stack left alone.
+
+**Placed 2026-10-25**, from the spec loop's run 48: **b-9c5b11**,
+**b-01c53d**, **b-92fdbe**, **b-d3f977**, **b-f0e351** and **b-87001a**.
+Each is a gap a seat, a finish or the run found and the stack left alone.
 
 ~~**22**~~, ~~**23**~~, **31**, ~~**19**~~, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, ~~**62**~~, **63**, ~~**64**~~, **75**, **76**, **77**.
