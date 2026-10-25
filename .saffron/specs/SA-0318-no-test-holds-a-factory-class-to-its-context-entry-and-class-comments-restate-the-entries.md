@@ -309,6 +309,7 @@ commit. Commit as each witness passes.
 
 A prototype of this change passed the whole of `tests/ontology` and the
 `shacl` gate. With `factory.ttl` reverted, all three witnesses failed. Twelve of the
-wrong versions under the first criterion were run against its witness, and
-each failed it. The one left, iterating `CLOSED_SETS`, fails on the real
+wrong versions under the first criterion were run against its witness on
+2026-10-24, and each failed it. That run used all seven inline cases,
+including the bullet's colon and the mid-line case. The one left, iterating `CLOSED_SETS`, fails on the real
 tree's `Plan` class. Both mutants failed their witnesses.
