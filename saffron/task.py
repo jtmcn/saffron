@@ -1084,8 +1084,8 @@ def _rebuild_rebut_result(task_dir: Path) -> RebutResult:
 
 
 def _task_branch(ledger: Ledger, repo_id: int, row: sqlite3.Row) -> str | None:
-    """The `branch` recorded against `row`'s own task. `tasks_by_repo`
-    carries no `branch` column (`ledger.py:1147-1152`), so it is read
+    """The `branch` recorded against `row`'s own task. `Ledger.tasks_by_repo`
+    carries no `branch` column, so it is read
     off the matching row of `tasks_by_spec_id` instead."""
     match = next(
         (
@@ -1101,7 +1101,7 @@ def _task_branch(ledger: Ledger, repo_id: int, row: sqlite3.Row) -> str | None:
 def _origin_branch_heads(url: str) -> dict[str, str]:
     """Every branch `url` holds right now, name to sha, from one
     `ls-remote`. The fallback below filters its candidates by this, so
-    a branch origin already dropped costs no fetch (`SA-0320`)."""
+    a branch origin already dropped costs no fetch (`SA-0315`)."""
     done = _run(["git", "ls-remote", url, "refs/heads/*"])
     if done.returncode != 0:
         raise GitError(f"git ls-remote {url}: {done.stderr.strip()}")
@@ -1121,7 +1121,7 @@ def _fallback_parent_branch(
     mirror_path: Path,
 ) -> str | Refused:
     """`parent_branch` for a `tree_base` no task's `pushed_sha` matches
-    (`DESIGN.md` §5.7, `SA-0320`). Walks every `pushed_sha`-carrying
+    (`DESIGN.md` §5.7, `SA-0315`). Walks every `pushed_sha`-carrying
     task, newest first, kept to those whose `branch`
     `_origin_branch_heads` still lists. Each is fetched into the mirror
     first, so an unfetched `tree_base` disqualifies instead of raising.
@@ -1171,9 +1171,9 @@ def ready_task(
     save the one path that reads `mirror_path`: the `tree_base`
     fallback below, reached only when no task's `pushed_sha` matches it.
 
-    Refuses by name rather than by raising. It names the spec id, the
-    state, the pull request url, and the missing, stale or unmatched
-    file or sha.
+    Refuses by name, naming the spec id, the state, the pull request
+    url, and the missing, stale or unmatched file or sha. A git failure
+    in the fallback raises instead, since it is infrastructure.
     """
     if repo_id is None:
         return Refused(reason=f"{spec_id} has no task in this repo")
@@ -1311,7 +1311,7 @@ def package_ready_task(
 
     Returns `ready_task`'s `Refused` untouched, before the image or the
     network exist. `ready_task`'s own `tree_base` fallback reads
-    `mirror_path` earlier, on its own refusal path. On a `ReadyTask` it
+    `mirror_path` earlier, whether it then refuses or not. On a `ReadyTask` it
     prepares the mirror and builds the repo's image. It then runs N1's
     host-binding probe in a network named for this spec id, and calls
     `package_phase.package` once.

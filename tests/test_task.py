@@ -2540,6 +2540,13 @@ def _rt_write_patch(
     )
 
 
+def _rt_tasks_snapshot(ledger: Ledger) -> list[tuple]:
+    """Every row of `tasks`, sorted, so a refusal can show it wrote nothing."""
+    return sorted(
+        tuple(row) for row in ledger._db.execute("SELECT * FROM tasks").fetchall()
+    )
+
+
 def _rt_set_mtime(path: Path, when: float) -> None:
     os.utime(path, (when, when))
 
@@ -2946,12 +2953,7 @@ def test_ready_task_refuses_with_a_reason_and_writes_nothing(tmp_path):
     out_dir = tmp_path / "out"
     mirror_path = tmp_path / "mirror-unused.git"
 
-    def _snapshot() -> list[tuple]:
-        return sorted(
-            tuple(row) for row in ledger._db.execute("SELECT * FROM tasks").fetchall()
-        )
-
-    before = _snapshot()
+    before = _rt_tasks_snapshot(ledger)
     result = task_module.ready_task(
         "RT-0",
         repo=repo,
@@ -2962,7 +2964,7 @@ def test_ready_task_refuses_with_a_reason_and_writes_nothing(tmp_path):
     )
     assert isinstance(result, Refused)
     assert "RT-0" in result.reason
-    assert _snapshot() == before
+    assert _rt_tasks_snapshot(ledger) == before
     assert not mirror_path.exists()
 
     result = task_module.ready_task(
@@ -2975,7 +2977,7 @@ def test_ready_task_refuses_with_a_reason_and_writes_nothing(tmp_path):
     )
     assert isinstance(result, Refused)
     assert "RT-0" in result.reason
-    assert _snapshot() == before
+    assert _rt_tasks_snapshot(ledger) == before
     assert not mirror_path.exists()
 
     other_states = [s for s in get_args(TaskState) if s != "READY_FOR_REVIEW"]
@@ -2986,7 +2988,7 @@ def test_ready_task_refuses_with_a_reason_and_writes_nothing(tmp_path):
         newer = _rt_task(ledger, repo_id, spec_id=spec_id, spec_sha="a" * 64)
         ledger.set_task_state(newer, state)
 
-        before = _snapshot()
+        before = _rt_tasks_snapshot(ledger)
         result = task_module.ready_task(
             spec_id,
             repo=repo,
@@ -2997,14 +2999,14 @@ def test_ready_task_refuses_with_a_reason_and_writes_nothing(tmp_path):
         )
         assert isinstance(result, Refused)
         assert state in result.reason
-        assert _snapshot() == before
+        assert _rt_tasks_snapshot(ledger) == before
         assert not mirror_path.exists()
 
     pr_task = _rt_task(ledger, repo_id, spec_id="RT-PR", spec_sha="a" * 64)
     ledger.set_task_package(
         pr_task, "READY_FOR_REVIEW", "saffron/RT-PR", "c" * 40, "https://example/pr/1"
     )
-    before = _snapshot()
+    before = _rt_tasks_snapshot(ledger)
     result = task_module.ready_task(
         "RT-PR",
         repo=repo,
@@ -3015,7 +3017,7 @@ def test_ready_task_refuses_with_a_reason_and_writes_nothing(tmp_path):
     )
     assert isinstance(result, Refused)
     assert "https://example/pr/1" in result.reason
-    assert _snapshot() == before
+    assert _rt_tasks_snapshot(ledger) == before
     assert not mirror_path.exists()
 
     file_spec = "RT-FILE"
@@ -3037,7 +3039,7 @@ def test_ready_task_refuses_with_a_reason_and_writes_nothing(tmp_path):
     _clear(task_dir)
     _rt_write_patch(task_dir, base_sha="a" * 40, tree_base="a" * 40, head_sha="c" * 40)
     (task_dir / "findings.json").write_text("[]")
-    before = _snapshot()
+    before = _rt_tasks_snapshot(ledger)
     result = task_module.ready_task(
         file_spec,
         repo=repo,
@@ -3048,7 +3050,7 @@ def test_ready_task_refuses_with_a_reason_and_writes_nothing(tmp_path):
     )
     assert isinstance(result, Refused)
     assert "baseline.json" in result.reason
-    assert _snapshot() == before
+    assert _rt_tasks_snapshot(ledger) == before
     assert not mirror_path.exists()
 
     for name in ("patch.diff", "patch.json", "findings.json"):
@@ -3066,7 +3068,7 @@ def test_ready_task_refuses_with_a_reason_and_writes_nothing(tmp_path):
                 baseline_mtime = (task_dir / "baseline.json").stat().st_mtime
                 _rt_set_mtime(target, baseline_mtime - 10)
 
-            before = _snapshot()
+            before = _rt_tasks_snapshot(ledger)
             result = task_module.ready_task(
                 file_spec,
                 repo=repo,
@@ -3077,7 +3079,7 @@ def test_ready_task_refuses_with_a_reason_and_writes_nothing(tmp_path):
             )
             assert isinstance(result, Refused)
             assert name in result.reason
-            assert _snapshot() == before
+            assert _rt_tasks_snapshot(ledger) == before
             assert not mirror_path.exists()
 
     # An unresolved `spec_sha`, paired with a `tree_base` that differs
@@ -3087,7 +3089,7 @@ def test_ready_task_refuses_with_a_reason_and_writes_nothing(tmp_path):
     sha_dir = out_dir / "RT-SHA"
     _rt_write_patch(sha_dir, base_sha="a" * 40, tree_base="d" * 40, head_sha="c" * 40)
     _rt_seed_records(sha_dir)
-    before = _snapshot()
+    before = _rt_tasks_snapshot(ledger)
     result = task_module.ready_task(
         "RT-SHA",
         repo=repo,
@@ -3098,13 +3100,13 @@ def test_ready_task_refuses_with_a_reason_and_writes_nothing(tmp_path):
     )
     assert isinstance(result, Refused)
     assert "f" * 12 in result.reason
-    assert _snapshot() == before
+    assert _rt_tasks_snapshot(ledger) == before
     assert not mirror_path.exists()
 
     ledger.close()
 
 
-# --- SA-0320: `ready_task`'s `tree_base` fallback reads the mirror -----
+# --- SA-0315: `ready_task`'s `tree_base` fallback reads the mirror -----
 
 
 def _rt_parent_chain(tmp_path: Path) -> tuple[Path, dict[str, str]]:
@@ -3293,11 +3295,6 @@ def test_ready_task_refuses_a_tree_base_no_branch_at_origin_carries(tmp_path):
     _decoy("RT-C2", "saffron/RT-STALE")
     _decoy("RT-C3", "saffron/RT-GONE")
 
-    def _snapshot() -> list[tuple]:
-        return sorted(
-            tuple(row) for row in ledger._db.execute("SELECT * FROM tasks").fetchall()
-        )
-
     mirror_path = tmp_path / "mirror2.git"
     spec_sha = hashlib.sha256(_RT_TEXT.encode()).hexdigest()
     cases = (
@@ -3324,7 +3321,7 @@ def test_ready_task_refuses_a_tree_base_no_branch_at_origin_carries(tmp_path):
         )
         _rt_seed_records(task_dir)
 
-        before = _snapshot()
+        before = _rt_tasks_snapshot(ledger)
         result = task_module.ready_task(
             "RT-1",
             repo=checkout,
@@ -3336,7 +3333,7 @@ def test_ready_task_refuses_a_tree_base_no_branch_at_origin_carries(tmp_path):
         assert isinstance(result, Refused)
         assert tree_base[:12] in result.reason
         assert "no branch at origin carries it" in result.reason
-        assert _snapshot() == before
+        assert _rt_tasks_snapshot(ledger) == before
 
     _git(checkout, "remote", "set-url", "origin", str(tmp_path / "does-not-exist"))
     with pytest.raises(GitError):
