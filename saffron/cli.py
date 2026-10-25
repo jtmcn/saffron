@@ -2791,7 +2791,7 @@ def _adopted_pull_request(
 
     `None` when `gh` fails, prints no JSON, or leaves one of the three
     fields out or empty. The caller then refuses with exit 1 and writes
-    nothing, naming only the pull request number (step 2)."""
+    nothing, naming only the pull request number."""
     found = gh(
         ["gh", "pr", "view", str(pr), "--repo", slug, "--json", _ADOPT_GH_FIELDS]
     )
@@ -2818,13 +2818,13 @@ def _adopt(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     head branch together. It then refuses with exit 1 and no write on a
     missing field, a mismatched head branch, or a different carried url.
 
-    A repeat run on the same pull request retries. A raise from the
+    Adopting the same pull request again retries. A raise from the
     re-gate reaches the caller, which exits 2 after the write lands."""
     repo = args.repo.resolve()
     url = package_phase.real_remote(repo)
     repo_id = ledger.resolve_repo_id(url)
     rows = ledger.tasks_by_spec_id(repo_id, args.spec_id) if repo_id is not None else []
-    if not rows:
+    if repo_id is None or not rows:
         print(f"adopt: {args.spec_id} has no task in this repo")
         return 1
     newest = rows[-1]
@@ -2835,10 +2835,17 @@ def _adopt(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         )
         return 1
     task_id = int(newest["task_id"])
-    carried = ledger._db.execute(
-        "SELECT pr_url FROM tasks WHERE task_id = ?", (task_id,)
-    ).fetchone()
-    carried_url = carried["pr_url"] if carried is not None else ""
+    carried_url = (
+        next(
+            (
+                r["pr_url"]
+                for r in ledger.tasks_by_repo(repo_id)
+                if r["task_id"] == task_id
+            ),
+            None,
+        )
+        or ""
+    )
 
     slug = package_phase.github_slug(url)
     named = _adopted_pull_request(run_gh, slug, args.pr)
@@ -2860,18 +2867,19 @@ def _adopt(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
 
     if state == "READY_FOR_REVIEW":
         # A resolved `pushed_sha` is PACKAGE's own commit, and it stays.
-        # The end review and `finish` read it as the layer's diff (step 6).
+        # The end review and `finish` read it as the layer's diff .
         if not _RESOLVED_SHA.fullmatch(newest["pushed_sha"] or ""):
             ledger.record_push(task_id, head_sha)
         ledger.adopt_pull_request(task_id, adopted_url)
         print(f"adopt: task {task_id} ({args.spec_id}) → {adopted_url}")
         return 0
 
-    # Record the head, then the url (step 4): both facts, so a fold
+    # Record the head, then the url: both facts, so a fold
     # rebuilds them, and the url is on record before the re-gate it feeds.
     ledger.record_push(task_id, head_sha)
     ledger.adopt_pull_request(task_id, adopted_url)
 
+    before = ledger.regate(task_id)
     outcome = regate.run_regate(
         task_id,
         repo=repo,
@@ -2895,6 +2903,12 @@ def _adopt(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
 
     if regated is None:
         why = "its re-gate declined, recording nothing"
+    elif outcome != 0 and before is not None and tuple(regated) == tuple(before):
+        # A decline writes no row, so adopt cannot tell it from a repeated result.
+        why = (
+            f"its re-gate wrote no new row; the last one names "
+            f"{regated['new_failures']} new failure(s) on {regated['head_sha'][:12]}"
+        )
     elif regated["head_sha"] != head_sha:
         why = (
             f"its newest re-gate names {regated['head_sha'][:12]}, not the adopted head"

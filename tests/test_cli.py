@@ -2632,7 +2632,7 @@ class _FakeRegate:
     pair, recorded with `ledger.record_regate` before answering `0` for
     zero new failures and `1` otherwise, the contract `saffron/regate.py`
     returns. Every call asserts the task already carries a url. `_adopt`
-    must record it before re-gating (step 4). `calls` names every task
+    must record it before re-gating. `calls` names every task
     id this double was asked about, in order."""
 
     def __init__(self, outcomes: dict[int, typing.Any]) -> None:
@@ -2655,15 +2655,11 @@ class _FakeRegate:
         return 0 if new_failures == 0 else 1
 
 
-def _fake_regate(outcomes: dict[int, typing.Any]) -> _FakeRegate:
-    return _FakeRegate(outcomes)
-
-
 def test_adopt_writes_the_url_gh_names_onto_the_specs_newest_task(
     tmp_path, monkeypatch, capsys
 ):
-    """One task per state `adopt` takes. `NOT_IMPLEMENTED` and `EXHAUSTED`
-    carry an empty `pr_url` beside a recorded push and diff stat.
+    """One task per state `adopt` takes. `EXHAUSTED` carries an empty
+    `pr_url` beside a diff stat, and `NOT_IMPLEMENTED` a NULL one.
     `READY_FOR_REVIEW` carries a NULL one and is adopted with no re-gate.
 
     Every column but `pr_url` and `pushed_sha` reads back unchanged, and
@@ -2721,7 +2717,7 @@ def test_adopt_writes_the_url_gh_names_onto_the_specs_newest_task(
     }
     ledger.close()
 
-    declines = _fake_regate({not_implemented: 1, exhausted: 1})
+    declines = _FakeRegate({not_implemented: 1, exhausted: 1})
     monkeypatch.setattr(cli.regate, "run_regate", declines)
 
     for spec_id, task_id, branch in (
@@ -2758,7 +2754,7 @@ def test_adopt_writes_the_url_gh_names_onto_the_specs_newest_task(
         before = befores[task_id]
         assert after["pr_url"] == adopted_url
         if task_id == ready:
-            # Already resolved (PACKAGE's own commit): it stays (step 6).
+            # Already resolved, as PACKAGE leaves it: it stays.
             assert after["pushed_sha"] == before["pushed_sha"]
         else:
             assert after["pushed_sha"] == adopted_head
@@ -2954,7 +2950,7 @@ def test_an_adopted_pull_request_is_a_fact_the_fold_keeps(tmp_path, monkeypatch)
     monkeypatch.setattr(
         cli.regate,
         "run_regate",
-        _fake_regate({not_implemented: 1, exhausted: 1}),
+        _FakeRegate({not_implemented: 1, exhausted: 1}),
     )
     for spec_id, branch in (
         ("SY-FOLD-NI", "saffron/SY-FOLD-NI"),
@@ -3040,7 +3036,7 @@ def test_a_merged_adopted_pull_request_admits_the_child_of_a_not_implemented_par
     adopted_url = "https://github.com/owner/repo/pull/55"
     adopted_head = "5" * 40
     monkeypatch.setattr(
-        cli.regate, "run_regate", _fake_regate({parent_task: (adopted_head, 3)})
+        cli.regate, "run_regate", _FakeRegate({parent_task: (adopted_head, 3)})
     )
     monkeypatch.setattr(
         cli,
@@ -3157,7 +3153,7 @@ def test_adopt_moves_a_task_whose_regate_is_green_on_the_adopted_head_to_ready_f
 
         adopted_url = "https://github.com/owner/repo/pull/61"
         adopted_head = "6" * 40
-        fake = _fake_regate({parent_task: (adopted_head, 0)})
+        fake = _FakeRegate({parent_task: (adopted_head, 0)})
         monkeypatch.setattr(cli.regate, "run_regate", fake)
         monkeypatch.setattr(
             cli,
@@ -3268,7 +3264,7 @@ def test_adopt_keeps_the_state_of_a_task_whose_regate_is_red_declined_or_on_anot
                 head_sha=head_sha,
             ),
         )
-        monkeypatch.setattr(cli.regate, "run_regate", _fake_regate(outcomes))
+        monkeypatch.setattr(cli.regate, "run_regate", _FakeRegate(outcomes))
         assert (
             cli.main(
                 [
@@ -3293,6 +3289,25 @@ def test_adopt_keeps_the_state_of_a_task_whose_regate_is_red_declined_or_on_anot
         assert row["pr_url"] == url
         assert row["pushed_sha"] == head_sha
 
+    # A retry whose re-gate declines names the last row as the last row.
+    monkeypatch.setattr(
+        cli,
+        "run_gh",
+        _fake_gh_names_a_pull_request(
+            "https://github.com/owner/repo/pull/91",
+            head_branch="saffron/SY-RED",
+            number="91",
+            head_sha="r" * 40,
+        ),
+    )
+    monkeypatch.setattr(cli.regate, "run_regate", _FakeRegate({red_task: 1}))
+    assert (
+        cli.main(["--home", str(home), "adopt", "SY-RED", "91", "--repo", str(repo)])
+        == 0
+    )
+    out = capsys.readouterr().out
+    assert "kept EXHAUSTED (its re-gate wrote no new row" in out
+
     # Re-run on the same pull request after the red result: a fresh head
     # and a green re-gate move the task on.
     retry_head = "g" * 40
@@ -3307,7 +3322,7 @@ def test_adopt_keeps_the_state_of_a_task_whose_regate_is_red_declined_or_on_anot
         ),
     )
     monkeypatch.setattr(
-        cli.regate, "run_regate", _fake_regate({red_task: (retry_head, 0)})
+        cli.regate, "run_regate", _FakeRegate({red_task: (retry_head, 0)})
     )
     assert (
         cli.main(["--home", str(home), "adopt", "SY-RED", "91", "--repo", str(repo)])
@@ -3495,6 +3510,7 @@ def test_adopt_refuses_a_pull_request_gh_cannot_describe_or_whose_head_is_anothe
         == 1
     )
     out = capsys.readouterr().out
+    assert "pull request 12" in out
     assert "some/other-branch" in out
     assert "saffron/SY-WRONGBRANCH" in out
     assert not _task_row(ledger, branch_task)["pr_url"]
@@ -3627,7 +3643,7 @@ def test_an_adopted_head_and_state_move_are_facts_the_fold_keeps(tmp_path, monke
     monkeypatch.setattr(
         cli.regate,
         "run_regate",
-        _fake_regate({moved: (green_head, 0), stayed: (red_head, 5)}),
+        _FakeRegate({moved: (green_head, 0), stayed: (red_head, 5)}),
     )
 
     for spec_id, branch, number, head_sha in (
