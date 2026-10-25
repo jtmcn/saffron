@@ -85,6 +85,7 @@ from saffron.repos.mirror import (
     GitError,
     UnreadablePath,
     _run,
+    ensure_mirror,
     export_saffron_dir,
     file_at,
     has_commit,
@@ -546,6 +547,28 @@ class Refused:
     reason: str
 
 
+# The attribute a marked exception carries, private to this module.
+_RAISED_IN_PACKAGE = "_saffron_raised_in_package"
+
+
+def mark_raised_in_package(exc: BaseException) -> None:
+    """Mark `exc` as having escaped `run_task`'s own `package_phase.package`
+    call for a `READY_FOR_REVIEW` cell. The mark lives on the object itself.
+    A bare re-raise of the same instance still carries it wherever a batch
+    next catches it. `run_task` never marks an exhausted-mode raise:
+    `saffron package` refuses a task that is not `READY_FOR_REVIEW`, so
+    naming that command for one would send the operator to a refusal
+    (`b-066901`)."""
+    setattr(exc, _RAISED_IN_PACKAGE, True)
+
+
+def raised_in_package(exc: BaseException) -> bool:
+    """True for an exception `mark_raised_in_package` marked. False for any
+    other, a fresh never-raised one included. The mark lives on the object,
+    never on its type, so a caller cannot read it off the class."""
+    return bool(getattr(exc, _RAISED_IN_PACKAGE, False))
+
+
 def _recorded_spec_text(
     ledger: Ledger, task_id: int, spec: Spec, base: PinnedBase
 ) -> tuple[Spec, str] | Refused | None:
@@ -874,14 +897,18 @@ def run_task(
                     # The cell's own write stopped short of this state
                     # (b-dce9a4), so the raise path writes it here instead.
                     ledger.set_task_state(outcome.task_id, "READY_FOR_REVIEW")
+                    # Marked so a batch names `saffron package` and closes `INFRASTRUCTURE`.
+                    # The breaker still counts it like any raise (`b-066901`).
+                    mark_raised_in_package(exc)
                     raise
                 result = None
                 package_error_note = str(exc)
-            except BaseException:
+            except BaseException as exc:
                 # Any other raise, `KeyboardInterrupt` included, leaves the
                 # same row in flight unless this writes it (b-dce9a4).
                 if not exhausted_package:
                     ledger.set_task_state(outcome.task_id, "READY_FOR_REVIEW")
+                    mark_raised_in_package(exc)
                 raise
             else:
                 print(f"{spec.id:<10} {result.state}  {result.pr_url or result.note}")
@@ -1082,6 +1109,79 @@ def _rebuild_rebut_result(task_dir: Path) -> RebutResult:
     )
 
 
+def _task_branch(ledger: Ledger, repo_id: int, row: sqlite3.Row) -> str | None:
+    """The `branch` recorded against `row`'s own task. `Ledger.tasks_by_repo`
+    carries no `branch` column, so it is read
+    off the matching row of `tasks_by_spec_id` instead."""
+    match = next(
+        (
+            r
+            for r in ledger.tasks_by_spec_id(repo_id, row["spec_id"])
+            if r["task_id"] == row["task_id"]
+        ),
+        None,
+    )
+    return match["branch"] if match is not None else None
+
+
+def _origin_branch_heads(url: str) -> dict[str, str]:
+    """Every branch `url` holds right now, name to sha, from one
+    `ls-remote`. The fallback below filters its candidates by this, so
+    a branch origin already dropped costs no fetch (`SA-0315`)."""
+    done = _run(["git", "ls-remote", url, "refs/heads/*"])
+    if done.returncode != 0:
+        raise GitError(f"git ls-remote {url}: {done.stderr.strip()}")
+    heads: dict[str, str] = {}
+    for line in done.stdout.splitlines():
+        sha, ref = line.split("\t", 1)
+        heads[ref.removeprefix("refs/heads/")] = sha
+    return heads
+
+
+def _fallback_parent_branch(
+    tree_base: str,
+    *,
+    repo: Path,
+    repo_id: int,
+    ledger: Ledger,
+    mirror_path: Path,
+) -> str | Refused:
+    """`parent_branch` for a `tree_base` no task's `pushed_sha` matches
+    (`DESIGN.md` §5.7, `SA-0315`). Walks every `pushed_sha`-carrying
+    task, newest first, kept to those whose `branch`
+    `_origin_branch_heads` still lists. Each is fetched into the mirror
+    first, so an unfetched `tree_base` disqualifies instead of raising.
+    The winner is the first whose fetched head reaches `tree_base`, and
+    whose own `pushed_sha` is an ancestor of it. A listed branch gone by
+    its own fetch raises, and so does a failed `ls-remote`: both
+    infrastructure, never a refusal.
+    """
+    mirror = ensure_mirror(repo, mirror_path)
+    url = package_phase.real_remote(repo)
+    origin_heads = _origin_branch_heads(url)
+
+    candidates = [
+        row for row in reversed(ledger.tasks_by_repo(repo_id)) if row["pushed_sha"]
+    ]
+    for row in candidates:
+        branch = _task_branch(ledger, repo_id, row)
+        if branch is None or branch not in origin_heads:
+            continue
+        head = package_phase.fetch_parent_branch(mirror, url, branch)
+        if not _is_ancestor(mirror, tree_base, head):
+            continue
+        if not _is_ancestor(mirror, row["pushed_sha"], tree_base):
+            continue
+        return branch
+
+    return Refused(
+        reason=(
+            f"{tree_base[:12]} was pushed by no task in this repo, and no "
+            "branch at origin carries it"
+        )
+    )
+
+
 def ready_task(
     spec_id: str,
     *,
@@ -1089,14 +1189,17 @@ def ready_task(
     repo_id: int | None,
     ledger: Ledger,
     out_dir: Path,
+    mirror_path: Path,
 ) -> ReadyTask | Refused:
     """Rebuilds what `package()` needs for `spec_id`'s newest task in this
     repo, from the ledger and the task directory alone. No live
-    `CellOutcome` is required, and nothing here writes, ledger or disk.
+    `CellOutcome` is required, and nothing here writes, ledger or disk,
+    save the one path that writes `mirror_path`: the `tree_base`
+    fallback below, reached only when no task's `pushed_sha` matches it.
 
-    Refuses by name rather than by raising. It names the spec id, the
-    state, the pull request url, and the missing, stale or unmatched
-    file or sha.
+    Refuses by name, naming the spec id, the state, the pull request
+    url, and the missing, stale or unmatched file or sha. A git failure
+    in the fallback raises instead, since it is infrastructure.
     """
     if repo_id is None:
         return Refused(reason=f"{spec_id} has no task in this repo")
@@ -1188,20 +1291,19 @@ def ready_task(
             for row in ledger.tasks_by_repo(repo_id)
             if row["pushed_sha"] == tree_base
         ]
-        if not pushers:
-            return Refused(
-                reason=f"{tree_base[:12]} was pushed by no task in this repo"
+        if pushers:
+            parent_branch = _task_branch(ledger, repo_id, pushers[-1])
+        else:
+            fallback = _fallback_parent_branch(
+                tree_base,
+                repo=repo,
+                repo_id=repo_id,
+                ledger=ledger,
+                mirror_path=mirror_path,
             )
-        pusher = pushers[-1]
-        pusher_task = next(
-            (
-                row
-                for row in ledger.tasks_by_spec_id(repo_id, pusher["spec_id"])
-                if row["task_id"] == pusher["task_id"]
-            ),
-            None,
-        )
-        parent_branch = pusher_task["branch"] if pusher_task is not None else None
+            if isinstance(fallback, Refused):
+                return fallback
+            parent_branch = fallback
 
     outcome = CellOutcome(
         state="READY_FOR_REVIEW",
@@ -1233,14 +1335,20 @@ def package_ready_task(
     """`saffron package`'s whole body: `ready_task`'s rebuild, then every
     step PACKAGE needs on its own, with no agent and no `run_one_cell`.
 
-    Returns `ready_task`'s `Refused` untouched, before the mirror, the
-    image or the network exist. On a `ReadyTask` it prepares the mirror
-    and builds the repo's image. It then runs N1's host-binding probe in
-    a network named for this spec id, and calls `package_phase.package`
-    once.
+    Returns `ready_task`'s `Refused` untouched, before the image or the
+    network exist. `ready_task`'s own `tree_base` fallback reads
+    `mirror_path` earlier, whether it then refuses or not. On a `ReadyTask` it
+    prepares the mirror and builds the repo's image. It then runs N1's
+    host-binding probe in a network named for this spec id, and calls
+    `package_phase.package` once.
     """
     ready = ready_task(
-        spec_id, repo=repo, repo_id=repo_id, ledger=ledger, out_dir=out_dir
+        spec_id,
+        repo=repo,
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir,
+        mirror_path=mirror_path,
     )
     if isinstance(ready, Refused):
         return ready

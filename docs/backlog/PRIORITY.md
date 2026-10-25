@@ -584,6 +584,11 @@ deferred finish exempts the stack base's branch but none on its chain.
 **b-781ea4**. The witness gate passes a mutant whose find matches twice. The
 finish's follow-up drafts fail to parse, so it files nothing.
 
+**Placed 2026-10-25**, from the spec loop's run 48: **b-1b05be**, then
+**b-009d51** and **b-b9365d**. The finish re-raises findings that review
+commits fixed. A chain child is refused for citations its parent moved. A
+host-filed probe runs a witness that never imports the mutated file.
+
 ### Tier 3 — real, not urgent
 
 **Placed 2026-10-16**, from the spec loop's run 42: **b-60317d**.
@@ -617,6 +622,10 @@ stack left alone.
 **b-545741**, which close gaps between `factory.ttl` and `CONTEXT.md`.
 **b-7aefb8** is a property inside `factory.ttl`, and **b-8e14fb** its place
 in `policy.yaml`. **b-2227b0**, closed as parked, records a draft ADR.
+
+**Placed 2026-10-25**, from the spec loop's run 48: **b-9c5b11**,
+**b-01c53d**, **b-92fdbe**, **b-d3f977**, **b-f0e351** and **b-87001a**.
+Each is a gap a seat, a finish or the run found and the stack left alone.
 
 ~~**22**~~, ~~**23**~~, **31**, ~~**19**~~, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, ~~**62**~~, **63**, ~~**64**~~, **75**, **76**, **77**.

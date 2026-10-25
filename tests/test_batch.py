@@ -753,6 +753,213 @@ def test_the_breaker_still_reports_infrastructure_over_a_task_left_in_flight(
     assert any("TE-0010" in line and "REBUTTING" in line for line in lines)
 
 
+def _marked_runtime_error(message: str) -> CellRuntimeError:
+    """A `CellRuntimeError` carrying the mark `run_task` sets on a PACKAGE raise."""
+    from saffron.task import mark_raised_in_package
+
+    exc = CellRuntimeError(message)
+    mark_raised_in_package(exc)
+    return exc
+
+
+def test_a_batch_whose_package_raised_closes_infrastructure_whatever_it_stopped_on(
+    ledger, repo_id
+):
+    """`run_batch` closes its row `INFRASTRUCTURE`, and returns it, once its
+    runner raised an exception `raised_in_package` marks, whatever reason
+    the loop itself stopped on. The loop still runs every later candidate
+    it would have run. The log names `saffron package <spec id>` for the
+    spec that raised, beside its `raised` line, and for no other spec. Two
+    marked raises in a row still fire the breaker, so a third candidate
+    never runs."""
+    # Imported here, not at module scope, as the comment in this test explains:
+    # test_task.py::test_a_raise_that_escapes_run_task_from_package_is_marked_and_kept
+    from saffron.phases import package as package_phase
+    from saffron.task import mark_raised_in_package
+
+    def _marked_package_error(message: str) -> package_phase.PackageError:
+        exc = package_phase.PackageError(message)
+        mark_raised_in_package(exc)
+        return exc
+
+    def _command_lines(lines: list[str], spec_id: str) -> list[str]:
+        return [line for line in lines if f"saffron package {spec_id}" in line]
+
+    # DRAINED: both candidates run, the second reaching READY_FOR_REVIEW.
+    # The first raises a marked `PackageError`, never `CellRuntimeError`.
+    drained_candidates = [_candidate("TE-0021"), _candidate("TE-0022")]
+    run_id = _spend(ledger, repo_id, 1.0)
+    runner = FakeRunner(
+        [
+            _marked_package_error("gh is unavailable"),
+            _outcome(state="READY_FOR_REVIEW", run_id=run_id),
+        ]
+    )
+    lines: list[str] = []
+    reason = run_batch(
+        drained_candidates,
+        ledger,
+        budget_usd=50.0,
+        until=None,
+        runner=runner,
+        rescan=lambda: drained_candidates,
+        readiness_check=_ready,
+        emit=lines.append,
+    )
+    assert reason == "INFRASTRUCTURE"
+    assert [c.spec.id for c in runner.calls] == ["TE-0021", "TE-0022"]
+    assert _batch_row(ledger, _latest_batch_id(ledger))["status"] == "INFRASTRUCTURE"
+    assert any(
+        "TE-0021" in line and "raised" in line and "gh is unavailable" in line
+        for line in lines
+    )
+    assert _command_lines(lines, "TE-0021") != []
+    assert _command_lines(lines, "TE-0022") == []
+
+    # BUDGET: the first raises marked, and the second's own budget exceeds
+    # what is left, so the second's runner is never called.
+    budget_candidates = [
+        _candidate("TE-0023", budget_usd=1.0),
+        _candidate("TE-0024", budget_usd=1000.0),
+    ]
+    runner_budget = FakeRunner([_marked_runtime_error("gh is unavailable")])
+    lines_budget: list[str] = []
+    reason_budget = run_batch(
+        budget_candidates,
+        ledger,
+        budget_usd=5.0,
+        until=None,
+        runner=runner_budget,
+        rescan=lambda: budget_candidates,
+        readiness_check=_ready,
+        emit=lines_budget.append,
+    )
+    assert reason_budget == "INFRASTRUCTURE"
+    assert [c.spec.id for c in runner_budget.calls] == ["TE-0023"]
+    assert _batch_row(ledger, _latest_batch_id(ledger))["status"] == "INFRASTRUCTURE"
+    assert _command_lines(lines_budget, "TE-0023") != []
+    assert _command_lines(lines_budget, "TE-0024") == []
+
+    # UNTIL: the clock passes the deadline before the second candidate.
+    until_candidates = [_candidate("TE-0025"), _candidate("TE-0026")]
+    runner_until = FakeRunner([_marked_runtime_error("gh is unavailable")])
+    clock = FakeClock([datetime(2026, 9, 5, 1, 0), datetime(2026, 9, 5, 7, 0)])
+    lines_until: list[str] = []
+    reason_until = run_batch(
+        until_candidates,
+        ledger,
+        budget_usd=50.0,
+        until=datetime(2026, 9, 5, 6, 30),
+        runner=runner_until,
+        clock=clock,
+        rescan=lambda: until_candidates,
+        readiness_check=_ready,
+        emit=lines_until.append,
+    )
+    assert reason_until == "INFRASTRUCTURE"
+    assert [c.spec.id for c in runner_until.calls] == ["TE-0025"]
+    assert _batch_row(ledger, _latest_batch_id(ledger))["status"] == "INFRASTRUCTURE"
+    assert _command_lines(lines_until, "TE-0025") != []
+    assert _command_lines(lines_until, "TE-0026") == []
+
+    # INCOMPLETE: the second candidate comes back in flight.
+    incomplete_candidates = [_candidate("TE-0027"), _candidate("TE-0028")]
+    run_id_two = _spend(ledger, repo_id, 1.0)
+    runner_incomplete = FakeRunner(
+        [
+            _marked_runtime_error("gh is unavailable"),
+            _outcome(state="REVIEWING", run_id=run_id_two),
+        ]
+    )
+    lines_incomplete: list[str] = []
+    reason_incomplete = run_batch(
+        incomplete_candidates,
+        ledger,
+        budget_usd=50.0,
+        until=None,
+        runner=runner_incomplete,
+        rescan=lambda: incomplete_candidates,
+        readiness_check=_ready,
+        emit=lines_incomplete.append,
+    )
+    assert reason_incomplete == "INFRASTRUCTURE"
+    assert [c.spec.id for c in runner_incomplete.calls] == ["TE-0027", "TE-0028"]
+    assert _batch_row(ledger, _latest_batch_id(ledger))["status"] == "INFRASTRUCTURE"
+    assert _command_lines(lines_incomplete, "TE-0027") != []
+    assert _command_lines(lines_incomplete, "TE-0028") == []
+
+    # A later candidate whose own raise is unmarked gets its `raised` line
+    # and no command line, once a `CellRuntimeError`, once a `PackageError`.
+    unmarked_runtime_candidates = [_candidate("TE-0029"), _candidate("TE-0030")]
+    runner_unmarked_runtime = FakeRunner(
+        [_marked_runtime_error("gh is unavailable"), CellRuntimeError("the proxy died")]
+    )
+    lines_unmarked_runtime: list[str] = []
+    run_batch(
+        unmarked_runtime_candidates,
+        ledger,
+        budget_usd=50.0,
+        until=None,
+        runner=runner_unmarked_runtime,
+        rescan=lambda: unmarked_runtime_candidates,
+        readiness_check=_ready,
+        emit=lines_unmarked_runtime.append,
+    )
+    assert any(
+        "TE-0030" in line and "raised" in line for line in lines_unmarked_runtime
+    )
+    assert _command_lines(lines_unmarked_runtime, "TE-0030") == []
+
+    unmarked_package_candidates = [_candidate("TE-0031"), _candidate("TE-0032")]
+    runner_unmarked_package = FakeRunner(
+        [
+            _marked_runtime_error("gh is unavailable"),
+            package_phase.PackageError("gh is unavailable"),
+        ]
+    )
+    lines_unmarked_package: list[str] = []
+    run_batch(
+        unmarked_package_candidates,
+        ledger,
+        budget_usd=50.0,
+        until=None,
+        runner=runner_unmarked_package,
+        rescan=lambda: unmarked_package_candidates,
+        readiness_check=_ready,
+        emit=lines_unmarked_package.append,
+    )
+    assert any(
+        "TE-0032" in line and "raised" in line for line in lines_unmarked_package
+    )
+    assert _command_lines(lines_unmarked_package, "TE-0032") == []
+
+    # Two marked raises in a row still fire the breaker: a third candidate
+    # queued behind them never runs.
+    breaker_candidates = [
+        _candidate("TE-0033"),
+        _candidate("TE-0034"),
+        _candidate("TE-0035"),
+    ]
+    runner_breaker = FakeRunner(
+        [
+            _marked_runtime_error("gh is unavailable"),
+            _marked_runtime_error("gh is unavailable"),
+        ]
+    )
+    reason_breaker = run_batch(
+        breaker_candidates,
+        ledger,
+        budget_usd=50.0,
+        until=None,
+        runner=runner_breaker,
+        rescan=lambda: breaker_candidates,
+        readiness_check=_ready,
+        emit=lambda line: None,
+    )
+    assert reason_breaker == "INFRASTRUCTURE"
+    assert [c.spec.id for c in runner_breaker.calls] == ["TE-0033", "TE-0034"]
+
+
 def test_in_flight_outcomes_do_not_fire_the_breaker(ledger, repo_id):
     """The breaker is unchanged: an in-flight outcome still resets the
     consecutive-abort count, so two provider blips in a row do not end a
@@ -6790,6 +6997,120 @@ def test_a_follow_ups_cell_runtime_failure_is_offered_again(ledger, repo_id):
         ("TE-12", "TE-9"),
     ]
     assert "follow-ups unrun  TE-11" in lines
+
+
+def test_a_stack_batch_misses_a_spec_whose_package_raised_and_closes_infrastructure(
+    ledger, repo_id
+):
+    """A stack batch treats an exception `raised_in_package` marks, from
+    its runner, as a miss like any other raise. It calls the runner once
+    for that spec, refuses each spec whose `depends_on` reaches it, and
+    closes its row `INFRASTRUCTURE`. Its end review and follow-ups still
+    run. A resumed tail under `saffron finish` runs the runner once for a
+    follow-up whose raise is marked. It returns `INFRASTRUCTURE` without
+    writing to the already-closed row (`b-066901`)."""
+    from saffron.batch import run_stack_batch
+
+    # 1) An order spec raises marked: its dependent is refused, the
+    # standalone spec still runs, and the one follow-up still runs too.
+    order = [
+        _candidate("TE-0036"),
+        _candidate("TE-0037", depends_on=["TE-0036"]),
+        _candidate("TE-0038"),
+    ]
+    rows1 = {"__follow_ups__": [{"id": "TE-0039", "budget_usd": 1.0}]}
+    doubles1 = RaisingStackDoubles(
+        ledger,
+        repo_id,
+        rows1,
+        {("runner", "TE-0036"): [_marked_runtime_error("gh is unavailable")]},
+    )
+    lines1: list[str] = []
+
+    reason1 = run_stack_batch(
+        order,
+        ledger,
+        100.0,
+        None,
+        doubles1.runner,
+        readiness_check=_ready,
+        review=doubles1.review,
+        mint=doubles1.mint,
+        end_review=doubles1.end_review,
+        follow_ups=doubles1.follow_ups,
+        sleep=_fail_sleep,
+        emit=lines1.append,
+    )
+
+    assert reason1 == "INFRASTRUCTURE"
+    assert doubles1.runner_calls == [
+        ("TE-0036", None),
+        ("TE-0038", None),
+        ("TE-0039", "TE-0038"),
+    ]
+    assert any(
+        "TE-0037" in line and "refused" in line and "TE-0036" in line for line in lines1
+    )
+    assert any("saffron package TE-0036" in line for line in lines1)
+    assert _batch_row(ledger, _latest_batch_id(ledger))["status"] == "INFRASTRUCTURE"
+
+    # 2) Every order spec reaches READY_FOR_REVIEW. The one follow-up
+    # raises marked instead.
+    rows2 = {"__follow_ups__": [{"id": "TE-0041", "budget_usd": 1.0}]}
+    doubles2 = RaisingStackDoubles(
+        ledger,
+        repo_id,
+        rows2,
+        {("runner", "TE-0041"): [_marked_runtime_error("gh is unavailable")]},
+    )
+
+    reason2 = run_stack_batch(
+        [_candidate("TE-0040")],
+        ledger,
+        100.0,
+        None,
+        doubles2.runner,
+        readiness_check=_ready,
+        review=doubles2.review,
+        mint=doubles2.mint,
+        end_review=doubles2.end_review,
+        follow_ups=doubles2.follow_ups,
+        sleep=_fail_sleep,
+    )
+
+    assert reason2 == "INFRASTRUCTURE"
+    assert doubles2.runner_calls == [("TE-0040", None), ("TE-0041", "TE-0040")]
+    assert _batch_row(ledger, _latest_batch_id(ledger))["status"] == "INFRASTRUCTURE"
+
+    # 3) A `DRAINED` resume with no `sleep` given: its one follow-up raises
+    # marked, and the already-closed row is left untouched.
+    batch_id3, resume3 = _resumable_batch(ledger, repo_id, reason="DRAINED")
+    before3 = _row_window(ledger, batch_id3)
+    rows3 = {"__follow_ups__": [{"id": "TE-0044", "budget_usd": 1.0}]}
+    doubles3 = RaisingStackDoubles(
+        ledger,
+        repo_id,
+        rows3,
+        {("runner", "TE-0044"): [_marked_runtime_error("gh is unavailable")]},
+    )
+
+    reason3 = run_stack_batch(
+        [],
+        ledger,
+        resume3.budget_usd,
+        None,
+        doubles3.runner,
+        readiness_check=_ready,
+        review=doubles3.review,
+        mint=doubles3.mint,
+        end_review=doubles3.end_review,
+        follow_ups=doubles3.follow_ups,
+        resume=resume3,
+    )
+
+    assert reason3 == "INFRASTRUCTURE"
+    assert doubles3.runner_calls == [("TE-0044", "TE-2")]
+    assert _row_window(ledger, batch_id3) == before3
 
 
 def test_a_cell_runtime_failure_is_offered_again_only_until_the_breaker(

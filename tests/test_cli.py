@@ -2604,35 +2604,75 @@ def test_a_command_files_each_fact_it_writes_in_the_tasks_own_mirror(
 _ADOPT_PR_NUMBER = "123"
 
 
-def _fake_gh_names_a_pull_request(url, number=_ADOPT_PR_NUMBER, slug="owner/repo"):
-    """A `gh pr view <number> --repo <slug> ... --jq .url` fake. Its answer can
-    differ in case from the origin's slug, so a version that builds the URL
-    itself rather than asking fails against it."""
+def _fake_gh_names_a_pull_request(
+    url, *, head_branch, number=_ADOPT_PR_NUMBER, slug="owner/repo", head_sha="c" * 40
+):
+    """A `gh pr view <number> --repo <slug> --json url,headRefOid,headRefName`
+    fake. Its answer can differ in case from the origin's slug, so a version
+    that builds the URL itself rather than asking fails against it.
+    `head_branch` is required: every caller must say which branch the pull
+    request heads, since `_adopt` now refuses on a mismatch."""
 
     def fake(argv):
         assert argv[:3] == ["gh", "pr", "view"]
         assert argv[3] == number
         assert argv[argv.index("--repo") + 1] == slug
-        assert "--jq" in argv
-        return subprocess.CompletedProcess(argv, 0, url + "\n", "")
+        assert argv[-2:] == ["--json", "url,headRefOid,headRefName"]
+        payload = {"url": url, "headRefOid": head_sha, "headRefName": head_branch}
+        return subprocess.CompletedProcess(argv, 0, json.dumps(payload), "")
 
     return fake
+
+
+class _FakeRegate:
+    """A `regate.run_regate` double keyed by task id (b-619b7d).
+
+    Each value in `outcomes` is a bare int, the decline shape, returned
+    as given and writing no row. Or it is a `(head_sha, new_failures)`
+    pair, recorded with `ledger.record_regate` before answering `0` for
+    zero new failures and `1` otherwise, the contract `saffron/regate.py`
+    returns. Every call asserts the task already carries a url. `_adopt`
+    must record it before re-gating. `calls` names every task
+    id this double was asked about, in order."""
+
+    def __init__(self, outcomes: dict[int, typing.Any]) -> None:
+        self.outcomes = outcomes
+        self.calls: list[int] = []
+
+    def __call__(self, task_id, *, repo, ledger, out_dir, mirror_path, gh):
+        self.calls.append(task_id)
+        carried = ledger._db.execute(
+            "SELECT pr_url FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        assert carried is not None and carried["pr_url"]
+        outcome = self.outcomes[task_id]
+        if isinstance(outcome, int):
+            return outcome
+        head_sha, new_failures = outcome
+        ledger.record_regate(
+            task_id, head_sha=head_sha, baseline_sha="b" * 40, new_failures=new_failures
+        )
+        return 0 if new_failures == 0 else 1
 
 
 def test_adopt_writes_the_url_gh_names_onto_the_specs_newest_task(
     tmp_path, monkeypatch, capsys
 ):
-    """One task per state `adopt` takes: `NOT_IMPLEMENTED` and
-    `READY_FOR_REVIEW` carry a NULL `pr_url`, `EXHAUSTED` carries an empty
-    one beside a recorded push and diff stat. Every other column reads
-    back unchanged, and an older task of the same spec is untouched.
-    `gh`'s answer differs in case from the slug, so a URL built from the
-    slug and the number fails this."""
+    """One task per state `adopt` takes. `EXHAUSTED` carries an empty
+    `pr_url` beside a diff stat, and `NOT_IMPLEMENTED` a NULL one.
+    `READY_FOR_REVIEW` carries a NULL one and is adopted with no re-gate.
+
+    Every column but `pr_url` and `pushed_sha` reads back unchanged, and
+    an older task of the same spec is untouched. `gh`'s answer differs
+    in case from the slug, so a URL built from the slug and the number
+    fails this. `NOT_IMPLEMENTED` and `EXHAUSTED` are each declined by
+    their own re-gate, which has no row to keep. Neither moves state.
+    Only the adopted head and url land."""
     repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
     home = tmp_path / "home"
     home.mkdir()
     adopted_url = "https://github.com/OWNER/REPO/pull/123"
-    monkeypatch.setattr(cli, "run_gh", _fake_gh_names_a_pull_request(adopted_url))
+    adopted_head = "c" * 40
 
     ledger = Ledger(home / "ledger.db")
     repo_id = _seed_repo(tmp_path, ledger, "https://github.com/owner/repo.git")
@@ -2655,7 +2695,7 @@ def test_adopt_writes_the_url_gh_names_onto_the_specs_newest_task(
 
     older_rfr = _seed_task(ledger, repo_id, spec_id="SY-RFR", state="REJECTED")
     ready = _seed_task(ledger, repo_id, spec_id="SY-RFR", state="DIAGNOSING")
-    ledger.record_push(ready, "p" * 40)
+    ledger.record_push(ready, "a" * 40)
     ledger.set_task_state(ready, "READY_FOR_REVIEW")
 
     older_ex = _seed_task(ledger, repo_id, spec_id="SY-EX", state="REJECTED")
@@ -2677,11 +2717,21 @@ def test_adopt_writes_the_url_gh_names_onto_the_specs_newest_task(
     }
     ledger.close()
 
-    for spec_id, task_id in (
-        ("SY-NI", not_implemented),
-        ("SY-RFR", ready),
-        ("SY-EX", exhausted),
+    declines = _FakeRegate({not_implemented: 1, exhausted: 1})
+    monkeypatch.setattr(cli.regate, "run_regate", declines)
+
+    for spec_id, task_id, branch in (
+        ("SY-NI", not_implemented, "saffron/SY-NI"),
+        ("SY-RFR", ready, "saffron/SY-RFR"),
+        ("SY-EX", exhausted, "saffron/SY-EX"),
     ):
+        monkeypatch.setattr(
+            cli,
+            "run_gh",
+            _fake_gh_names_a_pull_request(
+                adopted_url, head_branch=branch, head_sha=adopted_head
+            ),
+        )
         assert (
             cli.main(
                 [
@@ -2703,8 +2753,15 @@ def test_adopt_writes_the_url_gh_names_onto_the_specs_newest_task(
         check.close()
         before = befores[task_id]
         assert after["pr_url"] == adopted_url
-        for column in ("state", "branch", "pushed_sha", "added", "removed"):
+        if task_id == ready:
+            # Already resolved, as PACKAGE leaves it: it stays.
+            assert after["pushed_sha"] == before["pushed_sha"]
+        else:
+            assert after["pushed_sha"] == adopted_head
+        for column in ("state", "branch", "added", "removed"):
             assert after[column] == before[column], column
+
+    assert sorted(declines.calls) == sorted([not_implemented, exhausted])
 
     check = Ledger(home / "ledger.db")
     assert _task_row(check, older) == older_before
@@ -2714,13 +2771,16 @@ def test_adopt_writes_the_url_gh_names_onto_the_specs_newest_task(
 
 
 def test_adopt_refuses_with_exit_one_and_writes_nothing(tmp_path, monkeypatch, capsys):
-    """Every refusal path, read from the ledger alone. A missing ledger row
-    or spec refuses. So does a newest task that already carries a
-    `pr_url`, or sits in any state `adopt` does not take. A dead newest
-    task shadowing an older live one still refuses on the newest. None of
-    those asks `gh`. The last two cases ask `gh` once each, about a number
-    it names nothing for. The whole table reads the same once every case
-    above finishes."""
+    """Every refusal path read from the ledger alone still refuses before
+    any `gh` call. A missing ledger row or spec refuses. So does a newest
+    task in a state adopt does not take. So does a dead newest task
+    shadowing an older live one.
+
+    A newest task that already carries a `pr_url` now asks `gh` too, and
+    refuses only once `gh` names a different one, naming both urls. None
+    of the ledger-only cases call `gh`. The last two cases ask `gh` once
+    each, about a number it names nothing for. The whole table reads the
+    same once every case above finishes."""
     repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
     no_history = _checkout_with_origin(
         tmp_path, "https://github.com/owner/none.git", dirname="checkout-none"
@@ -2730,9 +2790,9 @@ def test_adopt_refuses_with_exit_one_and_writes_nothing(tmp_path, monkeypatch, c
     ledger = Ledger(home / "ledger.db")
     repo_id = _seed_repo(tmp_path, ledger, "https://github.com/owner/repo.git")
 
-    takes = {"NOT_IMPLEMENTED", "READY_FOR_REVIEW", "EXHAUSTED"}
+    takes = {"NOT_IMPLEMENTED", "READY_FOR_REVIEW", "EXHAUSTED", "MERGE_FAILED"}
     others = sorted(state for state in typing.get_args(TaskState) if state not in takes)
-    assert len(others) == 25
+    assert len(others) == 24
 
     carried = {}
     for i, state in enumerate(sorted(takes)):
@@ -2775,13 +2835,6 @@ def test_adopt_refuses_with_exit_one_and_writes_nothing(tmp_path, monkeypatch, c
     )
     assert "SY-NOTASK" in capsys.readouterr().out
 
-    for spec_id, url in carried.items():
-        assert (
-            cli.main(["--home", str(home), "adopt", spec_id, "1", "--repo", str(repo)])
-            == 1
-        )
-        assert url in capsys.readouterr().out
-
     for spec_id, state in other_states.items():
         assert (
             cli.main(["--home", str(home), "adopt", spec_id, "1", "--repo", str(repo)])
@@ -2796,6 +2849,25 @@ def test_adopt_refuses_with_exit_one_and_writes_nothing(tmp_path, monkeypatch, c
     assert "MERGED" in capsys.readouterr().out
 
     assert calls == []
+
+    # Each now asks `gh`, which names a different url. The refusal still
+    # exits 1 and writes nothing, but only once `gh` answers.
+    for spec_id, carried_url in carried.items():
+        different_url = carried_url + "-different"
+        monkeypatch.setattr(
+            cli,
+            "run_gh",
+            _fake_gh_names_a_pull_request(
+                different_url, head_branch=f"saffron/{spec_id}", number="1"
+            ),
+        )
+        assert (
+            cli.main(["--home", str(home), "adopt", spec_id, "1", "--repo", str(repo)])
+            == 1
+        )
+        out = capsys.readouterr().out
+        assert carried_url in out
+        assert different_url in out
 
     def gh_returns_nonzero(argv):
         calls.append(argv)
@@ -2825,8 +2897,6 @@ def test_adopt_refuses_with_exit_one_and_writes_nothing(tmp_path, monkeypatch, c
     )
     assert "405" in capsys.readouterr().out
 
-    assert len(calls) == 2
-
     final_ledger = Ledger(home / "ledger.db")
     after = _dump_tasks(final_ledger)
     final_ledger.close()
@@ -2834,11 +2904,13 @@ def test_adopt_refuses_with_exit_one_and_writes_nothing(tmp_path, monkeypatch, c
 
 
 def test_an_adopted_pull_request_is_a_fact_the_fold_keeps(tmp_path, monkeypatch):
-    """An adoption is a fact, not a bare `UPDATE`. Folding the record it is
-    appended to rebuilds the row with the adopted URL. Every other column
-    stands exactly as it did before the adoption. This runs for a
-    `NOT_IMPLEMENTED` row and for an `EXHAUSTED` row with a recorded push
-    and diff stat."""
+    """An adoption's url and head are facts, not a bare `UPDATE`. Folding
+    the record they are appended to rebuilds both.
+
+    Every other column stands exactly as it did before the adoption.
+    This holds for a `NOT_IMPLEMENTED` row and for an `EXHAUSTED` row
+    with a recorded push and diff stat. Each is declined by its own
+    re-gate, so neither moves state."""
     repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
     home = tmp_path / "home"
     home.mkdir()
@@ -2874,8 +2946,23 @@ def test_an_adopted_pull_request_is_a_fact_the_fold_keeps(tmp_path, monkeypatch)
     seed.close()
 
     adopted_url = "https://github.com/owner/repo/pull/77"
-    monkeypatch.setattr(cli, "run_gh", _fake_gh_names_a_pull_request(adopted_url, "77"))
-    for spec_id in ("SY-FOLD-NI", "SY-FOLD-EX"):
+    adopted_head = "f" * 40
+    monkeypatch.setattr(
+        cli.regate,
+        "run_regate",
+        _FakeRegate({not_implemented: 1, exhausted: 1}),
+    )
+    for spec_id, branch in (
+        ("SY-FOLD-NI", "saffron/SY-FOLD-NI"),
+        ("SY-FOLD-EX", "saffron/SY-FOLD-EX"),
+    ):
+        monkeypatch.setattr(
+            cli,
+            "run_gh",
+            _fake_gh_names_a_pull_request(
+                adopted_url, head_branch=branch, number="77", head_sha=adopted_head
+            ),
+        )
         assert (
             cli.main(["--home", str(home), "adopt", spec_id, "77", "--repo", str(repo)])
             == 0
@@ -2892,7 +2979,8 @@ def test_an_adopted_pull_request_is_a_fact_the_fold_keeps(tmp_path, monkeypatch)
             ).fetchone()
         )
         assert row["pr_url"] == adopted_url
-        for column in ("state", "branch", "pushed_sha", "added", "removed"):
+        assert row["pushed_sha"] == adopted_head
+        for column in ("state", "branch", "added", "removed"):
             assert row[column] == before[column], column
     folded.close()
 
@@ -2902,8 +2990,9 @@ def test_a_merged_adopted_pull_request_admits_the_child_of_a_not_implemented_par
 ):
     """A parent whose only task ended `NOT_IMPLEMENTED`, with no push and
     no pull request, refuses its child, naming `NOT_IMPLEMENTED`. `adopt`
-    alone changes nothing about that. Only `reconcile` reading a merge
-    does, and the same `build_queue` scan then admits the child."""
+    with a red re-gate changes nothing about that but the recorded head.
+    Only `reconcile` reading a merge moves the state, and the same
+    `build_queue` scan then admits the child."""
     from saffron.scheduler import build_queue
 
     specs_dir = tmp_path / "specs"
@@ -2945,7 +3034,20 @@ def test_a_merged_adopted_pull_request_admits_the_child_of_a_not_implemented_par
     assert "NOT_IMPLEMENTED" in before_refusals[0].reason
 
     adopted_url = "https://github.com/owner/repo/pull/55"
-    monkeypatch.setattr(cli, "run_gh", _fake_gh_names_a_pull_request(adopted_url, "55"))
+    adopted_head = "5" * 40
+    monkeypatch.setattr(
+        cli.regate, "run_regate", _FakeRegate({parent_task: (adopted_head, 3)})
+    )
+    monkeypatch.setattr(
+        cli,
+        "run_gh",
+        _fake_gh_names_a_pull_request(
+            adopted_url,
+            head_branch=f"saffron/{parent_id}",
+            number="55",
+            head_sha=adopted_head,
+        ),
+    )
     assert (
         cli.main(["--home", str(home), "adopt", parent_id, "55", "--repo", str(repo)])
         == 0
@@ -2977,12 +3079,621 @@ def test_a_merged_adopted_pull_request_admits_the_child_of_a_not_implemented_par
         ).fetchone()
     )
     assert after_row["state"] == "MERGED"
-    assert not after_row["pushed_sha"]
+    # `adopt`'s red re-gate already recorded the adopted head.
+    # `reconcile` never clears `pushed_sha` on a merge.
+    assert after_row["pushed_sha"] == adopted_head
 
     candidates, refusals = build_queue(specs_dir, repo_id, check)
     check.close()
     assert [c.spec.id for c in candidates] == [child_id]
     assert refusals == []
+
+
+def test_adopt_moves_a_task_whose_regate_is_green_on_the_adopted_head_to_ready_for_review(
+    tmp_path, monkeypatch
+):
+    """For a newest task in `EXHAUSTED`, `NOT_IMPLEMENTED` or
+    `MERGE_FAILED`, `adopt` records the url and the head, then re-gates
+    once. A green re-gate naming the adopted head moves the task to
+    `READY_FOR_REVIEW`, exiting 0.
+
+    A child that both a plain and a `stack=True` scan refused before
+    then becomes a candidate. The `stack=True` one names the adopted
+    task and its branch as the child's `stack_base`."""
+    from saffron.scheduler import StackBase, build_queue
+
+    for i, parent_state in enumerate(("EXHAUSTED", "NOT_IMPLEMENTED", "MERGE_FAILED")):
+        specs_dir = tmp_path / f"specs-{parent_state}"
+        specs_dir.mkdir()
+        parent_id = f"SA-98{i}0"
+        child_id = f"SA-98{i}1"
+        (specs_dir / "parent.md").write_text(
+            f"---\nid: {parent_id}\ntitle: Parent\ntype: chore\n---\n\nBody.\n"
+        )
+        (specs_dir / "child.md").write_text(
+            f"---\nid: {child_id}\ntitle: Child\ntype: chore\n"
+            f"depends_on: [{parent_id}]\n---\n\nBody.\n"
+        )
+        parent_spec, parent_sha = intake.load_spec(specs_dir / "parent.md")
+
+        repo = _checkout_with_origin(
+            tmp_path, "https://github.com/owner/repo.git", dirname=f"co-{parent_state}"
+        )
+        home = tmp_path / f"home-{parent_state}"
+        home.mkdir()
+        ledger_path = home / "ledger.db"
+
+        seed = Ledger(ledger_path)
+        repo_id = _seed_repo(tmp_path, seed, "https://github.com/owner/repo.git")
+        # A rejected, no-url older sibling at the same spec_sha, so both
+        # scans still refuse the child before the adopt (`SA-0026`).
+        _seed_task(
+            seed, repo_id, spec_id=parent_id, state="REJECTED", spec_sha=parent_sha
+        )
+        parent_task = _seed_task(
+            seed, repo_id, spec_id=parent_id, state="DIAGNOSING", spec_sha=parent_sha
+        )
+        seed.set_task_package(
+            parent_task,
+            parent_state,
+            branch=f"saffron/{parent_id}",
+            pushed_sha="",
+            pr_url="",
+            added=3,
+            removed=1,
+        )
+        seed.close()
+
+        check = Ledger(ledger_path)
+        plain_before, _ = build_queue(specs_dir, repo_id, check)
+        stack_before, _ = build_queue(specs_dir, repo_id, check, stack=True)
+        check.close()
+        assert [c.spec.id for c in plain_before] == []
+        assert [c.spec.id for c in stack_before] == []
+
+        adopted_url = "https://github.com/owner/repo/pull/61"
+        adopted_head = "6" * 40
+        fake = _FakeRegate({parent_task: (adopted_head, 0)})
+        monkeypatch.setattr(cli.regate, "run_regate", fake)
+        monkeypatch.setattr(
+            cli,
+            "run_gh",
+            _fake_gh_names_a_pull_request(
+                adopted_url,
+                head_branch=f"saffron/{parent_id}",
+                number="61",
+                head_sha=adopted_head,
+            ),
+        )
+        assert (
+            cli.main(
+                ["--home", str(home), "adopt", parent_id, "61", "--repo", str(repo)]
+            )
+            == 0
+        )
+        assert fake.calls == [parent_task]
+
+        check = Ledger(ledger_path)
+        after_row = _task_row(check, parent_task)
+        assert after_row["state"] == "READY_FOR_REVIEW"
+        assert after_row["pr_url"] == adopted_url
+        assert after_row["pushed_sha"] == adopted_head
+        regated = check.regate(parent_task)
+        assert regated is not None
+        assert regated["head_sha"] == adopted_head
+
+        plain_after, plain_refusals_after = build_queue(specs_dir, repo_id, check)
+        stack_after, stack_refusals_after = build_queue(
+            specs_dir, repo_id, check, stack=True
+        )
+        check.close()
+
+        assert [c.spec.id for c in plain_after] == [child_id]
+        assert plain_refusals_after == []
+        assert [c.spec.id for c in stack_after] == [child_id]
+        assert stack_refusals_after == []
+        assert stack_after[0].stack_base == StackBase(
+            spec_id=parent_id, task_id=parent_task, branch=f"saffron/{parent_id}"
+        )
+
+
+def test_adopt_keeps_the_state_of_a_task_whose_regate_is_red_declined_or_on_another_head(
+    tmp_path, monkeypatch, capsys
+):
+    """For each of the three re-gated states, adopt keeps the task's
+    state and exits 0. One re-gate names new failures on the adopted
+    head. One declines with no row. One names zero new failures on a
+    head other than the adopted one.
+
+    The url and the head are recorded all the same, and the line
+    printed names the kept state. Run again on the same pull request
+    after the red result, a fresh head and a green re-gate move the
+    task on."""
+    repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(tmp_path, ledger, "https://github.com/owner/repo.git")
+
+    def _seed(spec_id, state):
+        task_id = _seed_task(ledger, repo_id, spec_id=spec_id, state="DIAGNOSING")
+        ledger.set_task_package(
+            task_id,
+            state,
+            branch=f"saffron/{spec_id}",
+            pushed_sha="",
+            pr_url="",
+            added=1,
+            removed=1,
+        )
+        return task_id
+
+    red_task = _seed("SY-RED", "EXHAUSTED")
+    declined_task = _seed("SY-DECLINED", "NOT_IMPLEMENTED")
+    other_head_task = _seed("SY-OTHERHEAD", "MERGE_FAILED")
+    ledger.close()
+
+    cases = (
+        ("SY-RED", red_task, 91, "r" * 40, {red_task: ("r" * 40, 2)}, "EXHAUSTED"),
+        (
+            "SY-DECLINED",
+            declined_task,
+            92,
+            "d" * 40,
+            {declined_task: 1},
+            "NOT_IMPLEMENTED",
+        ),
+        (
+            "SY-OTHERHEAD",
+            other_head_task,
+            93,
+            "o" * 40,
+            {other_head_task: ("x" * 40, 0)},
+            "MERGE_FAILED",
+        ),
+    )
+    for spec_id, task_id, pr_number, head_sha, outcomes, state in cases:
+        url = f"https://github.com/owner/repo/pull/{pr_number}"
+        monkeypatch.setattr(
+            cli,
+            "run_gh",
+            _fake_gh_names_a_pull_request(
+                url,
+                head_branch=f"saffron/{spec_id}",
+                number=str(pr_number),
+                head_sha=head_sha,
+            ),
+        )
+        monkeypatch.setattr(cli.regate, "run_regate", _FakeRegate(outcomes))
+        assert (
+            cli.main(
+                [
+                    "--home",
+                    str(home),
+                    "adopt",
+                    spec_id,
+                    str(pr_number),
+                    "--repo",
+                    str(repo),
+                ]
+            )
+            == 0
+        )
+        out = capsys.readouterr().out
+        assert state in out
+
+        check = Ledger(home / "ledger.db")
+        row = _task_row(check, task_id)
+        check.close()
+        assert row["state"] == state
+        assert row["pr_url"] == url
+        assert row["pushed_sha"] == head_sha
+
+    # A retry whose re-gate declines names the last row as the last row.
+    monkeypatch.setattr(
+        cli,
+        "run_gh",
+        _fake_gh_names_a_pull_request(
+            "https://github.com/owner/repo/pull/91",
+            head_branch="saffron/SY-RED",
+            number="91",
+            head_sha="r" * 40,
+        ),
+    )
+    monkeypatch.setattr(cli.regate, "run_regate", _FakeRegate({red_task: 1}))
+    assert (
+        cli.main(["--home", str(home), "adopt", "SY-RED", "91", "--repo", str(repo)])
+        == 0
+    )
+    out = capsys.readouterr().out
+    assert "kept EXHAUSTED (its re-gate wrote no new row" in out
+
+    # Re-run on the same pull request after the red result: a fresh head
+    # and a green re-gate move the task on.
+    retry_head = "g" * 40
+    monkeypatch.setattr(
+        cli,
+        "run_gh",
+        _fake_gh_names_a_pull_request(
+            "https://github.com/owner/repo/pull/91",
+            head_branch="saffron/SY-RED",
+            number="91",
+            head_sha=retry_head,
+        ),
+    )
+    monkeypatch.setattr(
+        cli.regate, "run_regate", _FakeRegate({red_task: (retry_head, 0)})
+    )
+    assert (
+        cli.main(["--home", str(home), "adopt", "SY-RED", "91", "--repo", str(repo)])
+        == 0
+    )
+    capsys.readouterr()
+
+    check = Ledger(home / "ledger.db")
+    row = _task_row(check, red_task)
+    check.close()
+    assert row["state"] == "READY_FOR_REVIEW"
+    assert row["pushed_sha"] == retry_head
+
+
+def test_adopt_of_a_ready_task_records_the_url_and_runs_no_regate(
+    tmp_path, monkeypatch
+):
+    """For a newest task already `READY_FOR_REVIEW`, adopt records the
+    url, runs no re-gate and exits 0. A row with no resolved `pushed_sha`
+    takes the adopted head as its own, and a `stack=True` scan then names
+    that task as its child's `stack_base`. A row with a resolved
+    `pushed_sha` keeps it."""
+    from saffron.scheduler import StackBase, build_queue
+
+    repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(tmp_path, ledger, "https://github.com/owner/repo.git")
+
+    unresolved = _seed_task(ledger, repo_id, spec_id="SY-7001", state="DIAGNOSING")
+    ledger.set_task_state(unresolved, "READY_FOR_REVIEW")
+
+    resolved = _seed_task(ledger, repo_id, spec_id="SY-7002", state="DIAGNOSING")
+    ledger.record_push(resolved, "a" * 40)
+    ledger.set_task_state(resolved, "READY_FOR_REVIEW")
+    ledger.close()
+
+    calls = []
+    monkeypatch.setattr(cli.regate, "run_regate", lambda *a, **k: calls.append(a) or 0)
+
+    adopted_url_1 = "https://github.com/owner/repo/pull/71"
+    adopted_head_1 = "7" * 40
+    monkeypatch.setattr(
+        cli,
+        "run_gh",
+        _fake_gh_names_a_pull_request(
+            adopted_url_1,
+            head_branch="saffron/SY-7001",
+            number="71",
+            head_sha=adopted_head_1,
+        ),
+    )
+    assert (
+        cli.main(["--home", str(home), "adopt", "SY-7001", "71", "--repo", str(repo)])
+        == 0
+    )
+
+    adopted_url_2 = "https://github.com/owner/repo/pull/72"
+    monkeypatch.setattr(
+        cli,
+        "run_gh",
+        _fake_gh_names_a_pull_request(
+            adopted_url_2,
+            head_branch="saffron/SY-7002",
+            number="72",
+            head_sha="9" * 40,
+        ),
+    )
+    assert (
+        cli.main(["--home", str(home), "adopt", "SY-7002", "72", "--repo", str(repo)])
+        == 0
+    )
+
+    assert calls == []
+
+    check = Ledger(home / "ledger.db")
+    unresolved_row = _task_row(check, unresolved)
+    resolved_row = _task_row(check, resolved)
+    assert unresolved_row["pr_url"] == adopted_url_1
+    assert unresolved_row["pushed_sha"] == adopted_head_1
+    assert resolved_row["pr_url"] == adopted_url_2
+    assert resolved_row["pushed_sha"] == "a" * 40
+
+    specs_dir = tmp_path / "specs"
+    specs_dir.mkdir()
+    # `SY-7001` names no file here: it is external to this order, read
+    # by `_resolve_stack_base` purely from the ledger (`TB-QUALIFIES`).
+    (specs_dir / "child.md").write_text(
+        "---\nid: SY-7003\ntitle: Child\ntype: chore\n"
+        "depends_on: [SY-7001]\n---\n\nBody.\n"
+    )
+    candidates, refusals = build_queue(specs_dir, repo_id, check, stack=True)
+    check.close()
+    assert refusals == []
+    by_id = {c.spec.id: c for c in candidates}
+    assert by_id["SY-7003"].stack_base == StackBase(
+        spec_id="SY-7001", task_id=unresolved, branch="saffron/SY-7001"
+    )
+
+
+def test_adopt_refuses_a_pull_request_gh_cannot_describe_or_whose_head_is_another_branch(
+    tmp_path, monkeypatch, capsys
+):
+    """Adopt exits 1, writes nothing and runs no re-gate in seven cases.
+    `gh` exits non-zero. It prints no JSON. Its JSON lacks the url, the
+    head commit or the head branch. The head branch is not the task's
+    `branch`. Or the task already carries a url other than the one `gh`
+    names.
+
+    Every line names the pull request number. A branch mismatch also
+    names both branches, and a url mismatch both urls."""
+    repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(tmp_path, ledger, "https://github.com/owner/repo.git")
+
+    regate_calls = []
+    monkeypatch.setattr(
+        cli.regate, "run_regate", lambda *a, **k: regate_calls.append(a) or 0
+    )
+
+    def _fresh(spec_id, pr_url=None):
+        return _seed_task(
+            ledger, repo_id, spec_id=spec_id, state="NOT_IMPLEMENTED", pr_url=pr_url
+        )
+
+    missing_field_cases = {
+        "SY-NONZERO": lambda argv: subprocess.CompletedProcess(argv, 1, "", "boom"),
+        "SY-NOJSON": lambda argv: subprocess.CompletedProcess(argv, 0, "not json", ""),
+        "SY-NOURL": lambda argv: subprocess.CompletedProcess(
+            argv,
+            0,
+            json.dumps({"headRefOid": "a" * 40, "headRefName": "saffron/SY-NOURL"}),
+            "",
+        ),
+        "SY-NOHEAD": lambda argv: subprocess.CompletedProcess(
+            argv,
+            0,
+            json.dumps(
+                {
+                    "url": "https://github.com/owner/repo/pull/5",
+                    "headRefName": "saffron/SY-NOHEAD",
+                }
+            ),
+            "",
+        ),
+        "SY-NOBRANCHFIELD": lambda argv: subprocess.CompletedProcess(
+            argv,
+            0,
+            json.dumps(
+                {"url": "https://github.com/owner/repo/pull/6", "headRefOid": "a" * 40}
+            ),
+            "",
+        ),
+    }
+    for spec_id, fake in missing_field_cases.items():
+        task_id = _fresh(spec_id)
+        monkeypatch.setattr(cli, "run_gh", fake)
+        assert (
+            cli.main(["--home", str(home), "adopt", spec_id, "9", "--repo", str(repo)])
+            == 1
+        )
+        out = capsys.readouterr().out
+        assert "9" in out
+        row = _task_row(ledger, task_id)
+        assert not row["pr_url"]
+        assert row["state"] == "NOT_IMPLEMENTED"
+
+    branch_task = _fresh("SY-WRONGBRANCH")
+    monkeypatch.setattr(
+        cli,
+        "run_gh",
+        _fake_gh_names_a_pull_request(
+            "https://github.com/owner/repo/pull/12",
+            head_branch="some/other-branch",
+            number="12",
+        ),
+    )
+    assert (
+        cli.main(
+            ["--home", str(home), "adopt", "SY-WRONGBRANCH", "12", "--repo", str(repo)]
+        )
+        == 1
+    )
+    out = capsys.readouterr().out
+    assert "pull request 12" in out
+    assert "some/other-branch" in out
+    assert "saffron/SY-WRONGBRANCH" in out
+    assert not _task_row(ledger, branch_task)["pr_url"]
+
+    carried_url = "https://github.com/owner/repo/pull/13"
+    url_task = _fresh("SY-WRONGURL", pr_url=carried_url)
+    different_url = "https://github.com/owner/repo/pull/14"
+    monkeypatch.setattr(
+        cli,
+        "run_gh",
+        _fake_gh_names_a_pull_request(
+            different_url, head_branch="saffron/SY-WRONGURL", number="14"
+        ),
+    )
+    assert (
+        cli.main(
+            ["--home", str(home), "adopt", "SY-WRONGURL", "14", "--repo", str(repo)]
+        )
+        == 1
+    )
+    out = capsys.readouterr().out
+    assert carried_url in out
+    assert different_url in out
+    assert _task_row(ledger, url_task)["pr_url"] == carried_url
+
+    assert regate_calls == []
+    ledger.close()
+
+
+def test_adopt_whose_regate_raises_exits_two_with_the_pull_request_recorded(
+    tmp_path, monkeypatch, capsys
+):
+    """For each of the three states adopt re-gates, a re-gate that raises
+    makes `saffron adopt` exit 2. The task keeps its state, and the url
+    and the head stay recorded, since both were written before the raise."""
+    repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = Ledger(home / "ledger.db")
+    repo_id = _seed_repo(tmp_path, ledger, "https://github.com/owner/repo.git")
+
+    tasks = {}
+    for state in ("EXHAUSTED", "NOT_IMPLEMENTED", "MERGE_FAILED"):
+        spec_id = f"SY-RAISE-{state}"
+        task_id = _seed_task(ledger, repo_id, spec_id=spec_id, state="DIAGNOSING")
+        ledger.set_task_package(
+            task_id,
+            state,
+            branch=f"saffron/{spec_id}",
+            pushed_sha="",
+            pr_url="",
+            added=2,
+            removed=0,
+        )
+        tasks[spec_id] = (task_id, state)
+    ledger.close()
+
+    def _raising_regate(task_id, **_kwargs):
+        raise RuntimeError("regate: toolchain missing")
+
+    monkeypatch.setattr(cli.regate, "run_regate", _raising_regate)
+
+    pr_number = 200
+    for spec_id, (task_id, state) in tasks.items():
+        pr_number += 1
+        url = f"https://github.com/owner/repo/pull/{pr_number}"
+        head_sha = "a" * 40
+        monkeypatch.setattr(
+            cli,
+            "run_gh",
+            _fake_gh_names_a_pull_request(
+                url,
+                head_branch=f"saffron/{spec_id}",
+                number=str(pr_number),
+                head_sha=head_sha,
+            ),
+        )
+        exit_code = cli.main(
+            ["--home", str(home), "adopt", spec_id, str(pr_number), "--repo", str(repo)]
+        )
+        assert exit_code == 2
+        capsys.readouterr()
+
+        check = Ledger(home / "ledger.db")
+        row = _task_row(check, task_id)
+        check.close()
+        assert row["state"] == state
+        assert row["pr_url"] == url
+        assert row["pushed_sha"] == head_sha
+
+
+def test_an_adopted_head_and_state_move_are_facts_the_fold_keeps(tmp_path, monkeypatch):
+    """Folding the record rebuilds an adopted task's url and head. An
+    `EXHAUSTED` task adopt moved to `READY_FOR_REVIEW` folds to
+    `READY_FOR_REVIEW`, and a `NOT_IMPLEMENTED` task whose re-gate was red
+    folds to `NOT_IMPLEMENTED`."""
+    repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
+    home = tmp_path / "home"
+    home.mkdir()
+    record = MemoryRecord()
+    monkeypatch.setattr(cli, "Ledger", lambda path, **_: Ledger(path, record=record))
+
+    seed = Ledger(home / "ledger.db", record=record)
+    repo_id = _seed_repo(tmp_path, seed, "https://github.com/owner/repo.git")
+
+    moved = _seed_task(seed, repo_id, spec_id="SY-FOLD-MOVE", state="DIAGNOSING")
+    seed.set_task_package(
+        moved,
+        "EXHAUSTED",
+        branch="saffron/SY-FOLD-MOVE",
+        pushed_sha="",
+        pr_url="",
+        added=1,
+        removed=1,
+    )
+    stayed = _seed_task(seed, repo_id, spec_id="SY-FOLD-STAY", state="DIAGNOSING")
+    seed.set_task_package(
+        stayed,
+        "NOT_IMPLEMENTED",
+        branch="saffron/SY-FOLD-STAY",
+        pushed_sha="",
+        pr_url="",
+        added=1,
+        removed=1,
+    )
+    seed.close()
+
+    green_head = "9" * 40
+    red_head = "z" * 40
+    monkeypatch.setattr(
+        cli.regate,
+        "run_regate",
+        _FakeRegate({moved: (green_head, 0), stayed: (red_head, 5)}),
+    )
+
+    for spec_id, branch, number, head_sha in (
+        ("SY-FOLD-MOVE", "saffron/SY-FOLD-MOVE", "81", green_head),
+        ("SY-FOLD-STAY", "saffron/SY-FOLD-STAY", "82", red_head),
+    ):
+        url = f"https://github.com/owner/repo/pull/{number}"
+        monkeypatch.setattr(
+            cli,
+            "run_gh",
+            _fake_gh_names_a_pull_request(
+                url, head_branch=branch, number=number, head_sha=head_sha
+            ),
+        )
+        assert (
+            cli.main(
+                ["--home", str(home), "adopt", spec_id, number, "--repo", str(repo)]
+            )
+            == 0
+        )
+
+    # `adopt_pull_request`'s own fact also carries `pushed_sha`, masking
+    # a bare `UPDATE`. Read the record for the `task_push` fact itself.
+    direct = Ledger(home / "ledger.db")
+    for task_id, head_sha in ((moved, green_head), (stayed, red_head)):
+        key = direct.record_key(task_id)
+        assert key is not None
+        pushes = [f for f in record.read(key) if f.kind == "task_push"]
+        assert any(f.payload.get("pushed_sha") == head_sha for f in pushes), pushes
+    direct.close()
+
+    folded = Ledger(tmp_path / "folded.db")
+    outcome = fold(record, folded)
+    assert outcome.skipped == []
+
+    moved_row = dict(
+        folded._db.execute(
+            "SELECT * FROM tasks WHERE spec_id = ?", ("SY-FOLD-MOVE",)
+        ).fetchone()
+    )
+    stayed_row = dict(
+        folded._db.execute(
+            "SELECT * FROM tasks WHERE spec_id = ?", ("SY-FOLD-STAY",)
+        ).fetchone()
+    )
+    assert moved_row["state"] == "READY_FOR_REVIEW"
+    assert moved_row["pushed_sha"] == green_head
+    assert stayed_row["state"] == "NOT_IMPLEMENTED"
+    assert stayed_row["pushed_sha"] == red_head
+    folded.close()
 
 
 def test_package_probes_the_host_then_runs_package_on_the_rebuilt_task(
@@ -3021,8 +3732,8 @@ def test_package_probes_the_host_then_runs_package_on_the_rebuilt_task(
 
     calls = []
 
-    def fake_ready_task(spec_id, *, repo, repo_id, ledger, out_dir):
-        calls.append(("ready_task", spec_id, repo, repo_id))
+    def fake_ready_task(spec_id, *, repo, repo_id, ledger, out_dir, mirror_path):
+        calls.append(("ready_task", spec_id, repo, repo_id, mirror_path))
         return ready
 
     monkeypatch.setattr(task, "ready_task", fake_ready_task)
@@ -3127,8 +3838,9 @@ def test_package_probes_the_host_then_runs_package_on_the_rebuilt_task(
     ]
 
     network_name = "saffron-hostprobe-SY-PKG"
-    assert calls[0][1:] == ("SY-PKG", resolved_repo, repo_id)
-    assert calls[1][1:] == (resolved_repo, cli._mirror_path(resolved_repo, home))
+    expected_mirror_path = cli._mirror_path(resolved_repo, home)
+    assert calls[0][1:] == ("SY-PKG", resolved_repo, repo_id, expected_mirror_path)
+    assert calls[1][1:] == (resolved_repo, expected_mirror_path)
     assert calls[2][1] == resolved_repo
     assert calls[3][1] == network_name
     assert calls[4][1:] == (network_name, (), {"subnet": claimed_subnet})
@@ -5090,6 +5802,53 @@ def test_a_batch_whose_store_lacks_the_proxy_is_refused_and_mints_no_task_row(
     assert out == 2
     assert _tasks_and_latest_batch_status(home_plain) == (0, "INFRASTRUCTURE")
     assert f"build -t {proxy.PROXY_TAG}" in printed
+
+
+def test_saffron_batch_exits_2_and_names_the_package_command_when_package_raised(
+    tmp_path, monkeypatch, capsys
+):
+    """Unlike the proxy-image failure above, readiness here passes.
+    `cli.run_task` mints a task row, then raises a `CellRuntimeError`
+    `mark_raised_in_package` marks. That is the same mark `run_task` itself
+    sets on a raise escaping its own PACKAGE call on a `READY_FOR_REVIEW`
+    cell. `saffron batch` exits 2, prints `saffron package SY-1`, and the
+    batch row closes `INFRASTRUCTURE` (`b-066901`)."""
+    # Imported here, not at module scope, as the comment in this test explains:
+    # test_task.py::test_a_raise_that_escapes_run_task_from_package_is_marked_and_kept
+    from saffron.task import mark_raised_in_package
+
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
+    _readiness_passes(monkeypatch, tmp_path)
+
+    candidate = Candidate(
+        path=Path("SY-1.md"),
+        spec=intake.Spec(id="SY-1", title="t", type="chore"),
+        spec_sha="s" * 64,
+        task_id=None,
+    )
+    monkeypatch.setattr(
+        cli,
+        "_resolve_queue",
+        lambda *a, **k: _fake_batch_resolution(tmp_path, candidates=[candidate]),
+    )
+
+    def _mint_then_raise_marked(spec, spec_sha, *, base, repo, ledger, out_dir, **_kw):
+        rid = ledger.upsert_repo(repo.name, base.url, str(base.mirror), policy_sha=None)
+        run_id = ledger.create_run(rid, base.base_sha)
+        ledger.create_task(run_id, spec.id, spec_sha, f"saffron/{spec.id}")
+        exc = runtime.CellRuntimeError("the proxy could not be started")
+        mark_raised_in_package(exc)
+        raise exc
+
+    monkeypatch.setattr(cli, "run_task", _mint_then_raise_marked)
+
+    home = tmp_path / "home"
+    out = main(["--home", str(home), "batch", "--repo", str(tmp_path)])
+    printed = capsys.readouterr().out
+
+    assert out == 2
+    assert "saffron package SY-1" in printed
+    assert _tasks_and_latest_batch_status(home) == (1, "INFRASTRUCTURE")
 
 
 def test_saffron_batch_runs_a_night_with_the_defaults_4_2_1_fixes(
