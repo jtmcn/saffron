@@ -98,7 +98,9 @@ Backlog item **b-c16c6c**, under `DESIGN.md` §4.6. The parked record
 the graph: a cross-check test closes every measured gap at less cost. This spec
 is that test for the classes, and the comment cleanup the item asks for.
 
-Every line cited below was read at `b2acd68f`. `SA-0317` (b-545741) edits
+Every line cited below was read at `3c9288c0`. Each `CONTEXT.md` line number,
+and the count of 134 headwords, is a base figure from before the five entries
+below land. Those entries shift both. `SA-0317` (b-545741) edits
 `tests/ontology/test_vocabulary_agrees_with_context.py` before this spec runs.
 It makes `context_enumeration` import `definition_sentence` from
 `ontology/spans.py`. So find each function in that file by name, not by line.
@@ -126,7 +128,7 @@ base. They fall into four groups.
   spec's own pull request, because `CONTEXT.md` is `protected`
   (`.saffron/policy.yaml:59-61`). **This spec assumes the five present at its
   base**, headed Acceptance criterion, Diff, Plan, Pull request and Scope
-  proposal.
+  proposal. The notes give the order that makes this hold.
 - 6 have no headword of their own. `CoreGate`, `ContractGate` and
   `RepoDefinedGate` (`ontology/factory.ttl:70-72`) are bullets inside the Gate entry
   (`CONTEXT.md:363-374`). `BlockingLevel` (`ontology/factory.ttl:233-236`) has three
@@ -134,15 +136,16 @@ base. They fall into four groups.
   (`CONTEXT.md:418-421`). `Role` (`ontology/factory.ttl:238-244`) carries the three
   judgements on a rebuttal, whose terms are the Verdict, Adjudication and
   Rebuttal entries (`CONTEXT.md:640`, `:646`, `:652`). `SpecType`
-  (`ontology/factory.ttl:227-228`) holds the frontmatter `type` values, and no entry
-  defines them.
+  (`ontology/factory.ttl:227-228`) declares three of the six frontmatter types
+  that intake knows (`saffron/intake.py:27`). No entry defines it, and open
+  item b-60d804 tracks the gap. Its exclusion reason says those three things.
 
 **A headword.** `CONTEXT.md` writes an entry as a line that opens with a bold
 term and a colon. ADR 11 counts 134 of them (`docs/adr/0011-an-avoided-phrase-is-banned-or-confusable.md:17`),
 and so does a line-anchored match at base, with no two equal after casefolding.
-Two bold phrases open a line with no colon, at `CONTEXT.md:137` and `:232`. The
-second is a lowercase preflight outcome, which a pattern without the colon
-reads as a second headword for that class.
+Four bold phrases open a line with no colon, at `CONTEXT.md:6`, `:8`, `:137`
+and `:232`. The last is a lowercase preflight outcome, which a pattern without
+the colon reads as a second headword for that class.
 
 **The comments.** `factory.ttl` holds 21 `rdfs:comment` values, measured with
 rdflib. A 22nd text match, at `ontology/factory.ttl:255`, sits inside a `##`
@@ -172,8 +175,9 @@ six terminal states (`ontology/factory.ttl:154`), and the entry lists 14
    comments. Leave the ten property comments and the ontology's own comment
    as they are.
 4. **The module docstring.** It says the file checks the closed-set overlap
-   alone (`tests/ontology/test_vocabulary_agrees_with_context.py:5`). Make it
-   name the class check too, within ten lines.
+   alone, in six sets (`tests/ontology/test_vocabulary_agrees_with_context.py:5`).
+   `CLOSED_SETS` holds eleven. Correct the count, and make the docstring name
+   the class check too, within ten lines.
 
 ## Out of scope
 
@@ -194,6 +198,43 @@ six terminal states (`ontology/factory.ttl:154`), and the entry lists 14
 
 ## Notes for the agent
 
+**Precondition, for the operator.** The five entries land in this spec's own
+pull request. This spec depends on `SA-0317`, so its cell is cut from
+`SA-0317`'s branch head (`CONTEXT.md:797-799`). That branch carries the
+entries only if this pull request merged before `SA-0317`'s cell was cut.
+Run the three specs, `SA-0317`, `SA-0318` and `SA-0319`, as one stack batch
+after all three spec pull requests merge. The other order is to merge this
+pull request before `SA-0317`'s cell is cut. Without the entries, `plan`
+equals no headword, so the first criterion's real-tree half fails. Plan's
+comment then sits on a class with no entry, so the third criterion never
+reaches it. `CONTEXT.md` is forbidden here, so no repair can fix that, and
+the task ends `EXHAUSTED`.
+
+**The hand-written entries.** Each of the five meets four requirements.
+
+- (a) Its headword starts a line as `**<Headword>**:`, outside any bullet or
+  fence. It equals the class's label after casefolding, in the singular, with
+  no backticks. No two headwords in the file are equal after casefolding.
+- (b) It bolds no closed-set term, that is no key of `SETS` in
+  `ontology/spans.py:18-30`, and not `Status`. `definition_sentence` raises
+  unless the bold term occurs exactly once (`ontology/spans.py:38-40`).
+  `render_context`, the `SA-0317` reader and the `prose` gate's
+  `_rendered` (`.saffron/gates/prose.py:443-455`) all call it.
+- (c) It cites no bare section number. It writes `DESIGN.md` before a
+  section sign. `tests/test_citations.py:237-252` asserts that exactly six
+  bare citations are shadowed.
+- (d) A blank line sits before and after it. `definition_sentence` bounds a
+  definition at the next blank line (`ontology/spans.py:44`).
+
+The Plan entry must hold the half of the deleted Plan comment that no other
+entry holds: a plan is the how, where a spec is the what. Plan checkpoint
+(`CONTEXT.md:264`) and Control artifact (`:275`) hold the rest. The
+operator's draft meets this:
+
+> **Plan**: The `plan.json` the implementer writes at the plan checkpoint,
+> before any code. A spec says what to change, and a plan says how. The host
+> validates it there, so it is a control artifact.
+
 **The comment rule.** A comment is definitional when it says what the term is
 or does in the factory. That is what a `CONTEXT.md` entry says, so it is
 deleted. A comment records a modelling choice when it says why the graph
@@ -210,10 +251,18 @@ decided here, and you judge none.
 | `ontology/factory.ttl:96` | `GateRole` | definitional, as `CONTEXT.md:356-358` | delete |
 | `ontology/factory.ttl:148` | `TaskState` | definitional, as `CONTEXT.md:661-663` | delete |
 | `ontology/factory.ttl:150` | `InFlightState` | definitional, as `CONTEXT.md:674-677` | delete |
-| `ontology/factory.ttl:152` | `EndState` | definitional, as `CONTEXT.md:665-672` | delete |
+| `ontology/factory.ttl:152` | `EndState` | both: the last sentence says why the class is wider than `TerminalState` | delete the first three sentences and move the last to a `#` comment |
 | `ontology/factory.ttl:154` | `TerminalState` | definitional, with a stale count | delete, and add the label in its place |
 | `ontology/factory.ttl:259` | `Principle` | both | delete the first sentence and move the second to a `#` comment |
 | `ontology/factory.ttl:271` | `ADR` | definitional, as `CONTEXT.md:1001-1007` | delete |
+
+For `EndState`, write the `#` comment as these two lines, directly above its
+declaration.
+
+```
+# Wider than the terminal states: it also holds what the operator's own decision
+# produces, and ORPHANED, which no one chose.
+```
 
 For `Principle`, write the `#` comment as these two lines, with no dash.
 
@@ -225,7 +274,7 @@ For `Principle`, write the `#` comment as these two lines, with no dash.
 Place it below the
 `##` block that opens the design record
 (`ontology/factory.ttl:246-256`). No criterion witnesses
-the two `#` comments, because a test of comment text guards nothing.
+the three `#` comments, because a test of comment text guards nothing.
 
 The comments at `ontology/factory.ttl:12`, `:113`, `:119`, `:122`, `:127`, `:130`, `:132`,
 `:135`, `:139`, `:265` and `:268` stay. The first is on the ontology, and the
@@ -238,11 +287,13 @@ so it declares a witness alone, and `witness` will report `skip` for it.
 - The first witness asserts the real tree has no problem and no stale
   exclusion. In the same test, drive the functions over an inline Turtle
   graph and inline `CONTEXT.md` text, and assert the exact problem list.
-  Drive six cases in that graph. One label is only a prefix of a headword.
+  Drive seven cases in that graph. One label is only a prefix of a headword.
   One class has no label. One label equals two headwords that differ only in
-  case. One label equals a bullet's bold term, and one a bold term with no
-  colon. One class lies outside the namespace. Drive one headword in a
-  different case, which must match. Then drive the exclusion check with three
+  case. One label equals the bold term of a bullet written `- **X**: …`,
+  with its colon. One label equals a bold term with no colon. One label
+  equals a bold term with its colon in mid-line, as in `See **X**: …`. One
+  class lies outside the namespace. Drive one headword in a different case,
+  which must match. Then drive the exclusion check with three
   entries: a name that is no class, a class with a blank reason, and a class
   whose label equals a headword. Keep the inline cases in this test and not
   in a test of their own. A test of the functions alone stays green with
