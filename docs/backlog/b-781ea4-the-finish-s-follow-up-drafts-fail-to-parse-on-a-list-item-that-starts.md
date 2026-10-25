@@ -30,3 +30,5 @@ with the parse error. The writer's prompt names the two types a follow-up can de
 ## Record
 
 - 2026-10-24: filed from the spec loop's run 47.
+- 2026-10-25: recurred in the spec loop's run 48. `saffron finish 55` pooled one
+  draft with "spec has no YAML frontmatter block".

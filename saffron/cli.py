@@ -46,6 +46,7 @@ from saffron.cell.session import (
     _default_emit,
     stop_on_rejected,
 )
+from saffron.cell.session import _SHA as _RESOLVED_SHA
 from saffron.events import Event, EventLog
 from saffron.intake import Spec, load_spec
 from saffron.ledger import Ledger
@@ -194,7 +195,9 @@ def main(argv: list[str] | None = None) -> int:
 
     adopt_parser = subcommands.add_parser(
         "adopt",
-        help="name a by-hand pull request as one spec's newest task's own",
+        help="name a by-hand pull request as one spec's newest task's own, "
+        "re-gating EXHAUSTED/NOT_IMPLEMENTED/MERGE_FAILED toward "
+        "READY_FOR_REVIEW (b-619b7d)",
     )
     adopt_parser.add_argument(
         "spec_id", help="the spec id whose newest task adopts the pull request"
@@ -364,7 +367,7 @@ def main(argv: list[str] | None = None) -> int:
             return _guarding_sigterm(lambda: _regate(args, ledger, out_dir))
 
         if args.command == "adopt":
-            return _adopt(args, ledger)
+            return _guarding_sigterm(lambda: _adopt(args, ledger, out_dir))
 
         if args.command == "package":
             return _package(args, ledger, out_dir)
@@ -2773,60 +2776,148 @@ def _regate(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     )
 
 
-# A newest task in one of these carries no pull request yet and is the one
-# `reconcile` will later ask about (b-a7e5f3). Every other state refuses.
-_ADOPTABLE_STATES = MERGE_ONLY_STATES | {"READY_FOR_REVIEW"}
+# States a pull request opened or fixed by hand can leave a task in.
+# `MERGE_FAILED` is the one a fix by hand most often leaves (b-619b7d).
+_ADOPTABLE_STATES = MERGE_ONLY_STATES | {"MERGE_FAILED", "READY_FOR_REVIEW"}
+
+_ADOPT_GH_FIELDS = "url,headRefOid,headRefName"
 
 
-def _adopt(args: argparse.Namespace, ledger: Ledger) -> int:
+def _adopted_pull_request(
+    gh: GhRunner, slug: str, pr: int
+) -> tuple[str, str, str] | None:
+    """Everything `gh` must say about `pr` for `_adopt` to use it: its own
+    url, its head commit and its head branch, in one call.
+
+    `None` when `gh` fails, prints no JSON, or leaves one of the three
+    fields out or empty. The caller then refuses with exit 1 and writes
+    nothing, naming only the pull request number."""
+    found = gh(
+        ["gh", "pr", "view", str(pr), "--repo", slug, "--json", _ADOPT_GH_FIELDS]
+    )
+    if found.returncode != 0:
+        return None
+    try:
+        info = json.loads(found.stdout)
+    except json.JSONDecodeError:
+        return None
+    url = info.get("url") or ""
+    head_sha = info.get("headRefOid") or ""
+    head_branch = info.get("headRefName") or ""
+    if not url or not head_sha or not head_branch:
+        return None
+    return url, head_sha, head_branch
+
+
+def _adopt(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     """`saffron adopt <spec id> <pr> --repo .`: name a pull request opened
-    by hand as the spec's newest task's own. `reconcile` can then ask
-    GitHub what happened to it (b-a7e5f3). Reads the ledger and refuses
-    before asking `gh` anything."""
+    or fixed by hand as the spec's newest task's own (b-619b7d).
+
+    Refuses before any `gh` call for a missing task or an unadoptable
+    state. Otherwise it asks `gh` for the url, the head commit and the
+    head branch together. It then refuses with exit 1 and no write on a
+    missing field, a mismatched head branch, or a different carried url.
+
+    Adopting the same pull request again retries. A raise from the
+    re-gate reaches the caller, which exits 2 after the write lands."""
     repo = args.repo.resolve()
     url = package_phase.real_remote(repo)
     repo_id = ledger.resolve_repo_id(url)
-    rows = (
-        [row for row in ledger.tasks_by_repo(repo_id) if row["spec_id"] == args.spec_id]
-        if repo_id is not None
-        else []
-    )
-    if not rows:
+    rows = ledger.tasks_by_spec_id(repo_id, args.spec_id) if repo_id is not None else []
+    if repo_id is None or not rows:
         print(f"adopt: {args.spec_id} has no task in this repo")
         return 1
     newest = rows[-1]
-    if newest["state"] not in _ADOPTABLE_STATES:
+    state = newest["state"]
+    if state not in _ADOPTABLE_STATES:
         print(
-            f"adopt: {args.spec_id}'s newest task is {newest['state']}, "
-            "which adopt does not take"
+            f"adopt: {args.spec_id}'s newest task is {state}, which adopt does not take"
         )
         return 1
-    if newest["pr_url"]:
-        print(f"adopt: {args.spec_id}'s newest task already carries {newest['pr_url']}")
-        return 1
+    task_id = int(newest["task_id"])
+    carried_url = (
+        next(
+            (
+                r["pr_url"]
+                for r in ledger.tasks_by_repo(repo_id)
+                if r["task_id"] == task_id
+            ),
+            None,
+        )
+        or ""
+    )
 
     slug = package_phase.github_slug(url)
-    found = run_gh(
-        [
-            "gh",
-            "pr",
-            "view",
-            str(args.pr),
-            "--repo",
-            slug,
-            "--json",
-            "url",
-            "--jq",
-            ".url",
-        ]
-    )
-    adopted_url = found.stdout.strip() if found.returncode == 0 else ""
-    if not adopted_url:
+    named = _adopted_pull_request(run_gh, slug, args.pr)
+    if named is None:
         print(f"adopt: gh named no pull request numbered {args.pr}")
         return 1
+    adopted_url, head_sha, head_branch = named
+    if head_branch != newest["branch"]:
+        print(
+            f"adopt: pull request {args.pr} heads {head_branch}, not {newest['branch']}"
+        )
+        return 1
+    if carried_url and carried_url != adopted_url:
+        print(
+            f"adopt: {args.spec_id}'s newest task already carries {carried_url}, "
+            f"not {adopted_url}"
+        )
+        return 1
 
-    ledger.adopt_pull_request(newest["task_id"], adopted_url)
-    print(f"adopt: task {newest['task_id']} ({args.spec_id}) → {adopted_url}")
+    if state == "READY_FOR_REVIEW":
+        # A resolved `pushed_sha` is PACKAGE's own commit, and it stays.
+        # The end review and `finish` read it as the layer's diff.
+        if not _RESOLVED_SHA.fullmatch(newest["pushed_sha"] or ""):
+            ledger.record_push(task_id, head_sha)
+        ledger.adopt_pull_request(task_id, adopted_url)
+        print(f"adopt: task {task_id} ({args.spec_id}) → {adopted_url}")
+        return 0
+
+    # Record the head, then the url: both facts, so a fold
+    # rebuilds them, and the url is on record before the re-gate it feeds.
+    ledger.record_push(task_id, head_sha)
+    ledger.adopt_pull_request(task_id, adopted_url)
+
+    before = ledger.regate(task_id)
+    outcome = regate.run_regate(
+        task_id,
+        repo=repo,
+        ledger=ledger,
+        out_dir=out_dir,
+        mirror_path=_mirror_path(repo, args.home),
+        gh=run_gh,
+    )
+    regated = ledger.regate(task_id)
+    if (
+        outcome == 0
+        and regated is not None
+        and regated["head_sha"] == head_sha
+        and regated["new_failures"] == 0
+    ):
+        ledger.set_task_state(task_id, "READY_FOR_REVIEW")
+        print(
+            f"adopt: task {task_id} ({args.spec_id}) → {adopted_url}, READY_FOR_REVIEW"
+        )
+        return 0
+
+    if regated is None:
+        why = "its re-gate declined, recording nothing"
+    elif outcome != 0 and before is not None and tuple(regated) == tuple(before):
+        # A decline writes no row, so adopt cannot tell it from a repeated result.
+        why = (
+            f"its re-gate wrote no new row; the last one names "
+            f"{regated['new_failures']} new failure(s) on {regated['head_sha'][:12]}"
+        )
+    elif regated["head_sha"] != head_sha:
+        why = (
+            f"its newest re-gate names {regated['head_sha'][:12]}, not the adopted head"
+        )
+    else:
+        why = f"its re-gate recorded {regated['new_failures']} new failure(s)"
+    print(
+        f"adopt: task {task_id} ({args.spec_id}) → {adopted_url}, kept {state} ({why})"
+    )
     return 0
 
 

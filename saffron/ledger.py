@@ -1678,7 +1678,8 @@ class Ledger:
         sets, `READY_FOR_REVIEW` or `MERGE_FAILED`, is not the task's last
         word: `reconcile` revises a `READY_FOR_REVIEW` row once GitHub
         decides. `MERGE_FAILED` is not revised, since it is outside
-        `PR_PENDING_STATES`: it reaches the operator with no pull request.
+        `PR_PENDING_STATES`: it reaches the operator with no pull request
+        until `saffron adopt` names one.
         `added`/`removed` are `None` on the paths that return before
         `diff_stat` ran. Also rolls the spend up from the task's attempts,
         as `set_task_state` does (b-dce9a4)."""
@@ -1700,9 +1701,10 @@ class Ledger:
         """Name a by-hand pull request as this task's own, through the same
         `task_package` fact `set_task_package` builds, so a fold rebuilds
         it unchanged (b-a7e5f3). Carries the row's own `state`, `branch`,
-        `pushed_sha`, `added` and `removed` rather than a caller's: an
-        adoption changes nothing about the row but its `pr_url`, and a
-        `NOT_IMPLEMENTED` row has no pushed branch to pass as `str`."""
+        `pushed_sha`, `added` and `removed` rather than a caller's: this
+        write changes only the `pr_url`, and a `NOT_IMPLEMENTED` row has no
+        pushed branch to pass as `str`. `_adopt` records the head and any
+        state move as their own facts."""
         row = self._db.execute(
             "SELECT state, branch, pushed_sha, added, removed FROM tasks WHERE task_id = ?",
             (task_id,),
