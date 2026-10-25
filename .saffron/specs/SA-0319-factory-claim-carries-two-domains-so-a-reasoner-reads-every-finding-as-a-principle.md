@@ -4,7 +4,7 @@ title: "`factory:claim` carries two `rdfs:domain` triples, so a reasoner reads e
 type: bug
 priority: 3
 depends_on: [SA-0318]
-estimated_lines: 80
+estimated_lines: 89
 estimate_measured: true
 touches:
   - ontology/factory.ttl
@@ -51,10 +51,12 @@ acceptance:
       the one domain `factory:Finding`. The new `factory:principleClaim` is
       an `owl:DatatypeProperty` with domain `factory:Principle` and range
       `xsd:string`. The witness asserts both declarations and that the
-      real vocabulary has no property with two domains. Through the same
-      check, it then adds a second domain to one datatype property and to
-      one object property in a copy of the vocabulary, and asserts the
-      check names exactly those two.
+      real vocabulary has no property with two domains. The check counts
+      `rdfs:domain` triples per subject in the namespace, whatever the
+      subject's type. Through the same check, the witness then adds a second
+      domain to one datatype property and to one object property in a copy
+      of the vocabulary. It also gives two domains to a new subject typed as
+      neither. It asserts the check names exactly those three.
     witness: tests/ontology/test_vocabulary.py::test_no_factory_property_carries_two_domains
     mutant:
       file: ontology/factory.ttl
@@ -63,6 +65,7 @@ acceptance:
     wrong_versions:
       - "The check names `factory:claim` and asserts its domains alone, so a second property given two domains passes."
       - "The check reads only subjects typed `owl:DatatypeProperty`, so an object property with two domains passes."
+      - "The check reads only subjects typed `owl:DatatypeProperty` or `owl:ObjectProperty`, so the untyped subject with two domains passes."
       - "The check counts `rdfs:domain` occurrences per text line of the file, so a domain declared in a second statement block passes."
       - "The check reads one domain per property with `Graph.value`, which returns one of the two and never sees the second."
       - "`factory:principleClaim` is declared with no `rdfs:range`, or with `factory:Principle` as an extra domain of `factory:claim` kept beside it."
@@ -94,7 +97,11 @@ acceptance:
       shape any of them violates is `factory:PrincipleShape`. One states its
       claim under `factory:claim` alone. One has an 11-character
       `factory:principleClaim`. One has two distinct 12-character values.
-      One has a 14-digit `xsd:integer` value.
+      One has a 14-digit `xsd:integer` value. The witness then validates
+      the committed negative fixture
+      `tests/ontology/fixtures/negative/PrincipleShape.ttl` and asserts the
+      set of its results' `sh:resultPath` values is exactly
+      `factory:contributedBy`.
     witness: tests/ontology/test_shapes.py::test_the_principle_shape_constrains_the_principle_claim_property
     mutant:
       file: ontology/shapes/factory-shapes.ttl
@@ -106,6 +113,7 @@ acceptance:
       - "The new property shape drops `sh:datatype`, so the integer claim conforms."
       - "The new property shape drops `sh:maxCount`, so two claims conform."
       - "The witness asserts only that each refused graph fails to conform, so a refusal by `RevisionAppendixShape` over a malformed appendix passes it."
+      - "The negative fixture keeps its claim under `factory:claim`, so it also trips the new property's minimum count."
   - claim: >-
       `DESIGN.md`'s principle index renders byte-identical from the appendix
       records after the change.
@@ -126,7 +134,10 @@ acceptance:
 ## Context
 
 Backlog item **b-7aefb8**, under `DESIGN.md` §4.6. Every line cited below
-was read at `b2acd68f`.
+was read at `f933aa01`, which stacks this spec on `SA-0317` and `SA-0318`.
+Neither of those specs edits a property declaration. `SA-0318` adds class
+labels to `ontology/factory.ttl`, so its line numbers can move when it
+lands. Each declaration below is named by its text as well.
 
 `ontology/factory.ttl` declares `factory:claim` twice. Line 141 gives it
 `rdfs:domain factory:Finding`, and line 263, in the design-record block,
@@ -166,6 +177,8 @@ No expected output under `ontology/queries/expected/` names the property.
 `V4-task-findings.csv` carries the bound `claim` column of the view's
 query, which the finding side keeps. `docs/superpowers/plans/` quotes the property in two plans,
 which are history and stay as written.
+`docs/superpowers/specs/2026-10-05-run-record-view-design.md:93` names
+`factory:claim` on `Finding` alone, which stays true.
 
 ## Problem
 
@@ -193,8 +206,8 @@ That leaves four edits and three tests.
    Left on the old property, it would also trip the new property's
    minimum count. `test_each_shape_rejects_its_negative_fixture` at
    `tests/ontology/test_shapes.py:51` still passes either way, because
-   both violations belong to `PrincipleShape`, so no test holds this edit.
-   It keeps the fixture isolating the one constraint it names.
+   both violations belong to `PrincipleShape`. So criterion 3's witness
+   holds this edit by the fixture's result paths.
 
 A test fails when one `factory:` property carries two domains (criterion
 1). It sits beside the other vocabulary tests in
@@ -265,8 +278,13 @@ typed `factory:RevisionAppendix`. That appendix needs an
 (`:351-352`). Name the shape each refused graph violated with
 `_named_shape_of` (`tests/ontology/test_shapes.py:12`), and assert that
 set equals `PrincipleShape` alone, as lines 60-63 do for the negative
-fixtures. A plain witness is one `def` driving all five graphs, never a
-parametrised test.
+fixtures. A plain witness is one `def` driving all five graphs and the
+fixture, never a parametrised test. `FIXTURES` in
+`tests/ontology/ontology_paths.py:6` locates the fixture directory, and a
+result's path is its `sh:resultPath` triple in the results graph.
+
+Criterion 1's untyped subject is a new local name added only to the
+copied graph, never to the committed vocabulary.
 
 New docstrings and comments meet the `prose` ratchet at zero hits: no
 em-dash, semicolon, contraction, perfect tense, hedge, or sentence over 25
