@@ -753,6 +753,15 @@ def test_the_breaker_still_reports_infrastructure_over_a_task_left_in_flight(
     assert any("TE-0010" in line and "REBUTTING" in line for line in lines)
 
 
+def _marked_runtime_error(message: str) -> CellRuntimeError:
+    """A `CellRuntimeError` carrying the mark `run_task` sets on a PACKAGE raise."""
+    from saffron.task import mark_raised_in_package
+
+    exc = CellRuntimeError(message)
+    mark_raised_in_package(exc)
+    return exc
+
+
 def test_a_batch_whose_package_raised_closes_infrastructure_whatever_it_stopped_on(
     ledger, repo_id
 ):
@@ -763,15 +772,10 @@ def test_a_batch_whose_package_raised_closes_infrastructure_whatever_it_stopped_
     spec that raised, beside its `raised` line, and for no other spec. Two
     marked raises in a row still fire the breaker, so a third candidate
     never runs."""
-    # Imported here, not at module scope (see `test_a_raise_that_escapes_
-    # run_task_from_package_is_marked_and_kept`'s own comment).
+    # Imported here, not at module scope, as the comment in this test explains:
+    # test_task.py::test_a_raise_that_escapes_run_task_from_package_is_marked_and_kept
     from saffron.phases import package as package_phase
     from saffron.task import mark_raised_in_package
-
-    def _marked(message: str) -> CellRuntimeError:
-        exc = CellRuntimeError(message)
-        mark_raised_in_package(exc)
-        return exc
 
     def _marked_package_error(message: str) -> package_phase.PackageError:
         exc = package_phase.PackageError(message)
@@ -818,7 +822,7 @@ def test_a_batch_whose_package_raised_closes_infrastructure_whatever_it_stopped_
         _candidate("TE-0023", budget_usd=1.0),
         _candidate("TE-0024", budget_usd=1000.0),
     ]
-    runner_budget = FakeRunner([_marked("gh is unavailable")])
+    runner_budget = FakeRunner([_marked_runtime_error("gh is unavailable")])
     lines_budget: list[str] = []
     reason_budget = run_batch(
         budget_candidates,
@@ -838,7 +842,7 @@ def test_a_batch_whose_package_raised_closes_infrastructure_whatever_it_stopped_
 
     # UNTIL: the clock passes the deadline before the second candidate.
     until_candidates = [_candidate("TE-0025"), _candidate("TE-0026")]
-    runner_until = FakeRunner([_marked("gh is unavailable")])
+    runner_until = FakeRunner([_marked_runtime_error("gh is unavailable")])
     clock = FakeClock([datetime(2026, 9, 5, 1, 0), datetime(2026, 9, 5, 7, 0)])
     lines_until: list[str] = []
     reason_until = run_batch(
@@ -862,7 +866,10 @@ def test_a_batch_whose_package_raised_closes_infrastructure_whatever_it_stopped_
     incomplete_candidates = [_candidate("TE-0027"), _candidate("TE-0028")]
     run_id_two = _spend(ledger, repo_id, 1.0)
     runner_incomplete = FakeRunner(
-        [_marked("gh is unavailable"), _outcome(state="REVIEWING", run_id=run_id_two)]
+        [
+            _marked_runtime_error("gh is unavailable"),
+            _outcome(state="REVIEWING", run_id=run_id_two),
+        ]
     )
     lines_incomplete: list[str] = []
     reason_incomplete = run_batch(
@@ -885,7 +892,7 @@ def test_a_batch_whose_package_raised_closes_infrastructure_whatever_it_stopped_
     # and no command line, once a `CellRuntimeError`, once a `PackageError`.
     unmarked_runtime_candidates = [_candidate("TE-0029"), _candidate("TE-0030")]
     runner_unmarked_runtime = FakeRunner(
-        [_marked("gh is unavailable"), CellRuntimeError("the proxy died")]
+        [_marked_runtime_error("gh is unavailable"), CellRuntimeError("the proxy died")]
     )
     lines_unmarked_runtime: list[str] = []
     run_batch(
@@ -905,7 +912,10 @@ def test_a_batch_whose_package_raised_closes_infrastructure_whatever_it_stopped_
 
     unmarked_package_candidates = [_candidate("TE-0031"), _candidate("TE-0032")]
     runner_unmarked_package = FakeRunner(
-        [_marked("gh is unavailable"), package_phase.PackageError("gh is unavailable")]
+        [
+            _marked_runtime_error("gh is unavailable"),
+            package_phase.PackageError("gh is unavailable"),
+        ]
     )
     lines_unmarked_package: list[str] = []
     run_batch(
@@ -931,7 +941,10 @@ def test_a_batch_whose_package_raised_closes_infrastructure_whatever_it_stopped_
         _candidate("TE-0035"),
     ]
     runner_breaker = FakeRunner(
-        [_marked("gh is unavailable"), _marked("gh is unavailable")]
+        [
+            _marked_runtime_error("gh is unavailable"),
+            _marked_runtime_error("gh is unavailable"),
+        ]
     )
     reason_breaker = run_batch(
         breaker_candidates,
@@ -6997,12 +7010,6 @@ def test_a_stack_batch_misses_a_spec_whose_package_raised_and_closes_infrastruct
     follow-up whose raise is marked. It returns `INFRASTRUCTURE` without
     writing to the already-closed row (`b-066901`)."""
     from saffron.batch import run_stack_batch
-    from saffron.task import mark_raised_in_package
-
-    def _marked(message: str) -> CellRuntimeError:
-        exc = CellRuntimeError(message)
-        mark_raised_in_package(exc)
-        return exc
 
     # 1) An order spec raises marked: its dependent is refused, the
     # standalone spec still runs, and the one follow-up still runs too.
@@ -7013,7 +7020,10 @@ def test_a_stack_batch_misses_a_spec_whose_package_raised_and_closes_infrastruct
     ]
     rows1 = {"__follow_ups__": [{"id": "TE-0039", "budget_usd": 1.0}]}
     doubles1 = RaisingStackDoubles(
-        ledger, repo_id, rows1, {("runner", "TE-0036"): [_marked("gh is unavailable")]}
+        ledger,
+        repo_id,
+        rows1,
+        {("runner", "TE-0036"): [_marked_runtime_error("gh is unavailable")]},
     )
     lines1: list[str] = []
 
@@ -7041,13 +7051,17 @@ def test_a_stack_batch_misses_a_spec_whose_package_raised_and_closes_infrastruct
     assert any(
         "TE-0037" in line and "refused" in line and "TE-0036" in line for line in lines1
     )
+    assert any("saffron package TE-0036" in line for line in lines1)
     assert _batch_row(ledger, _latest_batch_id(ledger))["status"] == "INFRASTRUCTURE"
 
     # 2) Every order spec reaches READY_FOR_REVIEW. The one follow-up
     # raises marked instead.
     rows2 = {"__follow_ups__": [{"id": "TE-0041", "budget_usd": 1.0}]}
     doubles2 = RaisingStackDoubles(
-        ledger, repo_id, rows2, {("runner", "TE-0041"): [_marked("gh is unavailable")]}
+        ledger,
+        repo_id,
+        rows2,
+        {("runner", "TE-0041"): [_marked_runtime_error("gh is unavailable")]},
     )
 
     reason2 = run_stack_batch(
@@ -7074,7 +7088,10 @@ def test_a_stack_batch_misses_a_spec_whose_package_raised_and_closes_infrastruct
     before3 = _row_window(ledger, batch_id3)
     rows3 = {"__follow_ups__": [{"id": "TE-0044", "budget_usd": 1.0}]}
     doubles3 = RaisingStackDoubles(
-        ledger, repo_id, rows3, {("runner", "TE-0044"): [_marked("gh is unavailable")]}
+        ledger,
+        repo_id,
+        rows3,
+        {("runner", "TE-0044"): [_marked_runtime_error("gh is unavailable")]},
     )
 
     reason3 = run_stack_batch(

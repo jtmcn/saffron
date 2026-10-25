@@ -24,7 +24,8 @@ corpse a dead scan left behind).
 
 `Refused` is imported from `saffron.task` for its type alone. Importing a
 type is not importing the driver that builds it. `raised_in_package` is
-imported the same way, to tell a raise `run_task` marked from any other.
+imported too. It reads a mark on an exception and drives nothing, so it
+tells a raise `run_task` marked from any other.
 That mark names a raise escaping `run_task`'s own PACKAGE call for a
 `READY_FOR_REVIEW` cell. A marked raise is never offered again, and it
 closes the batch row `INFRASTRUCTURE` no matter what else the night did
@@ -240,7 +241,7 @@ def _drive(
             return "INFRASTRUCTURE", consecutive_aborts
 
     # By spec id, or a re-offered `Candidate` starts twice. With `sleep` set, one that ended
-    # `RATE_LIMITED`, in `_OFFERED_AGAIN` or raised `CellRuntimeError` is taken back out.
+    # `RATE_LIMITED`, in `_OFFERED_AGAIN` or raised an unmarked `CellRuntimeError` is taken back out.
     started: set[str] = set()
     # Each rescan replaces this rather than merging, so a spec the latest
     # scan no longer offers does not run because an earlier one did.
@@ -319,7 +320,7 @@ def _drive(
                 # above, never instead of it (`b-066901`).
                 package_raised.append(candidate.spec.id)
                 emit(
-                    f"{candidate.spec.id:<10} finish   "
+                    f"{candidate.spec.id:<10} unpackaged  "
                     f"saffron package {candidate.spec.id}"
                 )
             if isinstance(exc, CellRuntimeError) and sleep is not None and not marked:
@@ -650,7 +651,7 @@ def run_stack_batch(
         if review is not None:
             if candidate.spec.id not in task_ids:
                 # Minted once per spec, never for a follow-up, already seeded.
-                # A raise here is always a miss, even a `CellRuntimeError`, which `review` and `runner` offer again (b-60a399).
+                # A raise here is always a miss, even an unmarked `CellRuntimeError`, which `review` and `runner` offer again (b-60a399).
                 assert mint is not None
                 try:
                     task_id = mint(candidate)
@@ -1006,9 +1007,9 @@ def _promote_in_flight(
     package_raised: list[str],
     emit: Callable[[str], None],
 ) -> StopReason:
-    """Name every task this call left in flight, promoting `reason` to
-    `INCOMPLETE` whenever `in_flight` is non-empty and `reason` is not
-    already `INFRASTRUCTURE`. Then, whenever `package_raised` is non-empty,
+    """Name every task this call left in flight or unpackaged. `reason`
+    becomes `INCOMPLETE` whenever `in_flight` is non-empty and `reason` is
+    not already `INFRASTRUCTURE`. Then, whenever `package_raised` is non-empty,
     `reason` becomes `INFRASTRUCTURE` outright, whatever it was. That list
     names a runner raise `raised_in_package` marks (`b-066901`).
 

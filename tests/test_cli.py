@@ -5813,8 +5813,8 @@ def test_saffron_batch_exits_2_and_names_the_package_command_when_package_raised
     sets on a raise escaping its own PACKAGE call on a `READY_FOR_REVIEW`
     cell. `saffron batch` exits 2, prints `saffron package SY-1`, and the
     batch row closes `INFRASTRUCTURE` (`b-066901`)."""
-    # Imported here, not at module scope (see `test_a_raise_that_escapes_
-    # run_task_from_package_is_marked_and_kept`'s own comment in `test_task.py`).
+    # Imported here, not at module scope, as the comment in this test explains:
+    # test_task.py::test_a_raise_that_escapes_run_task_from_package_is_marked_and_kept
     from saffron.task import mark_raised_in_package
 
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok")
