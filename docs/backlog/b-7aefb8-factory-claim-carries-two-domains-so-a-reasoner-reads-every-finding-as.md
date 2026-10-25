@@ -4,7 +4,7 @@ title: "`factory:claim` carries two `rdfs:domain` triples, so a reasoner reads e
 status: open
 tier: 3
 filed: 2026-10-24
-specs: []
+specs: [SA-0319]
 prs: []
 commits: []
 cites: [§4.6]
