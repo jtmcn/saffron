@@ -897,8 +897,8 @@ def run_task(
                     # The cell's own write stopped short of this state
                     # (b-dce9a4), so the raise path writes it here instead.
                     ledger.set_task_state(outcome.task_id, "READY_FOR_REVIEW")
-                    # Marked so a batch can name `saffron package` as the
-                    # fix, not count this as an ordinary abort (`b-066901`).
+                    # Marked so a batch names `saffron package` and closes `INFRASTRUCTURE`.
+                    # The breaker still counts it like any raise (`b-066901`).
                     mark_raised_in_package(exc)
                     raise
                 result = None
@@ -1194,7 +1194,7 @@ def ready_task(
     """Rebuilds what `package()` needs for `spec_id`'s newest task in this
     repo, from the ledger and the task directory alone. No live
     `CellOutcome` is required, and nothing here writes, ledger or disk,
-    save the one path that reads `mirror_path`: the `tree_base`
+    save the one path that writes `mirror_path`: the `tree_base`
     fallback below, reached only when no task's `pushed_sha` matches it.
 
     Refuses by name, naming the spec id, the state, the pull request

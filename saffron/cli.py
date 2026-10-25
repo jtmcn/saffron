@@ -2867,7 +2867,7 @@ def _adopt(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
 
     if state == "READY_FOR_REVIEW":
         # A resolved `pushed_sha` is PACKAGE's own commit, and it stays.
-        # The end review and `finish` read it as the layer's diff .
+        # The end review and `finish` read it as the layer's diff.
         if not _RESOLVED_SHA.fullmatch(newest["pushed_sha"] or ""):
             ledger.record_push(task_id, head_sha)
         ledger.adopt_pull_request(task_id, adopted_url)
