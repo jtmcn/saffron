@@ -263,7 +263,9 @@ Criterion 1's witness reads the committed vocabulary with `rdflib`, as
 `rdfs:domain` triples per subject in the namespace rather than per line of
 text. Put the real-vocabulary assertion first, so the witness fails at
 base. For the mutated copy, parse the vocabulary into a fresh graph and add
-the two extra triples there. `factory:verdict` and `factory:contributedBy`
+the extra triples there: a second domain on each of the two properties
+below, and two domains on one new untyped local name. `factory:verdict` and
+`factory:contributedBy`
 are one datatype and one object property that carry one domain each today.
 
 Criterion 2's witness builds its graph the way `_graph` does at
