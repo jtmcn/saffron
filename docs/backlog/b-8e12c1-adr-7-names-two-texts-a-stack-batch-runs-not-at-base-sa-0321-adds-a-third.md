@@ -1,12 +1,13 @@
 ---
 id: b-8e12c1
 title: ADR 7 and the glossary name two texts a stack batch runs that are not at `base_sha`, and SA-0321 adds a third
-status: open
+status: done
+closed: 2026-10-26
 tier: 2
 by_hand: true
 filed: 2026-10-26
-specs: [SA-0321]
-prs: []
+specs: []
+prs: [974]
 commits: []
 cites: [§4.2.1]
 related: [b-009d51]
@@ -44,3 +45,4 @@ All three land in `SA-0321`'s own pull request.
   It closes with that pull request's number. After `SA-0321`'s review, the
   amendment names the held construct's name, and **Recorded spec text** says
   a rewrite is not a Revision.
+- 2026-10-26: done by hand in #974, beside `SA-0321`, the spec it describes.
