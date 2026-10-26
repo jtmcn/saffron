@@ -57,7 +57,7 @@ acceptance:
       changed between the packaged head and the graded head, after it was
       cited, and names both full shas. The concern joins `pool` and no
       group. The witness drives one layer graded two review commits above
-      its packaged head. The first commit edits one cited line in place and
+      its packaged head. The first commit edits two cited lines in place and
       deletes another. The second inserts two lines three lines below a
       third cited line, and deletes the file a fourth cites. All four are
       `unverified` in `pool`, and `finish.write_findings` writes each with
@@ -131,8 +131,8 @@ docstring says why: "their line numbers were recorded against it"
 own entry for the layer, else `layer_fields` (`saffron/qualify.py:193-203`).
 `branch_heads` gives an entry whose `head` is the branch's fetched head
 (`saffron/end_review.py:260-302`). That head can also carry a lower
-layer's review commits restacked in, or a merge from the default branch
-(`saffron/end_review.py:255-258`).
+layer's review commits restacked in, as `_graded_fixture` does
+(`tests/test_qualify.py:1040-1047`).
 
 **What the finish reads.** `_stack_follow_ups` hands `qualify` the end
 review's own `stack.fields` (`saffron/cli.py:1633-1646`).
@@ -242,8 +242,10 @@ config. `DIFF_FLAGS` sets the context itself.
   and line 2 of `gone.py`. Line 6 of `b.py` gains a second word, such as
   `retry_budget`.
 - `R1` edits line 10 of `a.py`, and that line gains the same second word.
-  `R1` also deletes line 20 of `a.py` and edits line 3 of `u.py`. `R2` inserts two lines after what was line 40 of `a.py`, and
-  deletes `gone.py`.
+  `R1` also deletes line 20 of `a.py` and edits line 3 of `u.py`. `R2` inserts two lines after H2's line 40 of `a.py`, which is
+  line 39 in R1's tree. It also deletes `gone.py`.
+- Line 3 of `u.py` at `H2` shares no word outside the common-word list with
+  H2's changed lines, so it stays unanchored over the packaged range.
 - TE-2's concerns cite lines 10, 20, 38 and 44 of `a.py`, line 2 of
   `gone.py`, line 6 of `b.py` and line 3 of `u.py`. Its end review cites
   line 10 of `a.py`. TE-1's concern cites line 10 of `a.py`.
@@ -257,7 +259,8 @@ insertion's context, line 44 of `a.py`, falls in that hunk's graded side
 and not its packaged side. Line 38 sits three lines above the insertion,
 so only a context of three covers it. The shared word makes `anchor`'s
 token rule reach line 6 of `b.py`, which no hunk covers. A prototype of
-this fixture killed every wrong version listed under criterion 1. The `preserves` witness killed the one under
+this revised fixture killed every wrong version listed under criterion 1,
+the re-anchor and both context versions included. The `preserves` witness killed the one under
 criterion 2.
 
 **The neighbours.** `tests/test_finish.py`, `tests/test_follow_up.py` and
