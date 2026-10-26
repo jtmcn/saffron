@@ -3,7 +3,7 @@ id: SA-0321
 title: A stack batch refuses a spec for citations that moved to one place, though the check already names that place
 type: feature
 priority: 2
-estimated_lines: 200
+estimated_lines: 210
 touches:
   - saffron/spec_citations.py
   - tests/test_spec_citations.py
@@ -68,7 +68,7 @@ acceptance:
     wrong_versions:
       - Every occurrence of a citation's text replaced, so the right `export_saffron_dir` citation of line 21 becomes `4-6` too.
       - The first occurrence of a citation's text replaced, so the right line 21 changes and the moved one stays.
-      - Offsets read before earlier rewrites applied, so the `tiny` rewrite after the `4-6` one lands a character early.
+      - Offsets read before earlier rewrites applied, so the `tiny` rewrite after the `4-6` one lands two characters early.
       - The rewrite applied to the paragraph as the checker joins it, so the wrapped paragraph loses its line break and indent.
       - A one-line span written `S-S`, so the `tiny` citations read `2-2`.
       - A bare citation given its anchored path, so the bare `30-32` becomes a path citation.
@@ -77,8 +77,8 @@ acceptance:
   - claim: >-
       `rewrite_moved_citations` leaves every other defect, in text order,
       and leaves its citation's text as written. The witness drives each
-      kind the check reports, with every offset held by its clause's first
-      name. That is a bare citation with no path, a start before line 1, an
+      kind the check reports. The held map takes every offset whose clause
+      names one, mapped to that name. That is a bare citation with no path, a start before line 1, an
       end before its start, a missing file and a range past a file's end.
       It also drives a held name that opens two spans. One rewritable
       citation among them is rewritten and is not left.
@@ -99,9 +99,11 @@ acceptance:
       raises. So a moved definition citation is rewritten, and a moved
       use-site citation of the same name is left as a defect. A clause
       naming two names is held by one and rewritten only onto that name's
-      construct. When two names hold it, the shorter construct's name
-      does. A name defined twice at `commit` holds nothing. The witness
-      drives every member named here.
+      construct. When two names hold it and one construct sits inside the
+      other, the inner one's name holds it, in either clause order. Two
+      disjoint constructs both held whole hold nothing, and neither do two
+      of equal length. A name defined twice at `commit` holds nothing. The
+      witness drives every member named here.
     witness: tests/test_spec_citations.py::test_a_use_site_citation_is_left_while_its_definition_citation_is_rewritten
     wrong_versions:
       - The held map ignored, so the use-site citation of lines 9-10 is rewritten to the definition at `4-6`.
@@ -113,13 +115,17 @@ acceptance:
       - A rewrite onto the union of the clause's spans, so the `alpha` and `beta` citation is moved onto `beta` at `4-5`.
       - A name that opens two constructs at the own commit counted as held, so the `twin` citation is moved onto the second at `4-5`.
       - The first holding name in clause order kept, so the `outer` and `inner` citation becomes `4-7` and not `5-6`.
+      - The last holding name in clause order kept, so the `inner` and `outer` citation becomes `4-7` and not `5-6`.
+      - The shorter construct's name kept whether or not it sits inside the other, so the disjoint `two` and `one` citation moves onto `one` at `6-7`.
+      - A tie broken by clause order, so the `left` and `right` citation moves onto `left` at `4-5`.
   - claim: >-
       In a stack batch, a spec whose `cite` returns defects that
       `rewrite_moved_citations` rewrites, and none it leaves, is not
       refused. Before its review, the batch records the rewritten text as
       the task's spec text. Its origin is `revision`, and its path is the
       candidate's file name under `.saffron/specs/`, as a revision's is. It
-      hands that review the rewritten text. It emits one line per rewrite
+      hands that review the rewritten text, and hands a `revise` route the
+      same text. It emits one line per rewrite
       in text order,
       `f"{spec_id:<10} moved  {path}:{old} -> {path}:{new}"`. A bare
       citation's line names its anchored path. The witness drives a spec
@@ -130,6 +136,7 @@ acceptance:
       - The batch rewrites the `spec_text` it read from the ledger, so a first text with no row is never rewritten.
       - The rewritten text recorded after the review returns, so the ledger holds the old text while the review runs.
       - The review handed the old text, or no text, while the ledger holds the new one.
+      - The writer handed the old `spec_text`, or `None`, on a `revise` route, so it revises the queued citations again.
       - One `moved` line for all rewrites, or none.
       - A spec with no defect records its text anyway.
       - The rewritten text recorded with origin `follow_up` or at a path other than the candidate's own, so `run_task` refuses it.
@@ -259,9 +266,11 @@ defect of any other kind carries no span.
 `saffron/spec_citations.py` reads the same citations and the same policy
 patterns at `commit`. A clause name holds a citation when it opens
 exactly one construct there, with the range inside it or holding it
-whole. When several names hold one, the name with the shortest construct
-holds it. It reads only files the tree at
-`commit` lists, and skips a range that does not resolve there.
+whole. When two names hold one and one construct sits inside the other,
+the inner one's name holds it. Two disjoint constructs, or two of equal
+length, hold nothing, and the citation stays a defect. It reads only files
+the tree at `commit` lists, and skips a range that does not resolve there.
+A clause that names nothing is never in the map.
 
 **The pure rewrite.** `rewrite_moved_citations(text, defects, held)` takes
 the text the defects were found in. It returns the new text, the rewrites
@@ -299,7 +308,9 @@ same lines once defects are structured.
 - **`driver.py check`.** It still blocks on every defect before a batch.
   Telling a rewritable one apart there is a separate change.
 - **A new origin.** `SPEC_TEXT_ORIGINS` stays as it is
-  (`saffron/ledger.py:80-82`). The rewritten text is a `revision` row.
+  (`saffron/ledger.py:80-82`). The rewritten text is a `revision` row. The
+  comment above it lists what writes each origin and does not name the
+  rewrite. That stale prose stays, since `saffron/ledger.py` is forbidden.
 
 ## Notes for the agent
 
@@ -363,8 +374,8 @@ spec spells them so, or its own citation check reads the fixture paths.
 `mod/tiny.py` holds four lines: `x = 1`, `def tiny(): pass`, `y = 2` and
 `z = 3`. Criterion 2 also commits `mod/twice.py`, five lines:
 `def twin():`, `    return 1`, a blank line, `def twin():` and
-`    return 2`. Each witness maps every defect's offset to its clause's
-first name.
+`    return 2`. Each witness's held map takes every defect's offset whose
+clause names one, mapped to that name.
 
 Criterion 1's text, with its seven defects as the checker reports them now:
 
@@ -463,7 +474,11 @@ between. The second commit puts `import os` and two blank lines above
 adds `mod/new.py`, defining `fresh` at lines 1-2. Both commits hold
 `mod/nest.py`, four lines: `def outer():`, `    def inner():`,
 `        return 1` and `    return inner`. The second commit puts the same
-three lines above them. The text is eleven paragraphs.
+three lines above them. Both commits hold `mod/both.py`, defining `one` at
+lines 1-2 and `two` at 3-5. The second commit puts those three lines and
+two more blank lines above it. Both commits hold `mod/even.py`, defining
+`left` at 1-2 and `right` at 3-4. The second commit puts the same three
+lines above it. The text is fourteen paragraphs.
 
 ```text
 «_mirror_path» and the blank line after it sit at «mod/cli.py:1-4».
@@ -487,14 +502,20 @@ It builds «mirror_path» with «_mirror_path(repo, home)» and hands it over (�
 «twin» returns one («mod/twin.py:2»).
 
 «outer» returns «inner» («mod/nest.py:2-3»).
+
+«inner» is returned by «outer» («mod/nest.py:2-3»).
+
+«two» and «one» sit together («mod/both.py:1-5»).
+
+«left» and «right» sit together («mod/even.py:1-4»).
 ```
 
 Measured on a prototype at base, the held map at the first commit holds
-four citations. The first and second are held by `_mirror_path`, the ninth
-by `alpha` and the eleventh by `inner`. Nothing raises. Assert that map
-exactly, by offset and name. Pass the second commit's defects and that map
-to the rewrite. `1-4` and `3` both become `4-6`, and `2-3` becomes `5-6`.
-No other range changes. The defects left,
+five citations. The first and second are held by `_mirror_path`, the
+ninth by `alpha`, and the eleventh and twelfth by `inner`. Nothing raises.
+Assert that map exactly, by offset and name. Pass the second commit's
+defects and that map to the rewrite. `1-4` and `3` both become `4-6`, and
+both `2-3` ranges become `5-6`. No other range changes. The defects left,
 in order, read as follows.
 
 ```text
@@ -503,9 +524,13 @@ mod/cli.py:9-10: the construct it names sits at mod/cli.py:4-6
 mod/cli.py:3-1: ends before it starts
 mod/pair.py:2: the construct it names sits at mod/pair.py:4-5
 mod/twin.py:2: the construct it names sits at mod/twin.py:4-5
+mod/both.py:1-5: the construct it names sits at mod/both.py:6-7, 8-10
+mod/even.py:1-4: the construct it names sits at mod/even.py:4-5, 6-7
 ```
 
 The prototype killed each of criterion 3's wrong versions on this text.
+The exact held map kills every one, and the new text kills all but the
+`digest` one.
 
 **Criteria 4 and 5** extend `StackDoubles` in `tests/test_batch.py` with a
 `cite` double. It returns a text, defects built in the test, and a held
@@ -515,7 +540,10 @@ at that moment. Build each text as `_spec_text(...)` with a line of
 citations appended, so it parses. Criterion 4 drives two specs of the
 order. The first has no recorded text, and its `cite` returns a queued
 text with two held one-span defects, one of them bare. The second returns
-no defect. Criterion 5 drives three specs of the order. The first returns
+no defect. The third returns one held one-span defect, and its review
+routes `revise`, then `run`. Its revise double keeps the `spec_text` it was
+handed, which must be the rewritten text. Its re-check returns that text
+and no defect. Criterion 5 drives three specs of the order. The first returns
 two held one-span defects and one with no span. The second returns one
 held one-span defect and one one-span defect not held. The third declares
 `depends_on` on the first. A follow-up takes the same branch. Criterion 9
