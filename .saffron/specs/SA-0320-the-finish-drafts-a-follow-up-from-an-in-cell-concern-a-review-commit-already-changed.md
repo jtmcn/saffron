@@ -1,9 +1,9 @@
 ---
 id: SA-0320
-title: "The finish drafts a follow-up from an in-cell concern whose cited line a review commit already changed"
+title: "The finish drafts a follow-up from an in-cell concern whose cited line changed after PACKAGE pushed it"
 type: bug
 priority: 2
-estimated_lines: 30
+estimated_lines: 32
 estimate_measured: true
 touches:
   - saffron/qualify.py
@@ -53,29 +53,34 @@ acceptance:
       `unverified` when its cited line, read at the packaged head, lies in a
       hunk of the diff from the packaged head to the head `graded_fields`
       gives that layer. That diff is read with `DIFF_FLAGS`, so a hunk
-      carries three lines of context. The reason names that graded head's
-      full sha. The concern joins `pool` and no group. The witness drives
-      one layer graded two review commits above its packaged head. The
-      first commit edits one cited line in place and deletes another. The
-      second inserts two lines below a third cited line and deletes the
-      file a fourth cites. All four are `unverified` in `pool`, and
-      `finish.write_findings` writes each with that outcome and reason. In
-      that layer three findings stay `qualified` and become `follow_up`
-      entries. One is a concern four lines past the insertion, one is a
-      concern in a file neither commit touched, and one is an end-review
-      finding citing the line edited in place. A concern unanchored over
-      the packaged range, whose line the first commit edits, stays
-      `unanchored` with an empty reason. A layer below, whose graded head
-      is its packaged head, keeps its concern `qualified`. That concern
-      cites a line the upper layer's own packaged change rewrites.
+      carries three lines of context. The reason says the cited line
+      changed between the packaged head and the graded head, after it was
+      cited, and names both full shas. The concern joins `pool` and no
+      group. The witness drives one layer graded two review commits above
+      its packaged head. The first commit edits one cited line in place and
+      deletes another. The second inserts two lines three lines below a
+      third cited line, and deletes the file a fourth cites. All four are
+      `unverified` in `pool`, and `finish.write_findings` writes each with
+      that outcome and reason. In that layer three findings stay
+      `qualified` and become `follow_up` entries. One is a concern four
+      lines past the insertion. One is a concern in a file neither commit
+      touched, whose line shares a token with the first commit's edit. One
+      is an end-review finding citing the line edited in place. A concern
+      unanchored over the packaged range, whose line the first commit
+      edits, stays `unanchored` with an empty reason. A layer below, whose
+      graded head is its packaged head, keeps its concern `qualified`. That
+      concern cites a line the upper layer's own packaged change rewrites.
     witness: tests/test_qualify.py::test_an_in_cell_concern_whose_cited_line_a_review_commit_changed_is_not_drafted
     wrong_versions:
-      - The check diffs with zero lines of context, so the concern one line above the insertion stays qualified.
+      - The check diffs with zero lines of context, so the concern above the insertion stays qualified.
+      - The check diffs with two lines of context, so the concern three lines above the insertion stays qualified.
+      - The check diffs with four lines of context, so the concern four lines past the insertion is dropped.
       - The check diffs only the graded head against its own parent, so the first review commit's two changes stay qualified.
       - The check reads the graded side of the diff, so the concern past the insertion is dropped once the deletion shifts the lines.
       - The check diffs from the packaged head's parent, so every concern the packaged change anchored is dropped.
       - The check matches a concern by file alone, so the concern past the insertion is dropped.
-      - The reason names the packaged head rather than the graded head.
+      - The check re-anchors each concern over the later diff with `anchor`, so the concern sharing a token with the first commit's edit is dropped.
+      - The reason names only the packaged head.
       - The reason names only the graded head's first twelve characters.
       - The check overrides every outcome, so the unanchored concern becomes unverified.
       - The dropped concern is recorded `killed`, so it never reaches the findings file.
@@ -95,7 +100,7 @@ acceptance:
 ## Context
 
 Backlog item **b-1b05be**, under `DESIGN.md` §5.7 and ADR 7's amendment
-for a deferred finish. Every line below was read at `068862d9`.
+for a deferred finish. Every line below was read at `5de5c918`.
 
 **The run that found it.** This is the spec loop's run 48. `saffron finish
 53`, `54` and `55` each wrote a `findings.json`. Its in-cell critic rows named
@@ -107,14 +112,14 @@ review commits changed. The files are
 
 **Measured on those five.** Each pair was diffed in the home mirror with
 three lines of context. The diff was reversed, so its new side is the
-PACKAGE head. The
-four rows the item calls fixed each fall in a hunk. Read at each PACKAGE
+PACKAGE head. The four rows the item calls fixed each fall in a hunk. Read at each PACKAGE
 head, not at base, these are
 `saffron/cli.py:2896`, `tests/test_cli.py:2666`, `saffron/task.py:1124` and
 `saffron/batch.py:243`. The fifth, `saffron/task.py:1144`, falls in none,
-and the item says the spec answered it. With zero lines of context,
-`saffron/cli.py:2896` falls in no hunk, since its review commit inserts
-lines after line 2897.
+and the item says the spec answered it. Its review commit inserts lines
+after line 2897, so `saffron/cli.py:2896` needs at least two lines of
+context. That is all the run shows about context. No rate of concerns
+dropped wrongly was measured.
 
 **Where `qualify` reads each range.** `qualify` walks each layer top down
 (`saffron/qualify.py:268-317`). End-review findings read the range
@@ -125,7 +130,9 @@ docstring says why: "their line numbers were recorded against it"
 (`saffron/end_review.py:140-148`). `graded_fields` returns the end review's
 own entry for the layer, else `layer_fields` (`saffron/qualify.py:193-203`).
 `branch_heads` gives an entry whose `head` is the branch's fetched head
-(`saffron/end_review.py:260-302`).
+(`saffron/end_review.py:260-302`). That head can also carry a lower
+layer's review commits restacked in, or a merge from the default branch
+(`saffron/end_review.py:255-258`).
 
 **What the finish reads.** `_stack_follow_ups` hands `qualify` the end
 review's own `stack.fields` (`saffron/cli.py:1633-1646`).
@@ -163,30 +170,43 @@ keeps it there too (`tests/test_qualify.py:1266-1269`).
 
 ## Problem
 
-An in-cell concern is anchored at the head PACKAGE pushed. A review commit
-can change its cited line before the end review runs. The finish still
-drafts a follow-up from it, so the writer drafts a fix for code that is
-already gone.
+An in-cell concern is anchored at the head PACKAGE pushed. Its cited line
+can change before the end review reads the layer, by a review commit or
+by anything else the branch took in. The finish still drafts a follow-up
+from it, so the writer drafts a fix for code that is already gone. The
+follow-up targets the graded tree, so any change between the two heads
+counts.
 
 1. **The later range.** For each layer with in-cell concerns, read the head
    `graded_fields` gives it. When that head differs from the packaged head,
    diff the two with `DIFF_FLAGS`. Collect each path's packaged-side lines
-   a hunk covers.
+   a hunk covers. Read this diff before the range's first
+   `record_qualification` call. A read the mirror cannot answer then
+   raises before any row in the range is recorded, as `_qualify_range`'s
+   docstring says (`saffron/qualify.py:119-123`).
 2. **The drop.** Take a concern `_decide` would make `qualified`, whose
-   line is in that set for its file. It becomes `unverified` instead. The reason
-   names the graded head's full sha. Any other outcome is left as it is.
+   line is in that set for its file. It becomes `unverified` instead. The
+   reason says plainly that the cited line changed after it was cited.
+   It names the change as between the packaged sha and the graded sha,
+   each in full.
+   Any other outcome is left as it is.
 3. **What stays.** Anchoring still reads the packaged range. End-review and
    join findings are not checked. A layer whose graded head is its
    packaged head is not checked.
 4. **Docstrings.** The module docstring and `qualify`'s say a concern whose
-   cited line a later commit changed is `unverified`. Each stays within ten
-   lines, the prose gate's cap.
+   cited line changed after PACKAGE is `unverified`. A module docstring is
+   exempt from the prose gate's cap (`.saffron/gates/prose.py:66-67`).
+   `qualify`'s is ten lines now (`saffron/qualify.py:221-230`) and must stay
+   within ten, so rewrite it rather than append.
 
 ## Out of scope
 
 - The `head` field of an in-cell row in `findings.json`. It stays
   `pushed_sha`, the head the line was cited at (`saffron/finish.py:279-283`).
 - Re-anchoring an in-cell concern at the graded head.
+- A narrower context than `DIFF_FLAGS`. A concern within three lines of a
+  later edit is demoted even when its own line did not change. Its row
+  stays visible in `findings.json` with the reason.
 - The join's findings, and an adequacy concern `_decide` already makes
   `unverified`.
 - The writer's prompt, which still names a kept concern's packaged head
@@ -218,12 +238,13 @@ config. `DIFF_FLAGS` sets the context itself.
 - The base commit holds `src/a.py` of 60 lines, `src/b.py`, `src/gone.py`
   and `src/u.py`.
 - TE-1 pushes `H1`, which rewrites line 10 of `a.py`. TE-2 pushes `H2` on
-  `H1`. It rewrites lines 10, 20, 39 and 44 of `a.py`, line 6 of `b.py`
-  and line 2 of `gone.py`.
-- `R1` edits line 10 of `a.py`, deletes its line 20 and edits line 3 of
-  `u.py`. `R2` inserts two lines after what was line 40 of `a.py`, and
+  `H1`. It rewrites lines 10, 20, 38 and 44 of `a.py`, line 6 of `b.py`
+  and line 2 of `gone.py`. Line 6 of `b.py` gains a second word, such as
+  `retry_budget`.
+- `R1` edits line 10 of `a.py`, and that line gains the same second word.
+  `R1` also deletes line 20 of `a.py` and edits line 3 of `u.py`. `R2` inserts two lines after what was line 40 of `a.py`, and
   deletes `gone.py`.
-- TE-2's concerns cite lines 10, 20, 39 and 44 of `a.py`, line 2 of
+- TE-2's concerns cite lines 10, 20, 38 and 44 of `a.py`, line 2 of
   `gone.py`, line 6 of `b.py` and line 3 of `u.py`. Its end review cites
   line 10 of `a.py`. TE-1's concern cites line 10 of `a.py`.
 - In `fields`, TE-1's head is `H1`. TE-2's head is `R2` and its diff base
@@ -232,9 +253,11 @@ config. `DIFF_FLAGS` sets the context itself.
   function that raises, so a probe call fails the test.
 
 The deletion in `R1` shifts the lines below it. So the line past the
-insertion's context, line 44 of `a.py`, falls in that hunk's graded side and not
-its packaged side. A prototype of this fixture killed every wrong version
-listed under criterion 1. The `preserves` witness killed the one under
+insertion's context, line 44 of `a.py`, falls in that hunk's graded side
+and not its packaged side. Line 38 sits three lines above the insertion,
+so only a context of three covers it. The shared word makes `anchor`'s
+token rule reach line 6 of `b.py`, which no hunk covers. A prototype of
+this fixture killed every wrong version listed under criterion 1. The `preserves` witness killed the one under
 criterion 2.
 
 **The neighbours.** `tests/test_finish.py`, `tests/test_follow_up.py` and
