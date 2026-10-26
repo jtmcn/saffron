@@ -2468,9 +2468,11 @@ def _cite_defects(spec_path: Path, ref: str) -> tuple[int, list[str]]:
     from saffron.spec_citations import citation_count_and_defects
 
     try:
-        return citation_count_and_defects(REPO, ref, spec_path.read_text())
+        count, defects = citation_count_and_defects(REPO, ref, spec_path.read_text())
     except (MirrorGitError, PolicyError) as err:
         raise GitError(str(err)) from err
+    # SA-0321 makes each defect a structured value whose `str` is its line.
+    return count, [str(defect) for defect in defects]
 
 
 # --------------------------------------------------------- enumerators

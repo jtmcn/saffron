@@ -219,7 +219,8 @@ _Avoid_: "rejected", "blocked".
 **Recorded spec text**: A spec's text that a task records and that is not at
 `base_sha`. It is a `spec_texts` row and a `spec_text` fact, hashed when recorded.
 Before the cell, `run_task` re-runs the gate 0 refusals that need no GitHub against
-the latest one. A revision, a follow-up and a draft each write one.
+the latest one. A revision, a follow-up, a draft and a stack batch's citation
+rewrite each write one.
 
 **Spec loop**: A delegate's pass over the queued specs, each through an attended
 `saffron cell`, into one stack. Each step it does by hand is one the factory does
