@@ -52,8 +52,10 @@ from host-side edits, which no gate ever sees.
 Three kinds of drift stay outside it, and pretending otherwise is the trap:
 
 - Most `_Avoid_` entries are ordinary English elsewhere — `check`, `issue`, `note`,
-  `fix`. They are enforced the only way they can be: `DESIGN.md` §5.3 injects
-  `CONTEXT.md` per phase.
+  `fix`. Injection strips the lists, because a prohibition puts the banned word
+  in the prompt (item 162). The conventions lens keeps them, and the advisory
+  `terms` gate reports the few in its own list. ADR 11 splits the lists into
+  banned and confusable phrases, one reader each.
 - A stale *list* has no string to match. §4.6's `prov:Activity` types were written at
   rev 3 and never gained `batch` when the ledger did.
 - A definition the schema contradicts is correct English in correct vocabulary.

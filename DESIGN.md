@@ -1900,3 +1900,4 @@ the ADR records, so a hand edit here is discarded.
 | 8 | REVIEW reads each hunk against the standing instructions, in a fourth lens | accepted | 4, 6, 9, 15, 17, 18, 28, 29, 30, 34, 41, 43, 47, 50, 51, 61 |
 | 9 | A read-only view renders the run record from the graph | accepted | 25, 61 |
 | 10 | Saffron ships as an engine that each operator deploys | accepted | 4, 7, 12, 14, 21, 23, 25, 30, 31, 32, 33, 62 |
+| 11 | An avoided phrase is either banned or confusable | accepted | 24, 28, 29, 30, 34, 36, 59 |

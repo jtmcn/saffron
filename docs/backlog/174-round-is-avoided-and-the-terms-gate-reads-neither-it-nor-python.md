@@ -8,7 +8,7 @@ specs: []
 prs: []
 commits: []
 cites: []
-related: [156]
+related: [156, b-8220e6]
 ---
 
 ## Problem
@@ -24,8 +24,10 @@ spends a REBUT round arguing".
 
 ## Done looks like
 
-`AVOIDED` lists "round" with its term. `terms` reads Python docstrings and
-comments, or a recorded decision says why not. `review.py:144` is fixed.
+"round" is a `_Confusable_:` phrase under each entry that avoids it, which
+ADR 11 makes the conventions lens's to judge. `AVOIDED` is deleted by
+b-8220e6. `terms` reads Python docstrings and comments, or a recorded
+decision says why not. `review.py:144` is fixed.
 
 ## Record
 
@@ -33,3 +35,5 @@ comments, or a recorded decision says why not. `review.py:144` is fixed.
   for a `.py` file under `terms` (`.saffron/gates/prose.py:415-418`). So
   `CONTEXT.md`'s _Avoid_ words in a Python comment or docstring reach no gate,
   and the loop's Standards seat reads them by hand.
+- 2026-10-24: ADR 11 (#963) makes "round" a confusable phrase, so the first
+  arm of Done moved from `AVOIDED` to a `_Confusable_:` line.

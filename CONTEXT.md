@@ -132,6 +132,10 @@ agent" (that is inside a cell), bare "session", and "surrogate". _Avoid_ also "t
 repo. The unit of work, written by the operator.
 _Avoid_: "ticket", "issue", "story", "request", "prompt".
 
+**Acceptance criterion**: One entry in a spec's `acceptance:` list. It pairs
+a claim about the change with the witness that guards it, and the `criteria`
+gate judges it.
+
 **Task**: One spec being executed: a ledger row with a state, a branch, a budget,
 and a cell. A spec is the input. A task is the execution. Its budget is a
 **best-effort** bound. It is checked between attempts, and an attempt's cost is
@@ -261,6 +265,10 @@ repair loop's count. After a loop that reached 2, that re-run is attempt 3, labe
 A repair turn on form gates after REBUT adds one more re-run, attempt 4 there, also labelled REBUT.
 _Avoid_: "iteration", "round", "pass", "retry", "try".
 
+**Plan**: The `plan.json` the implementer writes at the plan checkpoint, before
+any code. A spec says what to change, and a plan says how. The host validates it
+there, so it is a control artifact.
+
 **Plan checkpoint**: The `plan.json` write and host-side validation that opens the
 IMPLEMENT session. Deliberately *not* a phase, because the planner and the implementer are
 the same session.
@@ -306,6 +314,11 @@ Proposed, then ratified by the operator, where the declaration cannot stand: by
 DIAGNOSE on a bug spec, which has none, and by IMPLEMENT on any spec whose declared
 set cannot satisfy its acceptance criteria. Once fixed it feeds the conflict set
 and the `scope` gate.
+
+**Scope proposal**: A proposed `touches` set, with the evidence for it. DIAGNOSE
+writes one as `scope.json` on every bug spec. IMPLEMENT writes one in place of a
+plan when the declared `touches` cannot hold the change. That attempt ends at
+`SCOPE_REVIEW` (`DESIGN.md` §5.3.1).
 
 **`scope` gate**: The check that changed files are a subset of `touches`, and
 match neither the spec's `forbidden` list nor the repo's `protected` list.
@@ -374,6 +387,9 @@ in backticks. Three kinds, and the distinction is the core/repo boundary:
 
 _Avoid_: "check", "validation", "CI" (there is no CI), "the linter" for the `lint`
 gate. _Avoid_ naming any repo-defined gate here as though it were universal.
+
+**Diff**: The change a task's patch makes, from its tree base to its head. The
+gates and the lenses judge it, and PACKAGE pushes it.
 
 **Gate result**: One execution of one gate against one tree: an attempt's, or a
 run's `base_sha` for the baseline. Exactly one of `attempt_id` and `run_id` is set
@@ -745,6 +761,10 @@ usual, so `saffron gc` has nothing to reclaim. The second such cut ends `NOT_IMP
 
 **Ratify**: What the operator does to a proposed `touches` set at `SCOPE_REVIEW`.
 _Avoid_: "approve" (reserved for PRs), "confirm", "sign off".
+
+**Pull request**: The draft PACKAGE opens on a task's branch. The operator
+approves it by marking it ready, and reconcile records what GitHub then did with
+it.
 
 **Approve**: What the operator does to a pull request in GitHub by marking PACKAGE's
 draft ready. Reconcile records it as `APPROVED`. Approval admits a task to the merge

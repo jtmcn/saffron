@@ -617,6 +617,12 @@ seat or the run found and the stack left alone.
 **b-7655f9** and **b-2d2014**. Each is a gap a seat or the run found and the
 stack left alone.
 
+**Placed 2026-10-24**, from ADR 11 and the controlled vocabulary review:
+**b-8220e6**, then **b-541e9a**, which apply ADR 11. Then **b-c16c6c** and
+**b-545741**, which close gaps between `factory.ttl` and `CONTEXT.md`.
+**b-7aefb8** is a property inside `factory.ttl`, and **b-8e14fb** its place
+in `policy.yaml`. **b-2227b0**, closed as parked, records a draft ADR.
+
 **Placed 2026-10-25**, from the spec loop's run 48: **b-9c5b11**,
 **b-01c53d**, **b-92fdbe**, **b-d3f977**, **b-f0e351** and **b-87001a**.
 Each is a gap a seat, a finish or the run found and the stack left alone.
