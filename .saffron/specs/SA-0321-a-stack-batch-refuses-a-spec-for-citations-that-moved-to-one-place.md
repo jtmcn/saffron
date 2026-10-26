@@ -1,9 +1,9 @@
 ---
 id: SA-0321
-title: A stack batch refuses a child for citations its parent moved to one place, though the check already names that place
+title: A stack batch refuses a spec for citations that moved to one place, though the check already names that place
 type: feature
 priority: 2
-estimated_lines: 185
+estimated_lines: 200
 touches:
   - saffron/spec_citations.py
   - tests/test_spec_citations.py
@@ -47,14 +47,14 @@ forbidden:
   - tests/test_queued_specs.py
 budget_usd: 85
 max_attempts: 3
-max_turns: 225
+max_turns: 240
 risk: standard
 acceptance:
   - claim: >-
       `rewrite_moved_citations(text, defects, held)` rewrites each defect
-      whose construct sits at exactly one span and whose citation's offset
-      is in `held`. That citation's range in `text` becomes the span,
-      written `S` for one line and `S-E` otherwise. Its path, or its bare
+      whose citation's offset `held` maps to a name, when that name opens
+      exactly one span in the defect. That citation's range in `text`
+      becomes the span, written `S` for one line and `S-E` otherwise. Its path, or its bare
       form, and every other character stay as written. It returns the new
       text, one rewrite per such defect in text order, and the defects
       left. Each rewrite names the path, the old range and the new range.
@@ -77,32 +77,42 @@ acceptance:
   - claim: >-
       `rewrite_moved_citations` leaves every other defect, in text order,
       and leaves its citation's text as written. The witness drives each
-      kind the check reports, with every offset in `held`. That is a bare
-      citation with no path, a start before line 1, an end before its
-      start, a missing file, a range past a file's end, and a construct
-      found at two spans. One rewritable citation among them is rewritten
-      and is not left.
+      kind the check reports, with every offset held by its clause's first
+      name. That is a bare citation with no path, a start before line 1, an
+      end before its start, a missing file and a range past a file's end.
+      It also drives a held name that opens two spans. One rewritable
+      citation among them is rewritten and is not left.
     witness: tests/test_spec_citations.py::test_a_citation_defect_with_no_single_span_is_left_and_its_text_kept
     wrong_versions:
-      - A construct at two spans rewritten to its first span, so the line 21 citation beside `_diff` and `_print_summary` becomes `4-6`.
-      - A defect with no span dropped from the defects left, so five come back where six are left.
+      - A held name with two spans rewritten to its first, so the `twin` citation of line 3 becomes `1-2`.
+      - A defect with no span dropped from the defects left, so one comes back where six are left.
       - The defects left returned in kind order, so the unanchored bare citation is not first.
       - A past-the-end citation rewritten to the file's last line.
   - claim: >-
-      `citations_held_at(mirror, commit, text)` returns the offsets of the
-      citations that, at `commit`, sit inside a construct their names open
-      or hold one whole. A citation that passes there only by quoting a
-      name on a line outside every construct is not among them. So a
-      definition citation moved at a later commit is rewritten, and a
-      use-site citation of the same name is left as a defect. The witness
-      drives a citation inside a construct, one holding it whole, and one
-      at a call of it.
+      `citations_held_at(mirror, commit, text)` maps the offset of each
+      citation held at `commit` to the name that held it. A name holds a
+      citation when it opens exactly one construct there, and the range
+      sits inside it or holds it whole. A citation that passes only by
+      quoting a name on a line outside every construct is not held. Neither
+      is one whose names open no construct, or one with no path, a missing
+      file, a reversed range or a range past the file's end. None of those
+      raises. So a moved definition citation is rewritten, and a moved
+      use-site citation of the same name is left as a defect. A clause
+      naming two names is held by one and rewritten only onto that name's
+      construct. When two names hold it, the shorter construct's name
+      does. A name defined twice at `commit` holds nothing. The witness
+      drives every member named here.
     witness: tests/test_spec_citations.py::test_a_use_site_citation_is_left_while_its_definition_citation_is_rewritten
     wrong_versions:
-      - The held set ignored, so the use-site citation of lines 9-10 is rewritten to the definition at `4-6`.
-      - Every citation that passes at the reference commit counted as held, so the use-site citation is rewritten too.
-      - The held set read at the later commit, where no citation holds its construct, so nothing is rewritten.
+      - The held map ignored, so the use-site citation of lines 9-10 is rewritten to the definition at `4-6`.
+      - Every citation that passes at the own commit counted as held, so the use-site citation is rewritten too.
+      - The held map read at the later commit, where no citation holds its construct, so nothing is rewritten.
       - Only a range inside a construct counted, so the range 1-4 that holds it whole is left.
+      - The file read without checking the tree first, so `mod/new.py`, absent at the own commit, raises.
+      - A citation whose names open no construct counted as held, so `digest` at line 2 is in the map.
+      - A rewrite onto the union of the clause's spans, so the `alpha` and `beta` citation is moved onto `beta` at `4-5`.
+      - A name that opens two constructs at the own commit counted as held, so the `twin` citation is moved onto the second at `4-5`.
+      - The first holding name in clause order kept, so the `outer` and `inner` citation becomes `4-7` and not `5-6`.
   - claim: >-
       In a stack batch, a spec whose `cite` returns defects that
       `rewrite_moved_citations` rewrites, and none it leaves, is not
@@ -140,17 +150,17 @@ acceptance:
       - The refusal records no miss, so the dependent spec runs.
   - claim: >-
       `_stack_cite`'s callable returns the text it checked, the defects
-      `citation_defects` returned for it unchanged, and the held offsets.
-      Handed `None`, the text is the queued file at `base_sha`. Its held
-      offsets come from `citations_held_at` at the commit that last changed
-      that file in `base_sha`'s history. Handed a text, it returns that text
-      and no held offset. The commit it checks at is resolved as before.
+      `citation_defects` returned for it unchanged, and the held map.
+      Handed `None`, the text is the queued file at `base_sha`. Its held map
+      comes from `citations_held_at` at the commit that last changed that
+      file in `base_sha`'s history. Handed a text, it returns that text and
+      an empty held map. The commit it checks at is resolved as before.
     witness: tests/test_cli.py::test_a_stack_batchs_citation_check_returns_the_text_it_checked
     wrong_versions:
       - The callable returns the text it was handed, so `None` comes back for a spec with no recorded text.
-      - The held offsets read at `base_sha`, which here is a later commit that leaves the spec file alone.
-      - The held offsets read at the head the check resolved.
-      - Held offsets returned for a recorded text, so a revision's own slip is rewritten.
+      - The held map read at `base_sha`, which here is a later commit that leaves the spec file alone.
+      - The held map read at the head the check resolved.
+      - A held map returned for a recorded text, so a revision's own slip is rewritten.
       - The defects converted to strings, so the batch has no span to rewrite.
   - claim: >-
       Each construct defect `citation_defects` returns reads, through
@@ -214,17 +224,23 @@ text at `66d30a90`, checked at `origin/saffron/SA-0315` (`78f1453b`),
 reports seven. Each text reports none at its own commit. All seven of
 `SA-0316`'s name one span, and each held its construct at `66d30a90`. The
 hand refresh in `bc39d878` moved each onto that span. Of `SA-0315`'s four,
-one names two spans. Two more cite a call of a helper and passed at
-`c6e12a59` only by quoting its name. A one-span rewrite would move each
-onto the helper's `def`, where the hand refresh in `5c02dee1` kept the
-call. Only «saffron/cli.py» 512-538 held `_pushed_landed` there and would
-move right.
+two cite a call of a helper and passed at `c6e12a59` only by quoting its
+name. A plain one-span rewrite would move each onto the helper's `def`,
+where the hand refresh in `5c02dee1` kept the call. The other two held a
+construct there. One is «saffron/cli.py» 512-538, held by
+`_pushed_landed`. The other names a test and the `fake_ready_task` nested
+in it, and the shorter construct holds it. These counts come from running
+today's checker and a prototype of the held map at those commits.
+
+**It is not only a parent's moves.** The own commit is on `main`. So the
+rewrite also corrects drift that later merges to `main` made before
+`base_sha`, for a spec with no parent at all.
 
 ## Problem
 
-Rewrite each citation whose construct sits at exactly one span, when the
-citation held that construct at the spec's own commit. Refuse only for
-the defects left.
+Rewrite a citation when one name in its clause held it at the spec's own
+commit, and that name opens exactly one construct now. Move it onto that
+construct. Refuse only for the defects left.
 
 **The spec's own commit.** It is the commit that last changed the queued
 spec file in `base_sha`'s history. The spec was written and reviewed there,
@@ -235,24 +251,33 @@ Measured at the merge `ddf48856`, that returns `c6e12a59` for
 never rewritten.
 
 **A structured defect.** Each defect carries the line it prints today
-unchanged, its citation's place in the text, and the spans it found. Its
-`str` is that line. A defect of any other kind carries no span.
+unchanged and its citation's place in the text. A construct defect also
+carries the spans each clause name opens. Its `str` is that line. A
+defect of any other kind carries no span.
 
-**The held offsets.** `citations_held_at(mirror, commit, text)` in
+**The held map.** `citations_held_at(mirror, commit, text)` in
 `saffron/spec_citations.py` reads the same citations and the same policy
-patterns at `commit`. It keeps the offset of each citation whose range
-sits inside a span its names open, or holds one whole.
+patterns at `commit`. A clause name holds a citation when it opens
+exactly one construct there, with the range inside it or holding it
+whole. When several names hold one, the name with the shortest construct
+holds it. It reads only files the tree at
+`commit` lists, and skips a range that does not resolve there.
 
 **The pure rewrite.** `rewrite_moved_citations(text, defects, held)` takes
 the text the defects were found in. It returns the new text, the rewrites
 in text order and the defects left. It reads no git and no file.
 
 **The batch.** `cite` returns the text it checked, its defects and the
-held offsets. The batch passes all three to `rewrite_moved_citations`. Any
+held map. The batch passes all three to `rewrite_moved_citations`. Any
 defect left refuses the spec as today, counting only those left.
 Otherwise, when a rewrite happened, it records the new text and emits one
 `moved` line per rewrite before the review. Then it hands the review that
-text. With no defect, nothing changes.
+text. With no defect, nothing changes. After that review routes `run`,
+`_revised_spec_refusal` re-runs gate 0's open-pull-request refusal on any
+spec of the order whose latest row is a `revision`
+(`saffron/batch.py:435-437`). A rewritten spec has such a row. The
+rewrite leaves `touches` as it was, so the re-run asks gate 0's own
+question again, and that is harmless.
 
 **The adapter.** Update `cite`'s type and the comment above it
 (`saffron/batch.py:490-492`), and `_stack_cite`'s docstring.
@@ -285,13 +310,23 @@ witness tests code that does not exist at base. The `witness` gate reports
 
 **What the cut leaves.** A citation of code that was not in the tree at the
 spec's own commit holds nothing there. A child citing its parent's new
-code is then refused as today. In run 48 the cut rewrites all seven of
-`SA-0316`'s defects and one of `SA-0315`'s four, which stays refused.
+code is then refused as today. So is a citation already stale at its own
+commit. A spec last edited for prose only takes that edit as its own
+commit, and a citation stale there is refused too. In run 48 the
+prototype rewrites all seven of `SA-0316`'s defects, each to the span the
+hand refresh chose. It rewrites two of `SA-0315`'s four, «tests/test_cli.py»
+2599-2603 to 3735-3737 among them, as the hand refresh did. `SA-0315` stays
+refused on its two use-site citations.
+
+**`max_turns` is 240.** `history` names `SA-0312`'s 221 turns as the peak.
+That row was cut off at its own ceiling, so 221 is a floor and not a
+measured need. The extra turns cover that. The budget stays at 85.
 
 **A suggested shape, not a rule.** A frozen dataclass `CitationDefect`
 holds the printed line, the path and the old range as written. It also
 holds that range's offset in the text, and a tuple of spans. Its
-`__str__` returns the line. `citation_count_and_defects` and
+`__str__` returns the line. Its spans can be a mapping from each clause
+name to that name's spans. `citation_count_and_defects` and
 `citation_defects` return it, and `cli.py` keeps calling
 `citation_defects`. A `NamedTuple` can carry `cite`'s three values. Choose
 other names if they read better, and keep the two function names.
@@ -307,13 +342,13 @@ each is joined with single spaces before sentences are read
 (`saffron/spec_citations.py:71-88`, `:157-162`). A citation token holds no
 whitespace, and joining never adds or removes a backtick. So the k-th
 backtick pair in a paragraph's original text is the k-th in its joined
-form. Record each citation's offset in the original text. The offsets
-`citations_held_at` returns are read over the same text, so they match.
+form. Record each citation's offset in the original text. The offsets in
+`citations_held_at`'s map are read over the same text, so they match.
 
 **Existing tests.** Tests that compare a defect list with strings compare
 `[str(d) for d in ...]` instead. Their expected strings stay byte for byte.
 The batch test behind criterion 9 has a `cite` double returning lists. Make
-it return its text, defects that carry no span, and no held offset. Keep
+it return its text, defects that carry no span, and an empty held map. Keep
 every assertion it makes.
 
 **Import new names inside each test body.** A module-scope import of
@@ -326,7 +361,10 @@ spec spells them so, or its own citation check reads the fixture paths.
 **Criteria 1 and 2** use the `cite_repo` fixture in
 `tests/test_spec_citations.py`, with one more file committed on top.
 `mod/tiny.py` holds four lines: `x = 1`, `def tiny(): pass`, `y = 2` and
-`z = 3`. Each passes every defect's offset as `held`.
+`z = 3`. Criterion 2 also commits `mod/twice.py`, five lines:
+`def twin():`, `    return 1`, a blank line, `def twin():` and
+`    return 2`. Each witness maps every defect's offset to its clause's
+first name.
 
 Criterion 1's text, with its seven defects as the checker reports them now:
 
@@ -380,7 +418,7 @@ See «gone.py:1» for it.
 
 See «pkg/other.py:9» for it.
 
-Both «_diff» and «_print_summary» matter («mod/lib.py:21»).
+«twin» returns its value («mod/twice.py:3»).
 ```
 
 Its six defects left, in this order, read through `str`:
@@ -391,7 +429,7 @@ mod/lib.py:0: starts before line 1
 mod/lib.py:6-2: ends before it starts
 gone.py:1: no such file at <commit>
 pkg/other.py:9: pkg/other.py has 3 lines at <commit>
-mod/lib.py:21: the construct it names sits at mod/lib.py:4-6, 38-39
+mod/twice.py:3: the construct it names sits at mod/twice.py:1-2, 4-5
 ```
 
 The new text differs from the old only where the `tiny` citation's `3`
@@ -416,8 +454,16 @@ CLI = [
 ]
 ```
 
-The second commit puts `import os` and two blank lines above them. The
-text is three paragraphs.
+The first commit also holds `mod/pair.py`, defining `alpha` at lines 1-2
+and `beta` at 5-6. It holds `mod/twin.py`, defining `twin` at 1-2 and
+again at 5-6. Each body is one `return` line, with two blank lines
+between. The second commit puts `import os` and two blank lines above
+`mod/cli.py`'s lines. It cuts `mod/pair.py` to those three lines and
+`beta`, and `mod/twin.py` to those three lines and the second `twin`. It
+adds `mod/new.py`, defining `fresh` at lines 1-2. Both commits hold
+`mod/nest.py`, four lines: `def outer():`, `    def inner():`,
+`        return 1` and `    return inner`. The second commit puts the same
+three lines above them. The text is eleven paragraphs.
 
 ```text
 «_mirror_path» and the blank line after it sit at «mod/cli.py:1-4».
@@ -425,19 +471,45 @@ text is three paragraphs.
 «_mirror_path» returns its path at «mod/cli.py:3».
 
 It builds «mirror_path» with «_mirror_path(repo, home)» and hands it over («mod/cli.py:9-10»).
+
+«_mirror_path» is called at «mod/cli.py:12».
+
+«fresh» returns one at «mod/new.py:1-2».
+
+«_mirror_path» sits at «:1-3».
+
+«_mirror_path» sits at «mod/cli.py:3-1».
+
+«digest» is read at «mod/cli.py:2».
+
+«alpha» and «beta» both matter («mod/pair.py:2»).
+
+«twin» returns one («mod/twin.py:2»).
+
+«outer» returns «inner» («mod/nest.py:2-3»).
 ```
 
-At the first commit it reports no defect. At the second each citation is a
-defect whose construct sits at `4-6`. Measured at base, `1-4` and `3` hold
-their construct at the first commit, and `9-10` passes there only by its
-use. Pass the second commit's defects and the first commit's held offsets
-to the rewrite. `1-4` and `3` both become `4-6`. The `9-10` citation stays
-as written, and its defect is the one left, reading
-`mod/cli.py:9-10: the construct it names sits at mod/cli.py:4-6`.
+Measured on a prototype at base, the held map at the first commit holds
+four citations. The first and second are held by `_mirror_path`, the ninth
+by `alpha` and the eleventh by `inner`. Nothing raises. Assert that map
+exactly, by offset and name. Pass the second commit's defects and that map
+to the rewrite. `1-4` and `3` both become `4-6`, and `2-3` becomes `5-6`.
+No other range changes. The defects left,
+in order, read as follows.
+
+```text
+mod/cli.py:9-10: the construct it names sits at mod/cli.py:4-6
+:1-3: no path named earlier in its paragraph
+mod/cli.py:3-1: ends before it starts
+mod/pair.py:2: the construct it names sits at mod/pair.py:4-5
+mod/twin.py:2: the construct it names sits at mod/twin.py:4-5
+```
+
+The prototype killed each of criterion 3's wrong versions on this text.
 
 **Criteria 4 and 5** extend `StackDoubles` in `tests/test_batch.py` with a
-`cite` double. It returns a text, defects built in the test, and held
-offsets. Find each offset with `str.index` on that text. Wrap the review
+`cite` double. It returns a text, defects built in the test, and a held
+map. Find each offset with `str.index` on that text. Wrap the review
 double to keep each `spec_text` it was handed and the ledger's latest text
 at that moment. Build each text as `_spec_text(...)` with a line of
 citations appended, so it parses. Criterion 4 drives two specs of the
@@ -455,9 +527,9 @@ refused beside a rewritable defect.
 in `tests/test_cli.py`. From the rig's base commit, commit one more change
 that leaves the spec file alone, and pin `base_sha` there. Patch
 `cli.citation_defects` to return a sentinel list, and patch
-`cli.citations_held_at` to record its commit and return a sentinel set.
+`cli.citations_held_at` to record its commit and return a sentinel map.
 Handed `None`, the callable must ask for the rig's original base commit.
-Handed a text, it must not call it and must return no held offset.
+Handed a text, it must not call it and must return an empty held map.
 
 **The `prose` gate** counts every new comment and docstring. Write none
 with an em dash, a semicolon, a contraction, the perfect tense or a

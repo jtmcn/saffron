@@ -41,4 +41,6 @@ All three land in `SA-0321`'s own pull request.
 - 2026-10-26: filed with `SA-0321`.
 - 2026-10-26: edited by hand in `SA-0321`'s pull request. ADR 7 carries an
   amendment, and `DESIGN.md` §4.2.1 and **Recorded spec text** name the rewrite.
-  It closes with that pull request's number.
+  It closes with that pull request's number. After `SA-0321`'s review, the
+  amendment names the held construct's name, and **Recorded spec text** says
+  a rewrite is not a Revision.
