@@ -518,7 +518,7 @@ Each session sees one claim and the diff, and is never told which test is its wi
 Its edits are recorded in `criterion-probes.json`. A criterion probe that survives its own
 criterion's witness is the finding: nothing guards the claim. The host applies each one in
 a gate-only cell, and a survivor is a blocker for REBUT whether or not it anchors (`SA-0120`,
-`SA-0299`). The host then applies the same edit under the repo's whole `tests` gate and its other declared gates. A kill that leaves those gates clean and does not recur without the edit makes the survivor a concern. The concern names the tests that killed the edit (`SA-0322`).
+`SA-0299`). Its claim names each test the whole `tests` gate failed under the same edit (`SA-0322`).
 _Avoid_: "mutant" for one. A mutant is declared in a criterion, and a criterion probe is
 named by a session that wrote neither the code nor the witness. _Avoid_ "vacuity probe" for
 one. A lens names a vacuity probe against the tests, and a criterion probe targets a claim.
@@ -530,7 +530,7 @@ It sees the claim, the list and the diff, and is never told which test is its wi
 version it cannot express as an edit is recorded as such. The host applies each edit in the
 gate-only cell criterion probes use and runs that criterion's witness. Every outcome is
 recorded in `wrong-versions.json`. A survivor is a blocker for REBUT whether or not it
-anchors (`SA-0187`, `SA-0190`, `SA-0299`). The host then applies the same edit under the repo's whole `tests` gate and its other declared gates. A kill that leaves those gates clean and does not recur without the edit makes the survivor a concern. The concern names the tests that killed the edit (`SA-0322`). The host declines to run an edit to a declared test path or outside the
+anchors (`SA-0187`, `SA-0190`, `SA-0299`). The host declines to run an edit to a declared test path or outside the
 tree. It records why under the version's `refusal` key, and REVIEW's line counts it as refused.
 That is not a task **Refusal** (`SA-0233`).
 _Avoid_ "mutant" for one. A mutant is exact text withheld from the implementer, and a wrong
