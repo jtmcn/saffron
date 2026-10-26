@@ -1122,7 +1122,7 @@ withholding is what makes the edit evidence. Its author cannot see what would
 kill it, so it is not chosen to be killed. The edit is a **criterion probe**
 (`CONTEXT.md` §4). One that survives its criterion's witness is a claim nothing
 guards. The host applies each one in a gate-only cell. A survivor is a blocker for REBUT
-whether or not it anchors to the diff (`SA-0120`, `SA-0299`, ADR 3).
+whether or not it anchors to the diff (`SA-0120`, `SA-0299`, ADR 3). If the repo's whole `tests` gate kills the same edit, the survivor is a concern instead, naming the tests that killed it (`SA-0322`).
 
 **An edit a spec lists in prose.** A criterion also lists its known **wrong
 versions** (`CONTEXT.md` §4), one sentence each (`SA-0187`). The implementer
@@ -1134,7 +1134,7 @@ REVIEW a fresh session per such criterion turns each version into an edit. It
 sees the claim, the list and the diff, and never the witness. The host applies
 each edit in the gate-only cell the criterion probes use, and runs that
 criterion's witness. A survivor is a blocker for REBUT
-whether or not it anchors, filed as a surviving criterion probe is (`SA-0190`, `SA-0299`). An answer that
+whether or not it anchors, filed as a surviving criterion probe is (`SA-0190`, `SA-0299`). The whole-suite run applies to it too (`SA-0322`). An answer that
 is not the schema is re-prompted once in its own session, as a lens's is. A
 criterion still without a usable answer is an `error`. It blocks nothing, and
 the REVIEW line and the pull request name it (`SA-0202`).
@@ -1202,7 +1202,7 @@ Its instruction is not "review this code":
 
 That last clause is not politeness. A critic prompted to find problems will always find problems, and you will spend your mornings adjudicating invented ones.
 
-**Findings are reconciled against the diff before they count**. The critic emits `file` and `line` per finding. The host drops any finding it cannot anchor, and logs the drop. An unanchorable finding is either a hallucination or a complaint about pre-existing code. Neither belongs in a queue that is supposed to be about *this change*. A host-filed survivor is neither. The host ran its edit and watched the witness stay green, so it reaches REBUT anchored or not (§5.4.1, `SA-0299`). Same move as measuring doneness from git (§4.3): treat agent output as claims, reconcile against a host-computed fact set. Perhaps twenty lines of code, and it is the difference between a critic you read and a critic you learn to skim.
+**Findings are reconciled against the diff before they count**. The critic emits `file` and `line` per finding. The host drops any finding it cannot anchor, and logs the drop. An unanchorable finding is either a hallucination or a complaint about pre-existing code. Neither belongs in a queue that is supposed to be about *this change*. A host-filed survivor is neither. The host ran its edit and watched the witness stay green, so it reaches REBUT anchored or not (§5.4.1, `SA-0299`). One the whole `tests` gate kills is a concern instead (`SA-0322`). Same move as measuring doneness from git (§4.3): treat agent output as claims, reconcile against a host-computed fact set. Perhaps twenty lines of code, and it is the difference between a critic you read and a critic you learn to skim.
 
 **Anchoring admits two targets, not one, and the second exists for lens #3**. The rule was written for blast radius, §5.5.1's retired #3, which is asked *what else calls this*. So that lens's best findings point at lines the diff never touched: an unupdated caller, a missing migration, a serializer left behind. **The rule outlived the lens rather than lapsing with it:** test adequacy also cites code the diff did not touch. The test whose job was to catch the change often predates the diff. A hunk-only rule discards most of what that lens is for. The drop-rate diagnostic below would then read as a prompting defect when the reconciler is what is wrong. So a finding anchors if its file and line fall **inside a diff hunk**. It also anchors if that line **mentions an identifier the diff added, removed or renamed**. The second test is deliberately crude. It tokenizes the changed lines on word boundaries and intersects them with the tokens on the cited line. A shared token anchors unless it is one of 54 common English words in any case, such as `the` or `The` (b-38d45f). It knows no programming language. Crude is enough, because anchoring only ever had to establish that a finding points at real code with a real connection to this change. Everything else a lens files is still dropped and still counted.
 
