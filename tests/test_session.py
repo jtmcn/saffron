@@ -11875,7 +11875,9 @@ def test_a_criterion_probe_its_witness_survives_is_rebutted_as_a_blocker(
         cell,
         gate_results=[
             _tests_result("pass", collected=["t.py::a"]),
+            _tests_result("pass", collected=["t.py::a", "t.py::b"]),
             _tests_result("pass", collected=["t.py::b"]),
+            _tests_result("pass", collected=["t.py::a", "t.py::b"]),
         ],
         subsets=subsets,
     )
@@ -11908,7 +11910,7 @@ def test_a_criterion_probe_its_witness_survives_is_rebutted_as_a_blocker(
         gates=("tests",),
     )
     assert outcome.state == "REBUTTAL_UNJUDGED"
-    assert subsets == [["t.py::a"], ["t.py::b"]]
+    assert subsets == [["t.py::a"], [], ["t.py::b"], []]
 
     entries = json.loads(
         (tmp_path / "out" / "SY-1" / "criterion-probes.json").read_text()
@@ -11986,7 +11988,12 @@ def test_a_preserves_criterion_probe_argued_out_of_the_diff_is_kept_confirmed(
     )
     _rebuttable(monkeypatch, cell, rebut_commits=0)
     _stub_probe_gates(
-        monkeypatch, cell, gate_results=[_tests_result("pass", collected=["t.py::a"])]
+        monkeypatch,
+        cell,
+        gate_results=[
+            _tests_result("pass", collected=["t.py::a"]),
+            _tests_result("pass", collected=["t.py::a"]),
+        ],
     )
     contents = {"src/x.py": "def y():\n    return 1\nassert x == 1\n"}
 
@@ -12060,8 +12067,11 @@ def test_a_killed_or_errored_criterion_probe_files_nothing_and_stops_nothing(
     """Criterion 2: an edit its own witness kills is `killed` and files
     nothing. An edit under which the `tests` gate itself answers `error` is
     `error`, with `witness_gate`'s own summary, and stops nothing after it.
-    The witness drives three edits, in order: killed, `error`, killed."""
-    from saffron.intake import Criterion
+    The witness drives three edits, in order: killed, `error`, killed.
+    *preserves*: none of the three is `survived`, so the second ask
+    (backlog b-b9365d) never runs. Only the one witness is ever asked for
+    any of them."""
+    from saffron.intake import Criterion, Mutant
 
     criteria = [Criterion(claim=f"claim {n}", witness=f"t.py::{n}") for n in "abc"]
 
@@ -12076,6 +12086,7 @@ def test_a_killed_or_errored_criterion_probe_files_nothing_and_stops_nothing(
         ],
     )
     errored = _tests_result("error", summary="collection crashed")
+    subsets: list[list[str]] = []
     _stub_probe_gates(
         monkeypatch,
         cell,
@@ -12092,6 +12103,7 @@ def test_a_killed_or_errored_criterion_probe_files_nothing_and_stops_nothing(
                 failures=[Failure(file="t.py", code="c", message="boom")],
             ),
         ],
+        subsets=subsets,
     )
 
     outcome, _ledger = _drive(
@@ -12114,6 +12126,11 @@ def test_a_killed_or_errored_criterion_probe_files_nothing_and_stops_nothing(
     findings = json.loads((tmp_path / "out" / "SY-1" / "findings.json").read_text())
     (adequacy,) = [r for r in findings if r["lens"] == "adequacy"]
     assert adequacy["findings"] == []
+
+    # No entry survived, so no second ask ran for any of them: only the
+    # three witnesses, each asked alone, once.
+    assert subsets == [["t.py::a"], ["t.py::b"], ["t.py::c"]]
+    assert cell.mutated == [Mutant.model_validate(edit(n)) for n in "123"]
 
 
 def test_a_criterion_probe_nothing_could_answer_is_unproven_and_files_nothing(
@@ -12232,6 +12249,7 @@ def test_a_wrong_version_its_witness_survives_is_rebutted_as_a_blocker(
         gate_results=[
             _tests_result("fail", collected=["t.py::a"]),
             _tests_result("pass", collected=["t.py::a"]),
+            _tests_result("pass", collected=["t.py::a"]),
         ],
         subsets=subsets,
     )
@@ -12256,7 +12274,7 @@ def test_a_wrong_version_its_witness_survives_is_rebutted_as_a_blocker(
         gates=("tests",),
     )
     assert outcome.state == "REBUTTAL_UNJUDGED"
-    assert subsets == [["t.py::a"], ["t.py::a"]]
+    assert subsets == [["t.py::a"], ["t.py::a"], []]
 
     entry = json.loads((tmp_path / "out" / "SY-1" / "wrong-versions.json").read_text())
     assert entry == [
@@ -12292,7 +12310,7 @@ def test_a_wrong_version_its_witness_survives_is_rebutted_as_a_blocker(
                 f"{review.HOST_FILED}t.py::a stayed green with the spec's "
                 "wrong version 'the guard is removed' applied to src/x.py as an "
                 "edit. The claim was 'the guard rejects a negative amount', and "
-                "only that witness ran under the edit."
+                "the whole `tests` gate stayed green under the edit too."
             ),
             "file": "src/x.py",
             "filed_severity": None,
@@ -12351,6 +12369,8 @@ def test_a_survivor_outside_the_diff_still_reaches_rebut(monkeypatch, tmp_path):
         gate_results=[
             _tests_result("pass", collected=["t.py::a"]),
             _tests_result("pass", collected=["t.py::a"]),
+            _tests_result("pass", collected=["t.py::a"]),
+            _tests_result("pass", collected=["t.py::a"]),
         ],
         subsets=subsets,
     )
@@ -12393,7 +12413,7 @@ def test_a_survivor_outside_the_diff_still_reaches_rebut(monkeypatch, tmp_path):
         gates=("tests",),
     )
     assert outcome.state == "REBUTTAL_UNJUDGED"
-    assert subsets == [["t.py::a"], ["t.py::a"]]
+    assert subsets == [["t.py::a"], [], ["t.py::a"], []]
 
     findings = json.loads((tmp_path / "out" / "SY-1" / "findings.json").read_text())
     (correctness,) = [r for r in findings if r["lens"] == "correctness"]
@@ -12413,6 +12433,384 @@ def test_a_survivor_outside_the_diff_still_reaches_rebut(monkeypatch, tmp_path):
         (1, "src/y.py", 2, False, probe_edit),
         (2, "saffron/gates/runner.py", 330, False, wrong_edit),
     ]
+
+
+# --- backlog b-b9365d: a survivor's own edit, asked of the whole `tests` gate too ---
+
+
+def test_a_survivor_the_whole_suite_kills_stays_a_blocker_naming_the_killing_tests(
+    monkeypatch, tmp_path
+):
+    """Criterion 1: a survivor's edit is re-applied in the same Gate-only
+    cell and asked of the whole `tests` gate. It is a kill when that gate
+    fails on tests the gate collected, for the criterion's own edit and a
+    wrong version alike. The blocker stays a `blocker` with no
+    `filed_severity`, and the claim names every killing node id."""
+    from saffron.intake import Criterion, Mutant
+
+    criterion = Criterion(
+        claim="the guard holds", witness="t.py::a", wrong_versions=["only version"]
+    )
+
+    own_edit = {"file": "src/x.py", "find": "assert x == 1", "replace": "own"}
+    wrong_edit = {"file": "src/x.py", "find": "assert x == 1", "replace": "wrong"}
+    all_names = ["t.py::a", "t.py::b", "t.py::c", "t.py::d"]
+
+    cell = _stub_the_runtime(
+        monkeypatch,
+        patch=_ANCHORING_DIFF,
+        gate_cell_suite=[_tests_result("pass", collected=all_names)],
+    )
+    _rebuttable(monkeypatch, cell, rebut_commits=0)
+    subsets: list[list[str]] = []
+    _stub_probe_gates(
+        monkeypatch,
+        cell,
+        gate_results=[
+            _tests_result("pass", collected=["t.py::a"]),
+            _tests_result(
+                "fail",
+                collected=all_names,
+                failures=[
+                    Failure(file="t.py", code="t.py::b", message="boom"),
+                    Failure(file="t.py", code="t.py::c", message="boom"),
+                ],
+            ),
+            _tests_result("pass", collected=["t.py::a"]),
+            _tests_result(
+                "fail",
+                collected=all_names,
+                failures=[Failure(file="t.py", code="t.py::d", message="boom")],
+            ),
+        ],
+        subsets=subsets,
+    )
+    contents = {"src/x.py": "def y():\n    return 1\nassert x == 1\n"}
+
+    def _read_at_head(container, path):
+        return None if container == _CRITIC_CONTAINER else contents.get(path)
+
+    monkeypatch.setattr("saffron.cell.worktree.read_at_head", _read_at_head)
+
+    real_critic_cell = session.critic_cell
+    cells_entered: list[str | None] = []
+
+    def _spy(**kwargs):
+        cells_entered.append(kwargs["network"])
+        return real_critic_cell(**kwargs)
+
+    monkeypatch.setattr("saffron.cell.session.critic_cell", _spy)
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_probe_turns(_turn(_probe_answer(own_edit, "own reason")))
+        + [
+            _turn(_wrong_version_answer((wrong_edit, "wrong reason"))),
+            _turn("I have addressed the findings."),
+            _turn(structured_output=_CLAIMED_FIX),
+        ],
+        spec=_spec(acceptance=[criterion]),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "REBUTTAL_UNJUDGED"
+    assert subsets == [["t.py::a"], [], ["t.py::a"], []]
+    assert cell.mutated == [
+        Mutant.model_validate(own_edit),
+        Mutant.model_validate(own_edit),
+        Mutant.model_validate(wrong_edit),
+        Mutant.model_validate(wrong_edit),
+    ]
+    assert len(cells_entered) == 3
+
+    record = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
+    (own, wrong) = record["blockers"]
+    for blocker in (own, wrong):
+        assert blocker["severity"] == "blocker"
+        assert blocker["filed_severity"] is None
+        assert blocker["probe_verdict"] == "survived"
+        assert blocker["claim"].startswith(
+            f"{review.HOST_FILED}t.py::a stayed green with "
+        )
+    assert own["probe"] == own_edit
+    assert wrong["probe"] == wrong_edit
+    assert own["claim"] == (
+        f"{review.HOST_FILED}t.py::a stayed green with the criterion's own "
+        "edit applied to src/x.py. The claim was 'the guard holds'. Under "
+        "the edit the whole `tests` gate failed t.py::b, t.py::c, and the "
+        "criterion's witness did not fail."
+    )
+    assert wrong["claim"] == (
+        f"{review.HOST_FILED}t.py::a stayed green with the spec's wrong "
+        "version 'only version' applied to src/x.py as an edit. The claim "
+        "was 'the guard holds'. Under the edit the whole `tests` gate "
+        "failed t.py::d, and the criterion's witness did not fail."
+    )
+
+
+def test_a_survivor_the_whole_suite_also_misses_says_the_suite_stayed_green(
+    monkeypatch, tmp_path
+):
+    """Criterion 2: a survivor's second ask can also stay green. The
+    criterion's own edit meets a whole `tests` gate with no failure. The
+    wrong version's edit meets one whose only failure is the same
+    pre-existing failure the head already carried. `subtract_baseline`
+    cancels it, so it is no new failure and no kill either."""
+    from saffron.intake import Criterion, Mutant
+
+    criterion = Criterion(
+        claim="the guard holds", witness="t.py::a", wrong_versions=["only version"]
+    )
+
+    own_edit = {"file": "src/x.py", "find": "assert x == 1", "replace": "own"}
+    wrong_edit = {"file": "src/x.py", "find": "assert x == 1", "replace": "wrong"}
+    collected = ["t.py::a", "t.py::old"]
+    old_failure = Failure(file="t.py", code="t.py::old", message="pre-existing flake")
+
+    cell = _stub_the_runtime(
+        monkeypatch,
+        patch=_ANCHORING_DIFF,
+        gate_cell_suite=[
+            _tests_result("fail", collected=collected, failures=[old_failure])
+        ],
+    )
+    _rebuttable(monkeypatch, cell, rebut_commits=0)
+    subsets: list[list[str]] = []
+    _stub_probe_gates(
+        monkeypatch,
+        cell,
+        gate_results=[
+            _tests_result("pass", collected=["t.py::a"]),
+            _tests_result("pass", collected=collected),
+            _tests_result("pass", collected=["t.py::a"]),
+            _tests_result("fail", collected=collected, failures=[old_failure]),
+        ],
+        subsets=subsets,
+    )
+    contents = {"src/x.py": "def y():\n    return 1\nassert x == 1\n"}
+
+    def _read_at_head(container, path):
+        return None if container == _CRITIC_CONTAINER else contents.get(path)
+
+    monkeypatch.setattr("saffron.cell.worktree.read_at_head", _read_at_head)
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_probe_turns(_turn(_probe_answer(own_edit, "own reason")))
+        + [
+            _turn(_wrong_version_answer((wrong_edit, "wrong reason"))),
+            _turn("I have addressed the findings."),
+            _turn(structured_output=_CLAIMED_FIX),
+        ],
+        spec=_spec(acceptance=[criterion]),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "REBUTTAL_UNJUDGED"
+    assert subsets == [["t.py::a"], [], ["t.py::a"], []]
+    assert cell.mutated == [
+        Mutant.model_validate(own_edit),
+        Mutant.model_validate(own_edit),
+        Mutant.model_validate(wrong_edit),
+        Mutant.model_validate(wrong_edit),
+    ]
+
+    record = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
+    (own, wrong) = record["blockers"]
+    assert own["probe_verdict"] == "survived"
+    assert wrong["probe_verdict"] == "survived"
+    assert own["claim"] == (
+        f"{review.HOST_FILED}t.py::a stayed green with the criterion's own "
+        "edit applied to src/x.py. The claim was 'the guard holds', and the "
+        "whole `tests` gate stayed green under the edit too."
+    )
+    assert wrong["claim"] == (
+        f"{review.HOST_FILED}t.py::a stayed green with the spec's wrong "
+        "version 'only version' applied to src/x.py as an edit. The claim "
+        "was 'the guard holds', and the whole `tests` gate stayed green "
+        "under the edit too."
+    )
+
+
+def test_a_survivor_whose_whole_suite_cannot_answer_keeps_todays_blocker(
+    monkeypatch, tmp_path
+):
+    """Criterion 3: a second ask that cannot answer leaves today's claim
+    untouched. The stop can be an `error`, a `skip`, a mutator that declines
+    the edit's second application, or a cell that stops outright. Every
+    survivor still reaches REBUT with its witness-ask claim intact. The
+    stop empties the loop, so the fifth criterion is never even asked. A
+    head whose own lens table carries no `tests` result at all buys no
+    second ask for anyone."""
+    import saffron.gates.runner as runner_mod
+    from saffron.intake import Criterion, Mutant
+
+    criteria = [Criterion(claim=f"claim {n}", witness=f"t.py::{n}") for n in "abcde"]
+
+    def edit(letter):
+        return {"file": "src/x.py", "find": "assert x == 1", "replace": letter}
+
+    cell = _stub_the_runtime(
+        monkeypatch,
+        patch=_ANCHORING_DIFF,
+        gate_cell_suite=[
+            _tests_result(
+                "pass",
+                collected=["t.py::a", "t.py::b", "t.py::c", "t.py::d", "t.py::e"],
+            )
+        ],
+    )
+    _rebuttable(monkeypatch, cell, rebut_commits=0)
+
+    # The mutator declines `c`'s edit on its second application, the one
+    # non-answer `_stub_probe_gates` itself cannot script.
+    applications: dict[str, int] = {}
+
+    @contextlib.contextmanager
+    def _mutate(_container, mutant):
+        cell.mutated.append(mutant)
+        applications[mutant.replace] = applications.get(mutant.replace, 0) + 1
+        if mutant.replace == "c" and applications[mutant.replace] == 2:
+            yield "declined on its second application"
+            return
+        yield None
+
+    # A `CellRuntimeError` mid-script, scripted here by hand since
+    # `_stub_probe_gates`'s own iterator only ever returns a `GateResult`.
+    real_run_gate = runner_mod.run_gate
+    script = iter(
+        [
+            _tests_result("pass", collected=["t.py::a"]),
+            _tests_result("error", summary="collection crashed"),
+            _tests_result("pass", collected=["t.py::b"]),
+            _tests_result("skip", summary="repo lacks this toolchain"),
+            _tests_result("pass", collected=["t.py::c"]),
+            _tests_result("pass", collected=["t.py::d"]),
+            runtime.CellRuntimeError("the cell died mid-ask"),
+        ]
+    )
+    subsets: list[list[str]] = []
+
+    def _run_gate(name, executable, cwd, *, subset=None, executor=None, **kw):
+        container = getattr(executor, "container", None)
+        if container is not None and container.startswith("saffron-gate-"):
+            subsets.append(list(subset or []))
+            result = next(script)
+            if isinstance(result, BaseException):
+                raise result
+            return result
+        return real_run_gate(
+            name, executable, cwd, subset=subset, executor=executor, **kw
+        )
+
+    monkeypatch.setattr("saffron.gates.runner.run_gate", _run_gate)
+    monkeypatch.setattr("saffron.cell.worktree.source_mutated", _mutate)
+
+    contents = {"src/x.py": "def y():\n    return 1\nassert x == 1\n"}
+
+    def _read_at_head(container, path):
+        return None if container == _CRITIC_CONTAINER else contents.get(path)
+
+    monkeypatch.setattr("saffron.cell.worktree.read_at_head", _read_at_head)
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_probe_turns(
+            *(_turn(_probe_answer(edit(n), f"reason {n}")) for n in "abcde")
+        )
+        + [
+            _turn("I have addressed the findings."),
+            _turn(structured_output=_CLAIMED_FIX),
+        ],
+        spec=_spec(acceptance=criteria),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "REBUTTAL_UNJUDGED"
+    assert subsets == [
+        ["t.py::a"],
+        [],
+        ["t.py::b"],
+        [],
+        ["t.py::c"],
+        ["t.py::d"],
+        [],
+    ]
+    assert cell.mutated == [Mutant.model_validate(edit(n)) for n in "aabbccdd"]
+
+    entries = json.loads(
+        (tmp_path / "out" / "SY-1" / "criterion-probes.json").read_text()
+    )
+    assert [e["outcome"] for e in entries] == [
+        "survived",
+        "survived",
+        "survived",
+        "survived",
+        "unproven",
+    ]
+    assert entries[4]["summary"] == (
+        "an earlier edit left this cell's tree in an unknown state, so "
+        "nothing after it was asked"
+    )
+
+    record = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
+    assert [b["probe_verdict"] for b in record["blockers"]] == ["survived"] * 4
+    assert [b["claim"] for b in record["blockers"]] == [
+        f"{review.HOST_FILED}t.py::{n} stayed green with the criterion's "
+        f"own edit applied to src/x.py. The claim was 'claim {n}', and "
+        "only that witness ran under the edit."
+        for n in "abcd"
+    ]
+
+    # A head whose own lens table carries no `tests` result at all buys no
+    # second ask, whatever the one witness answers.
+    cell2 = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF, gate_cell_suite=[])
+    _rebuttable(monkeypatch, cell2, rebut_commits=0)
+    subsets2: list[list[str]] = []
+    _stub_probe_gates(
+        monkeypatch,
+        cell2,
+        gate_results=[_tests_result("pass", collected=["t.py::x"])],
+        subsets=subsets2,
+    )
+
+    def _read_at_head2(container, path):
+        return None if container == _CRITIC_CONTAINER else contents.get(path)
+
+    monkeypatch.setattr("saffron.cell.worktree.read_at_head", _read_at_head2)
+
+    only = Criterion(claim="claim x", witness="t.py::x")
+    outcome2, _ledger2 = _drive(
+        monkeypatch,
+        tmp_path / "no-head",
+        cell=cell2,
+        turns=_probe_turns(_turn(_probe_answer(edit("x"), "reason x")))
+        + [
+            _turn("I have addressed the findings."),
+            _turn(structured_output=_CLAIMED_FIX),
+        ],
+        spec=_spec(acceptance=[only]),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome2.state == "REBUTTAL_UNJUDGED"
+    assert subsets2 == [["t.py::x"]]
+    record2 = json.loads(
+        (tmp_path / "no-head" / "out" / "SY-1" / "rebuttal.json").read_text()
+    )
+    (blocker2,) = record2["blockers"]
+    assert blocker2["probe_verdict"] == "survived"
+    assert blocker2["claim"] == (
+        f"{review.HOST_FILED}t.py::x stayed green with the criterion's own "
+        "edit applied to src/x.py. The claim was 'claim x', and only that "
+        "witness ran under the edit."
+    )
 
 
 def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_probes(
@@ -13626,3 +14024,56 @@ def test_a_spec_whose_wrong_versions_all_edit_tests_reads_none_of_them_expressed
 
     (line,) = [w for w in cell.watched if w.startswith("REVIEW: wrong versions:")]
     assert line == "REVIEW: wrong versions: 2 declared, 0 expressed, 2 refused"
+
+
+def test_a_second_ask_whose_new_failure_no_head_test_names_keeps_todays_claim():
+    """A second ask can be `survived` with a new failure that names no test
+    the head collected. That answers nothing, so the claim keeps today's
+    text. It never says the whole `tests` gate stayed green."""
+    from saffron import probe
+    from saffron.intake import Criterion, Mutant
+    from saffron.phases import review
+
+    edit = Mutant(file="src/x.py", find="assert x == 1", replace="x2")
+    finding = review.survivor_finding(
+        Criterion(claim="c", witness="t.py::a"), edit, "assert x == 1\n"
+    )
+    uncounted = probe.ProbeResult(
+        "survived",
+        "a new failure exists but matched no counted test",
+        uncounted=("t.py::new[1]",),
+    )
+    clean = probe.ProbeResult("survived", "no new failure")
+
+    assert review.survivor_claim_with_suite_verdict(finding.claim, uncounted) == (
+        finding.claim
+    )
+    assert review.survivor_claim_with_suite_verdict(finding.claim, clean).endswith(
+        ", and the whole `tests` gate stayed green under the edit too."
+    )
+
+
+def test_a_kill_with_an_uncounted_failure_still_names_the_killing_tests():
+    """A `killed` verdict names its killing node ids even when the same
+    result also carries a non-empty `uncounted`: one new failure killed,
+    a different one answered nothing, and the kill still wins."""
+    from saffron import probe
+    from saffron.intake import Criterion, Mutant
+    from saffron.phases import review
+
+    edit = Mutant(file="src/x.py", find="assert x == 1", replace="x2")
+    finding = review.survivor_finding(
+        Criterion(claim="c", witness="t.py::a"), edit, "assert x == 1\n"
+    )
+    mixed = probe.ProbeResult(
+        "killed",
+        "a new failure killed it",
+        failures=("t.py::b", "t.py::c"),
+        uncounted=("t.py::zebra",),
+    )
+
+    head = finding.claim.removesuffix(", and only that witness ran under the edit.")
+    assert review.survivor_claim_with_suite_verdict(finding.claim, mixed) == (
+        f"{head}. {review.SUITE_KILL_SENTENCE}t.py::b, t.py::c, "
+        "and the criterion's witness did not fail."
+    )

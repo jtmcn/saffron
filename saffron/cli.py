@@ -73,7 +73,7 @@ from saffron.scheduler import (
     retirement_refusal,
     run_gh,
 )
-from saffron.spec_citations import citation_defects
+from saffron.spec_citations import CitationDefect, citation_defects, citations_held_at
 from saffron.task import (
     Handoff,
     PinnedBase,
@@ -510,6 +510,20 @@ def _retirement_markers_at(mirror: Path, base_sha: str) -> list[tuple[str, str]]
 
 def _run_git(mirror: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return git_mirror._run(["git", "-C", str(mirror), *args])
+
+
+def _own_commit(pinned: PinnedBase, path: str) -> str:
+    """The commit that last changed `path` in `pinned.base_sha`'s history
+    (`SA-0321`): where a queued spec was written and reviewed, and so
+    where its citations were read against the tree."""
+    result = _run_git(
+        pinned.mirror, "log", "-1", "--format=%H", pinned.base_sha, "--", path
+    )
+    if result.returncode != 0:
+        raise git_mirror.GitError(
+            f"git log {pinned.base_sha} -- {path}: {result.stderr.strip()}"
+        )
+    return result.stdout.strip()
 
 
 def _pushed_landed(mirror: Path, base_sha: str, pushed_sha: str) -> bool:
@@ -1275,27 +1289,37 @@ def _stack_cite(
     pinned: PinnedBase,
     stack_base: scheduler.StackBase | None = None,
     heads: dict[tuple[str, str | None], str] | None = None,
-) -> Callable[[Candidate, Candidate | None, str | None], list[str]]:
-    """`run_stack_batch`'s `cite` adapter (`SA-0295`). Checks a spec's
-    citations at the same commit `_stack_review` seeds its cell at
+) -> Callable[
+    [Candidate, Candidate | None, str | None],
+    tuple[str, list[CitationDefect], Mapping[int, str]],
+]:
+    """`run_stack_batch`'s `cite` adapter (`SA-0295`, `SA-0321`). Checks a
+    spec's citations at the commit `_stack_review` seeds its cell at
     (`_stack_head`), never at the operator's checkout. A `None` spec text
     reads the queued file at `base_sha`, and a missing one raises
-    `ValueError` before any fetch, the way `_stack_revise` reads one.
-
-    The commit it resolves is kept in `heads`, keyed by the candidate's
-    and the layer's spec ids. The review this check precedes then seeds
-    there with no second fetch.
+    `ValueError` before any fetch. That text's citations are also held
+    at the spec's own commit (`_own_commit`), tokenized by the checked
+    tree. A given text holds none. The checked commit sits in `heads`,
+    for the review right after this to reuse with no second fetch.
     """
 
     def run(
         candidate: Candidate, layer: Candidate | None, spec_text: str | None
-    ) -> list[str]:
+    ) -> tuple[str, list[CitationDefect], Mapping[int, str]]:
+        held: Mapping[int, str] = {}
+        queued = spec_text is None
         if spec_text is None:
             spec_text = _queued_spec_text(pinned, candidate)
         head = _stack_head(pinned, layer, stack_base)
         if heads is not None:
             heads[_heads_key(candidate, layer)] = head
-        return citation_defects(pinned.mirror, head, spec_text)
+        if queued:
+            own_commit = _own_commit(pinned, f".saffron/specs/{candidate.path.name}")
+            held = citations_held_at(
+                pinned.mirror, own_commit, spec_text, tokens_at=head
+            )
+        defects = citation_defects(pinned.mirror, head, spec_text)
+        return spec_text, defects, held
 
     return run
 
@@ -2163,7 +2187,11 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     stack_review: Callable[..., spec_review.SpecReviewSession] | None = None
     # Same: no citation is checked until then.
     stack_cite: (
-        Callable[[Candidate, Candidate | None, str | None], list[str]] | None
+        Callable[
+            [Candidate, Candidate | None, str | None],
+            tuple[str, list[CitationDefect], Mapping[int, str]],
+        ]
+        | None
     ) = None
     stack_mint: Callable[[Candidate], int] | None = None
     # Same: no reviewed spec is revised until then.

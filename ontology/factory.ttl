@@ -34,12 +34,11 @@ factory:SpecLoop owl:disjointWith factory:Batch, factory:Task .
 ## Entities
 
 factory:Spec               a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "spec" .
+# First-class, so a gate and a lens can assert on the same criterion via earl:test.
 factory:AcceptanceCriterion a owl:Class ;
     rdfs:subClassOf prov:Entity, earl:TestCriterion ;
-    rdfs:label "acceptance criterion" ;
-    rdfs:comment "First-class, so a gate and a lens can assert on the same criterion via earl:test." .
-factory:Plan          a owl:Class ; rdfs:subClassOf prov:Plan ; rdfs:label "plan" ;
-    rdfs:comment "plan.json: the how, where a spec is the what. Validated host-side at the plan checkpoint, so a control artifact rather than a claim." .
+    rdfs:label "acceptance criterion" .
+factory:Plan          a owl:Class ; rdfs:subClassOf prov:Plan ; rdfs:label "plan" .
 factory:ScopeProposal a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "scope proposal" .
 factory:Diff          a owl:Class ; rdfs:subClassOf prov:Entity, earl:TestSubject ; rdfs:label "diff" .
 factory:PullRequest   a owl:Class ; rdfs:subClassOf prov:Entity, earl:TestSubject ; rdfs:label "pull request" .
@@ -57,8 +56,7 @@ factory:Envelope owl:disjointWith factory:TouchesSet .
 factory:ImplementerSession a owl:Class ; rdfs:subClassOf prov:SoftwareAgent ; rdfs:label "implementer" .
 factory:CriticLens a owl:Class ;
     rdfs:subClassOf prov:SoftwareAgent, earl:Assertor ;
-    rdfs:label "lens" ;
-    rdfs:comment "Lens remits are meant to be disjoint (§5.5), and Appendix L measured two lenses filing one finding. One blocker routes to REBUT, and there is no vote." .
+    rdfs:label "lens" .
 factory:Operator a owl:Class ; rdfs:subClassOf prov:Person, earl:Assertor ; rdfs:label "operator" .
 
 # Acts on the operator's behalf under their git identity and credentials. None of
@@ -92,8 +90,7 @@ factory:criteria  a factory:CoreGate ; factory:blockingAt factory:alwaysBlocking
 factory:revert    a factory:CoreGate ; factory:blockingAt factory:alwaysBlocking .
 factory:witness   a factory:CoreGate ; factory:blockingAt factory:alwaysBlocking .
 
-factory:GateRole a owl:Class ; rdfs:label "gate role" ;
-    rdfs:comment "A name in the contract. The repo supplies the executable; core supplies the meaning (§5.4)." .
+factory:GateRole a owl:Class ; rdfs:label "gate role" .
 factory:format a factory:GateRole . factory:lint a factory:GateRole .
 factory:types a factory:GateRole . factory:tests a factory:GateRole .
 factory:no-network a factory:GateRole . factory:coverage a factory:GateRole .
@@ -144,14 +141,12 @@ factory:verdict      a owl:DatatypeProperty ; rdfs:domain factory:Finding ; rdfs
 ## Enumerated values. Each set is an axiom the relational schema cannot state:
 ## every one of these is a TEXT column in §4.1.
 
-factory:TaskState a owl:Class ; rdfs:label "task state" ;
-    rdfs:comment "A value tasks.state can hold: an in-flight state or an end state (item 52)." .
-factory:InFlightState a owl:Class ; rdfs:subClassOf factory:TaskState ; rdfs:label "in-flight state" ;
-    rdfs:comment "A state in which the task is Saffron's to advance, tonight or now (§4.2.1)." .
-factory:EndState a owl:Class ; rdfs:subClassOf factory:TaskState ; rdfs:label "end state" ;
-    rdfs:comment "A state in which the task is not Saffron's to advance. It waits on the operator, GitHub, the merge train or saffron gc. A re-queue resumes the same row from six of them, so an end state need not be final. Wider than the terminal states: it also holds what the operator's own decision produces, and ORPHANED, which no one chose." .
-factory:TerminalState a owl:Class ; rdfs:subClassOf factory:EndState ;
-    rdfs:comment "A state that reaches the operator (§3.3). Everything else is internal. CONTEXT.md §6 lists six of these and DESIGN.md §3.3 lists nine; §3.3 governs, see RATIONALE.md." .
+factory:TaskState a owl:Class ; rdfs:label "task state" .
+factory:InFlightState a owl:Class ; rdfs:subClassOf factory:TaskState ; rdfs:label "in-flight state" .
+# Wider than the terminal states: it also holds what the operator's own decision
+# produces, and ORPHANED, which no one chose.
+factory:EndState a owl:Class ; rdfs:subClassOf factory:TaskState ; rdfs:label "end state" .
+factory:TerminalState a owl:Class ; rdfs:subClassOf factory:EndState ; rdfs:label "terminal state" .
 
 factory:SCOPE_REVIEW a factory:TerminalState . factory:PLAN_REJECTED a factory:TerminalState .
 factory:EXHAUSTED a factory:TerminalState . factory:READY_FOR_REVIEW a factory:TerminalState .
@@ -174,7 +169,7 @@ factory:DIAGNOSING a factory:InFlightState . factory:IMPLEMENTING a factory:InFl
 factory:GATING a factory:InFlightState . factory:REPAIRING a factory:InFlightState .
 factory:REVIEWING a factory:InFlightState . factory:REBUTTING a factory:InFlightState .
 
-factory:RiskTier a owl:Class .
+factory:RiskTier a owl:Class ; rdfs:label "risk tier" .
 factory:standard a factory:RiskTier . factory:elevated a factory:RiskTier .
 
 ## How a night ended (§4.2.1). Not a task's end state: these describe the batch,
@@ -184,18 +179,18 @@ factory:standard a factory:RiskTier . factory:elevated a factory:RiskTier .
 ## five that says the machine rather than the work was wrong. INCOMPLETE is a
 ## night that left a task in flight: no end state at all, which is not a
 ## failure the morning can read (backlog item 70).
-factory:BatchStopReason a owl:Class .
+factory:BatchStopReason a owl:Class ; rdfs:label "batch stop reason" .
 factory:DRAINED a factory:BatchStopReason . factory:BUDGET a factory:BatchStopReason .
 factory:UNTIL a factory:BatchStopReason . factory:INFRASTRUCTURE a factory:BatchStopReason .
 factory:INCOMPLETE a factory:BatchStopReason .
 
 ## What `runs.preflight` stores. What a NULL there means is open (backlog item b-eac388).
-factory:PreflightOutcome a owl:Class .
+factory:PreflightOutcome a owl:Class ; rdfs:label "preflight outcome" .
 factory:PASSED a factory:PreflightOutcome . factory:FAILED a factory:PreflightOutcome .
 
 ## The kinds `events.jsonl` tags a line with. Suffixed because `Attempt` and
 ## `GateResult` already name classes here, and an event is not the thing it reports.
-factory:EventKind a owl:Class .
+factory:EventKind a owl:Class ; rdfs:label "event kind" .
 factory:PreflightEvent a factory:EventKind . factory:CeilingsEvent a factory:EventKind .
 factory:BaselineEvent a factory:EventKind . factory:PhaseStartEvent a factory:EventKind .
 factory:AttemptEvent a factory:EventKind . factory:GateResultEvent a factory:EventKind .
@@ -204,7 +199,7 @@ factory:TerminalEvent a factory:EventKind . factory:TaskOutcomeEvent a factory:E
 factory:TeardownEvent a factory:EventKind .
 
 ## The record's whole alphabet (`saffron/record/contract.py`), including kinds nothing appends yet.
-factory:FactKind a owl:Class .
+factory:FactKind a owl:Class ; rdfs:label "fact kind" .
 factory:task_created a factory:FactKind . factory:task_state a factory:FactKind .
 factory:task_package a factory:FactKind . factory:task_push a factory:FactKind .
 factory:task_merged_head a factory:FactKind . factory:task_policy a factory:FactKind .
@@ -227,7 +222,7 @@ factory:task_engine a factory:FactKind .
 factory:SpecType a owl:Class .
 factory:feature a factory:SpecType . factory:bug a factory:SpecType . factory:refactor a factory:SpecType .
 
-factory:Severity a owl:Class .
+factory:Severity a owl:Class ; rdfs:label "severity" .
 factory:blocker a factory:Severity . factory:concern a factory:Severity . factory:note a factory:Severity .
 
 factory:BlockingLevel a owl:Class .
@@ -255,20 +250,20 @@ factory:disputes a factory:Role . factory:concedes  a factory:Role .
 ## term whose only reader is an rdfs:comment is what the dead-term test deletes.
 ## They join when something reads them, not when someone writes a definition.
 
-factory:Principle a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "principle" ;
-    rdfs:comment "A numbered lesson in one global sequence. The number is an address — DESIGN.md, CONTEXT.md, the backlog and docs/evidence/ all cite it — so it is a property here rather than an ordering." .
+# Its number is an address. DESIGN.md, CONTEXT.md, the backlog and
+# docs/evidence/ all cite it, so it is a property here rather than an ordering.
+factory:Principle a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "principle" .
 factory:RevisionAppendix a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "revision appendix" .
 
 factory:principleNumber a owl:DatatypeProperty ; rdfs:domain factory:Principle ; rdfs:range xsd:integer .
-factory:claim a owl:DatatypeProperty ; rdfs:domain factory:Principle ; rdfs:range xsd:string .
+factory:principleClaim a owl:DatatypeProperty ; rdfs:domain factory:Principle ; rdfs:range xsd:string .
 factory:contributedBy a owl:ObjectProperty ; rdfs:domain factory:Principle ; rdfs:range factory:RevisionAppendix ;
     rdfs:comment "Exactly one. A principle is allocated its number by the appendix that found it, which is why the sequence stays contiguous without a registry." .
 factory:appendixLetter a owl:DatatypeProperty ; rdfs:domain factory:RevisionAppendix ; rdfs:range xsd:string .
 factory:coversRevision a owl:DatatypeProperty ; rdfs:domain factory:RevisionAppendix ; rdfs:range xsd:integer ;
     rdfs:comment "One or more. Appendix G covers rev 8 and rev 10 and Appendix O rev 18 and rev 19, because a revision that closes an earlier revision's question lands in that question's appendix." .
 
-factory:ADR a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "ADR" ;
-    rdfs:comment "One decision as it stands today, under docs/adr/, cited by number (ADR 1)." .
+factory:ADR a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "ADR" .
 
 factory:adrNumber a owl:DatatypeProperty ; rdfs:domain factory:ADR ; rdfs:range xsd:integer .
 factory:adrStatus a owl:DatatypeProperty ; rdfs:domain factory:ADR ; rdfs:range xsd:string .

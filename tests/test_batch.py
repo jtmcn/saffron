@@ -7433,7 +7433,7 @@ def test_a_stack_batch_needs_review_whenever_cite_is_given(ledger, repo_id):
             None,
             doubles.runner,
             readiness_check=_ready,
-            cite=lambda *_args: [],
+            cite=lambda *_args: ("", [], {}),
         )
 
     assert ledger.latest_batch_id() == 0
@@ -7455,17 +7455,40 @@ def test_a_stack_batch_refuses_a_spec_whose_citations_do_not_resolve_before_each
     monkeypatch.setattr(spec_review_module, "SPEC_WRITER_SESSION_USD", 1.0)
     monkeypatch.setattr(spec_review_module, "SPEC_REVIEW_SESSION_USD", 1.0)
 
+    from saffron.spec_citations import CitationDefect
+
+    def _defects(n):
+        """`n` stand-in defects, each with no spans: `rewrite_moved_citations`
+        leaves every one of them, held map or not."""
+        return [
+            CitationDefect(line=f"c{i}", path=None, offset=0, replace=None, spans=None)
+            for i in range(n)
+        ]
+
+    # A mix, so a refusal's count must read the defects left, not every
+    # defect `cite` returned. The first is held and rewritable, the second stays left.
+    held_301 = CitationDefect(
+        line="mod/z.py:1-2: the construct it names sits at mod/z.py:9-10",
+        path="mod/z.py",
+        offset=100,
+        replace=(100, 100),
+        spans={"z": ((9, 10),)},
+    )
+    left_301 = CitationDefect(
+        line="c0", path=None, offset=200, replace=None, spans=None
+    )
+
     order_log: list[str] = []
     cite_table: dict[str, list] = {
-        "TE-301": [["citation one", "citation two"]],
-        "TE-303": [[], ["c1", "c2", "c3"]],
-        "TE-305": [[], []],
+        "TE-301": [("", [held_301, left_301], {100: "z"})],
+        "TE-303": [("", _defects(0), {}), ("", _defects(3), {})],
+        "TE-305": [("", _defects(0), {}), ("", _defects(0), {})],
         "TE-306": [RuntimeError("cite boom")],
-        "TE-308": [[]],
-        "TE-309": [[]],
-        "TE-310": [[], []],
-        "TE-320": [[]],
-        "TE-321": [["c1"]],
+        "TE-308": [("", _defects(0), {})],
+        "TE-309": [("", _defects(0), {})],
+        "TE-310": [("", _defects(0), {}), ("", _defects(0), {})],
+        "TE-320": [("", _defects(0), {})],
+        "TE-321": [("", _defects(1), {})],
         "TE-322": [RuntimeError("follow-up cite boom")],
     }
     cite_calls: list[tuple[str, str | None, str | None, int | None]] = []
@@ -7662,7 +7685,7 @@ def test_a_stack_batch_refuses_a_spec_whose_citations_do_not_resolve_before_each
         line for line in lines if "refused" in line or "raised" in line
     ]
     assert refused_or_raised == [
-        f"{'TE-301':<10} refused  2 citation(s) do not resolve",
+        f"{'TE-301':<10} refused  1 citation(s) do not resolve",
         f"{'TE-302':<10} refused  reaches TE-301",
         f"{'TE-303':<10} refused  3 citation(s) do not resolve",
         f"{'TE-304':<10} refused  reaches TE-303",
@@ -7681,6 +7704,283 @@ def test_a_stack_batch_refuses_a_spec_whose_citations_do_not_resolve_before_each
     assert _task_routes(ledger, task_id_by_spec["TE-303"]) == ["revise"]
     assert _task_routes(ledger, task_id_by_spec["TE-321"]) == []
     assert _task_routes(ledger, task_id_by_spec["TE-322"]) == []
+
+
+def _held_defect(text: str, content: str, *, path: str, name: str, span: tuple):
+    """A `CitationDefect` stand-in for `content`'s one occurrence in `text`
+    (`SA-0321`). `path` is the citation's own resolved path, named as a
+    bare citation's defect names its anchor. `name` opens `span` alone."""
+    import re
+
+    from saffron.spec_citations import CitationDefect
+
+    offset = text.index(content)
+    match = re.match(r"^([^:\s]*):(\d+)(?:-(\d+))?$", content)
+    assert match is not None
+    start = offset + match.start(2)
+    end = offset + (match.end(3) if match.group(3) else match.end(2))
+    rng = content.split(":", 1)[1]
+    where = str(span[0]) if span[0] == span[1] else f"{span[0]}-{span[1]}"
+    line = f"{path}:{rng}: the construct it names sits at {path}:{where}"
+    return CitationDefect(
+        line=line, path=path, offset=offset, replace=(start, end), spans={name: (span,)}
+    )
+
+
+def test_a_stack_batch_records_a_spec_text_with_its_moved_citations_rewritten_before_its_review(
+    ledger, repo_id, monkeypatch
+):
+    """A spec whose `cite` returns defects `rewrite_moved_citations` fully
+    rewrites is not refused. The batch records the rewritten text under
+    origin `revision`. It hands that text to the review, and to a later
+    `revise` route. It emits one `moved` line per rewrite, in text order, naming
+    a bare citation's own anchored path. A spec with no defect records no
+    text."""
+    from saffron import spec_review as spec_review_module
+    from saffron.batch import run_stack_batch
+    from saffron.spec_citations import rewrite_moved_citations
+
+    monkeypatch.setattr(spec_review_module, "SPEC_WRITER_SESSION_USD", 1.0)
+    monkeypatch.setattr(spec_review_module, "SPEC_REVIEW_SESSION_USD", 1.0)
+
+    text_401 = _spec_text("TE-401", touches=[]) + (
+        "See `mod/a.py:1-2` and `:9` for the shape.\n"
+    )
+    defect_path = _held_defect(
+        text_401, "mod/a.py:1-2", path="mod/a.py", name="thing", span=(9, 10)
+    )
+    defect_bare = _held_defect(
+        text_401, ":9", path="mod/b.py", name="other", span=(2, 2)
+    )
+    held_401 = {defect_path.offset: "thing", defect_bare.offset: "other"}
+    new_text_401, rewrites_401, left_401 = rewrite_moved_citations(
+        text_401, [defect_path, defect_bare], held_401
+    )
+    assert left_401 == []
+    assert len(rewrites_401) == 2
+
+    text_403 = _spec_text("TE-403", touches=[]) + "No citation here.\n"
+
+    text_405 = _spec_text("TE-405", touches=[]) + "See `mod/c.py:3-4` here.\n"
+    defect_405 = _held_defect(
+        text_405, "mod/c.py:3-4", path="mod/c.py", name="thing", span=(7, 8)
+    )
+    held_405 = {defect_405.offset: "thing"}
+
+    def cite(candidate, pred, spec_text):
+        spec_id = candidate.spec.id
+        if spec_id == "TE-401":
+            return text_401, [defect_path, defect_bare], held_401
+        if spec_id == "TE-403":
+            return text_403, [], {}
+        assert spec_id == "TE-405"
+        if spec_text is None:
+            return text_405, [defect_405], held_405
+        return spec_text, [], {}
+
+    rows = {"TE-405": {"route": ["revise", "run"], "revised_touches": []}}
+    doubles = StackDoubles(ledger, repo_id, rows)
+    task_id_by_spec: dict[str, int] = {}
+
+    def mint(candidate):
+        task_id = doubles.mint(candidate)
+        task_id_by_spec[candidate.spec.id] = task_id
+        return task_id
+
+    review_calls: list[tuple] = []
+
+    def review(candidate, predecessor=None, **kw):
+        task_id = task_id_by_spec[candidate.spec.id]
+        row = ledger.spec_text(task_id)
+        review_calls.append(
+            (candidate.spec.id, kw.get("spec_text"), row["text"] if row else None)
+        )
+        return doubles.review(candidate, predecessor, **kw)
+
+    revise_calls: list[tuple] = []
+
+    def revise(candidate, predecessor, spec_text, review_text):
+        revise_calls.append((candidate.spec.id, spec_text))
+        return doubles.revise(candidate, predecessor, spec_text, review_text)
+
+    order = [
+        _candidate("TE-401", budget_usd=1.0),
+        _candidate("TE-403", budget_usd=1.0),
+        _candidate("TE-405", budget_usd=1.0),
+    ]
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        40.0,
+        None,
+        doubles.runner,
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        writer_usd=2.0,
+        review=review,
+        mint=mint,
+        revise=revise,
+        cite=cite,
+        end_review=doubles.end_review,
+        follow_ups=doubles.follow_ups,
+        sleep=lambda _seconds: None,
+        emit=lines.append,
+    )
+
+    assert reason == "DRAINED"
+    assert not any("refused" in line for line in lines)
+
+    row_401 = ledger.spec_text(task_id_by_spec["TE-401"])
+    assert row_401["origin"] == "revision"
+    assert row_401["path"] == ".saffron/specs/TE-401.md"
+    assert row_401["text"] == new_text_401
+
+    assert ledger.spec_text(task_id_by_spec["TE-403"]) is None
+
+    new_text_405, rewrites_405, left_405 = rewrite_moved_citations(
+        text_405, [defect_405], held_405
+    )
+    assert left_405 == []
+
+    moved_lines = [line for line in lines if " moved  " in line]
+    assert moved_lines == [
+        f"{'TE-401':<10} moved  {r.path}:{r.old} -> {r.path}:{r.new}"
+        for r in rewrites_401
+    ] + [
+        f"{'TE-405':<10} moved  {r.path}:{r.old} -> {r.path}:{r.new}"
+        for r in rewrites_405
+    ]
+    bare_line = next(line for line in moved_lines if "mod/b.py" in line)
+    assert bare_line == f"{'TE-401':<10} moved  mod/b.py:9 -> mod/b.py:2"
+
+    assert revise_calls[0] == ("TE-405", new_text_405)
+
+    for _spec_id, handed, latest in review_calls:
+        assert handed == latest
+
+    assert [c[0] for c in doubles.runner_calls] == ["TE-401", "TE-403", "TE-405"]
+
+
+def test_a_stack_batch_refuses_a_spec_with_a_citation_left_after_rewriting_and_records_no_text(
+    ledger, repo_id
+):
+    """A spec whose `cite` returns any defect `rewrite_moved_citations`
+    leaves is refused before its review, counting the defects left, not
+    every defect. That covers a defect of another kind, and a one-span
+    defect whose offset `cite` did not return as held. It records no text
+    and emits no `moved` line, even when other defects were rewritable. It
+    is still a miss, so a spec depending on it is refused, and a follow-up
+    is refused the same way."""
+    from saffron.batch import run_stack_batch
+    from saffron.spec_citations import CitationDefect
+
+    text_501 = _spec_text("TE-501", touches=[]) + (
+        "See `mod/a.py:1-2`, `mod/b.py:3-4` and `mod/x.py:5-6` here.\n"
+    )
+    held_a = _held_defect(
+        text_501, "mod/a.py:1-2", path="mod/a.py", name="a", span=(9, 10)
+    )
+    held_b = _held_defect(
+        text_501, "mod/b.py:3-4", path="mod/b.py", name="b", span=(2, 3)
+    )
+    no_span_501 = CitationDefect(
+        line="mod/x.py:5-6: no such file at deadbeef",
+        path="mod/x.py",
+        offset=text_501.index("mod/x.py:5-6"),
+        replace=None,
+        spans=None,
+    )
+    held_501 = {held_a.offset: "a", held_b.offset: "b"}
+
+    text_502 = _spec_text("TE-502", touches=[]) + (
+        "See `mod/c.py:1-2` and `mod/d.py:3-4` here.\n"
+    )
+    held_c = _held_defect(
+        text_502, "mod/c.py:1-2", path="mod/c.py", name="c", span=(7, 8)
+    )
+    not_held_d = _held_defect(
+        text_502, "mod/d.py:3-4", path="mod/d.py", name="d", span=(1, 1)
+    )
+    held_502 = {held_c.offset: "c"}  # not_held_d's offset is left out on purpose
+
+    text_510 = _spec_text("TE-510", touches=[]) + "See `gone.py:1` here.\n"
+    no_span_510 = CitationDefect(
+        line="gone.py:1: no such file at deadbeef",
+        path="gone.py",
+        offset=text_510.index("gone.py:1"),
+        replace=None,
+        spans=None,
+    )
+
+    def cite(candidate, pred, spec_text):
+        spec_id = candidate.spec.id
+        if spec_id == "TE-501":
+            return text_501, [held_a, held_b, no_span_501], held_501
+        if spec_id == "TE-502":
+            return text_502, [held_c, not_held_d], held_502
+        assert spec_id == "TE-510"
+        return text_510, [no_span_510], {}
+
+    rows = {"__follow_ups__": [{"id": "TE-510", "budget_usd": 1.0}]}
+    doubles = StackDoubles(ledger, repo_id, rows)
+    task_id_by_spec: dict[str, int] = {}
+
+    def mint(candidate):
+        task_id = doubles.mint(candidate)
+        task_id_by_spec[candidate.spec.id] = task_id
+        return task_id
+
+    def follow_ups(batch_key, stack_review):
+        candidates = doubles.follow_ups(batch_key, stack_review)
+        for candidate in candidates:
+            assert candidate.task_id is not None
+            task_id_by_spec[candidate.spec.id] = candidate.task_id
+        return candidates
+
+    order = [
+        _candidate("TE-501", budget_usd=1.0),
+        _candidate("TE-502", budget_usd=1.0),
+        _candidate("TE-503", budget_usd=1.0, depends_on=["TE-501"]),
+    ]
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        40.0,
+        None,
+        doubles.runner,
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        writer_usd=2.0,
+        review=doubles.review,
+        mint=mint,
+        revise=doubles.revise,
+        cite=cite,
+        end_review=doubles.end_review,
+        follow_ups=follow_ups,
+        sleep=lambda _seconds: None,
+        emit=lines.append,
+    )
+
+    assert reason == "DRAINED"
+    refused = [line for line in lines if "refused" in line]
+    assert refused == [
+        f"{'TE-501':<10} refused  1 citation(s) do not resolve",
+        f"{'TE-502':<10} refused  1 citation(s) do not resolve",
+        f"{'TE-503':<10} refused  reaches TE-501",
+        f"{'TE-510':<10} refused  1 citation(s) do not resolve",
+    ]
+    assert not any(" moved  " in line for line in lines)
+
+    assert ledger.spec_text(task_id_by_spec["TE-501"]) is None
+    assert ledger.spec_text(task_id_by_spec["TE-502"]) is None
+    # `follow_ups` itself records TE-510's first text, origin `follow_up`.
+    # The citation check records nothing further on top of it.
+    assert ledger.spec_text(task_id_by_spec["TE-510"])["origin"] == "follow_up"
+    assert doubles.runner_calls == []
 
 
 # backlog item b-8a0c9a: a closed stack batch's own tail, resumable

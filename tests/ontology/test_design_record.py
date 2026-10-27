@@ -94,6 +94,31 @@ def test_the_contiguity_check_would_catch_a_gap():
     assert numbers != list(range(1, len(numbers) + 1))
 
 
+def test_a_principles_claim_is_stated_under_its_own_property():
+    """Each parsed principle states its claim once, under
+    `factory:principleClaim`, and the parsed graph holds no `factory:claim`
+    triple at all. That property belongs to a finding."""
+    graph = _graph()
+    FACTORY = design_record.FACTORY
+    nodes = list(graph.subjects(rdflib.RDF.type, FACTORY.Principle))
+    assert nodes
+    for node in nodes:
+        assert len(list(graph.objects(node, FACTORY.principleClaim))) == 1
+
+    assert list(graph.triples((None, FACTORY.claim, None))) == []
+
+    by_node = {
+        str(next(graph.objects(node, FACTORY.principleNumber))): str(
+            next(graph.objects(node, FACTORY.principleClaim))
+        )
+        for node in nodes
+    }
+    returned = {
+        str(number): claim for number, claim, _ in design_record.principles(graph)
+    }
+    assert returned == by_node
+
+
 def test_each_appendix_contributed_a_contiguous_block():
     """A block, not a scatter. This is why the sequence stays contiguous with no
     registry: an appendix claims its numbers when it is written, in one run.

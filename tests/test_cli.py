@@ -9548,6 +9548,68 @@ def test_a_stack_batchs_citation_check_resolves_at_the_commit_its_review_reads(
     assert len(fetch_calls) == before_fetches
 
 
+def test_a_stack_batchs_citation_check_returns_the_text_it_checked(
+    tmp_path, monkeypatch
+):
+    """`cli._stack_cite`'s callable returns the text it checked, the
+    defects `citation_defects` returned for it unchanged, and the held
+    map. Handed `None`, the held map comes from `citations_held_at`, at
+    the commit that last changed the spec file. That commit is read in
+    the rig's original `base_sha`'s own history, never in a later
+    `base_sha` that leaves the file alone. Handed a text, it never calls
+    `citations_held_at`, and returns an empty held map."""
+    rig = _spec_session_rig(tmp_path, monkeypatch, ".saffron/specs/SY-1-x.md")
+    mirror, own_base_sha = rig.mirror, rig.base_sha
+
+    _git(mirror, "checkout", "-q", own_base_sha)
+    (mirror / "other.txt").write_text("extra\n")
+    _git(mirror, "add", "-A")
+    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "extra")
+    later_base_sha = _rev_parse(mirror, "HEAD")
+
+    from saffron.spec_citations import CitationDefect
+
+    real_citation_defects = cli.citation_defects
+    defects_calls: list[tuple] = []
+
+    def _spy_citation_defects(mirror_arg, commit, text):
+        defects_calls.append((mirror_arg, commit, text))
+        return real_citation_defects(mirror_arg, commit, text)
+
+    held_calls: list[tuple] = []
+
+    def _fake_citations_held_at(mirror_arg, commit, text, *, tokens_at=None):
+        held_calls.append((mirror_arg, commit, text, tokens_at))
+        return {7: "sentinel"}
+
+    monkeypatch.setattr(cli, "citation_defects", _spy_citation_defects)
+    monkeypatch.setattr(cli, "citations_held_at", _fake_citations_held_at)
+
+    pinned = task.PinnedBase(
+        mirror=mirror, url="https://github.com/o/r.git", base_sha=later_base_sha
+    )
+    sy1 = rig.candidate("SY-1")
+    cite = cli._stack_cite(pinned=pinned)
+
+    text, defects, held = cite(sy1, None, None)
+    assert text == "queued at base\n"
+    assert defects == []
+    assert held == {7: "sentinel"}
+    assert defects_calls == [(mirror, later_base_sha, "queued at base\n")]
+    assert held_calls == [(mirror, own_base_sha, "queued at base\n", later_base_sha)]
+
+    # ".md" is a suffix the rig's tree already carries (the spec file
+    # itself), so this backtick is read as a path, never as plain prose.
+    cited_text = "See `gone.md:1` here.\n"
+    text, defects, held = cite(sy1, None, cited_text)
+    assert text == cited_text
+    assert len(defects) == 1
+    assert isinstance(defects[0], CitationDefect)
+    assert defects[0].line == f"gone.md:1: no such file at {later_base_sha}"
+    assert held == {}
+    assert len(held_calls) == 1
+
+
 def test_a_stack_batchs_citation_check_and_spec_review_read_one_fetch(
     tmp_path, monkeypatch
 ):

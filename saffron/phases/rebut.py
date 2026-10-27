@@ -169,12 +169,24 @@ def _blocker_line(n: int, f: Finding) -> str:
     (backlog item 117): a `survived` verdict is the tests not noticing the
     edit, and the implementer is shown that edit so it can see what was
     missed. A blocker whose probe was `unproven` — or that carries none —
-    shows nothing the host does not actually know."""
+    shows nothing the host does not actually know. One exception (backlog
+    b-b9365d): a host-filed claim naming a kill from its own second ask says
+    the criterion's witness did not fail instead. Recognised only by
+    `review.HOST_FILED` plus `review.SUITE_KILL_SENTENCE` together, so a
+    lens cannot forge it."""
     line = f"{n}. [{f.lens}] {f.file}:{f.line} — {f.claim}"
     if f.probe_verdict == "survived" and f.probe is not None:
+        suite_killed = f.claim.startswith(review.HOST_FILED) and (
+            review.SUITE_KILL_SENTENCE in f.claim
+        )
+        tail = (
+            "the criterion's witness did not fail"
+            if suite_killed
+            else "no test able to decide it failed"
+        )
         line += (
             f" (its probe survived: in {f.probe.file}, `{f.probe.find}` -> "
-            f"`{f.probe.replace}`, and no test able to decide it failed)"
+            f"`{f.probe.replace}`, and {tail})"
         )
     return line
 

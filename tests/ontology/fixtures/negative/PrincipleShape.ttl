@@ -5,4 +5,4 @@
 # exactly how the sequence stops being contiguous without anyone noticing.
 :p a factory:Principle ;
     factory:principleNumber 57 ;
-    factory:claim "A claim of adequate length" .
+    factory:principleClaim "A claim of adequate length" .

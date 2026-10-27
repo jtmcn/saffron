@@ -7,12 +7,14 @@ and a module-scope import would fail collection under `revert`.
 
 from __future__ import annotations
 
+import json
 import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
 
+from saffron import finish
 from saffron import probe as probe_check
 from saffron.agents.findings import Finding, Severity
 from saffron.cell import session
@@ -344,6 +346,7 @@ class _Built:
     created: set[str]
     note: object
     join_review: review.LensReview | None = None
+    batch_id: int | None = None
 
     def run(self, qualify_fn, fields: dict[str, LayerFields] | None = None):
         if fields is None:
@@ -1298,3 +1301,201 @@ def test_findings_are_anchored_and_probed_over_the_range_the_end_review_graded(
     # The join's bottom falls back to TE-1's packaged range, not the top's.
     assert calls_bottom[0]["base_sha"] == built_bottom.shas["M"]
     assert "+a2_new" in calls_bottom[0]["patch"]
+
+
+def _later_diff_fixture(tmp_path: Path) -> _Built:
+    """`A` seeds `src/a.py` (60 lines), `src/b.py`, `src/gone.py` and
+    `src/u.py`. `H1` (TE-1's packaged head) rewrites `a.py:10`. `H2`
+    (TE-2's packaged head, on `H1`) rewrites `a.py:10,20,38,44`, `b.py:6`
+    and `gone.py:2`. A review branch off `H1`: `R1` edits `a.py:10` in
+    place and `u.py:3`, and deletes `a.py:20`. `H2b` restacks `H2`'s own
+    content onto `R1`'s shifted tree. `R2` inserts two lines after `H2`'s
+    own `a.py:40` and deletes `gone.py`. TE-2's graded head is `R2`. TE-1's
+    is its own packaged head, `H1`."""
+    mirror = tmp_path / "mirror"
+    mirror.mkdir()
+    _git(mirror, "init", "-q")
+
+    def commit(message: str) -> str:
+        _git(mirror, "add", "-A")
+        _git(mirror, "commit", "-q", "-m", message)
+        return _git(mirror, "rev-parse", "HEAD").strip()
+
+    _write(mirror, "src/a.py", [f"a{i}" for i in range(1, 61)])
+    _write(mirror, "src/b.py", [f"b{i}" for i in range(1, 9)])
+    _write(mirror, "src/gone.py", [f"g{i}" for i in range(1, 4)])
+    _write(mirror, "src/u.py", [f"u{i}" for i in range(1, 6)])
+    shas = {"A": commit("A")}
+
+    a = [f"a{i}" for i in range(1, 61)]
+    a[9] = "a10_h1"
+    _write(mirror, "src/a.py", a)
+    shas["H1"] = commit("H1")
+
+    a2 = list(a)
+    a2[9], a2[19], a2[37], a2[43] = "a10_h2", "a20_h2", "a38_h2", "a44_h2"
+    b2 = [f"b{i}" for i in range(1, 9)]
+    b2[5] = "b6_h2 retry_budget"
+    gone2 = [f"g{i}" for i in range(1, 4)]
+    gone2[1] = "g2_h2"
+    _write(mirror, "src/a.py", a2)
+    _write(mirror, "src/b.py", b2)
+    _write(mirror, "src/gone.py", gone2)
+    shas["H2"] = commit("H2")
+
+    _git(mirror, "checkout", "-q", shas["H1"])
+    r1 = list(a)
+    r1[9] = "a10_h1 retry_budget"
+    del r1[19]
+    u1 = [f"u{i}" for i in range(1, 6)]
+    u1[2] = "u3_r1"
+    _write(mirror, "src/a.py", r1)
+    _write(mirror, "src/u.py", u1)
+    shas["R1"] = commit("R1")
+
+    h2b = list(r1)
+    h2b[36], h2b[42] = "a38_h2", "a44_h2"
+    _write(mirror, "src/a.py", h2b)
+    _write(mirror, "src/b.py", b2)
+    _write(mirror, "src/gone.py", gone2)
+    shas["H2b"] = commit("H2b")
+
+    r2 = list(h2b)
+    r2[39:39] = ["ins1", "ins2"]
+    _write(mirror, "src/a.py", r2)
+    (mirror / "src" / "gone.py").unlink()
+    shas["R2"] = commit("R2")
+
+    _git(mirror, "checkout", "-q", shas["H2"])
+
+    ledger = Ledger(tmp_path / "ledger.db", record=MemoryRecord())
+    repo_id = ledger.upsert_repo(
+        "acme", "https://example/o", "/m.git", policy_sha="p" * 64
+    )
+    batch_id = ledger.create_batch(100.0)
+    run1 = ledger.create_run(repo_id, base_sha=shas["A"], batch_id=batch_id)
+    task1 = ledger.create_task(
+        run1, spec_id="TE-1", spec_sha="s" * 64, branch="saffron/TE-1"
+    )
+    run2 = ledger.create_run(repo_id, base_sha=shas["A"], batch_id=batch_id)
+    task2 = ledger.create_task(
+        run2, spec_id="TE-2", spec_sha="s" * 64, branch="saffron/TE-2"
+    )
+
+    ledger.set_task_package(
+        task1, "READY_FOR_REVIEW", "saffron/TE-1", shas["H1"], "https://pr/1"
+    )
+    ledger.set_task_package(
+        task2, "READY_FOR_REVIEW", "saffron/TE-2", shas["H2"], "https://pr/2"
+    )
+    ledger.record_stack_layer(task1, position=1, predecessor_task_id=None, generation=0)
+    ledger.record_stack_layer(
+        task2, position=2, predecessor_task_id=task1, generation=0
+    )
+
+    te1_key = _key(ledger, task1)
+    te2_key = _key(ledger, task2)
+
+    te1_concern = [_finding("correctness", "concern", "src/a.py", 10, "c1-a10")]
+    te2_concerns = [
+        _finding("correctness", "concern", "src/a.py", 10, "c-a10"),
+        _finding("correctness", "concern", "src/a.py", 20, "c-a20"),
+        _finding("correctness", "concern", "src/a.py", 38, "c-a38"),
+        _finding("correctness", "concern", "src/a.py", 44, "c-a44"),
+        _finding("correctness", "concern", "src/gone.py", 2, "c-gone2"),
+        _finding("correctness", "concern", "src/b.py", 6, "c-b6"),
+        _finding("correctness", "concern", "src/u.py", 3, "c-u3"),
+    ]
+    te2_end_review = [_finding("spec", "concern", "src/a.py", 10, "er-a10")]
+
+    ledger.record_findings(task1, te1_concern)
+    ledger.record_findings(task2, te2_concerns)
+
+    layers = [
+        LayerReview(te2_key, [review.LensReview("spec", te2_end_review)]),
+        LayerReview(te1_key, []),
+    ]
+
+    return _Built(
+        ledger,
+        layers,
+        mirror,
+        shas,
+        [],
+        repo=Path("/repo-sentinel"),
+        gates_dir=Path("/gates-sentinel"),
+        thread_env={"SENTINEL": "1"},
+        test_paths=["tests/**"],
+        gates={"tests": Path("/gates-sentinel/tests")},
+        created=set(),
+        note=lambda step, ok, detail: None,
+        join_review=None,
+        batch_id=batch_id,
+    )
+
+
+def test_an_in_cell_concern_whose_cited_line_a_review_commit_changed_is_not_drafted(
+    tmp_path, monkeypatch
+):
+    """An in-cell concern still anchors over its packaged range. But it is
+    `unverified` when its cited line sits in a hunk of the diff from that
+    packaged head to a later graded one. So the writer never drafts a fix
+    for code a review commit already changed.
+    """
+    from saffron.qualify import qualify
+
+    built = _later_diff_fixture(tmp_path)
+    te2_key, te1_key = built.layers[0].task_key, built.layers[1].task_key
+
+    def _raise(*args, **kwargs):
+        raise AssertionError("no finding here carries a probe")
+
+    monkeypatch.setattr(session, "probe_findings", _raise)
+
+    fields = {
+        te1_key: layer_fields(built.ledger, te1_key),
+        te2_key: replace(
+            layer_fields(built.ledger, te2_key),
+            base=built.shas["H1"],
+            diff_base=built.shas["H1"],
+            head=built.shas["R2"],
+        ),
+    }
+
+    result = built.run(qualify, fields=fields)
+
+    pool = {(q.task_key, q.finding.claim): (q.outcome, q.reason) for q in result.pool}
+    dropped = ("c-a10", "c-a20", "c-a38", "c-gone2")
+    expected_reason = (
+        f"its cited line changed between the packaged head {built.shas['H2']} "
+        f"and the graded head {built.shas['R2']} after it was cited"
+    )
+    for claim in dropped:
+        outcome, reason = pool[(te2_key, claim)]
+        assert outcome == "unverified"
+        assert reason == expected_reason
+    assert pool[(te2_key, "c-u3")] == ("unanchored", "")
+
+    groups = {
+        (g.task_key, g.file): [f.finding.claim for f in g.findings]
+        for g in result.groups
+    }
+    assert groups == {
+        (te2_key, "src/a.py"): ["er-a10", "c-a44"],
+        (te2_key, "src/b.py"): ["c-b6"],
+        (te1_key, "src/a.py"): ["c1-a10"],
+    }
+
+    assert built.batch_id is not None
+    written = finish.write_findings(
+        built.ledger, built.batch_id, [], tmp_path / "findings.json"
+    )
+    data = json.loads(written.read_text())
+    by_claim = {row["claim"]: row for row in data["findings"]}
+    for claim in dropped:
+        row = by_claim[claim]
+        assert row["outcome"] == "unverified"
+        assert row["reason"] == expected_reason
+    assert by_claim["c-u3"]["outcome"] == "unanchored"
+    for claim in ("er-a10", "c-a44", "c-b6", "c1-a10"):
+        assert by_claim[claim]["outcome"] == "follow_up"

@@ -584,8 +584,8 @@ deferred finish exempts the stack base's branch but none on its chain.
 **b-781ea4**. The witness gate passes a mutant whose find matches twice. The
 finish's follow-up drafts fail to parse, so it files nothing.
 
-**Placed 2026-10-25**, from the spec loop's run 48: **b-1b05be**, then
-**b-009d51** and **b-b9365d**. The finish re-raises findings that review
+**Placed 2026-10-25**, from the spec loop's run 48: ~~**b-1b05be**~~, then
+~~**b-009d51**~~ and ~~**b-b9365d**~~. The finish re-raises findings that review
 commits fixed. A chain child is refused for citations its parent moved. A
 host-filed probe runs a witness that never imports the mutated file.
 
@@ -593,6 +593,11 @@ host-filed probe runs a witness that never imports the mutated file.
 `SA-0321`'s own pull request. ADR 7, `DESIGN.md` §4.2.1 and `CONTEXT.md`
 each name the texts a stack batch runs that are not at `base_sha`.
 `SA-0321` adds a third.
+
+**Placed 2026-10-27**, from the spec loop's run 49: **b-e0044f**, then
+**b-549012**. The finishing layer queues a follow-up whose cell ran and fails
+on its drafts' prose, so a finish that drafts never pushes. A review commit is
+read by no lens until the finish.
 
 ### Tier 3 — real, not urgent
 
@@ -623,14 +628,19 @@ seat or the run found and the stack left alone.
 stack left alone.
 
 **Placed 2026-10-24**, from ADR 11 and the controlled vocabulary review:
-**b-8220e6**, then **b-541e9a**, which apply ADR 11. Then **b-c16c6c** and
-**b-545741**, which close gaps between `factory.ttl` and `CONTEXT.md`.
-**b-7aefb8** is a property inside `factory.ttl`, and **b-8e14fb** its place
+**b-8220e6**, then **b-541e9a**, which apply ADR 11. Then ~~**b-c16c6c**~~ and
+~~**b-545741**~~, which close gaps between `factory.ttl` and `CONTEXT.md`.
+~~**b-7aefb8**~~ is a property inside `factory.ttl`, and **b-8e14fb** its place
 in `policy.yaml`. **b-2227b0**, closed as parked, records a draft ADR.
 
 **Placed 2026-10-25**, from the spec loop's run 48: **b-9c5b11**,
 **b-01c53d**, **b-92fdbe**, **b-d3f977**, **b-f0e351** and **b-87001a**.
 Each is a gap a seat, a finish or the run found and the stack left alone.
+
+**Placed 2026-10-27**, from the spec loop's run 49: **b-719346**,
+**b-1b8b1e**, **b-92c92a**, **b-2a03c2**, **b-d2afe3**, **b-1ff5a3** and
+**b-3a0789**. Each is a gap a seat, a finish or the run found and the stack
+left alone.
 
 ~~**22**~~, ~~**23**~~, **31**, ~~**19**~~, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, ~~**62**~~, **63**, ~~**64**~~, **75**, **76**, **77**.

@@ -5,6 +5,7 @@ import subprocess
 
 import pyoxigraph as ox
 import pytest
+import rdflib
 from ontology_paths import NS, ONTOLOGY, VENDOR, VOCABULARY
 
 
@@ -21,6 +22,45 @@ def test_vendored_vocabularies_parse(path):
     store = ox.Store()
     store.bulk_load(path=str(path), format=ox.RdfFormat.TURTLE)
     assert len(store) > 0
+
+
+def _multi_domain_properties(graph: rdflib.Graph) -> set[str]:
+    """Local names, in the `factory:` namespace, with more than one
+    `rdfs:domain` triple. Two domains on one property is an intersection to a
+    reasoner, so a subject the vocabulary never meant to double-type."""
+    counts: dict[str, int] = {}
+    for subject, _, _ in graph.triples((None, rdflib.RDFS.domain, None)):
+        if str(subject).startswith(NS):
+            name = str(subject).removeprefix(NS)
+            counts[name] = counts.get(name, 0) + 1
+    return {name for name, n in counts.items() if n > 1}
+
+
+def test_no_factory_property_carries_two_domains():
+    """No `factory:` property carries two `rdfs:domain` triples, because a
+    reasoner reads two as an intersection. A principle states its claim
+    under the datatype property `factory:principleClaim`, and a finding
+    under `factory:claim`."""
+    FACTORY = rdflib.Namespace(NS)
+    graph = rdflib.Graph().parse(VOCABULARY, format="turtle")
+    assert (FACTORY.claim, rdflib.RDFS.domain, FACTORY.Finding) in graph
+    assert (FACTORY.principleClaim, rdflib.RDFS.domain, FACTORY.Principle) in graph
+    assert (FACTORY.principleClaim, rdflib.RDFS.range, rdflib.XSD.string) in graph
+    datatype = rdflib.OWL.DatatypeProperty
+    assert (FACTORY.principleClaim, rdflib.RDF.type, datatype) in graph
+    assert (FACTORY.claim, rdflib.RDF.type, datatype) in graph
+    assert _multi_domain_properties(graph) == set()
+
+    mutated = rdflib.Graph().parse(VOCABULARY, format="turtle")
+    mutated.add((FACTORY.verdict, rdflib.RDFS.domain, FACTORY.Task))
+    mutated.add((FACTORY.contributedBy, rdflib.RDFS.domain, FACTORY.Task))
+    mutated.add((FACTORY.untypedLocalName, rdflib.RDFS.domain, FACTORY.Task))
+    mutated.add((FACTORY.untypedLocalName, rdflib.RDFS.domain, FACTORY.Batch))
+    assert _multi_domain_properties(mutated) == {
+        "verdict",
+        "contributedBy",
+        "untypedLocalName",
+    }
 
 
 @pytest.mark.parametrize(
