@@ -49,6 +49,7 @@ from saffron.ledger import Ledger
 from saffron.preflight import Readiness
 from saffron.reconcile import IN_FLIGHT_STATES
 from saffron.scheduler import Candidate, _branch, open_pr_refusal
+from saffron.spec_citations import CitationDefect, rewrite_moved_citations
 from saffron.task import Refused, raised_in_package
 
 if TYPE_CHECKING:
@@ -487,9 +488,15 @@ def run_stack_batch(
     # `None` means no review runs, and nothing here changes. `SA-0156` passes
     # the production one, and `saffron batch` passes none until then.
     review: Callable[..., spec_review.SpecReviewSession] | None = None,
-    # `None` checks nothing. Given, it runs before each `review` call and a
-    # non-empty return refuses the spec with no review. `SA-0295` supplies it.
-    cite: Callable[[Candidate, Candidate | None, str | None], list[str]] | None = None,
+    # `None` checks nothing. Given, it runs before each `review` call, and
+    # a defect `rewrite_moved_citations` leaves refuses the spec with no review.
+    cite: (
+        Callable[
+            [Candidate, Candidate | None, str | None],
+            tuple[str, list[CitationDefect], Mapping[int, str]],
+        ]
+        | None
+    ) = None,
     # Required whenever `review` is given (checked below). Mints the task a
     # review's own facts are recorded against. `SA-0156` passes the real one.
     mint: Callable[[Candidate], int] | None = None,
@@ -680,7 +687,9 @@ def run_stack_batch(
                     spec_text = text_row["text"] if text_row is not None else None
                     if cite is not None:
                         try:
-                            defects = cite(candidate, pred, spec_text)
+                            checked_text, defects, held = cite(
+                                candidate, pred, spec_text
+                            )
                         except Exception:
                             if not is_follow_up:
                                 missed[candidate.spec.id] = frozenset(
@@ -688,8 +697,11 @@ def run_stack_batch(
                                 )
                                 remaining.remove(original)
                             raise
-                        if defects:
-                            reason = f"{len(defects)} citation(s) do not resolve"
+                        new_text, rewrites, left = rewrite_moved_citations(
+                            checked_text, defects, held
+                        )
+                        if left:
+                            reason = f"{len(left)} citation(s) do not resolve"
                             emit(f"{candidate.spec.id:<10} refused  {reason}")
                             if not is_follow_up:
                                 missed[candidate.spec.id] = frozenset(
@@ -697,6 +709,21 @@ def run_stack_batch(
                                 )
                                 remaining.remove(original)
                             return Refused(reason=reason)
+                        if rewrites:
+                            for rewrite in rewrites:
+                                emit(
+                                    f"{candidate.spec.id:<10} moved  "
+                                    f"{rewrite.path}:{rewrite.old} -> "
+                                    f"{rewrite.path}:{rewrite.new}"
+                                )
+                            ledger.record_spec_text(
+                                task_id,
+                                origin="revision",
+                                spec_id=candidate.spec.id,
+                                path=f".saffron/specs/{candidate.path.name}",
+                                text=new_text,
+                            )
+                            spec_text = new_text
                     kwargs = {} if spec_text is None else {"spec_text": spec_text}
                     # A raise from `review` records an `error` round and no attempt.
                     # It is a miss unless it is a `CellRuntimeError`.

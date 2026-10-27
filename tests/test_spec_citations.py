@@ -155,7 +155,7 @@ def test_citation_defects_resolve_each_citation_at_the_given_commit(empty_repo):
         "`pkg/thing.py:2-999` overruns the file. The helper `run.zzz:9` "
         "overruns too. A directory `pkg/sub:3` is cited directly."
     )
-    assert citation_defects(repo, base, defective) == [
+    assert [str(d) for d in citation_defects(repo, base, defective)] == [
         f"pkg/missing.py:5: no such file at {base}",
         f"dir/README:3: no such file at {base}",
         f"pkg/thing.py:2-999: pkg/thing.py has 20 lines at {base}",
@@ -195,7 +195,7 @@ def test_citation_defects_anchor_a_bare_line_number_inside_its_own_paragraph(
         "Nothing here names a path. See `:9-45` for confirmation.\n"
     )
 
-    assert citation_defects(repo, base, text) == [
+    assert [str(d) for d in citation_defects(repo, base, text)] == [
         f"a/thing.py:31: a/thing.py has 30 lines at {base}",
         ":9-45: no path named earlier in its paragraph",
     ]
@@ -285,7 +285,7 @@ def test_citation_defects_judge_a_citation_by_the_construct_its_clause_names(
     ]
     text = "\n\n".join(paragraphs)
 
-    assert citation_defects(repo, base, text) == [
+    assert [str(d) for d in citation_defects(repo, base, text)] == [
         "mod/lib.py:4-15: the construct it names sits at mod/lib.py:9-16",
         "mod/lib.py:17-22: the construct it names sits at mod/lib.py:19-23",
         "mod/lib.py:30-32: the construct it names sits at mod/lib.py:26-28",
@@ -349,7 +349,7 @@ def test_citation_defects_scope_names_to_each_citations_own_clause(cite_repo):
         "at `mod/lib.py:21`.\n"
     )
 
-    assert citation_defects(repo, base, text) == [
+    assert [str(d) for d in citation_defects(repo, base, text)] == [
         "mod/lib.py:21: the construct it names sits at mod/lib.py:4-6",
         "mod/lib.py:21: the construct it names sits at mod/lib.py:4-6",
     ]
@@ -376,7 +376,7 @@ def test_citation_defects_name_a_one_line_construct_alone_and_read_a_tab_indente
         "`gofunc` returns it (`mod/tabs.py:2-3`).\n"
     )
 
-    assert citation_defects(repo, base, text) == [
+    assert [str(d) for d in citation_defects(repo, base, text)] == [
         "mod/tiny.py:3: the construct it names sits at mod/tiny.py:2"
     ]
 
@@ -425,7 +425,7 @@ def test_citation_defects_read_definition_patterns_from_the_policy_at_the_commit
 
     # The commit's own policy decides, never the working tree's.
     (repo / ".saffron" / "policy.yaml").write_text(_CITATION_POLICY)
-    assert citation_defects(repo, def_only, text) == [
+    assert [str(d) for d in citation_defects(repo, def_only, text)] == [
         "mod/lib.py:4-15: the construct it names sits at mod/lib.py:9-16"
     ]
 
@@ -464,5 +464,290 @@ def test_citation_count_and_defects_count_each_citation_and_refuse_a_range_befor
 
     count, defects = citation_count_and_defects(repo, base, text)
     assert count == 8
-    assert defects == expected
-    assert citation_defects(repo, base, text) == expected
+    assert [str(d) for d in defects] == expected
+    assert [str(d) for d in citation_defects(repo, base, text)] == expected
+
+
+def _held_from_own_name(defects):
+    """Every defect's offset whose clause names exactly one name, mapped
+    to that name, whether or not that name opens exactly one construct.
+    `rewrite_moved_citations` itself must still refuse one that opens
+    more than one, such as `twin` below."""
+    held = {}
+    for defect in defects:
+        if defect.spans and len(defect.spans) == 1:
+            ((name, _spans),) = defect.spans.items()
+            held[defect.offset] = name
+    return held
+
+
+def test_a_citation_whose_construct_sits_at_one_span_is_rewritten_to_that_span(
+    cite_repo,
+):
+    from saffron.spec_citations import citation_defects, rewrite_moved_citations
+
+    repo, base = cite_repo
+    (repo / "mod" / "tiny.py").write_text("x = 1\ndef tiny(): pass\ny = 2\nz = 3\n")
+    _git(repo, "add", "mod/tiny.py")
+    _git(repo, "commit", "-qm", "tiny")
+    base = _git(repo, "rev-parse", "HEAD")
+
+    text = (
+        "`_review_one_layer` reads\n"
+        "  those fields (`mod/lib.py:4-15`).\n"
+        "\n"
+        "`_print_summary` checks `IF NOT EXISTS` (`mod/lib.py:44`).\n"
+        "\n"
+        "`tiny` does nothing (`mod/tiny.py:3-4`).\n"
+        "\n"
+        "The module `mod/lib.py` holds `Ledger` at `:30-32`.\n"
+        "\n"
+        "The module `mod/tiny.py` holds `tiny` at `:4`.\n"
+        "\n"
+        "`export_saffron_dir` writes it (`mod/lib.py:21`).\n"
+        "\n"
+        "`_diff` returns it (`mod/lib.py:21`), and `tiny` does nothing "
+        "(`mod/tiny.py:3`).\n"
+    )
+
+    defects = citation_defects(repo, base, text)
+    assert [str(d) for d in defects] == [
+        "mod/lib.py:4-15: the construct it names sits at mod/lib.py:9-16",
+        "mod/lib.py:44: the construct it names sits at mod/lib.py:38-39",
+        "mod/tiny.py:3-4: the construct it names sits at mod/tiny.py:2",
+        "mod/lib.py:30-32: the construct it names sits at mod/lib.py:26-28",
+        "mod/tiny.py:4: the construct it names sits at mod/tiny.py:2",
+        "mod/lib.py:21: the construct it names sits at mod/lib.py:4-6",
+        "mod/tiny.py:3: the construct it names sits at mod/tiny.py:2",
+    ]
+
+    held = _held_from_own_name(defects)
+    new_text, rewrites, left = rewrite_moved_citations(text, defects, held)
+
+    assert left == []
+    assert [(r.path, r.old, r.new) for r in rewrites] == [
+        ("mod/lib.py", "4-15", "9-16"),
+        ("mod/lib.py", "44", "38-39"),
+        ("mod/tiny.py", "3-4", "2"),
+        ("mod/lib.py", "30-32", "26-28"),
+        ("mod/tiny.py", "4", "2"),
+        ("mod/lib.py", "21", "4-6"),
+        ("mod/tiny.py", "3", "2"),
+    ]
+    expected_text = (
+        text.replace("mod/lib.py:4-15", "mod/lib.py:9-16")
+        .replace("mod/lib.py:44", "mod/lib.py:38-39")
+        .replace("mod/tiny.py:3-4", "mod/tiny.py:2")
+        .replace(":30-32", ":26-28")
+        .replace(":4`", ":2`")
+        .replace(
+            "`_diff` returns it (`mod/lib.py:21`)",
+            "`_diff` returns it (`mod/lib.py:4-6`)",
+        )
+        .replace("(`mod/tiny.py:3`).\n", "(`mod/tiny.py:2`).\n")
+    )
+    assert new_text == expected_text
+    assert citation_defects(repo, base, new_text) == []
+    held_again = _held_from_own_name(citation_defects(repo, base, new_text))
+    _, rewrites_again, left_again = rewrite_moved_citations(
+        new_text, citation_defects(repo, base, new_text), held_again
+    )
+    assert rewrites_again == []
+    assert left_again == []
+
+
+def test_a_citation_defect_with_no_single_span_is_left_and_its_text_kept(cite_repo):
+    from saffron.spec_citations import citation_defects, rewrite_moved_citations
+
+    repo, base = cite_repo
+    (repo / "mod" / "tiny.py").write_text("x = 1\ndef tiny(): pass\ny = 2\nz = 3\n")
+    (repo / "mod" / "twice.py").write_text(
+        "def twin():\n    return 1\n\ndef twin():\n    return 2\n"
+    )
+    _git(repo, "add", "mod/tiny.py", "mod/twice.py")
+    _git(repo, "commit", "-qm", "twice")
+    base = _git(repo, "rev-parse", "HEAD")
+
+    text = (
+        "The `_diff` helper sits at `:4-6`.\n"
+        "\n"
+        "See `mod/lib.py:0` for it.\n"
+        "\n"
+        "See `mod/lib.py:6-2` for it.\n"
+        "\n"
+        "`tiny` does nothing (`mod/tiny.py:3`).\n"
+        "\n"
+        "See `gone.py:1` for it.\n"
+        "\n"
+        "See `pkg/other.py:9` for it.\n"
+        "\n"
+        "`twin` returns its value (`mod/twice.py:3`).\n"
+    )
+
+    defects = citation_defects(repo, base, text)
+    assert [str(d) for d in defects] == [
+        ":4-6: no path named earlier in its paragraph",
+        "mod/lib.py:0: starts before line 1",
+        "mod/lib.py:6-2: ends before it starts",
+        "mod/tiny.py:3: the construct it names sits at mod/tiny.py:2",
+        f"gone.py:1: no such file at {base}",
+        f"pkg/other.py:9: pkg/other.py has 3 lines at {base}",
+        "mod/twice.py:3: the construct it names sits at mod/twice.py:1-2, 4-5",
+    ]
+
+    held = _held_from_own_name(defects)
+    new_text, rewrites, left = rewrite_moved_citations(text, defects, held)
+
+    assert [str(d) for d in left] == [
+        ":4-6: no path named earlier in its paragraph",
+        "mod/lib.py:0: starts before line 1",
+        "mod/lib.py:6-2: ends before it starts",
+        f"gone.py:1: no such file at {base}",
+        f"pkg/other.py:9: pkg/other.py has 3 lines at {base}",
+        "mod/twice.py:3: the construct it names sits at mod/twice.py:1-2, 4-5",
+    ]
+    assert new_text == text.replace("(`mod/tiny.py:3`).\n", "(`mod/tiny.py:2`).\n")
+    assert len(rewrites) == 1
+    assert rewrites[0].path == "mod/tiny.py"
+    assert rewrites[0].old == "3"
+    assert rewrites[0].new == "2"
+
+
+def test_a_use_site_citation_is_left_while_its_definition_citation_is_rewritten(
+    empty_repo,
+):
+    from saffron.spec_citations import (
+        citation_defects,
+        citations_held_at,
+        rewrite_moved_citations,
+    )
+
+    repo = empty_repo
+    cli_first = [
+        "def _mirror_path(repo, home):",
+        "    digest = repo",
+        "    return home / digest",
+        "",
+        "",
+        "def package(repo, home):",
+        "    x = 1",
+        "    y = 2",
+        "    mirror_path = _mirror_path(repo, home)",
+        "    return mirror_path",
+    ]
+    prelude = ["import os", "", ""]
+    pair_first = ["def alpha():", "    return 1", "", "", "def beta():", "    return 2"]
+    twin_first = ["def twin():", "    return 1", "", "", "def twin():", "    return 2"]
+    nest = ["def outer():", "    def inner():", "        return 1", "    return inner"]
+    both_first = [
+        "def one():",
+        "    return 1",
+        "def two():",
+        "    x = 1",
+        "    return x",
+    ]
+    even_first = ["def left():", "    return 1", "def right():", "    return 2"]
+
+    (repo / "mod").mkdir()
+    (repo / ".saffron").mkdir()
+    (repo / ".saffron" / "policy.yaml").write_text(_CITATION_POLICY)
+    (repo / "mod" / "cli.py").write_text("\n".join(cli_first) + "\n")
+    (repo / "mod" / "pair.py").write_text("\n".join(pair_first) + "\n")
+    (repo / "mod" / "twin.py").write_text("\n".join(twin_first) + "\n")
+    (repo / "mod" / "nest.py").write_text("\n".join(nest) + "\n")
+    (repo / "mod" / "both.py").write_text("\n".join(both_first) + "\n")
+    (repo / "mod" / "even.py").write_text("\n".join(even_first) + "\n")
+    _git(repo, "add", "mod", ".saffron")
+    _git(repo, "commit", "-qm", "first")
+    first = _git(repo, "rev-parse", "HEAD")
+
+    (repo / "mod" / "cli.py").write_text("\n".join(prelude + cli_first) + "\n")
+    (repo / "mod" / "pair.py").write_text(
+        "\n".join(prelude + ["def beta():", "    return 2"]) + "\n"
+    )
+    (repo / "mod" / "twin.py").write_text(
+        "\n".join(prelude + ["def twin():", "    return 2"]) + "\n"
+    )
+    (repo / "mod" / "new.py").write_text("def fresh():\n    return 1\n")
+    (repo / "mod" / "nest.py").write_text("\n".join(prelude + nest) + "\n")
+    (repo / "mod" / "both.py").write_text(
+        "\n".join(prelude + ["", ""] + both_first) + "\n"
+    )
+    (repo / "mod" / "even.py").write_text("\n".join(prelude + even_first) + "\n")
+    _git(repo, "add", "mod")
+    _git(repo, "commit", "-qm", "second")
+    second = _git(repo, "rev-parse", "HEAD")
+
+    text = (
+        "`_mirror_path` and the blank line after it sit at `mod/cli.py:1-4`.\n"
+        "\n"
+        "`_mirror_path` returns its path at `mod/cli.py:3`.\n"
+        "\n"
+        "It builds `mirror_path` with `_mirror_path(repo, home)` and hands it "
+        "over (`mod/cli.py:9-10`).\n"
+        "\n"
+        "`_mirror_path` is called at `mod/cli.py:12`.\n"
+        "\n"
+        "`fresh` returns one at `mod/new.py:1-2`.\n"
+        "\n"
+        "`_mirror_path` sits at `:1-3`.\n"
+        "\n"
+        "`_mirror_path` sits at `mod/cli.py:3-1`.\n"
+        "\n"
+        "`digest` is read at `mod/cli.py:2`.\n"
+        "\n"
+        "`alpha` and `beta` both matter (`mod/pair.py:2`).\n"
+        "\n"
+        "`twin` returns one (`mod/twin.py:2`).\n"
+        "\n"
+        "`outer` returns `inner` (`mod/nest.py:2-3`).\n"
+        "\n"
+        "`inner` is returned by `outer` (`mod/nest.py:2-3`).\n"
+        "\n"
+        "`two` and `one` sit together (`mod/both.py:1-5`).\n"
+        "\n"
+        "`left` and `right` sit together (`mod/even.py:1-4`).\n"
+    )
+
+    held = citations_held_at(repo, first, text)
+    nest_offset = text.index("mod/nest.py:2-3")
+    nest_offset_2 = text.index("mod/nest.py:2-3", nest_offset + 1)
+    assert held == {
+        text.index("mod/cli.py:1-4"): "_mirror_path",
+        text.index("mod/cli.py:3`"): "_mirror_path",
+        text.index("mod/pair.py:2"): "alpha",
+        nest_offset: "inner",
+        nest_offset_2: "inner",
+    }
+
+    defects = citation_defects(repo, second, text)
+    assert [str(d) for d in defects] == [
+        "mod/cli.py:1-4: the construct it names sits at mod/cli.py:4-6",
+        "mod/cli.py:3: the construct it names sits at mod/cli.py:4-6",
+        "mod/cli.py:9-10: the construct it names sits at mod/cli.py:4-6",
+        ":1-3: no path named earlier in its paragraph",
+        "mod/cli.py:3-1: ends before it starts",
+        "mod/pair.py:2: the construct it names sits at mod/pair.py:4-5",
+        "mod/twin.py:2: the construct it names sits at mod/twin.py:4-5",
+        "mod/nest.py:2-3: the construct it names sits at mod/nest.py:4-7, 5-6",
+        "mod/nest.py:2-3: the construct it names sits at mod/nest.py:4-7, 5-6",
+        "mod/both.py:1-5: the construct it names sits at mod/both.py:6-7, 8-10",
+        "mod/even.py:1-4: the construct it names sits at mod/even.py:4-5, 6-7",
+    ]
+
+    new_text, rewrites, left = rewrite_moved_citations(text, defects, held)
+
+    assert new_text == (
+        text.replace("mod/cli.py:1-4", "mod/cli.py:4-6")
+        .replace("mod/cli.py:3`", "mod/cli.py:4-6`")
+        .replace("mod/nest.py:2-3", "mod/nest.py:5-6")
+    )
+    assert [str(d) for d in left] == [
+        "mod/cli.py:9-10: the construct it names sits at mod/cli.py:4-6",
+        ":1-3: no path named earlier in its paragraph",
+        "mod/cli.py:3-1: ends before it starts",
+        "mod/pair.py:2: the construct it names sits at mod/pair.py:4-5",
+        "mod/twin.py:2: the construct it names sits at mod/twin.py:4-5",
+        "mod/both.py:1-5: the construct it names sits at mod/both.py:6-7, 8-10",
+        "mod/even.py:1-4: the construct it names sits at mod/even.py:4-5, 6-7",
+    ]

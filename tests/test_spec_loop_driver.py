@@ -2449,7 +2449,7 @@ def test_cite_reports_a_citation_whose_quoted_text_sits_on_other_lines(
 
     assert driver.cmd_cite(SimpleNamespace(spec_path=str(spec), base=base)) == 1
     defects = capsys.readouterr().out.splitlines()[:-1]
-    assert defects == citation_defects(repo, base, spec.read_text())
+    assert defects == [d.line for d in citation_defects(repo, base, spec.read_text())]
     assert defects[0].startswith("mod/lib.py:11-20: ")
 
 
@@ -2490,10 +2490,15 @@ def test_cite_and_check_report_what_the_batchs_citation_check_reports(
 
     args = SimpleNamespace(spec_path=str(spec), base="origin/main")
     assert driver.cmd_cite(args) == 1
-    assert capsys.readouterr().out.splitlines() == [*defects, "6 citation(s) checked"]
+    assert capsys.readouterr().out.splitlines() == [
+        *[d.line for d in defects],
+        "6 citation(s) checked",
+    ]
     assert driver.cmd_check(argparse.Namespace(spec_id="SA-0001")) == 1
     out = capsys.readouterr().out.splitlines()
-    assert [x for x in out if x.startswith("cite: ")] == [f"cite: {d}" for d in defects]
+    assert [x for x in out if x.startswith("cite: ")] == [
+        f"cite: {d.line}" for d in defects
+    ]
     assert "blocker: 5 of 6 citation(s) do not resolve at origin/main" in out
 
 
