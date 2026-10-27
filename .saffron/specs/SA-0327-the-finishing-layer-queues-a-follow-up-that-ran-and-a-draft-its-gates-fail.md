@@ -256,7 +256,9 @@ Every finish that drafts a follow-up escalates, so none reaches its push.
    layer is one whose earliest `spec_texts` row carries the origin
    `follow_up`. Its latest text leaves the commit. It is written to
    `ran_dir / Path(path).name`, with `ran_dir` made first. One line is
-   emitted per such text, naming its spec id and the written path. Every
+   emitted per such text, naming its spec id and the written path. Emit
+   these after every text is read, so a missing-text line for an unrun
+   task comes first (`tests/test_finish.py:492-493`). Every
    other layer's text and every unrun task's text is committed as today.
    Read and check every text with `_checked` before any write, as today.
 2. **The wiring for the queue.** `cli._stack_finish` passes
@@ -275,7 +277,9 @@ Every finish that drafts a follow-up escalates, so none reaches its push.
    `judge(path, text)` with the path the mint would use. An empty list
    mints the draft as today. A non-empty list calls `send_back` with the
    reason `the finishing suite failed it: ` and the lines joined by `; `.
-   Call it inside the same `try` as `SA-0325`'s parse branch. A raise from
+   `SA-0325` calls it inside its `except SpecError` clause
+   (`saffron/follow_up.py:371-376`). So use one `send_back` site shared by
+   the parse and judge refusals, or a `try` of the same shape. A raise from
    it pools the group with `write raised`, as that branch's does. Bind the
    return to a new name, end the group on `None`, and only then rebind
    `session`, as that branch does. The session then re-enters the one
@@ -299,7 +303,9 @@ Every finish that drafts a follow-up escalates, so none reaches its push.
    count.
 7. **Docstrings.** `commit_finish`'s docstring, the module docstrings of
    `finish.py` and `follow_up.py`, and `write_follow_ups`'s say what
-   changed. A function's docstring stays within ten lines. The `prose`
+   changed. `_stack_follow_ups`'s docstring says every input is read once
+   (`saffron/cli.py:1615-1617`). The judge's `verify` exports and loads the
+   policy for each draft (`:1026-1027`), so rewrite that sentence. A function's docstring stays within ten lines. The `prose`
    gate exempts a module docstring (`.saffron/gates/prose.py:66`).
 
 ## Out of scope
@@ -327,8 +333,18 @@ criterion declares a witness and no mutant, and `witness` will report
 `revision` row after the writer's own (`saffron/batch.py:719-725`). Reading
 the latest row's origin would commit that follow-up again. In every batch
 `run_stack_batch` records, generation 1 names the same layers. The witness
-does not separate the two readings. Criterion 1's arrangement is
-unmeasured: no wrong version was run against it.
+does not separate the two readings. Reasoned, not measured: the earliest
+origin also covers a follow-up task that a later batch resumes as a
+generation-0 layer.
+
+**Unmeasured wrong versions.** No wrong version under criteria 1 and 3 to
+6 was run. Those under criteria 4 and 5 can be run only once `SA-0325`'s
+code lands.
+
+**The judge's tree is not the finishing tree.** The judge commits atop the
+end review's top head. The finishing commit sits atop the later top, which
+includes the follow-up layers (`saffron/batch.py:987-1004`). So a draft
+judged green can meet a different tree there.
 
 **The path moves up.** The judge needs the path the mint uses, so the
 `path =` line moves above the judge call (`saffron/follow_up.py:390`).
@@ -350,7 +366,8 @@ as `test_queued_specs.py`'s.
   expects `TE-20-follow.md` in the commit (`tests/test_finish.py:517`,
   `:525-527`). `TE-20` is a follow-up layer in the `stack` fixture, so drop
   both checks. Its `assert len(emitted) == 1` becomes 2, since `TE-20`'s
-  new line joins `TE-24`'s (`tests/test_finish.py:491`).
+  new line follows `TE-24`'s. `emitted[0]` still names `TE-24`
+  (`tests/test_finish.py:492-493`).
 - Every `commit_finish` call in `tests/test_finish.py` needs a `ran_dir`
   (`:482`, `:535`, `:588`, `:648`, `:663`, `:713`, `:1382`, `:1393`).
 - `_fake_commit_finish` names its keywords
