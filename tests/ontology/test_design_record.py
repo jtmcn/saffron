@@ -95,10 +95,9 @@ def test_the_contiguity_check_would_catch_a_gap():
 
 
 def test_a_principles_claim_is_stated_under_its_own_property():
-    """`factory:claim` used to double as the finding's property and the
-    principle's. The principle side now states its claim under
+    """Each parsed principle states its claim once, under
     `factory:principleClaim`, and the parsed graph holds no `factory:claim`
-    triple at all."""
+    triple at all. That property belongs to a finding."""
     graph = _graph()
     FACTORY = design_record.FACTORY
     nodes = list(graph.subjects(rdflib.RDF.type, FACTORY.Principle))

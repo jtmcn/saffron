@@ -73,16 +73,16 @@ def test_every_shape_has_a_negative_fixture(shapes_graph):
 
 
 def test_the_principle_shape_constrains_the_principle_claim_property(shapes_graph):
-    """`PrincipleShape` moved its claim property from `factory:claim` to
-    `factory:principleClaim`, keeping the same four constraints: at least one
-    value, at most one, datatype `xsd:string`, minimum length 12."""
+    """`PrincipleShape` constrains `factory:principleClaim`, not
+    `factory:claim`: at least one value, at most one, datatype `xsd:string`,
+    minimum length 12. A claim of exactly 12 characters conforms."""
     appendix = (
         ':a a factory:RevisionAppendix ; factory:appendixLetter "A" ; '
         "factory:coversRevision 1 ."
     )
     conforming = (
         f"{appendix} :p a factory:Principle ; factory:principleNumber 57 ; "
-        'factory:principleClaim "A claim of adequate length" ; '
+        'factory:principleClaim "claimnumber1" ; '
         "factory:contributedBy :a ."
     )
     refused = {

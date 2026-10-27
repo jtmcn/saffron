@@ -37,14 +37,18 @@ def _multi_domain_properties(graph: rdflib.Graph) -> set[str]:
 
 
 def test_no_factory_property_carries_two_domains():
-    """`factory:claim` once held both `factory:Finding` and `factory:Principle`
-    as its domain. The principle side now states its claim under
-    `factory:principleClaim` instead, so `factory:claim` keeps one domain."""
+    """No `factory:` property carries two `rdfs:domain` triples, because a
+    reasoner reads two as an intersection. A principle states its claim
+    under the datatype property `factory:principleClaim`, and a finding
+    under `factory:claim`."""
     FACTORY = rdflib.Namespace(NS)
     graph = rdflib.Graph().parse(VOCABULARY, format="turtle")
     assert (FACTORY.claim, rdflib.RDFS.domain, FACTORY.Finding) in graph
     assert (FACTORY.principleClaim, rdflib.RDFS.domain, FACTORY.Principle) in graph
     assert (FACTORY.principleClaim, rdflib.RDFS.range, rdflib.XSD.string) in graph
+    datatype = rdflib.OWL.DatatypeProperty
+    assert (FACTORY.principleClaim, rdflib.RDF.type, datatype) in graph
+    assert (FACTORY.claim, rdflib.RDF.type, datatype) in graph
     assert _multi_domain_properties(graph) == set()
 
     mutated = rdflib.Graph().parse(VOCABULARY, format="turtle")
