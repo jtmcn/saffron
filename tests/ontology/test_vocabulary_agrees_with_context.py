@@ -39,7 +39,7 @@ def context_enumeration(term: str) -> set[str]:
     """The backticked tokens in a definition's first sentence.
 
     The span comes from the renderer's own function, `definition_sentence`,
-    so this reader and `render_context` rewrite the same bytes.
+    so this reader takes the same span `render_context` rewrites within.
 
     The token pattern is imported rather than repeated: `ontology.render`
     locates its write span from the same matches, so the span it rewrites cannot
