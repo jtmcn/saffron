@@ -14072,8 +14072,8 @@ def test_a_kill_with_an_uncounted_failure_still_names_the_killing_tests():
         uncounted=("t.py::zebra",),
     )
 
-    result = review.survivor_claim_with_suite_verdict(finding.claim, mixed)
-    assert result.endswith(
-        "failed t.py::b, t.py::c, and the criterion's witness did not fail."
+    head = finding.claim.removesuffix(", and only that witness ran under the edit.")
+    assert review.survivor_claim_with_suite_verdict(finding.claim, mixed) == (
+        f"{head}. {review.SUITE_KILL_SENTENCE}t.py::b, t.py::c, "
+        "and the criterion's witness did not fail."
     )
-    assert "zebra" not in result
