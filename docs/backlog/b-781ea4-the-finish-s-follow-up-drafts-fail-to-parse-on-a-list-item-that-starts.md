@@ -4,7 +4,7 @@ title: The finish's follow-up drafts fail to parse on a list item that starts wi
 status: open
 tier: 2
 filed: 2026-10-24
-specs: []
+specs: [SA-0325]
 prs: []
 commits: []
 cites: [§4.2.1]
