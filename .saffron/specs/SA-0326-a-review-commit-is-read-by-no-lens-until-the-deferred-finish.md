@@ -178,9 +178,12 @@ acceptance:
       The spec body both lenses read opens with one framing paragraph that
       `commit_review.py` holds. It says the diff holds only the review
       commits made after the cell's packaged head, and that a criterion met
-      below the range is not unmet. It names the range start and the head by
-      sha. In each system prompt it sits under the spec heading, ahead of
-      the spec's own body. The spec file and the recorded texts stay
+      below the range is not unmet. It names the range start and the head,
+      each by its full 40-character sha. In each system prompt it sits under
+      the `## The spec` heading, ahead of the spec's own body. The witness
+      reads only the slice between that heading and the body's marker. Both
+      full shas sit inside it, and neither `base_sha` nor the packaged
+      head's parent does. The spec file and the recorded texts stay
       unchanged.
     witness: tests/test_commit_review.py::test_review_frames_the_spec_body_as_review_commits_over_a_packaged_head
     wrong_versions:
@@ -188,6 +191,7 @@ acceptance:
       - The paragraph in the Spec lens's prompt alone.
       - The paragraph after the spec's body rather than ahead of it.
       - A paragraph naming the run's `base_sha` or the packaged head's parent as the range start.
+      - The shas named only on the template's `Range` line, outside the spec slice.
   - claim: >-
       A SIGTERM while a lens runs exits 143 through `_guarding_sigterm`. The
       cell `end_review.layer_cell` opened is torn down first. The witness
@@ -440,7 +444,7 @@ and its own line. A subject match then starts the range at the second.
 **Criterion 2's restack.** Fork a predecessor branch from `base_sha` with a
 commit, and fork the task's branch from it. Move the predecessor with a
 commit adding its own line. Rebase the task's branch onto the moved
-predecessor with `git rebase --onto`, then add the review commit. Keep a
+predecessor with `git rebase --onto`, then add the review commits. Keep a
 branch in the checkout naming the original packaged commit, so the mirror
 holds it as PACKAGE's own mirror does.
 
@@ -457,11 +461,17 @@ no-pull-request case with `ledger.record_push`, so the task has a
 unparseable case. Assert each case's own fragment, never `review:` alone. Seed a run
 at a commit with no spec for the missing file. Seed a `spec_sha` of zeros for
 the mismatched one. Seed a task under a second repo row for another repo.
+Call `set_task_package` on it with a branch, a `pushed_sha` and a `pr_url`,
+so it reaches the repo check.
 Use `adopt_pull_request` on a task with no package for the missing head. A
 branch reset to a fresh commit carrying another message covers the head
-holding neither.
+holding neither. That case and the restacked copy with nothing on it each
+keep a branch in the checkout on the original packaged commit. Step 3 calls
+`ensure_mirror(repo, …)` as `saffron/regate.py:145` does, so that branch puts
+the commit in the mirror. Without it the ancestry check reads a missing
+object, and `git merge-base --is-ancestor` exits 128 rather than 1.
 
-**Criterion 7** sets its own SIGTERM handler before `main`, and restores the
+**Criterion 8** sets its own SIGTERM handler before `main`, and restores the
 earlier one in a `finally`. Its agent fake sends the process SIGTERM. With
 the guard, `main` returns 143, the `layer_cell` fake's exit ran, and the
 test's handler never ran.
