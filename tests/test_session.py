@@ -12435,14 +12435,14 @@ def test_a_survivor_outside_the_diff_still_reaches_rebut(monkeypatch, tmp_path):
     ]
 
 
-# --- backlog b-b9365d: a survivor's own edit, asked of the whole suite too ---
+# --- backlog b-b9365d: a survivor's own edit, asked of the whole `tests` gate too ---
 
 
 def test_a_survivor_the_whole_suite_kills_stays_a_blocker_naming_the_killing_tests(
     monkeypatch, tmp_path
 ):
     """Criterion 1: a survivor's edit is re-applied in the same Gate-only
-    cell and asked of the whole `tests` gate. It is a kill when the suite
+    cell and asked of the whole `tests` gate. It is a kill when that gate
     fails on tests the gate collected, for the criterion's own edit and a
     wrong version alike. The blocker stays a `blocker` with no
     `filed_severity`, and the claim names every killing node id."""
@@ -12554,7 +12554,7 @@ def test_a_survivor_the_whole_suite_also_misses_says_the_suite_stayed_green(
     monkeypatch, tmp_path
 ):
     """Criterion 2: a survivor's second ask can also stay green. The
-    criterion's own edit meets a whole suite with no failure at all. The
+    criterion's own edit meets a whole `tests` gate with no failure. The
     wrong version's edit meets one whose only failure is the same
     pre-existing failure the head already carried. `subtract_baseline`
     cancels it, so it is no new failure and no kill either."""
@@ -14024,3 +14024,30 @@ def test_a_spec_whose_wrong_versions_all_edit_tests_reads_none_of_them_expressed
 
     (line,) = [w for w in cell.watched if w.startswith("REVIEW: wrong versions:")]
     assert line == "REVIEW: wrong versions: 2 declared, 0 expressed, 2 refused"
+
+
+def test_a_second_ask_whose_new_failure_no_head_test_names_keeps_todays_claim():
+    """A second ask can be `survived` with a new failure that names no test
+    the head collected. That answers nothing, so the claim keeps today's
+    text. It never says the whole `tests` gate stayed green."""
+    from saffron import probe
+    from saffron.intake import Criterion, Mutant
+    from saffron.phases import review
+
+    edit = Mutant(file="src/x.py", find="assert x == 1", replace="x2")
+    finding = review.survivor_finding(
+        Criterion(claim="c", witness="t.py::a"), edit, "assert x == 1\n"
+    )
+    uncounted = probe.ProbeResult(
+        "survived",
+        "a new failure exists but matched no counted test",
+        uncounted=("t.py::new[1]",),
+    )
+    clean = probe.ProbeResult("survived", "no new failure")
+
+    assert review.survivor_claim_with_suite_verdict(finding.claim, uncounted) == (
+        finding.claim
+    )
+    assert review.survivor_claim_with_suite_verdict(finding.claim, clean).endswith(
+        ", and the whole `tests` gate stayed green under the edit too."
+    )

@@ -733,6 +733,11 @@ def criterion_probe_outcome(status: GateStatus) -> str:
     return _CRITERION_PROBE_OUTCOMES[status]
 
 
+# Both claim forms' tail, stripped before a second ask's answer is
+# appended (backlog b-b9365d).
+_WITNESS_ONLY_TAIL = ", and only that witness ran under the edit."
+
+
 def survivor_finding(
     criterion: Criterion, edit: Mutant, content: str, *, version: str | None = None
 ) -> Finding:
@@ -751,13 +756,13 @@ def survivor_finding(
         (
             f"{HOST_FILED}{criterion.witness} stayed green with the criterion's "
             f"own edit applied to {edit.file}. The claim was "
-            f"{criterion.claim!r}, and only that witness ran under the edit."
+            f"{criterion.claim!r}{_WITNESS_ONLY_TAIL}"
         )
         if version is None
         else (
             f"{HOST_FILED}{criterion.witness} stayed green with the spec's "
             f"wrong version {version!r} applied to {edit.file} as an edit. The claim "
-            f"was {criterion.claim!r}, and only that witness ran under the edit."
+            f"was {criterion.claim!r}{_WITNESS_ONLY_TAIL}"
         )
     )
     return Finding(
@@ -771,10 +776,6 @@ def survivor_finding(
     )
 
 
-# `survivor_finding`'s own tail, stripped before a second ask's answer is
-# appended (backlog b-b9365d). Shared by both claim forms above.
-_WITNESS_ONLY_TAIL = ", and only that witness ran under the edit."
-
 # The kill tail's own opening phrase, checked by `rebut._blocker_line`
 # together with a leading `HOST_FILED`: a lens's claim never starts with one.
 SUITE_KILL_SENTENCE = "Under the edit the whole `tests` gate failed "
@@ -783,15 +784,16 @@ SUITE_KILL_SENTENCE = "Under the edit the whole `tests` gate failed "
 def survivor_claim_with_suite_verdict(claim: str, result: probe.ProbeResult) -> str:
     """`survivor_finding`'s claim, extended with a second ask of the whole
     `tests` gate over the same edit (backlog b-b9365d, `DESIGN.md` §5.4.1).
-    `killed` names every killing node id. `survived` says the suite stayed
-    green too. `unproven` returns `claim` unchanged: nothing else answered.
+    `killed` names every killing node id. `survived` says the whole `tests`
+    gate stayed green too, but only with no uncounted new failure. Otherwise
+    `claim` comes back unchanged, since nothing else answered.
     """
-    if result.verdict == "unproven":
+    if result.verdict == "unproven" or result.uncounted:
         return claim
     head = claim.removesuffix(_WITNESS_ONLY_TAIL)
     if result.verdict == "killed":
-        # A kill can be a style or format test failing, since this repo's
-        # own suite runs those as tests too. Severity never moves for it.
+        # A kill can be a style test failing, and core cannot tell (§2.1).
+        # Severity never moves for it.
         return (
             f"{head}. {SUITE_KILL_SENTENCE}"
             f"{', '.join(result.failures)}, and the criterion's witness did not fail."
