@@ -599,6 +599,9 @@ each name the texts a stack batch runs that are not at `base_sha`.
 on its drafts' prose, so a finish that drafts never pushes. A review commit is
 read by no lens until the finish.
 
+**Placed 2026-10-27**, from writing `SA-0326`: **b-bc8343**, by hand after
+`SA-0326` merges. `CONTEXT.md` names no review commit and no commit review.
+
 ### Tier 3 — real, not urgent
 
 **Placed 2026-10-16**, from the spec loop's run 42: **b-60317d**.

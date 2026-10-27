@@ -4,7 +4,7 @@ title: "A review commit is read by no lens until the deferred finish, so a deleg
 status: open
 tier: 2
 filed: 2026-10-27
-specs: []
+specs: [SA-0326]
 prs: []
 commits: []
 cites: [§5.7]
