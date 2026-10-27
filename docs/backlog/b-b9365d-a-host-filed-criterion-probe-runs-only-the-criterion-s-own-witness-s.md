@@ -1,11 +1,12 @@
 ---
 id: b-b9365d
 title: "A host-filed criterion probe runs only the criterion's own witness, so a preserves witness that never runs the mutated file files a false blocker"
-status: open
+status: done
 tier: 2
 filed: 2026-10-25
+closed: 2026-10-27
 specs: [SA-0322]
-prs: []
+prs: [978]
 commits: []
 cites: [§5.5]
 related: [b-a68b24]
@@ -31,3 +32,4 @@ that the criterion's witness never imports it.
 ## Record
 
 - 2026-10-25: filed from the spec loop's run 48.
+- 2026-10-27: done by `SA-0322` in #978, from the spec loop's run 49.

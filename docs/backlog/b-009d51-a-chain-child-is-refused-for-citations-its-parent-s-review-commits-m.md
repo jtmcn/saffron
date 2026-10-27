@@ -1,11 +1,12 @@
 ---
 id: b-009d51
 title: "A chain child is refused for citations its parent's review commits moved, so each child costs a spec PR and a batch"
-status: open
+status: done
 tier: 2
 filed: 2026-10-25
+closed: 2026-10-27
 specs: [SA-0321]
-prs: []
+prs: [977]
 commits: []
 cites: [§3.4]
 related: [b-d31930]
@@ -30,3 +31,4 @@ judged by the construct, before the batch refuses the spec.
 ## Record
 
 - 2026-10-25: filed from the spec loop's run 48.
+- 2026-10-27: done by `SA-0321` in #977, from the spec loop's run 49.

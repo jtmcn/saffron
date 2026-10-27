@@ -2599,3 +2599,50 @@ seat finding the in-cell critic and the end review both passed.
 - Run 48: a host-filed probe ran a `preserves` witness that never imports
   the mutated file, and filed a false blocker. **Bucket 1**, `witness`.
   **Open:** b-b9365d.
+
+## 2026-10-27, spec loop run 49 (#976 to #982)
+
+- `SA-0320` (#976): the witness asserted only that both shas appear in the
+  reason, so a reworded reason passed. **Bucket 3**, adequacy. **Landed:** a
+  review commit on #976.
+- `SA-0320` (#976): the graded head was compared with the head twice, and a
+  test fixture took a parameter it never used. **Bucket 3**, conventions.
+  **Landed:** a review commit on #976.
+- `SA-0321` (#977): the held map read file suffixes at the spec's own commit,
+  so a bare citation anchored to a different file than the later check read.
+  **Bucket 3**, contract. **Landed:** a review commit on #977. Its other
+  direction is **Open:** b-1b8b1e.
+- `SA-0321` (#977): docstrings said "parent", Predecessor's avoided word.
+  **Bucket 1**, `terms`. **Landed:** a review commit on #977. The gate's gap
+  is **Open:** b-8220e6.
+- `SA-0321` (#977): four sites spell a queued spec's repo path by hand.
+  **Bucket 3**, conventions. **Open:** b-3a0789.
+- `SA-0322` (#978): a survivor with an uncounted failure was written as having
+  stayed green. **Bucket 3**, correctness. **Landed:** a review commit on #978.
+- `SA-0322` (#978): tests said bare "suite", and a comment named §2.1 for a
+  claim it does not make. **Bucket 1**, `terms`, and **Bucket 3**,
+  conventions. **Landed:** a review commit on #978.
+- `SA-0317` (#979): `render_context`'s docstring counts six sets, and there
+  are eleven. **Bucket 3**, contract. **Open:** b-1ff5a3.
+- `SA-0318` (#980): a whitespace-only exclusion reason passed the witness.
+  **Bucket 3**, adequacy. **Landed:** a review commit on #980.
+- `SA-0318` (#980): two exclusion reasons carried semicolons inside string
+  literals. **Bucket 1**, `prose`. **Landed:** a review commit on #980.
+- `SA-0319` (#981): no witness asserted `principleClaim`'s property type, and
+  a 26-character conforming claim let a raised minimum length survive.
+  **Bucket 3**, adequacy. **Landed:** a review commit on #981.
+- `SA-0319` (#981): three docstrings told the history, not the property.
+  **Bucket 3**, conventions. **Landed:** a review commit on #981.
+- `SA-0323` (#982): the mixed-kill witness checked only the claim's tail, so
+  a kill that kept the witness-only clause passed the whole suite. **Bucket
+  3**, adequacy. **Landed:** a review commit on #982.
+- `SA-0323` (#982): `ProbeResult.uncounted`'s docstring says a kill carries
+  none. **Bucket 3**, contract. **Open:** b-d2afe3.
+- Run 49: the delegate's review commit on #978 dropped a kill whenever an
+  uncounted failure came with it, and only the finish's end review saw it.
+  **No bucket**, review commits. **Open:** b-549012.
+- Run 49: the finishing layer queued a spec whose cell ran and failed on its
+  drafts' prose, so nothing was pushed. **No bucket**, the finish. **Open:**
+  b-e0044f.
+- Run 49: `SA-0322` reached `READY_FOR_REVIEW` with a blocker the critic
+  still held. **No bucket**, REBUT. **Open:** b-92c92a.

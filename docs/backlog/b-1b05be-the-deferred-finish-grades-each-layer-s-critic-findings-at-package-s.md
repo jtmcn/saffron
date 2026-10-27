@@ -1,11 +1,12 @@
 ---
 id: b-1b05be
 title: "The deferred finish grades each layer's critic findings at PACKAGE's head, so it re-raises what review commits fixed"
-status: open
+status: done
 tier: 2
 filed: 2026-10-25
+closed: 2026-10-27
 specs: [SA-0320]
-prs: []
+prs: [976]
 commits: []
 cites: [§5.7]
 related: [b-781ea4, b-cc87b1]
@@ -34,3 +35,4 @@ that a later commit on the layer changed before the writer sees it.
 ## Record
 
 - 2026-10-25: filed from the spec loop's run 48.
+- 2026-10-27: done by `SA-0320` in #976, from the spec loop's run 49.

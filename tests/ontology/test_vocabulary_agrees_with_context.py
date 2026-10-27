@@ -4,8 +4,8 @@ class, they agree.
 Not a generated vocabulary. `CONTEXT.md` names the whole system. The ontology
 names only the run record, so most of that file has no term here and would
 fail the dead-term test if it did. The parametrized test below checks the
-eleven closed sets both documents enumerate, where they have measurably
-drifted: `CONTEXT.md` once listed six terminal states against nine. The
+eleven closed sets both documents enumerate, where they measurably
+drifted apart: `CONTEXT.md` once listed six terminal states against nine. The
 class check asks that every `factory:` class carry its headword as a label,
 or a stated exclusion.
 """

@@ -1,11 +1,12 @@
 ---
 id: b-7aefb8
 title: "`factory:claim` carries two `rdfs:domain` triples, so a reasoner reads every finding as a principle"
-status: open
+status: done
 tier: 3
 filed: 2026-10-24
+closed: 2026-10-27
 specs: [SA-0319]
-prs: []
+prs: [981]
 commits: []
 cites: [§4.6]
 related: []
@@ -32,3 +33,4 @@ domains.
 
 - 2026-10-24: filed from a review of the controlled vocabulary against SKOS
   practice.
+- 2026-10-27: done by `SA-0319` in #981, from the spec loop's run 49.

@@ -29,3 +29,4 @@ The watch waits for a task the batch names, and a stop ends it.
 - 2026-10-25: recurred three times in the spec loop's run 48. Each time the watch
   attached to a new task, it first reported the previous task as packaged and the new
   one as started.
+- 2026-10-27: in the spec loop's run 49 the hand-over wake-ups for four tasks arrived hours late, in one burst, after the delegate's review turns ended.

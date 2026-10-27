@@ -1,11 +1,12 @@
 ---
 id: b-c16c6c
 title: "No test holds a `factory:` term to a `CONTEXT.md` entry outside the closed sets, and the comments that restate entries drift"
-status: open
+status: done
 tier: 3
 filed: 2026-10-24
+closed: 2026-10-27
 specs: [SA-0318]
-prs: []
+prs: [980]
 commits: []
 cites: [§4.6]
 related: [b-2227b0]
@@ -38,3 +39,4 @@ Measured at `2e1efa2b`:
 
 - 2026-10-24: filed from the three reviews of the parked draft ADR (b-2227b0),
   which named this as the cheaper path that closes the measured gap.
+- 2026-10-27: done by `SA-0318` in #980, from the spec loop's run 49.

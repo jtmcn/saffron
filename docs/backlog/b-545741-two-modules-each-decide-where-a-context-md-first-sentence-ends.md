@@ -1,11 +1,12 @@
 ---
 id: b-545741
 title: "Two modules each decide where a `CONTEXT.md` first sentence ends, and only one stops at the blank line"
-status: open
+status: done
 tier: 3
 filed: 2026-10-24
+closed: 2026-10-27
 specs: [SA-0317]
-prs: []
+prs: [979]
 commits: []
 cites: []
 related: [b-c16c6c]
@@ -32,3 +33,4 @@ with no trailing period makes both raise.
 ## Record
 
 - 2026-10-24: found in the third review of the parked draft ADR (b-2227b0).
+- 2026-10-27: done by `SA-0317` in #979, from the spec loop's run 49.
