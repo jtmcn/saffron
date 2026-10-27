@@ -784,11 +784,13 @@ SUITE_KILL_SENTENCE = "Under the edit the whole `tests` gate failed "
 def survivor_claim_with_suite_verdict(claim: str, result: probe.ProbeResult) -> str:
     """`survivor_finding`'s claim, extended with a second ask of the whole
     `tests` gate over the same edit (backlog b-b9365d, `DESIGN.md` §5.4.1).
-    `killed` names every killing node id. `survived` says the whole `tests`
-    gate stayed green too, but only with no uncounted new failure. Otherwise
+    `killed` names every killing node id, even when `result.uncounted` is
+    also non-empty: an uncounted new failure decides nothing once a
+    different one already killed. `survived` says the whole `tests` gate
+    stayed green too, but only with no uncounted new failure. Otherwise
     `claim` comes back unchanged, since nothing else answered.
     """
-    if result.verdict == "unproven" or result.uncounted:
+    if result.verdict == "unproven":
         return claim
     head = claim.removesuffix(_WITNESS_ONLY_TAIL)
     if result.verdict == "killed":
@@ -798,6 +800,8 @@ def survivor_claim_with_suite_verdict(claim: str, result: probe.ProbeResult) -> 
             f"{head}. {SUITE_KILL_SENTENCE}"
             f"{', '.join(result.failures)}, and the criterion's witness did not fail."
         )
+    if result.uncounted:
+        return claim
     return f"{head}, and the whole `tests` gate stayed green under the edit too."
 
 

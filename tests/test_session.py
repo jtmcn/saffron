@@ -14051,3 +14051,29 @@ def test_a_second_ask_whose_new_failure_no_head_test_names_keeps_todays_claim():
     assert review.survivor_claim_with_suite_verdict(finding.claim, clean).endswith(
         ", and the whole `tests` gate stayed green under the edit too."
     )
+
+
+def test_a_kill_with_an_uncounted_failure_still_names_the_killing_tests():
+    """A `killed` verdict names its killing node ids even when the same
+    result also carries a non-empty `uncounted`: one new failure killed,
+    a different one answered nothing, and the kill still wins."""
+    from saffron import probe
+    from saffron.intake import Criterion, Mutant
+    from saffron.phases import review
+
+    edit = Mutant(file="src/x.py", find="assert x == 1", replace="x2")
+    finding = review.survivor_finding(
+        Criterion(claim="c", witness="t.py::a"), edit, "assert x == 1\n"
+    )
+    mixed = probe.ProbeResult(
+        "killed",
+        "a new failure killed it",
+        failures=("t.py::b", "t.py::c"),
+        uncounted=("t.py::zebra",),
+    )
+
+    result = review.survivor_claim_with_suite_verdict(finding.claim, mixed)
+    assert result.endswith(
+        "failed t.py::b, t.py::c, and the criterion's witness did not fail."
+    )
+    assert "zebra" not in result
