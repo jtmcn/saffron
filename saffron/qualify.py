@@ -9,6 +9,15 @@ range's diff, probed if it carries a probe, and filed as `qualified`,
 lens's findings are walked first, over the whole stack, under the top
 layer's task. Each layer is then walked top down: its end-review findings,
 then its own in-cell REVIEW concerns.
+
+An in-cell concern still anchors over the packaged range, since its line
+was recorded there. But the code it cites can move again before the end
+review reads the layer. When the layer's graded head (`graded_fields`)
+differs from its packaged one, hunks of their diff mark lines that moved.
+A concern `_decide` would file `qualified` is filed `unverified` instead
+when its line sits in such a hunk. The reason then names both heads in
+full. End-review and join findings, already read at the graded head, are
+never subject to this.
 """
 
 from __future__ import annotations
@@ -19,7 +28,7 @@ from functools import partial
 from pathlib import Path
 
 from saffron import end_review
-from saffron.agents.findings import Finding, Severity, anchor
+from saffron.agents.findings import Finding, Severity, anchor, parse_diff
 from saffron.cell import session
 from saffron.cell.worktree import DIFF_FLAGS
 from saffron.gates.contract import GateResult
@@ -115,15 +124,29 @@ def _qualify_range(
     gates: dict[str, Path],
     created: set[str],
     note: Callable[[str, bool, str], None],
+    graded_head: str | None = None,
 ) -> list[Qualified]:
     """One range's findings, anchored over `base..head`, probed and decided,
     each recorded under `task_id` in the order given. Builds no group.
     `qualify` does, across every range's own call, so a later one can
     extend an earlier one's. A read the mirror cannot answer raises before
-    any finding in the range is recorded."""
+    any finding in the range is recorded.
+
+    `graded_head`, set for a layer's in-cell concerns, demotes a
+    `qualified` finding to `unverified` when its cited line moved. A hunk
+    of the diff from `head` to it is read first, so a bad mirror still
+    raises before any row here is recorded."""
     diff = _git(mirror, "diff", *DIFF_FLAGS, f"{base}..{head}", strip=False)
     findings = anchor(inputs, diff, read_head=partial(file_at, mirror, head))
     filed: dict[int, Severity] = {id(f): f.severity for f in findings}
+
+    stale: dict[str, set[int]] = {}
+    if graded_head is not None and graded_head != head:
+        later_diff = _git(
+            mirror, "diff", *DIFF_FLAGS, f"{graded_head}..{head}", strip=False
+        )
+        stale = parse_diff(later_diff).hunk_lines
+
     probed = [f for f in findings if f.anchored and f.probe is not None]
     reasons: dict[tuple[str, str, str], str] = {}
     if probed:
@@ -166,6 +189,12 @@ def _qualify_range(
     decided: list[Qualified] = []
     for f in findings:
         outcome, reason = _decide(f, reasons)
+        if outcome == "qualified" and f.line in stale.get(f.file, ()):
+            outcome = "unverified"
+            reason = (
+                f"its cited line changed between the packaged head {head} "
+                f"and the graded head {graded_head} after it was cited"
+            )
         ledger.record_qualification(
             task_id, finding=f, filed=filed[id(f)], outcome=outcome, reason=reason
         )
@@ -219,15 +248,15 @@ def qualify(
     note: Callable[[str, bool, str], None],
 ) -> Qualification:
     """The join's findings first, over the whole stack, then every layer's
-    end-review findings and in-cell concerns, top down. Groups and pools
-    the findings every range decides across the whole walk, so the join's
-    findings and the top layer's own can share one group. A read the mirror
-    cannot answer raises out of it, and ranges walked earlier keep their rows.
+    end-review findings and in-cell concerns, top down. Groups and pools the
+    findings every range decides, so the join's and the top layer's own can
+    share one group. A read the mirror cannot answer raises out of it, and
+    ranges walked earlier keep their rows.
 
-    `fields` is the end review's own `StackReview.fields`. The join and
-    each layer's end-review findings read the range `graded_fields` gives
-    for it. A layer's in-cell REVIEW concerns keep the packaged range
-    instead, since their line numbers were recorded against it."""
+    `fields` is the end review's own `StackReview.fields`, read by the join
+    and each layer's end-review findings through `graded_fields`. A layer's
+    in-cell concern keeps the packaged range, but is `unverified` instead
+    of `qualified` when its line sits in a later hunk."""
     groups: dict[tuple[str, str], list[Qualified]] = {}
     pool: list[Qualified] = []
 
@@ -294,6 +323,8 @@ def qualify(
             )
         if concerns:
             packaged = end_review.layer_fields(ledger, layer.task_key)
+            graded = graded_fields(ledger, fields, layer.task_key)
+            graded_head = graded.head if graded.head != packaged.head else None
             _fold(
                 _qualify_range(
                     ledger,
@@ -313,6 +344,7 @@ def qualify(
                     gates=gates,
                     created=created,
                     note=note,
+                    graded_head=graded_head,
                 )
             )
 
