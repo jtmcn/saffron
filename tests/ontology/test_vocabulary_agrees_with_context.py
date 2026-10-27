@@ -8,13 +8,14 @@ drifted. `CONTEXT.md` §6 listed six terminal states, `DESIGN.md` §3.3 listed
 nine, and `saffron/cell/session.py` wrote a tenth state neither called terminal.
 """
 
-import re
+import sys
 
 import pytest
 import rdflib
 from ontology_paths import FIXTURES, NS, ONTOLOGY, VOCABULARY
 
 from ontology import render
+from ontology.spans import definition_sentence
 
 CONTEXT = ONTOLOGY.parent / "CONTEXT.md"
 
@@ -37,9 +38,8 @@ CLOSED_SETS = {
 def context_enumeration(term: str) -> set[str]:
     """The backticked tokens in a definition's first sentence.
 
-    First sentence only: every one of these definitions goes on to mention other
-    backticked names — `elevate_on`, `coverage`, `DESIGN.md` — that are prose
-    about the set rather than members of it.
+    The span comes from the renderer's own function, `definition_sentence`,
+    so this reader and `render_context` rewrite the same bytes.
 
     The token pattern is imported rather than repeated: `ontology.render`
     locates its write span from the same matches, so the span it rewrites cannot
@@ -47,11 +47,8 @@ def context_enumeration(term: str) -> set[str]:
     sentence made the renderer delete the prose after it while this stayed green.
     """
     body = CONTEXT.read_text()
-    # The marker, not the marker plus a colon: `Core gates` is a bullet that
-    # introduces its members with an em dash instead.
-    start = body.index(f"**{term}**") + len(f"**{term}**")
-    sentence = re.split(r"\.(?:\s|$)", body[start:], maxsplit=1)[0]
-    return set(render.MEMBER_TOKEN.findall(sentence))
+    start, end = definition_sentence(body, term)
+    return set(render.MEMBER_TOKEN.findall(body[start:end]))
 
 
 def ontology_members(class_name: str) -> set[str]:
@@ -77,6 +74,39 @@ def test_the_two_documents_close_the_set_the_same_way(term, class_name):
         f"{term}: CONTEXT.md says {sorted(from_context)}, "
         f"factory:{class_name} says {sorted(from_ontology)}"
     )
+
+
+def test_the_reader_refuses_each_definition_the_renderer_refuses(tmp_path, monkeypatch):
+    """A definition the renderer could not rewrite must raise here too.
+    One shared function, one reason, over the same text.
+    """
+    this_module = sys.modules[__name__]
+    no_trailing_period = "**Risk tier**: `standard` or `elevated`"
+    no_period_before_blank_line = (
+        "**Risk tier**: `standard` or `elevated`\n\n"
+        "A later paragraph names `elevate_on`.\n"
+    )
+    defined_twice = "**Risk tier**: `standard`.\n\n**Risk tier**: `elevated`.\n"
+
+    for entry in (
+        no_trailing_period,
+        no_period_before_blank_line,
+        defined_twice,
+    ):
+        context_path = tmp_path / "CONTEXT.md"
+        context_path.write_text(entry)
+        monkeypatch.setattr(this_module, "CONTEXT", context_path)
+        with pytest.raises(ValueError):
+            context_enumeration("Risk tier")
+        with pytest.raises(ValueError):
+            definition_sentence(entry, "Risk tier")
+
+    def _raise_lookup_error(text: str, term: str) -> tuple[int, int]:
+        raise LookupError(f"{term}: no span for this stub")
+
+    monkeypatch.setattr(this_module, "definition_sentence", _raise_lookup_error)
+    with pytest.raises(LookupError):
+        context_enumeration("Risk tier")
 
 
 def test_the_parser_would_notice_a_changed_set():
