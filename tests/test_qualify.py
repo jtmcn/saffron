@@ -1303,7 +1303,7 @@ def test_findings_are_anchored_and_probed_over_the_range_the_end_review_graded(
     assert "+a2_new" in calls_bottom[0]["patch"]
 
 
-def _later_diff_fixture(tmp_path: Path, monkeypatch) -> _Built:
+def _later_diff_fixture(tmp_path: Path) -> _Built:
     """`A` seeds `src/a.py` (60 lines), `src/b.py`, `src/gone.py` and
     `src/u.py`. `H1` (TE-1's packaged head) rewrites `a.py:10`. `H2`
     (TE-2's packaged head, on `H1`) rewrites `a.py:10,20,38,44`, `b.py:6`
@@ -1444,7 +1444,7 @@ def test_an_in_cell_concern_whose_cited_line_a_review_commit_changed_is_not_draf
     """
     from saffron.qualify import qualify
 
-    built = _later_diff_fixture(tmp_path, monkeypatch)
+    built = _later_diff_fixture(tmp_path)
     te2_key, te1_key = built.layers[0].task_key, built.layers[1].task_key
 
     def _raise(*args, **kwargs):
@@ -1466,11 +1466,14 @@ def test_an_in_cell_concern_whose_cited_line_a_review_commit_changed_is_not_draf
 
     pool = {(q.task_key, q.finding.claim): (q.outcome, q.reason) for q in result.pool}
     dropped = ("c-a10", "c-a20", "c-a38", "c-gone2")
+    expected_reason = (
+        f"its cited line changed between the packaged head {built.shas['H2']} "
+        f"and the graded head {built.shas['R2']} after it was cited"
+    )
     for claim in dropped:
         outcome, reason = pool[(te2_key, claim)]
         assert outcome == "unverified"
-        assert f"packaged head {built.shas['H2']}" in reason
-        assert f"graded head {built.shas['R2']}" in reason
+        assert reason == expected_reason
     assert pool[(te2_key, "c-u3")] == ("unanchored", "")
 
     groups = {
@@ -1492,8 +1495,7 @@ def test_an_in_cell_concern_whose_cited_line_a_review_commit_changed_is_not_draf
     for claim in dropped:
         row = by_claim[claim]
         assert row["outcome"] == "unverified"
-        assert f"packaged head {built.shas['H2']}" in row["reason"]
-        assert f"graded head {built.shas['R2']}" in row["reason"]
+        assert row["reason"] == expected_reason
     assert by_claim["c-u3"]["outcome"] == "unanchored"
     for claim in ("er-a10", "c-a44", "c-b6", "c1-a10"):
         assert by_claim[claim]["outcome"] == "follow_up"

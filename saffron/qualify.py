@@ -13,7 +13,7 @@ then its own in-cell REVIEW concerns.
 An in-cell concern still anchors over the packaged range, since its line
 was recorded there. But the code it cites can move again before the end
 review reads the layer. When the layer's graded head (`graded_fields`)
-differs from its packaged one, hunks of their diff mark lines that moved.
+differs from its packaged one, hunks of their diff mark lines at risk.
 A concern `_decide` would file `qualified` is filed `unverified` instead
 when its line sits in such a hunk. The reason then names both heads in
 full. End-review and join findings, already read at the graded head, are
@@ -132,10 +132,10 @@ def _qualify_range(
     extend an earlier one's. A read the mirror cannot answer raises before
     any finding in the range is recorded.
 
-    `graded_head`, set for a layer's in-cell concerns, demotes a
-    `qualified` finding to `unverified` when its cited line moved. A hunk
-    of the diff from `head` to it is read first, so a bad mirror still
-    raises before any row here is recorded."""
+    `graded_head` is set for a layer's in-cell concerns. A `qualified`
+    finding whose cited line sits in a hunk of `graded_head..head`, read
+    on `head`'s side, becomes `unverified`. That diff is read first, so a
+    bad mirror still raises before any row here is recorded."""
     diff = _git(mirror, "diff", *DIFF_FLAGS, f"{base}..{head}", strip=False)
     findings = anchor(inputs, diff, read_head=partial(file_at, mirror, head))
     filed: dict[int, Severity] = {id(f): f.severity for f in findings}
@@ -324,7 +324,7 @@ def qualify(
         if concerns:
             packaged = end_review.layer_fields(ledger, layer.task_key)
             graded = graded_fields(ledger, fields, layer.task_key)
-            graded_head = graded.head if graded.head != packaged.head else None
+            graded_head = graded.head
             _fold(
                 _qualify_range(
                     ledger,
