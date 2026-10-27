@@ -4,10 +4,9 @@ class, they agree.
 Not a generated vocabulary. `CONTEXT.md` names the whole system. The ontology
 names only the run record, so most of that file has no term here and would
 fail the dead-term test if it did. The parametrized test below checks the
-eleven closed sets both documents already enumerate, because that overlap is
-where they have measurably drifted: `CONTEXT.md` once listed six terminal
-states against `DESIGN.md`'s nine. The class check below instead asks
-whether every `factory:` class carries its `CONTEXT.md` headword as a label,
+eleven closed sets both documents enumerate, where they have measurably
+drifted: `CONTEXT.md` once listed six terminal states against nine. The
+class check asks that every `factory:` class carry its headword as a label,
 or a stated exclusion.
 """
 
@@ -39,7 +38,7 @@ CLOSED_SETS = {
 }
 
 # local class name -> why no CONTEXT.md headword stands for it. Each is a
-# bullet or a member list inside another entry, never a headword of its own.
+# bullet or member list inside another entry, or has no entry yet.
 EXCLUSIONS = {
     "CoreGate": "a bullet inside the Gate entry, not its own headword",
     "ContractGate": "a bullet inside the Gate entry, not its own headword",
@@ -50,10 +49,10 @@ EXCLUSIONS = {
     ),
     "Role": (
         "its members are the Verdict, Adjudication and Rebuttal entries' "
-        "own terms; the class carries no headword of its own"
+        "own terms. The class carries no headword of its own"
     ),
     "SpecType": (
-        "three of six frontmatter types intake knows; no CONTEXT.md entry "
+        "three of six frontmatter types intake knows. No CONTEXT.md entry "
         "defines the class (backlog item b-60d804)"
     ),
 }
@@ -264,16 +263,18 @@ def test_every_severity_has_its_own_bullet():
     )
 
 
-# The seven classes with an entry but no CLOSED_SETS member, and the
-# headword each one's label must now carry.
+# The seven classes that had an entry and no label at base, keyed by class.
 SEVEN_HEADWORDS = {
-    "TerminalState": "Terminal state",
-    "RiskTier": "Risk tier",
-    "BatchStopReason": "Batch stop reason",
-    "PreflightOutcome": "Preflight outcome",
-    "EventKind": "Event kind",
-    "FactKind": "Fact kind",
-    "Severity": "Severity",
+    CLOSED_SETS[headword]: headword
+    for headword in (
+        "Terminal state",
+        "Risk tier",
+        "Batch stop reason",
+        "Preflight outcome",
+        "Event kind",
+        "Fact kind",
+        "Severity",
+    )
 }
 
 _INLINE_TTL = """
@@ -327,16 +328,18 @@ def test_every_factory_class_has_one_context_entry_or_a_stated_exclusion():
         "TwoCase: label 'widget' matches 2 CONTEXT.md headwords: ['WIDGET', 'Widget']",
     ]
 
-    # Three exclusion problems: a name with no class, a class with a blank
-    # reason, and a class an operator excluded despite its matching label.
+    # Four exclusion problems: a name with no class, an empty reason, a
+    # whitespace reason, and a class excluded despite its matching label.
     inline_exclusions = {
         "GhostClass": "not a declared class at all",
         "BulletColon": "",
+        "MidLine": "  ",
         "CaseInsensitive": "excluded even though its label matches",
     }
     assert exclusion_problems(_INLINE_TTL, _INLINE_CONTEXT, inline_exclusions) == [
         "GhostClass: exclusion names no declared class",
         "BulletColon: exclusion reason is blank",
+        "MidLine: exclusion reason is blank",
         "CaseInsensitive: exclusion's class has a label equal to a headword "
         "'pull request'",
     ]
@@ -359,14 +362,11 @@ def test_no_class_with_an_entry_restates_it_in_a_comment():
     graph = rdflib.Graph().parse(VOCABULARY, format="turtle")
     heads_folded = {h.casefold() for h in headwords(CONTEXT.read_text())}
     offenders = []
-    for s in graph.subjects(rdflib.RDF.type, rdflib.OWL.Class):
-        if not str(s).startswith(NS):
+    for name, label in ontology_classes(VOCABULARY.read_text()).items():
+        if label is None or label.casefold() not in heads_folded:
             continue
-        label = graph.value(s, rdflib.RDFS.label)
-        if label is None or str(label).casefold() not in heads_folded:
-            continue
-        if graph.value(s, rdflib.RDFS.comment) is not None:
-            offenders.append(str(s).removeprefix(NS))
+        if graph.value(rdflib.URIRef(NS + name), rdflib.RDFS.comment) is not None:
+            offenders.append(name)
     assert not offenders, (
         f"classes with a CONTEXT.md entry that still carry a comment: "
         f"{sorted(offenders)}"
