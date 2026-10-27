@@ -4,8 +4,8 @@ Ported from the spec loop driver's `cite` command
 (`.claude/skills/run-saffron-spec-loop/driver.py`), which a delegate runs by
 hand. `SA-0295` builds the callable a stack batch runs here instead, before
 each spec review pays for a session (`DESIGN.md` §4.2.1). `SA-0321` adds
-`citations_held_at` and `rewrite_moved_citations`, so a citation a parent's
-later commits moved can be moved onto its construct rather than refused.
+`citations_held_at` and `rewrite_moved_citations`, so a citation that later
+commits moved can be moved onto its single construct rather than refused.
 This module knows git and spec text, and nothing about any repo's language
 or tools.
 """
@@ -58,8 +58,8 @@ class CitationDefect:
 
 
 class Rewrite(NamedTuple):
-    """One `rewrite_moved_citations` edit: a citation's path, as written,
-    and its range before and after the move."""
+    """One `rewrite_moved_citations` edit: a citation's path, or the path a
+    bare one anchors to, and its range before and after the move."""
 
     path: str | None
     old: str
@@ -276,10 +276,7 @@ def _construct_defect(
     spans = sorted({span for found in by_name.values() for span in found})
     if not spans:
         return None
-    if any(
-        (s <= cite.start and cite.end <= e) or (cite.start <= s and e <= cite.end)
-        for s, e in spans
-    ):
+    if any(_holds(span, cite.start, cite.end) for span in spans):
         return None
     outside = [
         ln
@@ -449,18 +446,21 @@ def _sole_holder(holders: list[tuple[str, tuple[int, int]]]) -> str | None:
     return best
 
 
-def citations_held_at(mirror: Path, commit: str, text: str) -> dict[int, str]:
+def citations_held_at(
+    mirror: Path, commit: str, text: str, *, tokens_at: str | None = None
+) -> dict[int, str]:
     """For each citation `text` makes, the one clause name that holds it at
-    `commit`, keyed by that citation's `offset`. A name holds a citation
-    when it opens exactly one construct at `commit`, with the range
-    inside that construct or holding it whole. When more than one name
-    holds it and the constructs nest, the inner name holds it. Two
-    disjoint constructs, or two of equal length, hold nothing. A
-    citation whose path, range or earlier anchor does not resolve at
-    `commit` holds nothing too, with no raise for that.
+    `commit`, keyed by that citation's `offset`. `tokens_at`'s tree, when
+    given, decides which tokens read as paths, as the later check reads
+    them. A name holds a citation when it opens exactly one construct
+    at `commit`, with the range inside it or holding it whole. Of nested
+    holders, the inner one holds it. Two disjoint constructs, or two of
+    equal length, hold nothing. Nor does a citation whose path, range or
+    earlier anchor does not resolve at `commit`.
     """
     names_in_tree = _tree_names(mirror, commit)
-    suffixes = {Path(n).suffix for n in names_in_tree if Path(n).suffix}
+    token_tree = names_in_tree if tokens_at is None else _tree_names(mirror, tokens_at)
+    suffixes = {Path(n).suffix for n in token_tree if Path(n).suffix}
     citations = _extract_citations(text, suffixes)
     patterns = _citation_patterns(mirror, commit, names_in_tree)
     lines_of = _lines_reader(mirror, commit, names_in_tree)
@@ -494,8 +494,8 @@ def rewrite_moved_citations(
     onto that construct's range, in `text`, leaving every other character
     as written. A defect with no spans is left as it stands. So is one
     whose held name opens no construct, or more than one, or that `held`
-    does not name. Returns the new text, the rewrites made and the
-    defects left, both in the order `defects` came in.
+    does not name. Returns the new text, the rewrites made in text order,
+    and the defects left in the order `defects` came in.
     """
     edits: list[tuple[int, int, str, Rewrite]] = []
     left: list[CitationDefect] = []

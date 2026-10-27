@@ -1294,27 +1294,30 @@ def _stack_cite(
     tuple[str, list[CitationDefect], Mapping[int, str]],
 ]:
     """`run_stack_batch`'s `cite` adapter (`SA-0295`, `SA-0321`). Checks a
-    spec's citations at the same commit `_stack_review` seeds its cell at
+    spec's citations at the commit `_stack_review` seeds its cell at
     (`_stack_head`), never at the operator's checkout. A `None` spec text
     reads the queued file at `base_sha`, and a missing one raises
-    `ValueError` before any fetch, as `_stack_revise` does. It also holds
-    that text's citations at the spec's own commit (`_own_commit`). A
-    given text has none, so its held map comes back empty. The checked
-    commit sits in `heads`, for the review right after this to reuse
-    with no second fetch.
+    `ValueError` before any fetch. That text's citations are also held
+    at the spec's own commit (`_own_commit`), tokenized by the checked
+    tree. A given text holds none. The checked commit sits in `heads`,
+    for the review right after this to reuse with no second fetch.
     """
 
     def run(
         candidate: Candidate, layer: Candidate | None, spec_text: str | None
     ) -> tuple[str, list[CitationDefect], Mapping[int, str]]:
         held: Mapping[int, str] = {}
+        queued = spec_text is None
         if spec_text is None:
             spec_text = _queued_spec_text(pinned, candidate)
-            own_commit = _own_commit(pinned, f".saffron/specs/{candidate.path.name}")
-            held = citations_held_at(pinned.mirror, own_commit, spec_text)
         head = _stack_head(pinned, layer, stack_base)
         if heads is not None:
             heads[_heads_key(candidate, layer)] = head
+        if queued:
+            own_commit = _own_commit(pinned, f".saffron/specs/{candidate.path.name}")
+            held = citations_held_at(
+                pinned.mirror, own_commit, spec_text, tokens_at=head
+            )
         defects = citation_defects(pinned.mirror, head, spec_text)
         return spec_text, defects, held
 

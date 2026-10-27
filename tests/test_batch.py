@@ -7731,9 +7731,9 @@ def test_a_stack_batch_records_a_spec_text_with_its_moved_citations_rewritten_be
     ledger, repo_id, monkeypatch
 ):
     """A spec whose `cite` returns defects `rewrite_moved_citations` fully
-    rewrites is not refused. The batch records the rewritten text as a
-    revision. It hands that text to the review, and to a later `revise`
-    round. It emits one `moved` line per rewrite, in text order, naming
+    rewrites is not refused. The batch records the rewritten text under
+    origin `revision`. It hands that text to the review, and to a later
+    `revise` route. It emits one `moved` line per rewrite, in text order, naming
     a bare citation's own anchored path. A spec with no defect records no
     text."""
     from saffron import spec_review as spec_review_module

@@ -9578,8 +9578,8 @@ def test_a_stack_batchs_citation_check_returns_the_text_it_checked(
 
     held_calls: list[tuple] = []
 
-    def _fake_citations_held_at(mirror_arg, commit, text):
-        held_calls.append((mirror_arg, commit, text))
+    def _fake_citations_held_at(mirror_arg, commit, text, *, tokens_at=None):
+        held_calls.append((mirror_arg, commit, text, tokens_at))
         return {7: "sentinel"}
 
     monkeypatch.setattr(cli, "citation_defects", _spy_citation_defects)
@@ -9596,7 +9596,7 @@ def test_a_stack_batchs_citation_check_returns_the_text_it_checked(
     assert defects == []
     assert held == {7: "sentinel"}
     assert defects_calls == [(mirror, later_base_sha, "queued at base\n")]
-    assert held_calls == [(mirror, own_base_sha, "queued at base\n")]
+    assert held_calls == [(mirror, own_base_sha, "queued at base\n", later_base_sha)]
 
     # ".md" is a suffix the rig's tree already carries (the spec file
     # itself), so this backtick is read as a path, never as plain prose.
