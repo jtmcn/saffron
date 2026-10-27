@@ -86,7 +86,9 @@ acceptance:
       draft `_validate` refuses for its type pools with that reason. A
       first draft `_validate` refuses for its id, type, `depends_on`, budget
       or `touches` pools after one call, never sent back. Every session but
-      the raised one is charged to the origin task. Both sessions' costs
+      the raised one is charged to the origin task, once each. The witness
+      reads the origin's `WRITING` attempts' session ids in order. Both
+      sessions' costs
       count against `cap_usd`. The send-back is priced after the first
       session's cost is counted. When what is left cannot cover
       `SPEC_WRITER_SESSION_USD`, the group pools with its first draft's
@@ -103,6 +105,7 @@ acceptance:
       - The second session is charged but its cost is left out of what the sub-cap has spent.
       - A send-back the sub-cap cannot cover pools with the sub-cap reason, not the parse reason.
       - A reset time on a second session pools its own group but leaves later groups to be written.
+      - A second parse failure charges the first session again, not the second.
   - claim: >-
       The seam is one closure in `write_follow_ups`, `send_back(reason)`,
       and it owns the whole send-back step. It charges the loop's refused
@@ -200,8 +203,9 @@ never sees why. Three runs in a row lost findings this way.
      whole spec, then `reason`, then the refused draft's text.
 2. **The parse branch.** A first draft that does not parse calls
    `send_back` in place of today's charge and pool (`:373-376`). The
-   reason is `follow-up text did not parse: ` and the `SpecError` text. A `None` ends
-   the group. A raise from it pools the group with `write raised`, as a
+   reason is `follow-up text did not parse: ` and the `SpecError` text.
+   Bind its return to a new name and end the group on `None`. Only then
+   rebind `session`, so the closure's next charge reads the second session. A raise from it pools the group with `write raised`, as a
    first call's raise does (`:355-357`).
 3. **The second session.** Run it back through the same handling from
    `spent` onward (`:359` to `:399`): the reset time, the error, the
@@ -245,14 +249,17 @@ group already sent back for its parse pools there with the gate reason.
 **Charging.** Both sessions of a group that pools are charged to the origin
 task, each as its own `WRITING` attempt through `_charge`. A second draft
 that is minted is charged to its minted task, as every minted draft is
-(`saffron/follow_up.py:398-399`). Both sessions add to `spent`.
+(`saffron/follow_up.py:398-399`). Both sessions add to `spent`. The
+rebind after the `None` check also keeps `ty` reading the captured
+`session` as `SpecWriterSession`. Assigning the return to `session`
+directly made `ty` report eight errors against the prototype.
 
 **Prompt order matters to a test double.** `_write_with_assigned_id` reads
 the first `^id: ` line of the prompt (`tests/test_follow_up.py:1071-1094`).
 The origin spec text and a refused draft both carry their own `id:` lines.
 Keeping the first prompt first keeps the assigned id the first match.
 
-**Two existing tests move.** Group 12's draft in `_eighteen_turns`,
+**Three existing tests move.** Group 12's draft in `_eighteen_turns`,
 `"not a spec at all\n"`, is now sent back (`tests/test_follow_up.py:458`).
 Give `_eighteen_turns` a second refused draft right after it, one that is
 not valid YAML. Then
@@ -263,10 +270,14 @@ needs `cap_usd` of 4.5, not 4.25, for group 17 to stay accepted
 become 12 (`:583`) and the batch spend 4.25 (`:585`). The reset call's
 writing attempts become 13 (`:629`).
 `test_an_accepted_follow_up_is_a_minted_task_with_its_text_and_its_writers_cost`
-shares those turns and needs the same `cap_usd` of 4.5 (`:723`).
-`test_a_follow_up_writers_attempt_records_the_model_its_session_names`
-passed unchanged against the prototype. Its parse group now takes the
-wrong-id turn as its second draft (`:849`).
+shares those turns and needs the same `cap_usd` of 4.5 (`:723`). The new
+type line must not contain "before" or "after", which that test asserts
+absent from the first prompt (`:786-787`).
+In `test_a_follow_up_writers_attempt_records_the_model_its_session_names`
+the wrong-id turn would become the parse group's second draft (`:849`).
+Give the parse group a second unparsable turn with its own model, so the
+wrong-id turn stays a first-draft id refusal. That model joins the pooled
+list after the parse model (`:908-913`).
 
 **The witnesses.** Build each on `_build`, `_stack`, `_q`, `_finding`,
 `_candidate`, `_qualify_stub`, `_mint_stub` and `_write_stub`.
@@ -279,7 +290,9 @@ wrong-id turn as its second draft (`:849`).
   first call. On its second it returns a valid `_candidate` under the
   prompt's own assigned id. Assert each second prompt starts with its first
   prompt. In the rest, assert the error comes before the whole draft.
-- Criterion 2 runs `write_follow_ups` twice on one `_build`. The first run
+- Criterion 2 runs `write_follow_ups` twice on one `_build`. Use
+  `_write_stub`, which numbers each session `s1`, `s2` and on
+  (`tests/test_follow_up.py:317`). The first run
   has `cap_usd` 50 and eleven groups. Groups 1 to 4 each send a refused
   draft back. Their second turns are a draft that fails to parse, a type
   `test` draft, an error session and a `RuntimeError`. Groups 5 to 9 are first drafts
