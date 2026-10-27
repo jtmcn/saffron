@@ -3,7 +3,7 @@ id: SA-0327
 title: "The finishing layer queues a follow-up whose cell ran, and a follow-up draft its own gates fail, so its suite escalates"
 type: bug
 priority: 2
-estimated_lines: 130
+estimated_lines: 136
 depends_on: [SA-0325]
 touches:
   - saffron/finish.py
@@ -136,19 +136,24 @@ acceptance:
       That holds whether the first draft failed the judge or failed to
       parse. A second draft that does not parse after a judge send-back
       pools with its parse reason. One `_validate` refuses pools with that
-      reason. A judge that raises pools its group with `judge raised `, the
-      exception's type, `: ` and its text. That session is charged to the
-      origin task, and later groups are still written. A red first draft
-      the sub-cap cannot cover with a second session pools with its own
-      judge reason, after one call. Every session of a pooled group is
-      charged to the origin task.
+      reason. A judge send-back whose second `write` raises pools the group
+      with `write raised`, and the raise goes no further. A judge send-back
+      whose second session has a reset time pools its group and every later
+      group. A judge that raises pools its group with `judge raised `, the
+      exception's type, `: ` and its text. Every later group pools with that
+      reason too, and makes no `write` call. The session the judge raised on
+      is charged to the origin task. A red first draft the sub-cap cannot
+      cover pools with its own judge reason, after one call. Every session of
+      a pooled group is charged to the origin task.
     witness: tests/test_follow_up.py::test_a_draft_the_finishing_suite_fails_twice_pools_with_its_second_failures_and_never_a_third_call
     wrong_versions:
       - A second judge failure is sent back again, so a group makes three calls.
       - A draft sent back for a parse error and then failed by the judge is sent back a second time.
       - A second judge failure pools with the first judgement's lines.
       - A raise from the judge escapes `write_follow_ups`.
-      - A raise from the judge pools every later group too.
+      - A raise from the judge pools only its own group, so later groups are still written.
+      - The judge send-back sits outside the `try`, so a raise from its second `write` escapes `write_follow_ups`.
+      - A judge send-back's second session runs its own copy of the reset handling, which pools its own group but leaves later groups to be written.
       - A session whose draft the judge raised on is not charged.
       - A red first draft the sub-cap cannot cover pools with the sub-cap reason, not its judge reason.
   - claim: >-
@@ -270,14 +275,21 @@ Every finish that drafts a follow-up escalates, so none reaches its push.
    `judge(path, text)` with the path the mint would use. An empty list
    mints the draft as today. A non-empty list calls `send_back` with the
    reason `the finishing suite failed it: ` and the lines joined by `; `.
-   A `None` ends the group. A session re-enters the handling from `spent`
-   onward, so the second draft meets the same parse, `_validate` and
-   judge. On a second draft, or on a group already sent back for its
-   parse, `send_back` pools the group with that reason. A raise from
-   `judge` charges its session to the origin task through `_charge`. It
-   pools the group with `judge raised <type>: <text>`, never through
-   `send_back`.
-5. **The wiring for the judge.** In `cli._stack_follow_ups`, pass a `judge`
+   Call it inside the same `try` as `SA-0325`'s parse branch. A raise from
+   it pools the group with `write raised`, as that branch's does. Bind the
+   return to a new name, end the group on `None`, and only then rebind
+   `session`, as that branch does. The session then re-enters the one
+   handling from `spent` onward, the reset time and the error included.
+   Write no second copy of it. So the second draft meets the same parse,
+   `_validate` and judge. On a second draft, or on a group already sent
+   back for its parse, `send_back` pools the group with that reason.
+5. **A raise from the judge.** It charges its session to the origin task
+   through `_charge`, never through `send_back`. It pools the group with
+   `judge raised <type>: <text>`. Every later group pools with the same
+   reason before any `write` call, the way a reset time's reason does
+   (`saffron/follow_up.py:289-291`). A raise is infrastructure, and it
+   would repeat for each group.
+6. **The wiring for the judge.** In `cli._stack_follow_ups`, pass a `judge`
    that calls `finish.judge_draft` with `pinned.mirror`, `top.head`, the
    path, the text and `out_dir / "follow-ups" / f"{batch_key}-judge" /
    "tree"`. Its `verify` is the finishing suite over `gates_dir`
@@ -285,9 +297,10 @@ Every finish that drafts a follow-up escalates, so none reaches its push.
    `comparison.new_failures`. Reshape `_finish_verify` so the judge and
    `publish_finish` share it. `publish_finish`'s `verify` keeps returning a
    count.
-6. **Docstrings.** `commit_finish`'s docstring, the module docstrings of
+7. **Docstrings.** `commit_finish`'s docstring, the module docstrings of
    `finish.py` and `follow_up.py`, and `write_follow_ups`'s say what
-   changed. Each docstring stays within ten lines.
+   changed. A function's docstring stays within ten lines. The `prose`
+   gate exempts a module docstring (`.saffron/gates/prose.py:66`).
 
 ## Out of scope
 
@@ -314,7 +327,14 @@ criterion declares a witness and no mutant, and `witness` will report
 `revision` row after the writer's own (`saffron/batch.py:719-725`). Reading
 the latest row's origin would commit that follow-up again. In every batch
 `run_stack_batch` records, generation 1 names the same layers. The witness
-does not separate the two readings.
+does not separate the two readings. Criterion 1's arrangement is
+unmeasured: no wrong version was run against it.
+
+**The path moves up.** The judge needs the path the mint uses, so the
+`path =` line moves above the judge call (`saffron/follow_up.py:390`).
+
+**Records amended by hand.** `DESIGN.md:472` and ADR 7's second amendment
+line are amended in this spec's pull request, not by the cell.
 
 **What the judge costs.** No model spend. Each judged draft costs one
 `reverify`: two gate-only cells, each running the whole suite. This repo's
@@ -329,7 +349,8 @@ as `test_queued_specs.py`'s.
 - `test_the_finishing_commit_writes_each_layers_and_unrun_texts_and_moves_no_spec`
   expects `TE-20-follow.md` in the commit (`tests/test_finish.py:517`,
   `:525-527`). `TE-20` is a follow-up layer in the `stack` fixture, so drop
-  both checks.
+  both checks. Its `assert len(emitted) == 1` becomes 2, since `TE-20`'s
+  new line joins `TE-24`'s (`tests/test_finish.py:491`).
 - Every `commit_finish` call in `tests/test_finish.py` needs a `ran_dir`
   (`:482`, `:535`, `:588`, `:648`, `:663`, `:713`, `:1382`, `:1393`).
 - `_fake_commit_finish` names its keywords
@@ -369,8 +390,9 @@ as `test_queued_specs.py`'s.
   calls the `judge` it is handed. Record `finish.judge_draft`'s arguments,
   and call the `verify` it was handed.
 
-**What the witnesses leave.** After a judge send-back, a second session
-that raises, carries an error or meets a reset time reaches `send_back`'s
-own handling. `SA-0325`'s witnesses drive those three, and these do not.
+**What the witnesses leave.** After a judge send-back, criterion 5 drives
+a second `write` that raises and a second session with a reset time. A
+second session that carries an error meets the same shared handling.
+`SA-0325`'s witnesses drive it after a parse send-back, and these do not.
 A `.saffron/specs` path that `_REVISION_PATH` refuses has more shapes than
 the two driven. Each meets the same `re.fullmatch`.
