@@ -90,7 +90,13 @@ def parse(records: list[Record]) -> rdflib.Graph:
                 graph.add(
                     (node, FACTORY.principleNumber, rdflib.Literal(int(found.group(1))))
                 )
-                graph.add((node, FACTORY.claim, rdflib.Literal(_claim(lines, number))))
+                graph.add(
+                    (
+                        node,
+                        FACTORY.principleClaim,
+                        rdflib.Literal(_claim(lines, number)),
+                    )
+                )
                 graph.add((node, FACTORY.contributedBy, appendix))
     return graph
 
@@ -114,7 +120,7 @@ def principles(graph: rdflib.Graph) -> list[tuple[int, str, str]]:
     rows = []
     for node in graph.subjects(rdflib.RDF.type, FACTORY.Principle):
         number = _one(graph, node, FACTORY.principleNumber)
-        claim = _one(graph, node, FACTORY.claim)
+        claim = _one(graph, node, FACTORY.principleClaim)
         appendix = _one(graph, node, FACTORY.contributedBy)
         letter = _one(graph, rdflib.URIRef(appendix), FACTORY.appendixLetter)
         rows.append((int(number), claim, letter))

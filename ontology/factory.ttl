@@ -256,7 +256,7 @@ factory:Principle a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "princi
 factory:RevisionAppendix a owl:Class ; rdfs:subClassOf prov:Entity ; rdfs:label "revision appendix" .
 
 factory:principleNumber a owl:DatatypeProperty ; rdfs:domain factory:Principle ; rdfs:range xsd:integer .
-factory:claim a owl:DatatypeProperty ; rdfs:domain factory:Principle ; rdfs:range xsd:string .
+factory:principleClaim a owl:DatatypeProperty ; rdfs:domain factory:Principle ; rdfs:range xsd:string .
 factory:contributedBy a owl:ObjectProperty ; rdfs:domain factory:Principle ; rdfs:range factory:RevisionAppendix ;
     rdfs:comment "Exactly one. A principle is allocated its number by the appendix that found it, which is why the sequence stays contiguous without a registry." .
 factory:appendixLetter a owl:DatatypeProperty ; rdfs:domain factory:RevisionAppendix ; rdfs:range xsd:string .

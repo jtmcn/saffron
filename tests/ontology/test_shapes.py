@@ -72,6 +72,70 @@ def test_every_shape_has_a_negative_fixture(shapes_graph):
     assert named == {p.stem for p in NEGATIVE}
 
 
+def test_the_principle_shape_constrains_the_principle_claim_property(shapes_graph):
+    """`PrincipleShape` moved its claim property from `factory:claim` to
+    `factory:principleClaim`, keeping the same four constraints: at least one
+    value, at most one, datatype `xsd:string`, minimum length 12."""
+    appendix = (
+        ':a a factory:RevisionAppendix ; factory:appendixLetter "A" ; '
+        "factory:coversRevision 1 ."
+    )
+    conforming = (
+        f"{appendix} :p a factory:Principle ; factory:principleNumber 57 ; "
+        'factory:principleClaim "A claim of adequate length" ; '
+        "factory:contributedBy :a ."
+    )
+    refused = {
+        "old property": (
+            f"{appendix} :p a factory:Principle ; factory:principleNumber 57 ; "
+            'factory:claim "A claim of adequate length" ; factory:contributedBy :a .'
+        ),
+        "too short": (
+            f"{appendix} :p a factory:Principle ; factory:principleNumber 57 ; "
+            'factory:principleClaim "elevenchars" ; factory:contributedBy :a .'
+        ),
+        "two values": (
+            f"{appendix} :p a factory:Principle ; factory:principleNumber 57 ; "
+            'factory:principleClaim "claimnumber1", "claimnumber2" ; '
+            "factory:contributedBy :a ."
+        ),
+        "wrong datatype": (
+            f"{appendix} :p a factory:Principle ; factory:principleNumber 57 ; "
+            "factory:principleClaim 12345678901234 ; factory:contributedBy :a ."
+        ),
+    }
+
+    def _parse(body: str) -> rdflib.Graph:
+        return rdflib.Graph().parse(
+            data=f"@prefix factory: <{NS}> .\n"
+            "@prefix : <urn:software-factory:data:> .\n"
+            f"{body}",
+            format="turtle",
+        )
+
+    conforms, _, text = validate(
+        _parse(conforming), shacl_graph=shapes_graph, advanced=True
+    )
+    assert conforms, text
+
+    for name, body in refused.items():
+        conforms, results, text = validate(
+            _parse(body), shacl_graph=shapes_graph, advanced=True
+        )
+        assert not conforms, name
+        violated: set[str] = set()
+        for _, _, source in results.triples((None, SH.sourceShape, None)):
+            violated |= _named_shape_of(shapes_graph, source)
+        assert violated == {f"{NS}PrincipleShape"}, f"{name}: {violated}"
+
+    fixture = next(p for p in NEGATIVE if p.stem == "PrincipleShape")
+    data = rdflib.Graph().parse(fixture, format="turtle")
+    conforms, results, text = validate(data, shacl_graph=shapes_graph, advanced=True)
+    assert not conforms, text
+    paths = {str(o) for _, _, o in results.triples((None, SH.resultPath, None))}
+    assert paths == {f"{NS}contributedBy"}, paths
+
+
 def test_every_core_gate_declares_a_blocking_level(shapes_graph):
     """Generating `CoreGateShape`'s `sh:in` removed a check that was catching
     this by accident. `CoreGateBlockingShape` holds a fourth copy of the core

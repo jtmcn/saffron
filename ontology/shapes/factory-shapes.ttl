@@ -336,7 +336,7 @@ factory:PrincipleShape a sh:NodeShape ;
     sh:targetClass factory:Principle ;
     sh:property [ sh:path factory:principleNumber ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:datatype xsd:integer ; sh:minInclusive 1 ] ;
-    sh:property [ sh:path factory:claim ; sh:minCount 1 ; sh:maxCount 1 ;
+    sh:property [ sh:path factory:principleClaim ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:datatype xsd:string ; sh:minLength 12 ] ;
     sh:property [ sh:path factory:contributedBy ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:class factory:RevisionAppendix ] .
