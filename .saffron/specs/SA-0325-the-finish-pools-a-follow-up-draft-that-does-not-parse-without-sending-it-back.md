@@ -3,7 +3,7 @@ id: SA-0325
 title: "The finish pools a follow-up draft that does not parse without sending it back to the writer"
 type: bug
 priority: 2
-estimated_lines: 46
+estimated_lines: 44
 estimate_measured: true
 touches:
   - saffron/follow_up.py
@@ -51,45 +51,47 @@ risk: standard
 acceptance:
   - claim: >-
       In `write_follow_ups`, a group whose first draft `intake.parse_spec`
-      refuses gets one more `write` call, made through `follow_up.send_back`
-      with the `SpecError` text as its reason. The witness drives three
-      refusals. One draft has no frontmatter block. One has a list item that
-      opens with a backtick, so its frontmatter is not valid YAML. One
-      parses as YAML but lacks the required `title`. Each second prompt
-      begins with the first prompt in full. After it come the refused draft
-      and the error text. Before each second call, `emit` gets a line
-      naming the group's task key, its file and the error text. Each second
-      draft parses and validates, and is minted under the next id. Each
-      first session is charged to the origin task as one `WRITING` attempt
-      at its own cost. Each second session is charged to its minted task.
-      Nothing is pooled, and the batch's spend counts all six sessions.
+      refuses gets one more `write` call, made through the `send_back`
+      seam. Its reason is `follow-up text did not parse: ` and the
+      `SpecError` text. The witness drives three refusals. One draft has no
+      frontmatter block. One has a list item that opens with a backtick, so
+      its frontmatter is not valid YAML. One parses as YAML but lacks the
+      required `title`. Each second prompt begins with the first prompt in
+      full. After it come the reason, then the refused draft. `emit` gets a
+      line naming the group's task key, its file and the reason. Each
+      second draft parses and validates, and is minted under the next id.
+      Each first session is charged to the origin task as one `WRITING`
+      attempt at its own cost. Each second session is charged to its
+      minted task. Nothing is pooled, and the batch's spend counts all six
+      sessions.
     witness: tests/test_follow_up.py::test_a_draft_that_does_not_parse_is_sent_back_once_with_its_error_and_then_minted
     wrong_versions:
-      - The second prompt carries the draft and the first prompt but not the error text.
-      - The second prompt carries the error text and the first prompt but not the draft.
-      - The second prompt is the error and the draft alone, so the findings and the assigned id are gone.
-      - The second prompt puts the error before the first prompt.
+      - The second prompt carries the draft and the first prompt but not the reason.
+      - The second prompt carries the reason and the first prompt but not the draft.
+      - The second prompt is the reason and the draft alone, so the findings and the assigned id are gone.
+      - The second prompt puts the reason before the first prompt.
+      - The second prompt puts the draft before the reason.
       - Only a draft with no frontmatter block is sent back, matched on its message.
-      - The first session is not charged before the send-back.
+      - The refused session is not charged before the send-back.
       - No line is emitted for a send-back.
-      - The emitted line names the group but not the error.
+      - The emitted line names the group but not the reason.
   - claim: >-
       A group is sent back at most once. When its second draft also fails
       to parse, it pools with `follow-up text did not parse: ` and the
-      second draft's error, and no third call is made. A second session is
-      otherwise handled as a first one is. A second draft `_validate`
-      refuses for its type pools with that reason. A second session carrying an error
-      pools with it. A second call that raises pools the group with `write
-      raised`, and the raise goes no further. A second session with a reset
-      time pools its group and every later group. A first draft `_validate`
-      refuses for its id, type, `depends_on`, budget or `touches` pools
-      after one call, never sent back. Every session but the raised one is
-      charged to the origin task. The first session's cost counts against
-      `cap_usd` before the send-back is priced. When what is left cannot
-      cover `SPEC_WRITER_SESSION_USD`, the group pools with its first
-      draft's parse reason and no second call is made. The witness's
-      sub-cap run makes that true only once the first session's cost is
-      counted.
+      second draft's error, and no third call is made. A second session
+      that sets a reset time, carries an error, or raises is handled as a
+      first one is. A reset time pools its group and every later group. An
+      error pools the group with it. A raise from the second call pools the
+      group with `write raised`, and the raise goes no further. A second
+      draft `_validate` refuses for its type pools with that reason. A
+      first draft `_validate` refuses for its id, type, `depends_on`, budget
+      or `touches` pools after one call, never sent back. Every session but
+      the raised one is charged to the origin task. Both sessions' costs
+      count against `cap_usd`. The send-back is priced after the first
+      session's cost is counted. When what is left cannot cover
+      `SPEC_WRITER_SESSION_USD`, the group pools with its first draft's
+      parse reason and no second call is made. The witness's sub-cap run
+      makes that true only once each session's cost is counted.
     witness: tests/test_follow_up.py::test_a_draft_sent_back_once_pools_on_its_second_refusal_and_never_past_the_sub_cap
     wrong_versions:
       - A second parse failure is sent back again, so a group makes three calls.
@@ -98,21 +100,25 @@ acceptance:
       - The second call sits outside the `try`, so its raise escapes `write_follow_ups`.
       - The send-back is priced against what was left before the first session ran.
       - The send-back is not priced at all.
+      - The second session is charged but its cost is left out of what the sub-cap has spent.
       - A send-back the sub-cap cannot cover pools with the sub-cap reason, not the parse reason.
-      - A second parse failure pools with the first draft's error.
-      - A second session that fails to parse is not charged.
       - A reset time on a second session pools its own group but leaves later groups to be written.
   - claim: >-
-      `follow_up.send_back(write, group, *, prompt, draft, reason)` calls
-      `write` once, with `group` and a prompt that begins with `prompt` and
-      then carries `draft` and `reason`. It returns that call's session
-      unchanged. The witness passes a reason that is no parse error, the
-      text of a gate failure.
-    witness: tests/test_follow_up.py::test_the_send_back_seam_hands_the_writer_its_prompt_the_draft_and_any_reason
+      The seam is one closure in `write_follow_ups`, `send_back(reason)`,
+      and it owns the whole send-back step. It charges the loop's refused
+      session to the origin task. It pools the group with `reason` when the
+      group was already sent back, or when `cap_usd` less what is spent is
+      below `SPEC_WRITER_SESSION_USD`. Otherwise it emits its line, then
+      makes the `write` call and returns its session. It returns `None`
+      when it pooled. The witness prices a send-back where what is left
+      equals `SPEC_WRITER_SESSION_USD`, and it is sent back. It reads
+      `write` calls and emitted lines from one log. The send-back line
+      comes after the first call and before the second. The pooled line
+      comes last, with the second draft's parse reason.
+    witness: tests/test_follow_up.py::test_a_send_back_is_priced_at_its_boundary_and_logged_before_its_call
     wrong_versions:
-      - The seam leaves the draft out of the prompt.
-      - The seam leaves the reason out of the prompt.
-      - The seam calls `write` once with the first prompt and again with the new one.
+      - The send-back pools when what is left equals the session price, by `<=` where the group check uses `<`.
+      - The send-back line is emitted after the second `write` call returns.
   - claim: >-
       The prompt `write_follow_ups` gives the writer has a line naming
       `bug` and `feature`, and that line names none of the other four spec
@@ -179,49 +185,62 @@ call for one group is a new session that reads only its prompt.
 A drafted follow-up whose text does not parse is pooled at once. The writer
 never sees why. Three runs in a row lost findings this way.
 
-1. **The seam.** Add `send_back(write, group, *, prompt, draft, reason)` to
-   `saffron/follow_up.py`. It makes one `write` call for `group`. Its prompt
-   is `prompt` in full, then a short instruction to fix and resend the whole
-   spec, then `reason`, then `draft`. It returns the session. It reads
-   nothing else, so any refusal can use it. Child spec `SA-0327` will send
-   a draft back through it when the finishing suite's gates fail the draft.
-2. **The send-back.** In `write_follow_ups`, a first draft that does not
-   parse is charged to the origin task as today. Its cost is already in
-   `spent`. When `cap_usd - spent` still covers `SPEC_WRITER_SESSION_USD`,
-   emit one line naming the group's task key, its file and the parse
-   reason. Then call `send_back` with the original prompt, the refused text
-   and the `SpecError` text. When it cannot cover a session, pool the group
-   with the parse reason exactly as today.
-3. **The second session.** Handle it as a first session is handled: the
-   raise, the reset time, the error, the parse, `_validate` and the mint. A
-   second parse failure pools with the second error. It is never sent back
-   again.
+1. **The seam.** Add a closure `send_back(reason: str) ->
+   SpecWriterSession | None` inside `write_follow_ups`, beside `_pool` and
+   `_charge` (`saffron/follow_up.py:268-282`). It reads the loop's current
+   `group`, `prompt`, `session` and origin task id, and `spent`. In order:
+   - Charge the refused `session` to the origin task through `_charge`.
+   - When this group was already sent back, or `cap_usd - spent` is below
+     `SPEC_WRITER_SESSION_USD`, pool the group with `reason` and return
+     `None`. Price it with `<`, as the group check does (`:293-298`).
+   - Otherwise mark the group sent back. Emit one line naming its task
+     key, its file and `reason`.
+   - Call `write(group, …)` once and return its session. The prompt is
+     `prompt` in full, then a short instruction to fix and resend the
+     whole spec, then `reason`, then the refused draft's text.
+2. **The parse branch.** A first draft that does not parse calls
+   `send_back` in place of today's charge and pool (`:373-376`). The
+   reason is `follow-up text did not parse: ` and the `SpecError` text. A `None` ends
+   the group. A raise from it pools the group with `write raised`, as a
+   first call's raise does (`:355-357`).
+3. **The second session.** Run it back through the same handling from
+   `spent` onward (`:359` to `:399`): the reset time, the error, the
+   parse, `_validate` and the mint. A second parse failure calls
+   `send_back` again, which pools it because the group was already sent
+   back.
 4. **The types.** `_prompt` gains one line telling the writer the type must
    be `bug` or `feature`. The line names no other type.
 5. **Docstrings.** The module docstring and `write_follow_ups`'s say a draft
    that does not parse goes back to the writer once. `write_follow_ups`'s
-   docstring is nine lines now (`saffron/follow_up.py:245-254`) and must
-   stay within ten, so rewrite it rather than append.
+   docstring is ten lines now by the `prose` gate's count, already at its
+   limit (`saffron/follow_up.py:245-254`, `.saffron/gates/prose.py:67`,
+   `:321`). Rewrite it rather than append.
 
 ## Out of scope
 
 - A draft `_validate` refuses. It is not sent back, and pools as today.
   `_validate`'s `type` reason in run 47 is answered by the prompt line
   instead.
-- A draft the finishing suite's gates fail. Its send-back is `SA-0327`,
-  which calls this spec's `send_back`.
+- A draft the finishing suite's gates fail. Its send-back is `SA-0327`.
 - The writer's system prompt, `saffron/agents/prompts/spec-writer.md`,
   which `saffron draft` shares.
 - `cli.py`'s `write` and its exception handler. `write` opens a new cell
   per call (`saffron/cli.py:1673-1701`). The handler pools each group no
   mint accepted, by its key (`:1723-1744`). Neither counts calls.
-- A second send-back, or one for a raised call, a reset time or a session
-  error.
+- A second send-back for one group, whatever its reason, or one for a
+  raised call, a reset time or a session error.
 
 ## Notes for the agent
 
 The send-back and the seam are new code, so every criterion declares a
 witness and no mutant, and `witness` will report `skip` for each.
+
+**For `SA-0327`.** The child calls `send_back(reason)` with its gate
+failure as the reason. Its call site is inside `write_follow_ups`'s loop,
+after `_validate` passes and before the candidate path is built and
+`mint` runs (`saffron/follow_up.py:378-390` at base). A non-`None` return
+re-enters the handling from `spent` onward, as the parse branch's does. A
+group already sent back for its parse pools there with the gate reason.
 
 **Charging.** Both sessions of a group that pools are charged to the origin
 task, each as its own `WRITING` attempt through `_charge`. A second draft
@@ -259,7 +278,7 @@ wrong-id turn as its second draft (`:849`).
 - Criterion 1's double returns a refused draft at cost 0.5 on each group's
   first call. On its second it returns a valid `_candidate` under the
   prompt's own assigned id. Assert each second prompt starts with its first
-  prompt, and that the draft and the error sit after it.
+  prompt. In the rest, assert the error comes before the whole draft.
 - Criterion 2 runs `write_follow_ups` twice on one `_build`. The first run
   has `cap_usd` 50 and eleven groups. Groups 1 to 4 each send a refused
   draft back. Their second turns are a draft that fails to parse, a type
@@ -268,9 +287,17 @@ wrong-id turn as its second draft (`:849`).
   Group 10 is sent back to a session with a reset time. Group 11 is never
   written. Assert the exact sequence of groups `write` saw. The second run
   sets `SPEC_WRITER_SESSION_USD` to 1.0 with `monkeypatch` and `cap_usd`
-  to 1.5. Group 1 fails twice. Group 2's first session leaves 0.75, so it
-  pools after one call. Priced before that session, 1.0 would remain and it
-  would be sent back.
+  to 1.5. Every session in it costs 0.25, `_write_stub`'s default for a
+  text turn. Group 1 fails twice. Group 2's first session leaves 0.75, so
+  it pools after one call. Priced before that session, 1.0 would remain
+  and it would be sent back. Left out of `spent`, group 1's second session
+  would also leave 1.0 there. Keep that cost at 0.25, or the version that
+  drops it survives.
+- Criterion 3 sets `SPEC_WRITER_SESSION_USD` to 1.0 and `cap_usd` to 1.25,
+  with one group. Its first draft has no frontmatter block and its second
+  is not valid YAML, each at 0.25. So 1.0 is left at the send-back. Let
+  `write` and `emit` append to one list. Assert the kinds after the first
+  emitted line run `write`, `emit`, `write`, `emit`.
 - Criterion 4 reads the first prompt of one group written with
   `_write_with_assigned_id`. Find the six type names with a whole-word
   pattern on each line. Some line's set of names is exactly `bug` and
@@ -281,10 +308,9 @@ mutant naming the group's own probe. A second draft is refused by
 `_validate` only for its type. The rest reach the same `_validate` call as
 the driven ones. The parse refusals not driven are "not a mapping", a reserved
 key, both criteria forms and `DisclosedMutantError`. Each is a `SpecError`
-caught by the same clause. No witness checks that `write_follow_ups` calls
-`send_back` rather than building the prompt itself. The `dead` gate fails a
-`send_back` that only a test calls, since it scans no test
-(`.saffron/gates/dead.py:4-5`).
+caught by the same clause. No witness can see that the send-back is one
+closure rather than inline code. Criterion 3's shape is held by review and
+by `SA-0327`, which calls it.
 
 A prototype of this change passed every test in `tests/test_follow_up.py`,
 with the two edits above. Each witness failed with the source at base.
