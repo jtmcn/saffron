@@ -86,7 +86,10 @@ reads those at the `base_sha` export, never at a layer's head (principle 43).
 **A stack batch runs spec text that is not at `base_sha`.** The text is a spec
 review's revision or a follow-up, and nothing else. Every spec the operator
 queued is first read at `base_sha`. Outside a stack batch, §4.2.1's input rule
-holds unchanged.
+holds unchanged. Amended 2026-10-26, `SA-0321`: a queued spec whose moved
+citations the batch rewrote is a third such text. A rewrite moves a citation
+only onto the construct of the name that held it at the spec's own commit.
+That name opens exactly one construct at both commits.
 
 A revised spec's cell holds the base text at the spec's path. The implement
 prompt carries the revision, and core's gates read the host's parsed copy. A
