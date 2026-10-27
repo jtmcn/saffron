@@ -4,7 +4,7 @@ title: "The finishing layer queues a follow-up spec whose cell already ran, and 
 status: open
 tier: 2
 filed: 2026-10-27
-specs: []
+specs: [SA-0327]
 prs: []
 commits: []
 cites: [§5.7]
