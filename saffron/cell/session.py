@@ -1963,8 +1963,8 @@ def _apply_criterion_probes(
     wrong version with the criterion that declared it. Writes each pair's
     outcome and summary in place, and a refused pair's own
     `probe.probe_refusal` reason under `refusal` beside them. Appends a
-    survivor's `Finding` to the `adequacy` review in `reviews`, the same
-    in-place contract `_probe_adequacy` keeps.
+    survivor's `Finding` to the `adequacy` review in `reviews`, and asks it
+    a second time of the whole `tests` gate too (backlog b-b9365d).
     """
     from saffron import probe as probe_check
     from saffron.cell import worktree
@@ -2004,9 +2004,10 @@ def _apply_criterion_probes(
         )
         return
 
-    collected = next(
-        (r.collected for r in gate_comparison.run.results if r.gate == "tests"), None
+    head_tests = next(
+        (r for r in gate_comparison.run.results if r.gate == "tests"), None
     )
+    collected = None if head_tests is None else head_tests.collected
     adequacy = next(r for r in reviews if r.lens == "adequacy")
 
     stack = contextlib.ExitStack()
@@ -2094,6 +2095,32 @@ def _apply_criterion_probes(
                 entry["summary"] = f"the survivor's line could not be read: {exc}"
                 _unproven(with_edit[index + 1 :], unknown_tree)
                 return
+
+            # The second ask (backlog b-b9365d) only runs for a survivor,
+            # and only `anchored.claim` can change from it.
+            if head_tests is not None:
+                try:
+                    suite_result = probe_check.check_probe(
+                        edit,
+                        baseline=head_tests,
+                        mutate=_mutate,
+                        run_tests=_run_tests,
+                        test_paths=test_paths,
+                        counted=head_tests.collected,
+                    )
+                except runtime.CellRuntimeError:
+                    # The finding already holds today's claim, so append it
+                    # unchanged and end the loop as a witness-ask stop does.
+                    adequacy.findings.append(anchored)
+                    _unproven(with_edit[index + 1 :], unknown_tree)
+                    return
+                anchored = anchored.model_copy(
+                    update={
+                        "claim": review.survivor_claim_with_suite_verdict(
+                            anchored.claim, suite_result
+                        )
+                    }
+                )
             adequacy.findings.append(anchored)
 
 

@@ -741,6 +741,8 @@ def survivor_finding(
     cell that applied and restored the edit. The line is where `edit.find`
     begins there, never a hunk line. `version` names the wrong version the
     edit came from. Without it, the edit is read as the criterion's own.
+    `survivor_claim_with_suite_verdict` can extend the claim afterward
+    (backlog b-b9365d), keeping only the text up to the quoted claim stable.
 
     Unanchored: the caller still runs this through `findings.anchor`, exactly
     as every other finding in a `LensReview` is."""
@@ -767,6 +769,34 @@ def survivor_finding(
         probe=edit,
         probe_verdict="survived",
     )
+
+
+# `survivor_finding`'s own tail, stripped before a second ask's answer is
+# appended (backlog b-b9365d). Shared by both claim forms above.
+_WITNESS_ONLY_TAIL = ", and only that witness ran under the edit."
+
+# The kill tail's own opening phrase, checked by `rebut._blocker_line`
+# together with a leading `HOST_FILED`: a lens's claim never starts with one.
+SUITE_KILL_SENTENCE = "Under the edit the whole `tests` gate failed "
+
+
+def survivor_claim_with_suite_verdict(claim: str, result: probe.ProbeResult) -> str:
+    """`survivor_finding`'s claim, extended with a second ask of the whole
+    `tests` gate over the same edit (backlog b-b9365d, `DESIGN.md` §5.4.1).
+    `killed` names every killing node id. `survived` says the suite stayed
+    green too. `unproven` returns `claim` unchanged: nothing else answered.
+    """
+    if result.verdict == "unproven":
+        return claim
+    head = claim.removesuffix(_WITNESS_ONLY_TAIL)
+    if result.verdict == "killed":
+        # A kill can be a style or format test failing, since this repo's
+        # own suite runs those as tests too. Severity never moves for it.
+        return (
+            f"{head}. {SUITE_KILL_SENTENCE}"
+            f"{', '.join(result.failures)}, and the criterion's witness did not fail."
+        )
+    return f"{head}, and the whole `tests` gate stayed green under the edit too."
 
 
 def _describe(review: LensReview) -> str:

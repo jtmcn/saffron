@@ -152,6 +152,54 @@ def test_a_blocker_whose_probe_survived_names_the_probe_to_the_implementer():
     assert "if False:" not in lines[1]
 
 
+def test_a_survivor_whose_suite_failed_tests_is_not_shown_as_undecided():
+    """Criterion 6 (backlog b-b9365d): `_blocker_line`'s phrase for a
+    survived probe says no test was able to decide the edit. That changes
+    for a host-filed claim whose own second ask found the whole `tests`
+    gate killing it. It then says the criterion's witness did not fail
+    instead. The exception is keyed on `review.HOST_FILED` plus
+    `review.SUITE_KILL_SENTENCE` together, so a lens cannot forge it: a
+    lens's claim never starts with `review.HOST_FILED`."""
+    from saffron import probe as probe_check
+    from saffron.intake import Criterion, Mutant
+
+    criterion = Criterion(claim="the guard holds", witness="t.py::a")
+    edit = Mutant(file="src/gap.py", find="if amount < 0:", replace="if False:")
+    base = review.survivor_finding(criterion, edit, "if amount < 0:\n")
+    killed = probe_check.ProbeResult(
+        verdict="killed",
+        reason="1 new failure(s) matched a counted test",
+        failures=("t.py::b",),
+    )
+    host_filed = base.model_copy(
+        update={"claim": review.survivor_claim_with_suite_verdict(base.claim, killed)}
+    )
+
+    lens_survivor = _blocker(
+        lens="adequacy",
+        claim="the guard never rejects a negative amount",
+        probe_verdict="survived",
+        probe={"file": "src/gap.py", "find": "if amount < 0:", "replace": "if False:"},
+    )
+    quoting_lens_survivor = _blocker(
+        lens="adequacy",
+        claim=(
+            "nothing guards this. "
+            f"{review.SUITE_KILL_SENTENCE}t.py::b, and the criterion's "
+            "witness did not fail — or so the host would claim."
+        ),
+        probe_verdict="survived",
+        probe={"file": "src/gap.py", "find": "if amount < 0:", "replace": "if False:"},
+    )
+
+    lines = rebut.blocker_lines(
+        [(1, host_filed), (2, lens_survivor), (3, quoting_lens_survivor)]
+    ).splitlines()
+    assert lines[0].endswith("and the criterion's witness did not fail)")
+    assert lines[1].endswith("and no test able to decide it failed)")
+    assert lines[2].endswith("and no test able to decide it failed)")
+
+
 def _run(
     *texts,
     blockers=None,
