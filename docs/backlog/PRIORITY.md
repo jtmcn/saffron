@@ -589,6 +589,11 @@ finish's follow-up drafts fail to parse, so it files nothing.
 commits fixed. A chain child is refused for citations its parent moved. A
 host-filed probe runs a witness that never imports the mutated file.
 
+**Placed 2026-10-26**, from writing `SA-0321`: **b-8e12c1**, by hand in
+`SA-0321`'s own pull request. ADR 7, `DESIGN.md` §4.2.1 and `CONTEXT.md`
+each name the texts a stack batch runs that are not at `base_sha`.
+`SA-0321` adds a third.
+
 ### Tier 3 — real, not urgent
 
 **Placed 2026-10-16**, from the spec loop's run 42: **b-60317d**.

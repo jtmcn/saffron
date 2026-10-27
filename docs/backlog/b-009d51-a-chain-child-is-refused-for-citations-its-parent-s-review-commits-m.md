@@ -4,7 +4,7 @@ title: "A chain child is refused for citations its parent's review commits moved
 status: open
 tier: 2
 filed: 2026-10-25
-specs: []
+specs: [SA-0321]
 prs: []
 commits: []
 cites: [§3.4]
