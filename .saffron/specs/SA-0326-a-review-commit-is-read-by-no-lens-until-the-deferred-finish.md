@@ -3,7 +3,7 @@ id: SA-0326
 title: A review commit is read by no lens until the deferred finish, and no command reads one on its own
 type: feature
 priority: 2
-estimated_lines: 300
+estimated_lines: 320
 touches:
   - saffron/commit_review.py
   - saffron/cli.py
@@ -49,7 +49,7 @@ forbidden:
   - tests/test_queued_specs.py
 budget_usd: 48
 max_attempts: 3
-max_turns: 200
+max_turns: 240
 risk: standard
 acceptance:
   - claim: >-
@@ -96,14 +96,17 @@ acceptance:
       range starts at its rebased copy. That copy is the commit on the
       head's first-parent chain whose full message equals the packaged
       commit's. The witness restacks the task's branch onto its moved
-      predecessor, then adds a review commit. Each system prompt holds that
-      review commit's added line. It holds neither the predecessor's moved
-      line nor the packaged commit's added line.
+      predecessor, then adds two review commits. The newer one repeats the
+      packaged commit's subject with another body, and each adds its own
+      line. Each system prompt holds both review commits' added lines. It
+      holds neither the predecessor's moved line nor the packaged commit's
+      added line.
     witness: tests/test_commit_review.py::test_review_starts_a_restacked_branchs_range_at_the_packaged_commits_rebased_copy
     wrong_versions:
       - The range always started at `pushed_sha`, so the predecessor's move reads as review work.
       - The range started at the predecessor's fetched head, so the packaged change reads as review work.
       - A decline whenever `pushed_sha` is not an ancestor of the head.
+      - The copy matched on the subject alone, by `--format=%s` or by `git log --grep`, so the newer review commit starts the range.
   - claim: >-
       A task holding recorded spec texts is read against its newest one,
       never the spec file at `base_sha`. The witness records two texts for a
@@ -128,40 +131,63 @@ acceptance:
       - Only the first lens's findings counted toward the exit.
       - An exit of 2 whenever any lens broke, a blocker beside it included.
   - claim: >-
-      With no blocker from either lens, each of three breaks exits 2. In the
+      With no blocker from either lens, each of four breaks exits 2. In the
       first the Spec lens's turn raises `AgentFailed`, and the review file
       records that lens's error. That failed turn's cost is still charged
-      through one `COMMIT_REVIEW` attempt. In the second
-      `end_review.layer_cell` raises. The review file then records an error
-      for both lenses, and no attempt opens. In the third `gh pr view` exits
-      non-zero, and no cell opens. The witness drives all three.
+      through one `COMMIT_REVIEW` attempt. The second is the same break in
+      the Standards lens's turn alone. In the third `end_review.layer_cell`
+      raises. The review file then records an error for both lenses, and no
+      attempt opens. In the fourth `gh pr view` exits non-zero, and no cell
+      opens. The witness drives all four.
     witness: tests/test_commit_review.py::test_review_exits_two_when_a_lens_or_its_cell_breaks_and_charges_the_failed_turn
     wrong_versions:
       - A broken lens read as one that found nothing, so the exit is 0.
+      - Only the first lens's error read, so a Standards break alone exits 0.
       - A failed turn left with no attempt, or one carrying a cost of 0.
       - A failed `gh pr view` read as a decline that prints and returns.
   - claim: >-
-      The command declines each of these twelve tasks before any cell. They
-      are an id with no task row, and a task with no pull request. Next come
-      a task whose adopted pull request has no packaged head, and a task of
-      another repo than `--repo`'s. Then a pull request GitHub reports
-      `MERGED`, and one it reports `CLOSED`. Then a fetched head equal to
-      `pushed_sha`, and a restacked head that is the packaged commit's
-      rebased copy itself. Then a head holding neither the packaged commit
-      nor a commit carrying its message. Then a task with no recorded text
-      and no `.saffron/specs/<spec id>-*.md` at `base_sha`. Then one with no
-      recorded text and a spec file there whose sha is not `spec_sha`. Last
-      is a task the command would read, with `CLAUDE_CODE_OAUTH_TOKEN`
-      unset. Each decline prints `review:` and its reason, then exits 2.
-      None opens a cell, runs an agent, opens an attempt or writes a review
-      file. The witness drives all twelve in one test.
+      The command declines each of these thirteen tasks before any cell.
+      Each prints `review:` and a reason holding the fragment named here,
+      then exits 2. An id with no task row gives "names no task". A task
+      with a pushed head and no pull request gives "carries no pull
+      request". A task whose adopted pull request has no packaged head gives
+      "has no packaged head". A task of another repo than `--repo`'s gives
+      "belongs to another repo". A pull request GitHub reports `MERGED`
+      gives "is MERGED", and one it reports `CLOSED` gives "is CLOSED". A
+      fetched head equal to `pushed_sha` gives "is the packaged head". A
+      restacked head that is the packaged commit's rebased copy itself gives
+      "is the packaged commit's rebased copy". A head holding neither the
+      packaged commit nor a commit carrying its message gives "holds no
+      packaged commit". A newest recorded text that `parse_spec` refuses
+      gives "recorded text does not parse". With no recorded text, a missing
+      `.saffron/specs/<spec id>-*.md` at `base_sha` gives "no spec file". A
+      spec file there whose sha is not `spec_sha` gives "does not hash to".
+      A task the command would read, with `CLAUDE_CODE_OAUTH_TOKEN` unset,
+      gives "CLAUDE_CODE_OAUTH_TOKEN is unset". None opens a cell, runs an
+      agent, opens an attempt or writes a review file. The witness drives all
+      thirteen in one test and asserts each case's own fragment.
     witness: tests/test_commit_review.py::test_review_declines_each_task_it_cannot_read_before_any_cell_and_exits_two
     wrong_versions:
-      - Any one of the twelve declines dropped.
+      - Any one of the thirteen declines dropped, so its case falls through to a later decline with another reason.
+      - A recorded text that does not parse left to raise, so `main` exits 2 with no `review:` line.
       - A state check that declines `CLOSED` and lets `MERGED` through.
       - An empty range checked only as head equal to `pushed_sha`, so a restacked copy with nothing on it reaches a cell.
       - The token read only after the cell opens.
       - A decline that exits 1, so a caller reads it as a blocker.
+  - claim: >-
+      The spec body both lenses read opens with one framing paragraph that
+      `commit_review.py` holds. It says the diff holds only the review
+      commits made after the cell's packaged head, and that a criterion met
+      below the range is not unmet. It names the range start and the head by
+      sha. In each system prompt it sits under the spec heading, ahead of
+      the spec's own body. The spec file and the recorded texts stay
+      unchanged.
+    witness: tests/test_commit_review.py::test_review_frames_the_spec_body_as_review_commits_over_a_packaged_head
+    wrong_versions:
+      - No framing paragraph, so the Spec lens reads the review commits as the whole layer.
+      - The paragraph in the Spec lens's prompt alone.
+      - The paragraph after the spec's body rather than ahead of it.
+      - A paragraph naming the run's `base_sha` or the packaged head's parent as the range start.
   - claim: >-
       A SIGTERM while a lens runs exits 143 through `_guarding_sigterm`. The
       cell `end_review.layer_cell` opened is torn down first. The witness
@@ -273,11 +299,12 @@ passes the resolved `--repo`, the ledger, the shared `out_dir`,
    whose full message equals `pushed_sha`'s. Decline when none matches.
    Decline when the range start is the head itself.
 5. Export `.saffron/` at the run's `base_sha` and load the policy from it.
-   Take the spec from the task's newest recorded text when it holds one.
-   Otherwise take the file under the export's `.saffron/specs/` whose sha
+   Take the spec from the task's newest recorded text when it holds one,
+   declining a text `parse_spec` refuses. Otherwise take the file under the export's `.saffron/specs/` whose sha
    is the task's `spec_sha`, declining when there is none.
 6. Decline a `CLAUDE_CODE_OAUTH_TOKEN` that is unset or empty.
-7. Build one `LayerFields`: `base` and `diff_base` the range start, `head`
+7. Prepend the framing paragraph below to the spec's body. Build one
+   `LayerFields`: `base` and `diff_base` the range start, `head`
    the fetched head, `known` the task's `_known_block`. Call
    `end_review._review_one_layer` with a `resolve` that returns it. Pass
    the same `open_cell`, `context_md`, `claude_md`, prompts, ceilings and
@@ -288,6 +315,18 @@ passes the resolved `--repo`, the ledger, the shared `out_dir`,
 
 A decline prints `review:` and its reason, and returns 2. Any other raise
 propagates to `main`, which exits 2.
+
+**The framing paragraph.** Both end-review prompts were written for a whole
+layer, and the Spec lens files an unmet criterion as a blocker
+(`saffron/agents/prompts/end-review-spec.md:12-14`, `saffron/agents/prompts/end-review-spec.md:38-39`). So the body
+handed to the lenses opens with one paragraph, built in `commit_review.py`.
+It says the diff holds only the review commits made after the cell's
+packaged head, and it names both shas. It says a criterion met below the
+range is not unmet. The lens reads the worktree at the head, so it can find one. The
+prompt files stay as they are.
+
+**Each decline's reason** carries the fragment criterion 6 names, so a
+caller can tell one decline from another.
 
 **Exit codes.** 1 when any finding of either lens is a `blocker`. Otherwise
 2 when either lens carries an error. Otherwise 0. A blocker is counted
@@ -331,9 +370,13 @@ and one naming the review file's path.
   review commit is a separate edit.
 - **`DESIGN.md` and `CONTEXT.md`.** Both are protected. The paragraph in
   §6.1 and the vocabulary entries are backlog item b-bc8343, by hand.
-- **The lens prompts.** Both end-review prompts read a whole layer. Here
-  they read the review commits alone, and the worktree holds the full tree.
-  A prompt that names that difference is a later change.
+- **The lens prompts.** The files stay as they are. The framing paragraph
+  rides in the spec body. Exit 1 is still unmeasured as a signal. No live
+  review commit was read this way. How often the Spec lens files a blocker
+  for a criterion met below the range is unknown.
+- **The stack page.** `saffron/report/stack.py:136-155` lists six attempt
+  labels, so its attempt table omits `COMMIT_REVIEW` rows while
+  `task_spend` counts them. Backlog item b-bc8343 carries it.
 - **The join lens.** One task's range has no seam to read.
 - **A merge into the branch.** A review range holding GitHub's "update
   branch" merge reads the merged commits as review work.
@@ -390,6 +433,10 @@ the spec's sha. Record one in-cell finding under a lens in `review.LENSES`.
 Call `set_task_package` with the packaged commit and a pull request URL.
 Write a `findings.json` into the task's directory first.
 
+**Criterion 2's two review commits.** Add the first review commit with its
+own subject. Add the second with the packaged commit's subject, another body
+and its own line. A subject match then starts the range at the second.
+
 **Criterion 2's restack.** Fork a predecessor branch from `base_sha` with a
 commit, and fork the task's branch from it. Move the predecessor with a
 commit adding its own line. Rebase the task's branch onto the moved
@@ -404,7 +451,10 @@ task's spec id, and holds its own body marker.
 **Criterion 5's failed turn.** Raise `AgentFailed(message, attempt)` with an
 `attempt` whose cost is not zero.
 
-**Criterion 6's cases.** Unset the token for the last case alone. Seed a run
+**Criterion 6's cases.** Unset the token for the last case alone. Build the
+no-pull-request case with `ledger.record_push`, so the task has a
+`pushed_sha` and no `pr_url`. Record one text that does not parse for the
+unparseable case. Assert each case's own fragment, never `review:` alone. Seed a run
 at a commit with no spec for the missing file. Seed a `spec_sha` of zeros for
 the mismatched one. Seed a task under a second repo row for another repo.
 Use `adopt_pull_request` on a task with no package for the missing head. A
@@ -418,8 +468,15 @@ test's handler never ran.
 
 **Residuals, one line each.**
 
-- `layer_cell` names its cell for the spec id. A finish reading the same spec
-  at once collides with it.
+- `layer_cell` names its cell for the spec id and removes any container of
+  that name first (`saffron/end_review.py:774-781`). A `saffron review` run
+  during a finish of the same spec removes the finish's lens cell. The
+  operator does not run the two at once.
+- `_review_one_layer` turns any raise into an error for both lenses at cost
+  0 (`saffron/end_review.py:472-476`). A rate-limited Standards turn raises
+  `RateLimited`, a `RuntimeError` (`saffron/cell/session.py:248`). So a
+  Spec blocker before it is lost, the exit is 2, and the file shows cost 0
+  while the attempts hold the spend. `end_review.py` stays forbidden.
 - The session's attempts join the batch's spend through its run. A deferred
   batch's `saffron finish` then has that much less left for follow-ups.
 - `saffron package` declines a task that carries a pull request, so it never

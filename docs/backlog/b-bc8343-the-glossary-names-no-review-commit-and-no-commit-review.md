@@ -35,7 +35,9 @@ reading one task's review commits, from its packaged head to its pull
 request's head at origin. The **End-review lens** entry names that second
 reader. The **Phase** entry adds COMMIT_REVIEW beside SPEC_REVIEW and
 SPEC_WRITING. `DESIGN.md` §6.1 gains a paragraph beside `saffron regate`'s, naming the
-command, its range and its three exit codes. All of it lands after `SA-0326` merges.
+command, its range and its three exit codes. The stack page's attempt table
+(`saffron/report/stack.py:136-155`) gains a COMMIT_REVIEW row, which a cell
+can land. All of it lands after `SA-0326` merges.
 
 ## Record
 
