@@ -1122,7 +1122,7 @@ withholding is what makes the edit evidence. Its author cannot see what would
 kill it, so it is not chosen to be killed. The edit is a **criterion probe**
 (`CONTEXT.md` §4). One that survives its criterion's witness is a claim nothing
 guards. The host applies each one in a gate-only cell. A survivor is a blocker for REBUT
-whether or not it anchors to the diff (`SA-0120`, `SA-0299`, ADR 3).
+whether or not it anchors to the diff (`SA-0120`, `SA-0299`, ADR 3). Its claim names each test that failed under the same edit and not at head (`SA-0322`). Where the suite answered and none did, it says the whole `tests` gate stayed green.
 
 **An edit a spec lists in prose.** A criterion also lists its known **wrong
 versions** (`CONTEXT.md` §4), one sentence each (`SA-0187`). The implementer

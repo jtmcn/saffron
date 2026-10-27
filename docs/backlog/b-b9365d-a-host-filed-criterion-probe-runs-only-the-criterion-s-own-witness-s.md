@@ -4,7 +4,7 @@ title: "A host-filed criterion probe runs only the criterion's own witness, so a
 status: open
 tier: 2
 filed: 2026-10-25
-specs: []
+specs: [SA-0322]
 prs: []
 commits: []
 cites: [§5.5]

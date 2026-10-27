@@ -520,7 +520,7 @@ Each session sees one claim and the diff, and is never told which test is its wi
 Its edits are recorded in `criterion-probes.json`. A criterion probe that survives its own
 criterion's witness is the finding: nothing guards the claim. The host applies each one in
 a gate-only cell, and a survivor is a blocker for REBUT whether or not it anchors (`SA-0120`,
-`SA-0299`).
+`SA-0299`). Its claim names each test that failed under the same edit and not at head (`SA-0322`). Where the suite answered and none did, it says the whole `tests` gate stayed green.
 _Avoid_: "mutant" for one. A mutant is declared in a criterion, and a criterion probe is
 named by a session that wrote neither the code nor the witness. _Avoid_ "vacuity probe" for
 one. A lens names a vacuity probe against the tests, and a criterion probe targets a claim.
