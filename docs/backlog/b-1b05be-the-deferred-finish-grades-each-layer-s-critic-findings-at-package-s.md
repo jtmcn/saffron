@@ -4,7 +4,7 @@ title: "The deferred finish grades each layer's critic findings at PACKAGE's hea
 status: open
 tier: 2
 filed: 2026-10-25
-specs: []
+specs: [SA-0320]
 prs: []
 commits: []
 cites: [§5.7]
