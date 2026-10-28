@@ -149,6 +149,15 @@ judge or new failures, and `2` is infrastructure:
 uv run saffron regate <task id> --repo .
 ```
 
+Read a pull request's own review commits with the end review's two lenses, and
+charge the session to the task. It changes no task state, and it needs
+`CLAUDE_CODE_OAUTH_TOKEN`. Exit `1` is a blocker, `2` is a declined task or a
+broken lens, and `0` is clean:
+
+```sh
+uv run saffron review <task id> --repo .
+```
+
 Print the next free spec id for a checkout, reading its spec files and, when one
 exists, the home ledger. It adds no ledger row and creates no ledger:
 
