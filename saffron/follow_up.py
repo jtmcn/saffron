@@ -283,6 +283,33 @@ def write_follow_ups(
             cost_usd_est=session.cost_usd,
         )
 
+    def send_back(reason: str) -> spec_review.SpecWriterSession | None:
+        """Charge the refused `session`. Pool `group` with `reason`
+        when `already_sent_back`, or the sub-cap cannot cover one
+        more session. Otherwise resend `prompt` once, with `reason`
+        and the refused draft appended, and return its session.
+        """
+        # Reads the loop's current names at call time, so B023 has no loop to flag.
+        _charge(origin_task_id, session)
+        remainder = cap_usd - spent
+        below_cap = remainder < spec_review.SPEC_WRITER_SESSION_USD
+        if already_sent_back or below_cap:
+            _pool(group, reason)
+            return None
+        emit(f"sending back {group.task_key} {group.file}: {reason}")
+        resend_prompt = (
+            f"{prompt}\n"
+            "The reply above did not parse as a spec. Fix it and resend "
+            "the whole spec text.\n"
+            f"{reason}\n"
+            f"{session.text}"
+        )
+        try:
+            return write(group, resend_prompt)
+        except Exception as exc:
+            _pool(group, f"write raised {type(exc).__name__}: {exc}")
+            return None
+
     spent = 0.0
     reset_reason: str | None = None
     candidates: list[Candidate] = []
@@ -359,34 +386,6 @@ def write_follow_ups(
             continue
 
         already_sent_back = False
-
-        def send_back(reason: str) -> spec_review.SpecWriterSession | None:
-            """Charge the refused `session`. Pool `group` with `reason`
-            when `already_sent_back`, or the sub-cap cannot cover one
-            more session. Otherwise resend `prompt` once, with `reason`
-            and the refused draft appended, and return its session.
-            """
-            # Every name below is read in the same loop pass that set it,
-            # never a later one: B023's own false positive for this shape.
-            _charge(origin_task_id, session)  # noqa: B023
-            remainder = cap_usd - spent  # noqa: B023
-            below_cap = remainder < spec_review.SPEC_WRITER_SESSION_USD  # noqa: B023
-            if already_sent_back or below_cap:  # noqa: B023
-                _pool(group, reason)  # noqa: B023
-                return None
-            emit(f"sending back {group.task_key} {group.file}: {reason}")  # noqa: B023
-            resend_prompt = (
-                f"{prompt}\n"  # noqa: B023
-                "The reply above did not parse as a spec. Fix it and resend "
-                "the whole spec text.\n"
-                f"{reason}\n"
-                f"{session.text}"  # noqa: B023
-            )
-            try:
-                return write(group, resend_prompt)  # noqa: B023
-            except Exception as exc:
-                _pool(group, f"write raised {type(exc).__name__}: {exc}")  # noqa: B023
-                return None
 
         while True:
             spent += session.cost_usd
