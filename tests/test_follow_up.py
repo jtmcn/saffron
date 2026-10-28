@@ -1118,6 +1118,27 @@ def test_a_draft_sent_back_once_pools_on_its_second_refusal_and_never_past_the_s
 
     assert candidates_a == []
     assert len(pooled_a) == 11
+    writing_a = [
+        a["session_id"]
+        for a in built.ledger.attempts(built.task_102)
+        if a["phase"] == spec_review.WRITING_PHASE
+    ]
+    assert writing_a == [
+        "s1",
+        "s2",
+        "s3",
+        "s4",
+        "s5",
+        "s-a3b",
+        "s7",
+        "s9",
+        "s10",
+        "s11",
+        "s12",
+        "s13",
+        "s-a10",
+    ]
+    assert pooled_a[3].reason.startswith("write raised ")
     expected_sequence = (
         [groups_a[0]] * 2
         + [groups_a[1]] * 2
