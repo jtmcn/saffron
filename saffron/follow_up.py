@@ -283,6 +283,8 @@ def write_follow_ups(
             cost_usd_est=session.cost_usd,
         )
 
+    already_sent_back = False
+
     def send_back(reason: str) -> spec_review.SpecWriterSession | None:
         """Charge the refused `session`. Pool `group` with `reason`
         when `already_sent_back`, or the sub-cap cannot cover one
@@ -290,16 +292,18 @@ def write_follow_ups(
         and the refused draft appended, and return its session.
         """
         # Reads the loop's current names at call time, so B023 has no loop to flag.
+        nonlocal already_sent_back
         _charge(origin_task_id, session)
         remainder = cap_usd - spent
         below_cap = remainder < spec_review.SPEC_WRITER_SESSION_USD
         if already_sent_back or below_cap:
             _pool(group, reason)
             return None
+        already_sent_back = True
         emit(f"sending back {group.task_key} {group.file}: {reason}")
         resend_prompt = (
             f"{prompt}\n"
-            "The reply above did not parse as a spec. Fix it and resend "
+            "The reply above was refused. Fix it and resend "
             "the whole spec text.\n"
             f"{reason}\n"
             f"{session.text}"
@@ -409,7 +413,6 @@ def write_follow_ups(
                 resent = send_back(f"follow-up text did not parse: {exc}")
                 if resent is None:
                     break
-                already_sent_back = True
                 session = resent
                 continue
 
