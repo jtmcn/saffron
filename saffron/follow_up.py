@@ -3,11 +3,12 @@ candidates (ADR 7, backlog item b-792ab2, step 7).
 
 `write_follow_ups` is the first caller of `qualify.qualify`. It walks one
 stack's layers, asks the injected `qualify` for `FollowUpGroup`s, and turns
-each affordable, validated group into a `Candidate` a caller can `mint`.
-Other groups join the caller-owned `pooled` list instead. A reset time, a
-spent sub-cap, a stale probe or an untrusted spec sends a group there. This module
-opens no cell and calls no model. `write` and `mint` are the caller's own
-adapters.
+each affordable, validated group into a `Candidate` a caller can `mint`. A
+draft that fails to parse goes back to the writer once, through
+`send_back`. Every other group that cannot become a follow-up joins the
+caller-owned `pooled` list instead: a reset time, a spent sub-cap, a stale
+probe or an untrusted spec. This module opens no cell and calls no model.
+`write` and `mint` are the caller's own adapters.
 """
 
 from __future__ import annotations
@@ -160,6 +161,7 @@ def _prompt(
         f"{top_head}.",
         f"id: {candidate_id}",
         f"budget_usd must not exceed {budget}.",
+        "the declared type must be bug or feature, not any other spec type.",
         "allowed paths:",
         *(f"- {path}" for path in allowed),
         "findings:",
@@ -246,12 +248,12 @@ def write_follow_ups(
 
     Walks `stack.layers` top down through `qualify`'s own grouping. Every
     group that survives the reset, sub-cap, probe and allowed-path checks
-    gets one `write` call, its text validated before it is minted. Opens
-    no cell. `write` and `mint` are the caller's own. Every head and range
-    comes from `stack.fields` through `graded_fields`, falling back to
-    `end_review.layer_fields`'s packaged head for a layer absent from it.
-    An in-cell concern's line names its packaged head instead.
-    """
+    gets one `write` call. A parse failure goes back to the writer once,
+    through `send_back`. A second failure pools the group, and a
+    validated draft is minted. Opens no cell. `write` and `mint` are the
+    caller's own. Every head and range falls back to
+    `end_review.layer_fields`'s packaged head for a layer `stack.fields`
+    has none for."""
     qualification = qualify(stack.layers, stack.join)
     emit(f"{len(qualification.pool)} qualified findings joined no group")
     if not stack.layers:
@@ -356,62 +358,100 @@ def write_follow_ups(
             _pool(group, f"write raised {type(exc).__name__}: {exc}")
             continue
 
-        spent += session.cost_usd
+        already_sent_back = False
 
-        if session.resets_at is not None:
-            reset_reason = "a spec writer session met the account's rate limit"
-            _charge(origin_task_id, session)
-            _pool(group, reset_reason)
-            continue
-        if session.error is not None:
-            _charge(origin_task_id, session)
-            _pool(group, f"the spec writer session carried an error: {session.error}")
-            continue
+        def send_back(reason: str) -> spec_review.SpecWriterSession | None:
+            """Charge the refused `session`. Pool `group` with `reason`
+            when `already_sent_back`, or the sub-cap cannot cover one
+            more session. Otherwise resend `prompt` once, with `reason`
+            and the refused draft appended, and return its session.
+            """
+            # Every name below is read in the same loop pass that set it,
+            # never a later one: B023's own false positive for this shape.
+            _charge(origin_task_id, session)  # noqa: B023
+            remainder = cap_usd - spent  # noqa: B023
+            below_cap = remainder < spec_review.SPEC_WRITER_SESSION_USD  # noqa: B023
+            if already_sent_back or below_cap:  # noqa: B023
+                _pool(group, reason)  # noqa: B023
+                return None
+            emit(f"sending back {group.task_key} {group.file}: {reason}")  # noqa: B023
+            resend_prompt = (
+                f"{prompt}\n"  # noqa: B023
+                "The reply above did not parse as a spec. Fix it and resend "
+                "the whole spec text.\n"
+                f"{reason}\n"
+                f"{session.text}"  # noqa: B023
+            )
+            try:
+                return write(group, resend_prompt)  # noqa: B023
+            except Exception as exc:
+                _pool(group, f"write raised {type(exc).__name__}: {exc}")  # noqa: B023
+                return None
 
-        try:
-            candidate_spec = intake.parse_spec(session.text)
-        except intake.SpecError as exc:
-            _charge(origin_task_id, session)
-            _pool(group, f"follow-up text did not parse: {exc}")
-            continue
+        while True:
+            spent += session.cost_usd
 
-        reason = _validate(
-            candidate_spec,
-            candidate_id=candidate_id,
-            origin=origin,
-            group=group,
-            allowed=allowed,
-        )
-        if reason is not None:
-            _charge(origin_task_id, session)
-            _pool(group, reason)
-            continue
+            if session.resets_at is not None:
+                reset_reason = "a spec writer session met the account's rate limit"
+                _charge(origin_task_id, session)
+                _pool(group, reset_reason)
+                break
+            if session.error is not None:
+                _charge(origin_task_id, session)
+                _pool(
+                    group,
+                    f"the spec writer session carried an error: {session.error}",
+                )
+                break
 
-        path = f".saffron/specs/{candidate_id}-{_slug(candidate_spec.title)}.md"
-        assert session.spec_sha is not None  # non-empty text always hashes
-        candidate = Candidate(
-            path=Path(path),
-            spec=candidate_spec,
-            spec_sha=session.spec_sha,
-            task_id=None,
-        )
-        task_id = mint(candidate)
-        _charge(task_id, session)
-        ledger.attach_run_to_batch(ledger.task_run(task_id), int(batch_key))
-        ledger.record_spec_text(
-            task_id,
-            origin="follow_up",
-            spec_id=candidate_spec.id,
-            path=path,
-            text=session.text,
-        )
-        candidates.append(
-            Candidate(
+            try:
+                candidate_spec = intake.parse_spec(session.text)
+            except intake.SpecError as exc:
+                resent = send_back(f"follow-up text did not parse: {exc}")
+                if resent is None:
+                    break
+                already_sent_back = True
+                session = resent
+                continue
+
+            reason = _validate(
+                candidate_spec,
+                candidate_id=candidate_id,
+                origin=origin,
+                group=group,
+                allowed=allowed,
+            )
+            if reason is not None:
+                _charge(origin_task_id, session)
+                _pool(group, reason)
+                break
+
+            path = f".saffron/specs/{candidate_id}-{_slug(candidate_spec.title)}.md"
+            assert session.spec_sha is not None  # non-empty text always hashes
+            candidate = Candidate(
                 path=Path(path),
                 spec=candidate_spec,
                 spec_sha=session.spec_sha,
-                task_id=task_id,
+                task_id=None,
             )
-        )
+            task_id = mint(candidate)
+            _charge(task_id, session)
+            ledger.attach_run_to_batch(ledger.task_run(task_id), int(batch_key))
+            ledger.record_spec_text(
+                task_id,
+                origin="follow_up",
+                spec_id=candidate_spec.id,
+                path=path,
+                text=session.text,
+            )
+            candidates.append(
+                Candidate(
+                    path=Path(path),
+                    spec=candidate_spec,
+                    spec_sha=session.spec_sha,
+                    task_id=task_id,
+                )
+            )
+            break
 
     return candidates

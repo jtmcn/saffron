@@ -455,7 +455,8 @@ def _eighteen_turns() -> list:
             touches=("src/b.py", "tests/test_c.py"),
             claims=("claim-concern-b",),
         ),  # 11 touches (untouched test)
-        "not a spec at all\n",  # 12 parse
+        "not a spec at all\n",  # 12 parse (first draft)
+        "---\n- `broken\n---\nbody\n",  # 12 parse (second draft, sent back once)
         spec_review.SpecWriterSession(
             text="",
             cost_usd=0.25,
@@ -517,15 +518,15 @@ def test_a_group_the_host_refuses_or_the_sub_cap_cannot_cover_goes_to_the_pool(
         specs_dir=built.specs_dir,
         repo_id=built.repo_id,
         test_paths=["tests/**"],
-        cap_usd=4.25,
+        cap_usd=4.5,
         emit=emitted.append,
         pooled=pooled,
     )
 
     assert qualify_calls == [(stack.layers, stack.join)]
-    assert len(emitted) == 18
+    assert len(emitted) == 19
     assert "2" in emitted[0]
-    assert len(write_calls) == 15
+    assert len(write_calls) == 16
     assert len(candidates) == 3
     assert len(pooled) == 17
 
@@ -580,9 +581,9 @@ def test_a_group_the_host_refuses_or_the_sub_cap_cannot_cover_goes_to_the_pool(
         for a in built.ledger.attempts(built.task_102)
         if a["phase"] == spec_review.WRITING_PHASE
     ]
-    assert len(writing) == 11
+    assert len(writing) == 12
     assert [a["subtype"] for a in writing].count("error") == 1
-    assert built.ledger.batch_spend(built.batch_id) == pytest.approx(4.0)
+    assert built.ledger.batch_spend(built.batch_id) == pytest.approx(4.25)
 
     # SA-0110 is the highest id now, so the calls below start at SA-0111.
 
@@ -626,7 +627,7 @@ def test_a_group_the_host_refuses_or_the_sub_cap_cannot_cover_goes_to_the_pool(
         for a in built.ledger.attempts(built.task_102)
         if a["phase"] == spec_review.WRITING_PHASE
     ]
-    assert len(reset_writing) == 12
+    assert len(reset_writing) == 13
 
     # `test_paths` that match nothing changed in the stack's range pools
     # every group with no write call at all.
@@ -720,7 +721,7 @@ def test_an_accepted_follow_up_is_a_minted_task_with_its_text_and_its_writers_co
         specs_dir=built.specs_dir,
         repo_id=built.repo_id,
         test_paths=["tests/**"],
-        cap_usd=4.25,
+        cap_usd=4.5,
         emit=lambda line: None,
         pooled=pooled,
     )
@@ -855,6 +856,18 @@ def test_a_follow_up_writers_attempt_records_the_model_its_session_names(
             spec_sha=hash_artifact("not a spec at all\n"),
             model="wm-parse",
         ),
+        # The parse group's second (sent-back) draft, which fails to parse
+        # too and so pools on its second refusal rather than being resent.
+        spec_review.SpecWriterSession(
+            text="---\n- `broken\n---\nbody\n",
+            cost_usd=0.25,
+            error=None,
+            resets_at=None,
+            session_id="s-parse2",
+            num_turns=3,
+            spec_sha=hash_artifact("---\n- `broken\n---\nbody\n"),
+            model="wm-parse2",
+        ),
         spec_review.SpecWriterSession(
             text=wrong_id_text,
             cost_usd=0.25,
@@ -907,9 +920,404 @@ def test_a_follow_up_writers_attempt_records_the_model_its_session_names(
     assert [a["model"] for a in pooled_attempts] == [
         "wm-error",
         "wm-parse",
+        "wm-parse2",
         "wm-wrongid",
         "wm-rate",
     ]
+
+
+_NO_FRONTMATTER = "not a spec at all\n"
+_BAD_YAML = "---\n- `broken\n---\nbody\n"
+
+
+def _concern_group(task_key: str, file: str, claim: str) -> FollowUpGroup:
+    return FollowUpGroup(
+        task_key=task_key,
+        file=file,
+        findings=(_q(task_key, _finding("spec", "concern", file, 1, claim)),),
+    )
+
+
+def test_a_draft_that_does_not_parse_is_sent_back_once_with_its_error_and_then_minted(
+    tmp_path, monkeypatch
+):
+    from saffron import follow_up, intake, spec_review
+
+    monkeypatch.setattr(spec_review, "SPEC_WRITER_SESSION_USD", 1.0)
+
+    built = _build(tmp_path)
+    stack = _stack(built)
+    key_102 = built.ledger.record_key(built.task_102)
+
+    groups = [
+        _concern_group(key_102, "src/b.py", "claim-no-frontmatter"),
+        _concern_group(key_102, "src/b.py", "claim-bad-yaml"),
+        _concern_group(key_102, "src/b.py", "claim-no-title"),
+    ]
+    no_title = _spec_text(
+        {"id": "SA-0999", "type": "feature", "budget_usd": 5.0, "touches": ["src/b.py"]}
+    )
+    bad_drafts = [_NO_FRONTMATTER, _BAD_YAML, no_title]
+
+    expected_errors = []
+    for bad in bad_drafts:
+        with pytest.raises(intake.SpecError) as exc_info:
+            intake.parse_spec(bad)
+        expected_errors.append(str(exc_info.value))
+
+    write_calls: list = []
+
+    def write(group, prompt):
+        write_calls.append((group, prompt))
+        i = len(write_calls) - 1
+        if i % 2 == 0:
+            text = bad_drafts[i // 2]
+        else:
+            match = re.search(r"^id: (\S+)$", prompt, re.MULTILINE)
+            assert match is not None
+            text = _candidate(match.group(1), touches=(group.file, "tests/test_b.py"))
+        return spec_review.SpecWriterSession(
+            text=text,
+            cost_usd=0.5,
+            error=None,
+            resets_at=None,
+            session_id=f"s{i + 1}",
+            num_turns=2,
+            spec_sha=hash_artifact(text),
+        )
+
+    emitted: list = []
+    mint_calls: list = []
+    pooled: list = []
+    before = built.ledger.batch_spend(built.batch_id)
+
+    candidates = follow_up.write_follow_ups(
+        built.ledger,
+        stack,
+        batch_key=str(built.batch_id),
+        qualify=_qualify_stub([], groups, []),
+        write=write,
+        mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], mint_calls),
+        mirror=built.mirror,
+        specs_dir=built.specs_dir,
+        repo_id=built.repo_id,
+        test_paths=["tests/**"],
+        cap_usd=50.0,
+        emit=emitted.append,
+        pooled=pooled,
+    )
+
+    assert pooled == []
+    assert len(candidates) == 3
+    assert len(write_calls) == 6
+
+    for i, error in enumerate(expected_errors):
+        first_prompt = write_calls[2 * i][1]
+        second_prompt = write_calls[2 * i + 1][1]
+        reason = f"follow-up text did not parse: {error}"
+        assert second_prompt.startswith(first_prompt)
+        rest = second_prompt[len(first_prompt) :]
+        assert rest.index(reason) < rest.index(bad_drafts[i])
+        assert any(
+            key_102 in line and "src/b.py" in line and reason in line
+            for line in emitted
+        )
+
+    writing = [
+        a
+        for a in built.ledger.attempts(built.task_102)
+        if a["phase"] == spec_review.WRITING_PHASE
+    ]
+    assert len(writing) == 3
+    assert all(a["cost_usd_est"] == pytest.approx(0.5) for a in writing)
+
+    for c in candidates:
+        attempts = built.ledger.attempts(c.task_id)
+        assert len(attempts) == 1
+        assert attempts[0]["cost_usd_est"] == pytest.approx(0.5)
+
+    after = built.ledger.batch_spend(built.batch_id)
+    assert after - before == pytest.approx(3.0)
+
+
+def test_a_draft_sent_back_once_pools_on_its_second_refusal_and_never_past_the_sub_cap(
+    tmp_path, monkeypatch
+):
+    from saffron import follow_up, spec_review
+
+    built = _build(tmp_path)
+    stack = _stack(built)
+    key_102 = built.ledger.record_key(built.task_102)
+
+    groups_a = [
+        _concern_group(key_102, "src/b.py", f"claim-a{i}") for i in range(1, 12)
+    ]
+
+    type_test_draft = _candidate("SA-0108", type_="test", claims=("claim-a2b",))
+    wrong_id_draft = _candidate("SA-0999", claims=("claim-a5",))
+    type_refusal_draft = _candidate("SA-0108", type_="refactor", claims=("claim-a6",))
+    depends_on_draft = _candidate(
+        "SA-0108", depends_on=("SA-0001",), claims=("claim-a7",)
+    )
+    budget_draft = _candidate("SA-0108", budget=999.0, claims=("claim-a8",))
+    touches_draft = _candidate(
+        "SA-0108", touches=("src/nope.py",), claims=("claim-a9",)
+    )
+    error_session = spec_review.SpecWriterSession(
+        text="",
+        cost_usd=0.25,
+        error="idle bound",
+        resets_at=None,
+        session_id="s-a3b",
+        num_turns=1,
+        spec_sha=None,
+    )
+    reset_session = spec_review.SpecWriterSession(
+        text="",
+        cost_usd=0.1,
+        error=None,
+        resets_at=99999999,
+        session_id="s-a10",
+        num_turns=0,
+        spec_sha=None,
+    )
+    turns_a = [
+        _NO_FRONTMATTER,  # g1 call1 - parse fail
+        _BAD_YAML,  # g1 call2 - parse fail again -> pooled
+        _NO_FRONTMATTER,  # g2 call1 - parse fail
+        type_test_draft,  # g2 call2 - validate (type) refusal -> pooled
+        _NO_FRONTMATTER,  # g3 call1 - parse fail
+        error_session,  # g3 call2 - error -> pooled
+        _NO_FRONTMATTER,  # g4 call1 - parse fail
+        RuntimeError("cell gone"),  # g4 call2 - raise -> pooled
+        wrong_id_draft,  # g5 call1 - id refusal -> pooled
+        type_refusal_draft,  # g6 call1 - type refusal -> pooled
+        depends_on_draft,  # g7 call1 - depends_on refusal -> pooled
+        budget_draft,  # g8 call1 - budget refusal -> pooled
+        touches_draft,  # g9 call1 - touches refusal -> pooled
+        reset_session,  # g10 call1 - reset -> pooled, propagates to g11
+    ]
+
+    write_calls_a: list = []
+    pooled_a: list = []
+    candidates_a = follow_up.write_follow_ups(
+        built.ledger,
+        stack,
+        batch_key=str(built.batch_id),
+        qualify=_qualify_stub([], groups_a, []),
+        write=_write_stub(write_calls_a, turns_a),
+        mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
+        mirror=built.mirror,
+        specs_dir=built.specs_dir,
+        repo_id=built.repo_id,
+        test_paths=["tests/**"],
+        cap_usd=50.0,
+        emit=lambda line: None,
+        pooled=pooled_a,
+    )
+
+    assert candidates_a == []
+    assert len(pooled_a) == 11
+    expected_sequence = (
+        [groups_a[0]] * 2
+        + [groups_a[1]] * 2
+        + [groups_a[2]] * 2
+        + [groups_a[3]] * 2
+        + [groups_a[4]]
+        + [groups_a[5]]
+        + [groups_a[6]]
+        + [groups_a[7]]
+        + [groups_a[8]]
+        + [groups_a[9]]
+    )
+    assert [call[0] for call in write_calls_a] == expected_sequence
+
+    # The second run tightens the sub-cap so group 2's own send-back is
+    # priced against `spent` *after* group 1's second session is counted.
+    monkeypatch.setattr(spec_review, "SPEC_WRITER_SESSION_USD", 1.0)
+    groups_b = [
+        _concern_group(key_102, "src/b.py", "claim-b1"),
+        _concern_group(key_102, "src/b.py", "claim-b2"),
+    ]
+    turns_b = [_NO_FRONTMATTER, _BAD_YAML, _NO_FRONTMATTER]
+    write_calls_b: list = []
+    pooled_b: list = []
+    candidates_b = follow_up.write_follow_ups(
+        built.ledger,
+        stack,
+        batch_key=str(built.batch_id),
+        qualify=_qualify_stub([], groups_b, []),
+        write=_write_stub(write_calls_b, turns_b),
+        mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
+        mirror=built.mirror,
+        specs_dir=built.specs_dir,
+        repo_id=built.repo_id,
+        test_paths=["tests/**"],
+        cap_usd=1.5,
+        emit=lambda line: None,
+        pooled=pooled_b,
+    )
+
+    assert candidates_b == []
+    assert len(write_calls_b) == 3
+    assert len(pooled_b) == 2
+    # Both pool with the parse reason: `send_back`'s sub-cap check pools
+    # with the refusal `reason` it was given, never a message of its own.
+    assert "did not parse" in pooled_b[0].reason
+    assert "did not parse" in pooled_b[1].reason
+
+    # A reset on a *second* (sent-back) session propagates to every later
+    # group too, exactly as a first session's reset already does.
+    reset_session_2 = spec_review.SpecWriterSession(
+        text="",
+        cost_usd=0.1,
+        error=None,
+        resets_at=99999999,
+        session_id="s-c1b",
+        num_turns=0,
+        spec_sha=None,
+    )
+    groups_c = [
+        _concern_group(key_102, "src/b.py", "claim-c1"),
+        _concern_group(key_102, "src/b.py", "claim-c2"),
+    ]
+    turns_c = [_NO_FRONTMATTER, reset_session_2]
+    write_calls_c: list = []
+    pooled_c: list = []
+    candidates_c = follow_up.write_follow_ups(
+        built.ledger,
+        stack,
+        batch_key=str(built.batch_id),
+        qualify=_qualify_stub([], groups_c, []),
+        write=_write_stub(write_calls_c, turns_c),
+        mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
+        mirror=built.mirror,
+        specs_dir=built.specs_dir,
+        repo_id=built.repo_id,
+        test_paths=["tests/**"],
+        cap_usd=50.0,
+        emit=lambda line: None,
+        pooled=pooled_c,
+    )
+
+    assert candidates_c == []
+    assert [call[0] for call in write_calls_c] == [groups_c[0], groups_c[0]]
+    assert len(pooled_c) == 2
+    assert "rate limit" in pooled_c[0].reason
+    assert pooled_c[1].group == groups_c[1]
+    assert "rate limit" in pooled_c[1].reason
+
+
+def test_a_send_back_is_priced_at_its_boundary_and_logged_before_its_call(
+    tmp_path, monkeypatch
+):
+    from saffron import follow_up, spec_review
+
+    monkeypatch.setattr(spec_review, "SPEC_WRITER_SESSION_USD", 1.0)
+
+    built = _build(tmp_path)
+    stack = _stack(built)
+    key_102 = built.ledger.record_key(built.task_102)
+    group = _concern_group(key_102, "src/b.py", "claim-boundary")
+
+    events: list = []
+
+    def write(group_, prompt):
+        events.append(("write", group_, prompt))
+        turn_index = sum(1 for e in events if e[0] == "write") - 1
+        text = [_NO_FRONTMATTER, _BAD_YAML][turn_index]
+        return spec_review.SpecWriterSession(
+            text=text,
+            cost_usd=0.25,
+            error=None,
+            resets_at=None,
+            session_id=f"se{turn_index + 1}",
+            num_turns=1,
+            spec_sha=hash_artifact(text),
+        )
+
+    def emit(line):
+        events.append(("emit", line))
+
+    pooled: list = []
+    candidates = follow_up.write_follow_ups(
+        built.ledger,
+        stack,
+        batch_key=str(built.batch_id),
+        qualify=_qualify_stub([], [group], []),
+        write=write,
+        mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
+        mirror=built.mirror,
+        specs_dir=built.specs_dir,
+        repo_id=built.repo_id,
+        test_paths=["tests/**"],
+        cap_usd=1.25,
+        emit=emit,
+        pooled=pooled,
+    )
+
+    assert candidates == []
+    assert len(pooled) == 1
+    assert events[0][0] == "emit"  # "N qualified findings joined no group"
+    kinds = [kind for kind, *_ in events[1:]]
+    assert kinds == ["write", "emit", "write", "emit"]
+    assert "did not parse" in events[2][1]
+    assert key_102 in events[2][1] and "src/b.py" in events[2][1]
+    assert pooled[0].reason.startswith("follow-up text did not parse")
+    # The pooled reason names the second draft's own parse error, never
+    # the first's: the loop must rebind `session` to the resend's reply.
+    assert "not valid YAML" in pooled[0].reason
+    assert "no YAML frontmatter block" not in pooled[0].reason
+
+    writing = [
+        a
+        for a in built.ledger.attempts(built.task_102)
+        if a["phase"] == spec_review.WRITING_PHASE
+    ]
+    assert [a["session_id"] for a in writing] == ["se1", "se2"]
+
+
+def test_the_writers_prompt_names_bug_and_feature_as_the_only_types(tmp_path):
+    from saffron import follow_up, intake
+
+    built = _build(tmp_path)
+    stack = _stack(built)
+    key_102 = built.ledger.record_key(built.task_102)
+    group = _concern_group(key_102, "src/b.py", "claim-types")
+
+    write_calls: list = []
+    candidates = follow_up.write_follow_ups(
+        built.ledger,
+        stack,
+        batch_key=str(built.batch_id),
+        qualify=_qualify_stub([], [group], []),
+        write=_write_with_assigned_id(write_calls),
+        mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
+        mirror=built.mirror,
+        specs_dir=built.specs_dir,
+        repo_id=built.repo_id,
+        test_paths=["tests/**"],
+        cap_usd=50.0,
+        emit=lambda line: None,
+        pooled=[],
+    )
+    assert len(candidates) == 1
+
+    from typing import get_args
+
+    prompt = write_calls[0][1]
+    names = get_args(intake.SpecType)
+    patterns = {name: re.compile(rf"\b{name}\b") for name in names}
+
+    type_lines = [
+        line
+        for line in prompt.splitlines()
+        if any(p.search(line) for p in patterns.values())
+    ]
+    matched_sets = [
+        {name for name, p in patterns.items() if p.search(line)} for line in type_lines
+    ]
+    assert {"bug", "feature"} in matched_sets
 
 
 def test_a_hundred_dollar_night_writes_one_follow_up_at_the_writer_ceiling(tmp_path):
