@@ -599,6 +599,9 @@ each name the texts a stack batch runs that are not at `base_sha`.
 on its drafts' prose, so a finish that drafts never pushes. A review commit is
 read by no lens until the finish.
 
+**Placed 2026-10-27**, from writing `SA-0326`: **b-bc8343**, by hand after
+`SA-0326` merges. `CONTEXT.md` names no review commit and no commit review.
+
 ### Tier 3 — real, not urgent
 
 **Placed 2026-10-16**, from the spec loop's run 42: **b-60317d**.
@@ -641,6 +644,9 @@ Each is a gap a seat, a finish or the run found and the stack left alone.
 **b-1b8b1e**, **b-92c92a**, **b-2a03c2**, **b-d2afe3**, **b-1ff5a3** and
 **b-3a0789**. Each is a gap a seat, a finish or the run found and the stack
 left alone.
+
+**Placed 2026-10-27**, from #985's CI run: **b-d0baf7**. A green finish
+test once found the finish's branch in the mirror.
 
 ~~**22**~~, ~~**23**~~, **31**, ~~**19**~~, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, ~~**62**~~, **63**, ~~**64**~~, **75**, **76**, **77**.

@@ -142,7 +142,14 @@ cell. The host moves no spec to `.saffron/specs/done/`. Amended
 reviewable layer. This repo's records rule wants an item closed in the tree
 that retires its spec, and the host cannot close an item. Batch 19's finish failed that
 rule on its own commit. The operator now retires each spec with the item it
-closes, in a commit above the stack.
+closes, in a commit above the stack. Amended 2026-10-27, b-e0044f (`SA-0327`): the layer
+leaves out a follow-up whose cell ran in the batch. Its text goes to the batch
+tree, since a queued spec whose fix is in the tree fails this repo's queue
+test. The operator retires it with the rest. The same amendment judges each
+follow-up draft with the finishing suite before it is minted. A draft that
+fails goes back to its writer once, and a second failure pools it. A draft
+already sent back for its parse pools at its first gate failure. A judgement
+that raises pools its group and every later one.
 
 **The finishing layer's parent is the top layer's recorded head.** §5.7 says a
 parent's head is fetched, never remembered. The finish is not a task, and it
