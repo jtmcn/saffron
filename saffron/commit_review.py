@@ -6,8 +6,8 @@ PACKAGE pushes one commit, and an operator's review commits land on top of
 it. Neither the in-cell lenses nor REBUT read those. This command reuses
 `end_review`'s own Spec and Standards lenses over that slice alone. The
 slice runs from the packaged head, or its rebased copy after a restack, to
-the branch's current head. It charges the session to the task under its
-own phase. It writes its findings beside the task, never through
+the branch's current head. It charges each lens turn to the task as a
+COMMIT_REVIEW attempt, not a phase of the cell pipeline. It writes its findings beside the task, never through
 `record_findings` or `record_end_review`. An end-review row would make
 `saffron finish` refuse the batch, and a `findings` row names no head.
 """
