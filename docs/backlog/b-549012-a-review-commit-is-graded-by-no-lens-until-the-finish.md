@@ -1,11 +1,12 @@
 ---
 id: b-549012
 title: "A review commit is read by no lens until the deferred finish, so a delegate's fix that dropped a kill reached the stack"
-status: open
+status: done
 tier: 2
 filed: 2026-10-27
+closed: 2026-10-29
 specs: [SA-0326]
-prs: []
+prs: [990]
 commits: []
 cites: [§5.7]
 related: [b-e0044f]
@@ -30,3 +31,4 @@ the loop records why the end review is enough.
 ## Record
 
 - 2026-10-27: filed from the spec loop's run 49.
+- 2026-10-29: `SA-0326` landed in #990, with three review commits (spec loop run 50).

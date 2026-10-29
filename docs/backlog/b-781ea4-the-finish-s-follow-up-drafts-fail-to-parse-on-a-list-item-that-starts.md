@@ -1,11 +1,12 @@
 ---
 id: b-781ea4
 title: The finish's follow-up drafts fail to parse on a list item that starts with a backtick, so every finding is pooled
-status: open
+status: done
 tier: 2
 filed: 2026-10-24
+closed: 2026-10-29
 specs: [SA-0325]
-prs: []
+prs: [989]
 commits: []
 cites: [§4.2.1]
 related: [b-cc87b1]
@@ -33,3 +34,4 @@ with the parse error. The writer's prompt names the two types a follow-up can de
 - 2026-10-25: recurred in the spec loop's run 48. `saffron finish 55` pooled one
   draft with "spec has no YAML frontmatter block".
 - 2026-10-27: recurred twice in `saffron finish 58`, in the spec loop's run 49. Two drafts had no frontmatter block, for `saffron/qualify.py` and `tests/ontology/test_vocabulary_agrees_with_context.py`, so both findings were pooled.
+- 2026-10-29: `SA-0325` landed in #989, after a hand fix and three review commits (spec loop run 50).
