@@ -1,11 +1,12 @@
 ---
 id: b-d0baf7
 title: "A green finish test once found the finish's branch in the mirror, on a commit that passed in the run beside it"
-status: open
+status: done
 tier: 3
 filed: 2026-10-27
+closed: 2026-10-29
 specs: []
-prs: []
+prs: [992]
 commits: []
 cites: [§5.7]
 related: []
@@ -34,3 +35,10 @@ the finish leaves no ref in the mirror whatever git does.
 ## Record
 
 - 2026-10-27: filed from #985's CI run.
+- 2026-10-29: measured. CI failed this test on all 12 runs on runner image
+  `20261025.179.1`, which ships git 2.56.0. It passed on all 8 runs on
+  `20261012.163.1`, which ships git 2.55.0. Git 2.56's release notes say a
+  push to a URL now updates the ref a matching remote's fetch refspec names.
+  The test mirror is a `clone --mirror` of that URL, so the push writes the
+  finish branch into the mirror at the pushed sha. The test now accepts that
+  one ref and nothing else new.
