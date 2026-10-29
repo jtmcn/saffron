@@ -228,9 +228,10 @@ names the commit with a temporary ref while `verify` runs, since a
 gate-only cell's seed can only fetch a branch (`saffron/finish.py:382-398`).
 
 **Where a draft is accepted.** `write_follow_ups` parses each draft
-(`saffron/follow_up.py:371-376`), then `_validate` reads it (`:378-388`).
+(`saffron/follow_up.py:410-417` at `SA-0325`'s head), then `_validate`
+reads it (`:419-429`).
 A draft that passes is given its path, minted and charged to its minted
-task (`:390-408`). Nothing between `_validate` and the mint reads the
+task (`:431-449`). Nothing between `_validate` and the mint reads the
 repo's gates. The follow-ups adapter exports `.saffron/` at the pinned
 base into `follow-ups/<batch key>` (`saffron/cli.py:1638-1640`). It reads
 the top layer's graded fields there (`:1648`).
@@ -246,7 +247,7 @@ emits a line naming its task key, its file and `reason`. Then it calls
 `write` once with the first prompt, then `reason`, then the refused draft.
 A returned session re-enters the loop's handling from `spent` onward.
 `SA-0325`'s notes name this spec's call site: after `_validate` passes,
-before `mint` runs (`saffron/follow_up.py:378-390` at this base).
+before `mint` runs (`saffron/follow_up.py:419-431` at its head).
 
 ## Problem
 
@@ -278,7 +279,7 @@ Every finish that drafts a follow-up escalates, so none reaches its push.
    mints the draft as today. A non-empty list calls `send_back` with the
    reason `the finishing suite failed it: ` and the lines joined by `; `.
    `SA-0325` calls it inside its `except SpecError` clause
-   (`saffron/follow_up.py:371-376`). So use one `send_back` site shared by
+   (`saffron/follow_up.py:410-417`). So use one `send_back` site shared by
    the parse and judge refusals, or a `try` of the same shape. A raise from
    it pools the group with `write raised`, as that branch's does. Bind the
    return to a new name, end the group on `None`, and only then rebind
@@ -291,7 +292,7 @@ Every finish that drafts a follow-up escalates, so none reaches its push.
    through `_charge`, never through `send_back`. It pools the group with
    `judge raised <type>: <text>`. Every later group pools with the same
    reason before any `write` call, the way a reset time's reason does
-   (`saffron/follow_up.py:289-291`). A raise is infrastructure, and it
+   (`saffron/follow_up.py:322-324`). A raise is infrastructure, and it
    would repeat for each group.
 6. **The wiring for the judge.** In `cli._stack_follow_ups`, pass a `judge`
    that calls `finish.judge_draft` with `pinned.mirror`, `top.head`, the
@@ -347,7 +348,7 @@ includes the follow-up layers (`saffron/batch.py:987-1004`). So a draft
 judged green can meet a different tree there.
 
 **The path moves up.** The judge needs the path the mint uses, so the
-`path =` line moves above the judge call (`saffron/follow_up.py:390`).
+`path =` line moves above the judge call (`saffron/follow_up.py:431`).
 
 **Records amended by hand.** `DESIGN.md:472` and ADR 7's second amendment
 line are amended in this spec's pull request, not by the cell.
