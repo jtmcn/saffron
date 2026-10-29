@@ -1621,7 +1621,11 @@ def test_a_green_finish_pushes_its_own_branch_and_opens_its_draft_pull_request(
         after_remote = dict(before_remote)
         after_remote[f"refs/heads/{branch}"] = sha
         assert _refs(s.remote) == after_remote
-        assert _refs(s.mirror) == before_mirror
+        # git 2.56 also updates the mirror's own ref for a push to its URL.
+        mirror_refs = _refs(s.mirror)
+        if mirror_refs.get(f"refs/heads/{branch}") == sha:
+            del mirror_refs[f"refs/heads/{branch}"]
+        assert mirror_refs == before_mirror
         assert len(_git(s.mirror, "worktree", "list").splitlines()) == 1
 
         fresh = Ledger(s.ledger_path)
