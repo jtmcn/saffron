@@ -8,7 +8,7 @@ it. Neither the in-cell lenses nor REBUT read those. This command reuses
 slice runs from the packaged head, or its rebased copy after a restack, to
 the branch's current head. It charges the session to the task under its
 own phase. It writes its findings beside the task, never through
-`record_findings` or `record_end_review`. Either row there would make
+`record_findings` or `record_end_review`. An end-review row would make
 `saffron finish` refuse the batch, and a `findings` row names no head.
 """
 
@@ -21,18 +21,20 @@ from pathlib import Path
 
 from saffron import end_review
 from saffron.agents import context
-from saffron.cell.session import _SAFFRON_ROOT, TURN_TIMEOUT_S, stop_on_rejected
+from saffron.cell.session import (
+    _SAFFRON_ROOT,
+    TURN_TIMEOUT_S,
+    _close_attempt,
+    stop_on_rejected,
+)
 from saffron.events import describe
 from saffron.intake import SpecError, load_spec, parse_spec
 from saffron.ledger import Ledger
 from saffron.phases import implement
 from saffron.phases import package as package_phase
+from saffron.regate import _JUDGEABLE_STATE, _fetch
 from saffron.repos import mirror as git_mirror
 from saffron.repos.policy import load_policy
-
-# Open is the only state this reads. A merged or closed pull request has no
-# branch left to read review commits off.
-_JUDGEABLE_STATE = "OPEN"
 
 
 class _Declined(Exception):
@@ -77,16 +79,6 @@ def _pr_state(gh: package_phase.GhRunner, pr_url: str) -> None:
     state = json.loads(done.stdout)["state"]
     if state != _JUDGEABLE_STATE:
         raise _Declined(f"{pr_url} is {state}, not {_JUDGEABLE_STATE}")
-
-
-def _fetch_head(mirror: Path, url: str, branch: str) -> str:
-    # `fetch_parent_branch`'s own message would call this branch a parent.
-    try:
-        return package_phase.fetch_parent_branch(mirror, url, branch)
-    except package_phase.ParentGone as gone:
-        raise package_phase.PackageError(
-            f"task branch {branch} could not be fetched"
-        ) from gone
 
 
 def _full_message(mirror: Path, sha: str) -> str:
@@ -170,25 +162,8 @@ def _framed_body(body: str, range_start: str, head: str) -> str:
     return f"{framing}\n\n{body}"
 
 
-def _close(
-    ledger: Ledger, attempt_id: int, attempt: implement.AttemptResult | None
-) -> None:
-    ledger.close_attempt(
-        attempt_id,
-        session_id=attempt.session_id if attempt else None,
-        model=attempt.model if attempt else None,
-        # A turn that produced no result at all is not a turn that succeeded,
-        # and $0.00 here is measured absence, not a crash's zeroed fields.
-        subtype=attempt.subtype if attempt else "error",
-        terminal_reason=attempt.terminal_reason if attempt else None,
-        num_turns=attempt.num_turns if attempt else 0,
-        cost_usd_est=attempt.cost_usd_est if attempt else 0.0,
-        cost_floor_usd_est=attempt.cost_floor_usd_est if attempt else None,
-    )
-
-
 def _charging(agent, *, ledger: Ledger, task_id: int):
-    """Every turn opened and closed under phase `COMMIT_REVIEW`, never the
+    """Every turn opened and closed under phase COMMIT_REVIEW, never the
     task's own state: `session.record_attempts` defaults to that state, and
     this session never moves it (§4.1). On `AgentFailed` the attempt still
     closes, from the failed turn's own `attempt`, before the exception
@@ -200,9 +175,9 @@ def _charging(agent, *, ledger: Ledger, task_id: int):
         try:
             attempt = agent(*args, **kwargs)
         except implement.AgentFailed as failed:
-            _close(ledger, attempt_id, failed.attempt)
+            _close_attempt(ledger, attempt_id, failed.attempt)
             raise
-        _close(ledger, attempt_id, attempt)
+        _close_attempt(ledger, attempt_id, attempt)
         return attempt
 
     return charged
@@ -245,7 +220,7 @@ def run_commit_review(
         _pr_state(gh, row["pr_url"])
 
         mirror = git_mirror.ensure_mirror(repo, mirror_path)
-        head = _fetch_head(mirror, url, row["branch"])
+        head = _fetch(mirror, url, "task", row["branch"])
         range_start = _range_start(mirror, row["pushed_sha"], head)
 
         exported = git_mirror.export_saffron_dir(
