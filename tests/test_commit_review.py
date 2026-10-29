@@ -375,8 +375,7 @@ def test_review_reads_the_review_commits_with_both_end_review_lenses_and_charges
         prompt = call["options"]["system_prompt"]
         assert "review commit's own line 0" in prompt
         assert "packaged change" not in prompt
-        assert fixture.packaged_sha in prompt
-        assert fixture.review_sha in prompt
+        assert f"**Range:** `{fixture.packaged_sha}..{fixture.review_sha}`" in prompt
         # The task's own in-cell finding, from `ledger.findings`.
         assert "- concern (correctness) q.py:1: pre-existing" in prompt
         # `CLAUDE.md` at `base_sha`, never the default branch's or the
@@ -535,8 +534,7 @@ def test_review_starts_a_restacked_branchs_range_at_the_packaged_commits_rebased
         assert "review commit's own line 1" in prompt
         assert "parent moved" not in prompt
         assert "packaged change" not in prompt
-        assert rebased_copy in prompt
-        assert newest_head in prompt
+        assert f"**Range:** `{rebased_copy}..{newest_head}`" in prompt
 
 
 def test_review_reads_a_task_against_its_newest_recorded_spec_text(
@@ -685,7 +683,7 @@ def test_review_exits_two_when_a_lens_or_its_cell_breaks_and_charges_the_failed_
 
     # 1. The Spec lens's turn raises `AgentFailed`. Its attempt still charges.
     root = tmp_path / "case1"
-    home, work, task_id, _fixture1 = _seed(root)
+    home, work, task_id, fixture1 = _seed(root)
     monkeypatch.setattr(cli, "run_gh", _gh_state("OPEN", []))
     monkeypatch.setattr(end_review, "layer_cell", _fake_layer_cell([]))
 
@@ -708,6 +706,19 @@ def test_review_exits_two_when_a_lens_or_its_cell_breaks_and_charges_the_failed_
         a["session_id"] == "s-fail" and a["cost_usd_est"] == 0.05 for a in attempts
     )
     ledger.close()
+    review_file = (
+        home
+        / "batches"
+        / "v0"
+        / SPEC_ID
+        / "commit-reviews"
+        / f"{fixture1.review_sha}.json"
+    )
+    errors = {
+        r["lens"]: r["error"] for r in json.loads(review_file.read_text())["reviews"]
+    }
+    assert errors["spec"] is not None
+    assert errors["standards"] is None
 
     # 2. The same break in the Standards lens's turn alone.
     root = tmp_path / "case2"
