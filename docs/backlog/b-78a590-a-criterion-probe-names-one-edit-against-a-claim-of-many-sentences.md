@@ -71,3 +71,6 @@ it would not notice.
 
 - 2026-10-30: filed by hand, from runs 49 and 50 and the `SA-0327` probe
   records.
+- 2026-10-30: specced as `SA-0328`, #999, through two spec review rounds. The
+  design text in `DESIGN.md` §5.4.1 and the glossary entry are amended in that
+  pull request.
