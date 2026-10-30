@@ -1393,6 +1393,9 @@ def test_a_draft_the_finishing_suite_fails_is_sent_back_once_with_its_failures_a
     assert len(write_calls) == 6
     # group_parse's first draft and group_refused's draft are never judged.
     assert len(judge_calls) == 4
+    # Each judged draft is judged at the path its mint would use.
+    judged_green = [p for p, t in judge_calls if "claim-r1-bad" not in t]
+    assert judged_green == [str(c.path) for c in mint_calls]
     assert len(candidates) == 3
     assert len(pooled) == 1
     assert pooled[0].group == group_refused
@@ -1604,6 +1607,40 @@ def test_a_draft_the_finishing_suite_fails_twice_pools_with_its_second_failures_
     assert "rate limit" in pooled_c[0].reason
     assert pooled_c[1].group == gI
     assert "rate limit" in pooled_c[1].reason
+
+    # A parse send-back spends the group's one send-back: a red judgement
+    # on the resend pools it, and no third draft is written.
+    gP = _concern_group(key_102, "src/b.py", "claim-p1")
+    draft_p_red = _candidate("SA-0108", claims=("claim-p1-red",))
+    draft_p_green = _candidate("SA-0108", claims=("claim-p1-green",))
+    write_calls_d: list = []
+
+    def judge_d(path: str, text: str) -> list[str]:
+        return ["[tests] a.py:1 E1: p1-red"] if "claim-p1-red" in text else []
+
+    pooled_d: list = []
+    candidates_d = follow_up.write_follow_ups(
+        built.ledger,
+        stack,
+        batch_key=str(built.batch_id),
+        qualify=_qualify_stub([], [gP], []),
+        write=_write_stub(write_calls_d, [_NO_FRONTMATTER, draft_p_red, draft_p_green]),
+        judge=judge_d,
+        mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
+        mirror=built.mirror,
+        specs_dir=built.specs_dir,
+        repo_id=built.repo_id,
+        test_paths=["tests/**"],
+        cap_usd=50.0,
+        emit=lambda line: None,
+        pooled=pooled_d,
+    )
+
+    assert candidates_d == []
+    assert len(write_calls_d) == 2
+    assert len(pooled_d) == 1
+    assert pooled_d[0].reason.startswith("the finishing suite failed it: ")
+    assert "p1-red" in pooled_d[0].reason
 
 
 def test_the_writers_prompt_names_bug_and_feature_as_the_only_types(tmp_path):

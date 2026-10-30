@@ -588,7 +588,9 @@ def test_the_finishing_commit_leaves_out_each_follow_up_layer_that_ran_and_write
     assert len(emitted) == 3
     assert str(stack.tasks["TE-24"]) in emitted[0]
     assert "TE-20" in emitted[1]
+    assert str(tmp_path / "ran" / "TE-20-follow.md") in emitted[1]
     assert "TE-25" in emitted[2]
+    assert str(tmp_path / "ran" / "TE-25-new.md") in emitted[2]
 
     diff = sorted(
         _git(
@@ -832,6 +834,8 @@ def test_a_draft_is_judged_on_its_own_commit_atop_the_head_under_a_ref_the_judge
         assert judge_refs == {list(judge_refs)[0]: sha}
         assert _git(stack.mirror, "rev-parse", f"{sha}^1") == head
         assert _git(stack.mirror, "show", f"{sha}:{path}") == text.strip()
+        added = _git(stack.mirror, "diff", "--name-status", f"{head}..{sha}")
+        assert added.splitlines() == [f"A\t{path}"]
         return [
             NewFailure(
                 gate="tests",

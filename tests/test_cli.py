@@ -11602,6 +11602,8 @@ def test_a_stack_batchs_follow_up_judge_runs_the_finishing_suite_on_each_draft_a
     assert rcall["policy"].model_dump() == expected_policy.model_dump()
     assert rcall["policy"].protected == []
     assert rcall["spec"] == expected_spec
+    assert rcall["packaged_sha"] == "c" * 40
+    assert rcall["new_base_sha"] == "d" * 40
 
 
 def test_a_stack_batchs_finish_reads_the_heads_its_end_review_graded(
