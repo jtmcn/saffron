@@ -410,8 +410,8 @@ def run_review(
 
 
 class _ProbeAnswer(BaseModel):
-    """One session's own answer against one claimed edit: the edit it
-    names, or none, and why. `_WrongVersionReport` is built on this."""
+    """One session's own answer: the edit it names, or none, and why.
+    `_WrongVersionReport` is built on this."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -427,7 +427,7 @@ class _SentenceProbe(_ProbeAnswer):
     sentence: str
 
 
-# The bound both the prompt and `_CriterionProbeReport` enforce (backlog
+# The bound the prompt states and `_CriterionProbeReport` enforces (backlog
 # item b-78a590, `SA-0328`): a claim's sentences, not its wrong versions.
 CRITERION_PROBE_CEILING = 16
 
@@ -506,7 +506,7 @@ def run_criterion_probes(
     all. Each session lists the claim's own sentences and names one edit
     per sentence, so a bad shape is re-prompted once through
     `_parse_or_reprompt`: the session covers a whole claim, not one edit,
-    so the retry is worth paying for.
+    so the re-prompt is worth paying for.
     """
     entries = []
     for criterion in acceptance:

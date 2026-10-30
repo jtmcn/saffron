@@ -1391,9 +1391,14 @@ def test_a_criterion_probe_session_names_one_edit_per_sentence_of_the_claim_it_i
         assert "t.py::test_a" not in prompt
         assert "t.py::test_b" not in prompt
         assert "one key, `probes`" in prompt
-        # Hardcoded, not read off the live constant: a mutant that moves
+        # Hardcoded, not read off the live constant: an edit that moves
         # the constant must make this literal check fail too.
         assert "Name at most 16 entries." in prompt
+        # The per-sentence ask is the change: a prompt back at one edit fails.
+        assert "name one edit per sentence" in prompt
+        assert "For each sentence, name the smallest edit" in prompt
+        assert "a list with one entry per sentence of the claim" in prompt
+        assert "`sentence` (string): the sentence quoted from the claim" in prompt
         assert "{ceiling}" not in prompt
     assert second.claim not in prompt_a
     assert first.claim not in prompt_b
@@ -1450,6 +1455,10 @@ def test_a_criterion_probe_session_names_one_edit_per_sentence_of_the_claim_it_i
     )
     assert "Name at most 4 entries." in patched
     assert "Name at most 16 entries." not in patched
+    # The schema moves with it, so the prompt and the schema state one bound.
+    five = [{"sentence": str(n), "edit": None, "reason": "r"} for n in range(5)]
+    with pytest.raises(ValueError, match="5 probes, over the ceiling of 4"):
+        review._parse_criterion_probe_report(_probes_block(five))
 
 
 def test_a_criterion_probe_answer_that_is_not_the_schema_is_reprompted_once_in_its_own_session():
@@ -1563,6 +1572,45 @@ def test_a_criterion_probe_answer_that_is_not_the_schema_is_reprompted_once_in_i
     assert entries[7]["error"] is None
     assert entries[7]["cost_usd"] == pytest.approx(0.5)
     assert len(entries[7]["probes"]) == 16
+
+
+def test_a_criterion_probe_answer_with_a_key_the_schema_does_not_name_is_reprompted():
+    """Criterion 2: an extra key on the answer or on a probe is not the
+    schema. Ignored, the old one-edit shape would lose its `edit` silently."""
+    probe = {"sentence": "s", "edit": None, "reason": "r"}
+    extra_on_answer = (
+        "<output>\n" + json.dumps({"probes": [probe], "edit": None}) + "\n</output>"
+    )
+    extra_on_probe = _probes_block([{**probe, "x": 1}])
+    good = _probe_text(None, "names none")
+
+    for first_answer, location in [
+        (extra_on_answer, "edit\n"),
+        (extra_on_probe, "probes.0.x\n"),
+    ]:
+        record: list[dict] = []
+        entries = review.run_criterion_probes(
+            "cell",
+            acceptance=[Criterion(claim="claim", witness="t.py::a")],
+            diff=DIFF,
+            context_md=CONTEXT_MD,
+            claude_md=None,
+            prompts_dir=PROMPTS,
+            max_turns=20,
+            budget_usd=2.0,
+            agent=_probe_agent(
+                _turn(first_answer, cost=0.3, session_id="s"),
+                _turn(good, cost=0.2, session_id="s"),
+                record=record,
+            ),
+            spec_id="SY-1",
+            emit=lambda _e: None,
+        )
+        assert len(record) == 2
+        assert location in record[1]["prompt"]
+        assert "Extra inputs are not permitted" in record[1]["prompt"]
+        assert entries[0]["error"] is None
+        assert [p["reason"] for p in entries[0]["probes"]] == ["names none"]
 
 
 def test_a_criterion_whose_session_answers_nothing_usable_is_an_error_with_no_probes_and_the_next_is_still_asked():
