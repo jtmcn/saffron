@@ -4,11 +4,13 @@ candidates (ADR 7, backlog item b-792ab2, step 7).
 `write_follow_ups` is the first caller of `qualify.qualify`. It walks one
 stack's layers, asks the injected `qualify` for `FollowUpGroup`s, and turns
 each affordable, validated group into a `Candidate` a caller can `mint`. A
-draft that fails to parse goes back to the writer once, through
-`send_back`. Every other group that cannot become a follow-up joins the
-caller-owned `pooled` list instead: a reset time, a spent sub-cap, a stale
-probe or an untrusted spec. This module opens no cell and calls no model.
-`write` and `mint` are the caller's own adapters.
+draft that fails to parse, or that the injected `judge` fails against the
+finishing suite, goes back to the writer once, through `send_back`. Every
+other group that cannot become a follow-up joins the caller-owned `pooled`
+list instead: a reset time, a spent sub-cap, a stale probe, an untrusted
+spec, or a judge that raised. This module opens no cell and calls no
+model of its own. `write`, `judge` and `mint` are the caller's own
+adapters.
 """
 
 from __future__ import annotations
@@ -235,6 +237,7 @@ def write_follow_ups(
         [Sequence[end_review.LayerReview], review.LensReview | None], Qualification
     ],
     write: Callable[[FollowUpGroup, str], spec_review.SpecWriterSession],
+    judge: Callable[[str, str], Sequence[str]],
     mint: Callable[[Candidate], int],
     mirror: Path,
     specs_dir: Path,
@@ -246,14 +249,14 @@ def write_follow_ups(
 ) -> list[Candidate]:
     """One stack's qualified findings, turned into follow-up candidates.
 
-    Walks `stack.layers` top down through `qualify`'s own grouping. Every
-    group that survives the reset, sub-cap, probe and allowed-path checks
-    gets one `write` call. A parse failure goes back to the writer once,
-    through `send_back`. A second failure pools the group, and a
-    validated draft is minted. Opens no cell. `write` and `mint` are the
-    caller's own. Every head and range falls back to
-    `end_review.layer_fields`'s packaged head for a layer `stack.fields`
-    has none for."""
+    Walks `stack.layers` top down through `qualify`'s own grouping. Each
+    surviving group gets one `write` call, then one `judge` call once it
+    parses and validates. A parse failure or a red judgement goes back to
+    the writer once, through `send_back`. A second failure, or a judge
+    that raises, pools the group instead. A validated, green-judged draft
+    is minted. Opens no cell. `write`, `judge` and `mint` are the
+    caller's own adapters, and a head or range with none in
+    `stack.fields` falls back to `end_review.layer_fields`'s packaged head."""
     qualification = qualify(stack.layers, stack.join)
     emit(f"{len(qualification.pool)} qualified findings joined no group")
     if not stack.layers:
@@ -315,12 +318,12 @@ def write_follow_ups(
             return None
 
     spent = 0.0
-    reset_reason: str | None = None
+    halt_reason: str | None = None
     candidates: list[Candidate] = []
 
     for group in qualification.groups:
-        if reset_reason is not None:
-            _pool(group, reset_reason)
+        if halt_reason is not None:
+            _pool(group, halt_reason)
             continue
 
         remainder = cap_usd - spent
@@ -395,9 +398,9 @@ def write_follow_ups(
             spent += session.cost_usd
 
             if session.resets_at is not None:
-                reset_reason = "a spec writer session met the account's rate limit"
+                halt_reason = "a spec writer session met the account's rate limit"
                 _charge(origin_task_id, session)
-                _pool(group, reset_reason)
+                _pool(group, halt_reason)
                 break
             if session.error is not None:
                 _charge(origin_task_id, session)
@@ -430,6 +433,23 @@ def write_follow_ups(
 
             path = f".saffron/specs/{candidate_id}-{_slug(candidate_spec.title)}.md"
             assert session.spec_sha is not None  # non-empty text always hashes
+
+            try:
+                judged = judge(path, session.text)
+            except Exception as exc:
+                _charge(origin_task_id, session)
+                halt_reason = f"judge raised {type(exc).__name__}: {exc}"
+                _pool(group, halt_reason)
+                break
+            if judged:
+                resent = send_back(
+                    f"the finishing suite failed it: {'; '.join(judged)}"
+                )
+                if resent is None:
+                    break
+                session = resent
+                continue
+
             candidate = Candidate(
                 path=Path(path),
                 spec=candidate_spec,

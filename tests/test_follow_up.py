@@ -50,6 +50,11 @@ def _commit(repo: Path, message: str) -> str:
     return _git(repo, "rev-parse", "HEAD").strip()
 
 
+def _green_judge(path: str, text: str) -> list[str]:
+    """The judge double every test but the judge's own uses: always green."""
+    return []
+
+
 def _mirror(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     """`base`, `H1` and `H2`, as the spec's notes table describes them."""
     mirror = tmp_path / "mirror"
@@ -513,6 +518,7 @@ def test_a_group_the_host_refuses_or_the_sub_cap_cannot_cover_goes_to_the_pool(
         batch_key=str(built.batch_id),
         qualify=_qualify_stub(qualify_calls, groups, pool),
         write=_write_stub(write_calls, _eighteen_turns()),
+        judge=_green_judge,
         mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], mint_calls),
         mirror=built.mirror,
         specs_dir=built.specs_dir,
@@ -609,6 +615,7 @@ def test_a_group_the_host_refuses_or_the_sub_cap_cannot_cover_goes_to_the_pool(
         batch_key=str(built.batch_id),
         qualify=_qualify_stub([], reset_groups, []),
         write=_write_stub(reset_calls, [reset_session]),
+        judge=_green_judge,
         mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
         mirror=built.mirror,
         specs_dir=built.specs_dir,
@@ -642,6 +649,7 @@ def test_a_group_the_host_refuses_or_the_sub_cap_cannot_cover_goes_to_the_pool(
         batch_key=str(built.batch_id),
         qualify=_qualify_stub([], one_group, []),
         write=_write_stub(notest_calls, []),
+        judge=_green_judge,
         mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
         mirror=built.mirror,
         specs_dir=built.specs_dir,
@@ -678,6 +686,7 @@ def test_a_group_the_host_refuses_or_the_sub_cap_cannot_cover_goes_to_the_pool(
             batch_key=str(built.batch_id),
             qualify=_qualify_stub([], two_groups, []),
             write=_write_stub([], turns),
+            judge=_green_judge,
             mint=_raising_mint,
             mirror=built.mirror,
             specs_dir=built.specs_dir,
@@ -716,6 +725,7 @@ def test_an_accepted_follow_up_is_a_minted_task_with_its_text_and_its_writers_co
         batch_key=str(built.batch_id),
         qualify=_qualify_stub([], groups, []),
         write=_write_stub(write_calls, turns),
+        judge=_green_judge,
         mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], mint_calls),
         mirror=built.mirror,
         specs_dir=built.specs_dir,
@@ -901,6 +911,7 @@ def test_a_follow_up_writers_attempt_records_the_model_its_session_names(
         batch_key=str(built.batch_id),
         qualify=_qualify_stub([], groups, []),
         write=_write_stub(write_calls, turns),
+        judge=_green_judge,
         mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], mint_calls),
         mirror=built.mirror,
         specs_dir=built.specs_dir,
@@ -997,6 +1008,7 @@ def test_a_draft_that_does_not_parse_is_sent_back_once_with_its_error_and_then_m
         batch_key=str(built.batch_id),
         qualify=_qualify_stub([], groups, []),
         write=write,
+        judge=_green_judge,
         mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], mint_calls),
         mirror=built.mirror,
         specs_dir=built.specs_dir,
@@ -1106,6 +1118,7 @@ def test_a_draft_sent_back_once_pools_on_its_second_refusal_and_never_past_the_s
         batch_key=str(built.batch_id),
         qualify=_qualify_stub([], groups_a, []),
         write=_write_stub(write_calls_a, turns_a),
+        judge=_green_judge,
         mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
         mirror=built.mirror,
         specs_dir=built.specs_dir,
@@ -1169,6 +1182,7 @@ def test_a_draft_sent_back_once_pools_on_its_second_refusal_and_never_past_the_s
         batch_key=str(built.batch_id),
         qualify=_qualify_stub([], groups_b, []),
         write=_write_stub(write_calls_b, turns_b),
+        judge=_green_judge,
         mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
         mirror=built.mirror,
         specs_dir=built.specs_dir,
@@ -1211,6 +1225,7 @@ def test_a_draft_sent_back_once_pools_on_its_second_refusal_and_never_past_the_s
         batch_key=str(built.batch_id),
         qualify=_qualify_stub([], groups_c, []),
         write=_write_stub(write_calls_c, turns_c),
+        judge=_green_judge,
         mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
         mirror=built.mirror,
         specs_dir=built.specs_dir,
@@ -1267,6 +1282,7 @@ def test_a_send_back_is_priced_at_its_boundary_and_logged_before_its_call(
         batch_key=str(built.batch_id),
         qualify=_qualify_stub([], [group], []),
         write=write,
+        judge=_green_judge,
         mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
         mirror=built.mirror,
         specs_dir=built.specs_dir,
@@ -1298,6 +1314,335 @@ def test_a_send_back_is_priced_at_its_boundary_and_logged_before_its_call(
     assert [a["session_id"] for a in writing] == ["se1", "se2"]
 
 
+def test_a_draft_the_finishing_suite_fails_is_sent_back_once_with_its_failures_and_then_minted(
+    tmp_path, monkeypatch
+):
+    from saffron import follow_up, spec_review
+
+    monkeypatch.setattr(spec_review, "SPEC_WRITER_SESSION_USD", 1.0)
+
+    built = _build(tmp_path)
+    stack = _stack(built)
+    key_102 = built.ledger.record_key(built.task_102)
+
+    group_green = _concern_group(key_102, "src/b.py", "claim-g1")
+    group_red = _concern_group(key_102, "src/b.py", "claim-r1")
+    group_parse = _concern_group(key_102, "src/b.py", "claim-p1")
+    group_refused = _concern_group(key_102, "src/b.py", "claim-v1")
+    groups = [group_green, group_red, group_parse, group_refused]
+
+    write_calls: list = []
+
+    def write(group, prompt):
+        write_calls.append((group, prompt))
+        i = len(write_calls) - 1
+        if i == 3:  # group_parse's first draft never parses.
+            text = _NO_FRONTMATTER
+        else:
+            match = re.search(r"^id: (\S+)$", prompt, re.MULTILINE)
+            assert match is not None
+            candidate_id = match.group(1)
+            claim = {
+                0: "claim-g1-ok",  # group_green: judged green
+                1: "claim-r1-bad",  # group_red call 1: judged red
+                2: "claim-r1-good",  # group_red call 2 (resend): judged green
+                4: "claim-p1-good",  # group_parse call 2 (resend): judged green
+                5: "claim-v1",  # group_refused: wrong type, never judged
+            }[i]
+            type_ = "refactor" if i == 5 else "feature"
+            text = _candidate(candidate_id, type_=type_, claims=(claim,))
+        return spec_review.SpecWriterSession(
+            text=text,
+            cost_usd=0.5,
+            error=None,
+            resets_at=None,
+            session_id=f"s{i + 1}",
+            num_turns=2,
+            spec_sha=hash_artifact(text),
+        )
+
+    judge_calls: list = []
+
+    def judge(path: str, text: str) -> list[str]:
+        judge_calls.append((path, text))
+        if "claim-r1-bad" in text:
+            return ["[tests] a.py:1 E1: boom", "[lint] b.py:2 E2: bad"]
+        return []
+
+    emitted: list = []
+    mint_calls: list = []
+    pooled: list = []
+
+    candidates = follow_up.write_follow_ups(
+        built.ledger,
+        stack,
+        batch_key=str(built.batch_id),
+        qualify=_qualify_stub([], groups, []),
+        write=write,
+        judge=judge,
+        mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], mint_calls),
+        mirror=built.mirror,
+        specs_dir=built.specs_dir,
+        repo_id=built.repo_id,
+        test_paths=["tests/**"],
+        cap_usd=50.0,
+        emit=emitted.append,
+        pooled=pooled,
+    )
+
+    assert len(write_calls) == 6
+    # group_parse's first draft and group_refused's draft are never judged.
+    assert len(judge_calls) == 4
+    # Each judged draft is judged at the path its mint would use.
+    judged_green = [p for p, t in judge_calls if "claim-r1-bad" not in t]
+    assert judged_green == [str(c.path) for c in mint_calls]
+    assert len(candidates) == 3
+    assert len(pooled) == 1
+    assert pooled[0].group == group_refused
+    assert "neither bug nor feature" in pooled[0].reason
+
+    reason = (
+        "the finishing suite failed it: [tests] a.py:1 E1: boom; [lint] b.py:2 E2: bad"
+    )
+    first_prompt = write_calls[1][1]
+    second_prompt = write_calls[2][1]
+    assert second_prompt.startswith(first_prompt)
+    rest = second_prompt[len(first_prompt) :]
+    # The two lines join with "; ", never ", ". A single failure could not
+    # tell the two separators apart.
+    assert ", ".join(["[tests] a.py:1 E1: boom", "[lint] b.py:2 E2: bad"]) not in rest
+    assert rest.index(reason) < rest.index("claim-r1-bad")
+    assert any(
+        key_102 in line and "src/b.py" in line and reason in line for line in emitted
+    )
+
+    writing = [
+        a
+        for a in built.ledger.attempts(built.task_102)
+        if a["phase"] == spec_review.WRITING_PHASE
+    ]
+    # The refused first session of group_red, group_parse's first (its
+    # parse failure) and group_refused's only session, each charged once.
+    assert [a["session_id"] for a in writing] == ["s2", "s4", "s6"]
+
+
+def test_a_draft_the_finishing_suite_fails_twice_pools_with_its_second_failures_and_never_a_third_call(
+    tmp_path, monkeypatch
+):
+    from saffron import follow_up, spec_review
+
+    built = _build(tmp_path)
+    stack = _stack(built)
+    key_102 = built.ledger.record_key(built.task_102)
+
+    gA, gB, gC, gD, gE, gF = [
+        _concern_group(key_102, "src/b.py", f"claim-a{i}") for i in range(1, 7)
+    ]
+    draft_a1 = _candidate("SA-0108", claims=("claim-a1-try1",))
+    draft_a2 = _candidate("SA-0108", claims=("claim-a1-try2",))
+    draft_b1 = _candidate("SA-0108", claims=("claim-a2-try1",))
+    draft_c1 = _candidate("SA-0108", claims=("claim-a3-try1",))
+    draft_c2 = _candidate("SA-0108", type_="refactor", claims=("claim-a3-try2",))
+    draft_d1 = _candidate("SA-0108", claims=("claim-a4-try1",))
+    draft_e1 = _candidate("SA-0108", claims=("claim-a5-try1",))
+
+    turns_a = [
+        draft_a1,  # gA call1 - judge fails
+        draft_a2,  # gA call2 (resend) - judge fails again -> pooled
+        draft_b1,  # gB call1 - judge fails
+        _NO_FRONTMATTER,  # gB call2 (resend) - parse fail -> pooled
+        draft_c1,  # gC call1 - judge fails
+        draft_c2,  # gC call2 (resend) - validate refuses -> pooled
+        draft_d1,  # gD call1 - judge fails
+        RuntimeError("cell gone"),  # gD call2 (resend) - write raises -> pooled
+        draft_e1,  # gE call1 - the judge itself raises -> pooled, and gF too
+    ]
+
+    write_calls_a: list = []
+    judge_calls_a: list = []
+
+    def judge_a(path: str, text: str) -> list[str]:
+        judge_calls_a.append((path, text))
+        if "claim-a5-try1" in text:
+            raise RuntimeError("judge cell gone")
+        if "claim-a1-try1" in text:
+            return ["[tests] a.py:1 E1: first-a1"]
+        if "claim-a1-try2" in text:
+            return ["[tests] a.py:1 E1: second-a1"]
+        if "claim-a2-try1" in text:
+            return ["[tests] a.py:1 E1: first-a2"]
+        if "claim-a3-try1" in text:
+            return ["[tests] a.py:1 E1: first-a3"]
+        if "claim-a4-try1" in text:
+            return ["[tests] a.py:1 E1: first-a4"]
+        raise AssertionError(f"unexpected judge text: {text[:120]!r}")
+
+    pooled_a: list = []
+    candidates_a = follow_up.write_follow_ups(
+        built.ledger,
+        stack,
+        batch_key=str(built.batch_id),
+        qualify=_qualify_stub([], [gA, gB, gC, gD, gE, gF], []),
+        write=_write_stub(write_calls_a, turns_a),
+        judge=judge_a,
+        mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
+        mirror=built.mirror,
+        specs_dir=built.specs_dir,
+        repo_id=built.repo_id,
+        test_paths=["tests/**"],
+        cap_usd=50.0,
+        emit=lambda line: None,
+        pooled=pooled_a,
+    )
+
+    assert candidates_a == []
+    assert len(write_calls_a) == 9
+    assert len(judge_calls_a) == 6
+    assert len(pooled_a) == 6
+    assert pooled_a[0].group == gA
+    assert "the finishing suite failed it: " in pooled_a[0].reason
+    assert "second-a1" in pooled_a[0].reason
+    assert "first-a1" not in pooled_a[0].reason
+    assert pooled_a[1].group == gB
+    assert "did not parse" in pooled_a[1].reason
+    assert pooled_a[2].group == gC
+    assert "neither bug nor feature" in pooled_a[2].reason
+    assert pooled_a[3].group == gD
+    assert pooled_a[3].reason.startswith("write raised RuntimeError: cell gone")
+    assert pooled_a[4].group == gE
+    assert pooled_a[4].reason == "judge raised RuntimeError: judge cell gone"
+    assert pooled_a[5].group == gF
+    assert pooled_a[5].reason == pooled_a[4].reason
+
+    writing_a = [
+        a["session_id"]
+        for a in built.ledger.attempts(built.task_102)
+        if a["phase"] == spec_review.WRITING_PHASE
+    ]
+    assert writing_a == ["s1", "s2", "s3", "s4", "s5", "s6", "s7", "s9"]
+
+    # A red first draft the sub-cap cannot cover pools with its own judge
+    # reason, after one call: no resend is ever attempted.
+    monkeypatch.setattr(spec_review, "SPEC_WRITER_SESSION_USD", 1.0)
+    gG = _concern_group(key_102, "src/b.py", "claim-g1")
+    draft_g1 = _candidate("SA-0108", claims=("claim-g1-try1",))
+
+    write_calls_b: list = []
+    judge_calls_b: list = []
+
+    def judge_b(path: str, text: str) -> list[str]:
+        judge_calls_b.append((path, text))
+        return ["[tests] a.py:1 E1: g1-red"]
+
+    pooled_b: list = []
+    candidates_b = follow_up.write_follow_ups(
+        built.ledger,
+        stack,
+        batch_key=str(built.batch_id),
+        qualify=_qualify_stub([], [gG], []),
+        write=_write_stub(write_calls_b, [draft_g1]),
+        judge=judge_b,
+        mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
+        mirror=built.mirror,
+        specs_dir=built.specs_dir,
+        repo_id=built.repo_id,
+        test_paths=["tests/**"],
+        cap_usd=1.2,
+        emit=lambda line: None,
+        pooled=pooled_b,
+    )
+
+    assert candidates_b == []
+    assert len(write_calls_b) == 1
+    assert len(judge_calls_b) == 1
+    assert len(pooled_b) == 1
+    assert "the finishing suite failed it: " in pooled_b[0].reason
+    assert "g1-red" in pooled_b[0].reason
+    assert "sub-cap" not in pooled_b[0].reason
+
+    # A reset on the *second* (judge-sent-back) session propagates to every
+    # later group too, exactly as it already does after a parse send-back.
+    reset_session = spec_review.SpecWriterSession(
+        text="",
+        cost_usd=0.1,
+        error=None,
+        resets_at=99999999,
+        session_id="s-h1b",
+        num_turns=0,
+        spec_sha=None,
+    )
+    gH, gI = [_concern_group(key_102, "src/b.py", f"claim-h{i}") for i in (1, 2)]
+    draft_h1 = _candidate("SA-0108", claims=("claim-h1-try1",))
+
+    write_calls_c: list = []
+    judge_calls_c: list = []
+
+    def judge_c(path: str, text: str) -> list[str]:
+        judge_calls_c.append((path, text))
+        return ["[tests] a.py:1 E1: h1-red"]
+
+    pooled_c: list = []
+    candidates_c = follow_up.write_follow_ups(
+        built.ledger,
+        stack,
+        batch_key=str(built.batch_id),
+        qualify=_qualify_stub([], [gH, gI], []),
+        write=_write_stub(write_calls_c, [draft_h1, reset_session]),
+        judge=judge_c,
+        mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
+        mirror=built.mirror,
+        specs_dir=built.specs_dir,
+        repo_id=built.repo_id,
+        test_paths=["tests/**"],
+        cap_usd=50.0,
+        emit=lambda line: None,
+        pooled=pooled_c,
+    )
+
+    assert candidates_c == []
+    assert [call[0] for call in write_calls_c] == [gH, gH]
+    assert len(judge_calls_c) == 1
+    assert len(pooled_c) == 2
+    assert pooled_c[0].group == gH
+    assert "rate limit" in pooled_c[0].reason
+    assert pooled_c[1].group == gI
+    assert "rate limit" in pooled_c[1].reason
+
+    # A parse send-back spends the group's one send-back: a red judgement
+    # on the resend pools it, and no third draft is written.
+    gP = _concern_group(key_102, "src/b.py", "claim-p1")
+    draft_p_red = _candidate("SA-0108", claims=("claim-p1-red",))
+    draft_p_green = _candidate("SA-0108", claims=("claim-p1-green",))
+    write_calls_d: list = []
+
+    def judge_d(path: str, text: str) -> list[str]:
+        return ["[tests] a.py:1 E1: p1-red"] if "claim-p1-red" in text else []
+
+    pooled_d: list = []
+    candidates_d = follow_up.write_follow_ups(
+        built.ledger,
+        stack,
+        batch_key=str(built.batch_id),
+        qualify=_qualify_stub([], [gP], []),
+        write=_write_stub(write_calls_d, [_NO_FRONTMATTER, draft_p_red, draft_p_green]),
+        judge=judge_d,
+        mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
+        mirror=built.mirror,
+        specs_dir=built.specs_dir,
+        repo_id=built.repo_id,
+        test_paths=["tests/**"],
+        cap_usd=50.0,
+        emit=lambda line: None,
+        pooled=pooled_d,
+    )
+
+    assert candidates_d == []
+    assert len(write_calls_d) == 2
+    assert len(pooled_d) == 1
+    assert pooled_d[0].reason.startswith("the finishing suite failed it: ")
+    assert "p1-red" in pooled_d[0].reason
+
+
 def test_the_writers_prompt_names_bug_and_feature_as_the_only_types(tmp_path):
     from saffron import follow_up, intake
 
@@ -1313,6 +1658,7 @@ def test_the_writers_prompt_names_bug_and_feature_as_the_only_types(tmp_path):
         batch_key=str(built.batch_id),
         qualify=_qualify_stub([], [group], []),
         write=_write_with_assigned_id(write_calls),
+        judge=_green_judge,
         mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
         mirror=built.mirror,
         specs_dir=built.specs_dir,
@@ -1376,6 +1722,7 @@ def test_a_hundred_dollar_night_writes_one_follow_up_at_the_writer_ceiling(tmp_p
         batch_key=str(built.batch_id),
         qualify=_qualify_stub([], groups, []),
         write=write,
+        judge=_green_judge,
         mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
         mirror=built.mirror,
         specs_dir=built.specs_dir,
@@ -1427,6 +1774,7 @@ def test_a_sub_cap_of_18_dollars_writes_none_and_37_writes_two(
         batch_key=str(built.batch_id),
         qualify=_qualify_stub([], groups, []),
         write=write,
+        judge=_green_judge,
         mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
         mirror=built.mirror,
         specs_dir=built.specs_dir,
@@ -1484,6 +1832,7 @@ def test_a_stack_with_no_layers_writes_nothing_and_raises_nothing(tmp_path):
         batch_key=str(built.batch_id),
         qualify=_qualify_stub([], [], []),
         write=lambda group, prompt: pytest.fail("no layer, no session"),
+        judge=_green_judge,
         mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
         mirror=built.mirror,
         specs_dir=built.specs_dir,
@@ -1650,6 +1999,7 @@ def test_a_follow_up_is_written_from_the_heads_and_ranges_the_end_review_graded(
         batch_key=str(built.batch_id),
         qualify=_qualify_stub(qualify_calls, [top_group, bottom_group], []),
         write=_write_stub(write_calls, turns),
+        judge=_green_judge,
         mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], mint_calls),
         mirror=built.mirror,
         specs_dir=built.specs_dir,
@@ -1702,6 +2052,7 @@ def test_a_follow_up_is_written_from_the_heads_and_ranges_the_end_review_graded(
         batch_key=str(built.batch_id),
         qualify=_qualify_stub([], [top_group, bottom_group], []),
         write=_write_with_assigned_id(write_calls_mt),
+        judge=_green_judge,
         mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
         mirror=built.mirror,
         specs_dir=built.specs_dir,
@@ -1734,6 +2085,7 @@ def test_a_follow_up_is_written_from_the_heads_and_ranges_the_end_review_graded(
         batch_key=str(built.batch_id),
         qualify=_qualify_stub([], [top_group, bottom_group], []),
         write=_write_with_assigned_id(write_calls_mb),
+        judge=_green_judge,
         mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
         mirror=built.mirror,
         specs_dir=built.specs_dir,

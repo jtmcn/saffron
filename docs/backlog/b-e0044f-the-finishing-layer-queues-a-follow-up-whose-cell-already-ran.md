@@ -1,11 +1,12 @@
 ---
 id: b-e0044f
 title: "The finishing layer queues a follow-up spec whose cell already ran, and judges the writer's drafts with `prose`, so it escalates"
-status: open
+status: done
 tier: 2
 filed: 2026-10-27
+closed: 2026-10-30
 specs: [SA-0327]
-prs: []
+prs: [996]
 commits: []
 cites: [§5.7]
 related: [b-fdbedc, b-781ea4]
@@ -33,3 +34,4 @@ fail on a draft's prose. A finish that drafts a spec reaches its push.
 ## Record
 
 - 2026-10-27: filed from the spec loop's run 49.
+- 2026-10-30: done in #996 (`SA-0327`), from the spec loop's run 50.

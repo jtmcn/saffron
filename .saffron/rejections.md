@@ -2667,3 +2667,18 @@ seat finding the in-cell critic and the end review both passed.
 - `SA-0326` (#990): the module docstring called the COMMIT_REVIEW attempt
   label a phase, which finish 60's Standards lens found. **Bucket 3**,
   conventions. **Landed:** a review commit on #990.
+
+## 2026-10-30, spec loop run 50 (#996)
+
+- `SA-0327` (#996): five witnesses each let a named claim through. They
+  missed the ran line's path, the judged diff, the judged path,
+  `reverify`'s two shas, and a parse send-back then a red judgement.
+  **Bucket 3**, adequacy. **Landed:** a review commit on #996.
+- `SA-0327` (#996): a judge raise was kept in `reset_reason`, a name made
+  for a rate limit. **Bucket 3**, conventions. **Landed:** a review commit
+  on #996.
+- `SA-0327` (#996): `judge_draft` copied `commit_finish`'s commit block line
+  for line. **Bucket 3**, conventions. **Landed:** a review commit on #996.
+- `SA-0327` (#996): `commit_finish`'s docstring dropped why its symlink
+  refusal exists. **Bucket 3**, conventions. **Landed:** a review commit on
+  #996.

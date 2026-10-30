@@ -594,7 +594,7 @@ host-filed probe runs a witness that never imports the mutated file.
 each name the texts a stack batch runs that are not at `base_sha`.
 `SA-0321` adds a third.
 
-**Placed 2026-10-27**, from the spec loop's run 49: **b-e0044f**, then
+**Placed 2026-10-27**, from the spec loop's run 49: ~~**b-e0044f**~~, then
 ~~**b-549012**~~. The finishing layer queues a follow-up whose cell ran and fails
 on its drafts' prose, so a finish that drafts never pushes. A review commit is
 read by no lens until the finish.
@@ -656,6 +656,9 @@ test once found the finish's branch in the mirror.
 
 **Placed 2026-10-29**, from #990's Spec seat: **b-8971e6**. Two commands
 read a task's spec from the first sorted file for its id.
+
+**Placed 2026-10-30**, from #996's Standards seat and finish 61: **b-25b7ba**.
+Two renderers spell a new failure, and they disagree on line 0.
 
 ~~**22**~~, ~~**23**~~, **31**, ~~**19**~~, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, ~~**62**~~, **63**, ~~**64**~~, **75**, **76**, **77**.

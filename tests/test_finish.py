@@ -485,12 +485,14 @@ def test_the_finishing_commit_writes_each_layers_and_unrun_texts_and_moves_no_sp
         [stack.tasks["TE-24"], stack.tasks["TE-21"]],
         mirror=stack.mirror,
         workdir=tmp_path / "work",
+        ran_dir=tmp_path / "ran",
         emit=emitted.append,
     )
     assert sha is not None
 
-    assert len(emitted) == 1
+    assert len(emitted) == 2
     assert str(stack.tasks["TE-24"]) in emitted[0]
+    assert "TE-20" in emitted[1]
 
     assert _git(stack.mirror, "rev-parse", f"{sha}^1") == stack.heads["TE-20"]
     author = _git(stack.mirror, "show", "-s", "--format=%an <%ae>", sha)
@@ -511,10 +513,10 @@ def test_the_finishing_commit_writes_each_layers_and_unrun_texts_and_moves_no_sp
         ).splitlines()
     )
     # Retiring to `done/` is the operator's, beside the item it closes (ADR 7).
+    # TE-20 is a follow-up layer, so its own text leaves the commit (below).
     assert diff == sorted(
         [
             "M\t.saffron/specs/TE-7-seven.md",
-            "A\t.saffron/specs/TE-20-follow.md",
             "A\t.saffron/specs/TE-21-other.md",
         ]
     )
@@ -522,13 +524,14 @@ def test_the_finishing_commit_writes_each_layers_and_unrun_texts_and_moves_no_sp
     assert "Seven r2" in _git(
         stack.mirror, "show", f"{sha}:.saffron/specs/TE-7-seven.md"
     )
-    assert "Twenty r1" in _git(
-        stack.mirror, "show", f"{sha}:.saffron/specs/TE-20-follow.md"
-    )
     assert "Twenty-one" in _git(
         stack.mirror, "show", f"{sha}:.saffron/specs/TE-21-other.md"
     )
     assert "Ten" in _git(stack.mirror, "show", f"{sha}:.saffron/specs/ten.md")
+
+    assert (tmp_path / "ran" / "TE-20-follow.md").read_text() == _spec_md(
+        "TE-20", "Twenty r1"
+    )
 
     empty_batch = stack.ledger.create_batch(10.0)
     before2 = _git(stack.mirror, "for-each-ref")
@@ -538,9 +541,80 @@ def test_the_finishing_commit_writes_each_layers_and_unrun_texts_and_moves_no_sp
         [stack.tasks["TE-21"]],
         mirror=stack.mirror,
         workdir=tmp_path / "work2",
+        ran_dir=tmp_path / "ran2",
     )
     assert result is None
     assert _git(stack.mirror, "for-each-ref") == before2
+
+
+def test_the_finishing_commit_leaves_out_each_follow_up_layer_that_ran_and_writes_its_text_to_the_ran_directory(
+    stack, tmp_path
+):
+    """A second follow-up layer, `TE-25`, above `TE-20` in the stack:
+    both leave the commit and both land in `ran_dir`, exactly."""
+    from saffron.finish import commit_finish
+
+    te25 = stack.task("TE-25", batch_id=stack.batch_b)
+    stack.ledger.set_task_package(
+        te25,
+        "READY_FOR_REVIEW",
+        "saffron/TE-25",
+        stack.heads["TE-20"],
+        "https://example.invalid/pr/TE-25",
+    )
+    stack.ledger.record_stack_layer(
+        te25, position=4, predecessor_task_id=stack.tasks["TE-20"], generation=1
+    )
+    stack.ledger.record_spec_text(
+        te25,
+        origin="follow_up",
+        spec_id="TE-25",
+        path=".saffron/specs/TE-25-new.md",
+        text=_spec_md("TE-25", "Twenty-five"),
+    )
+
+    emitted: list[str] = []
+    sha = commit_finish(
+        stack.ledger,
+        stack.batch_b,
+        [stack.tasks["TE-24"], stack.tasks["TE-21"]],
+        mirror=stack.mirror,
+        workdir=tmp_path / "work",
+        ran_dir=tmp_path / "ran",
+        emit=emitted.append,
+    )
+    assert sha is not None
+
+    assert len(emitted) == 3
+    assert str(stack.tasks["TE-24"]) in emitted[0]
+    assert "TE-20" in emitted[1]
+    assert str(tmp_path / "ran" / "TE-20-follow.md") in emitted[1]
+    assert "TE-25" in emitted[2]
+    assert str(tmp_path / "ran" / "TE-25-new.md") in emitted[2]
+
+    diff = sorted(
+        _git(
+            stack.mirror,
+            "diff",
+            "--no-renames",
+            "--name-status",
+            f"{stack.heads['TE-20']}..{sha}",
+        ).splitlines()
+    )
+    assert diff == sorted(
+        [
+            "M\t.saffron/specs/TE-7-seven.md",
+            "A\t.saffron/specs/TE-21-other.md",
+        ]
+    )
+
+    ran = tmp_path / "ran"
+    assert sorted(p.name for p in ran.iterdir()) == [
+        "TE-20-follow.md",
+        "TE-25-new.md",
+    ]
+    assert (ran / "TE-20-follow.md").read_text() == _spec_md("TE-20", "Twenty r1")
+    assert (ran / "TE-25-new.md").read_text() == _spec_md("TE-25", "Twenty-five")
 
 
 def test_the_finish_refuses_a_symlink_on_any_path_it_writes(
@@ -591,6 +665,7 @@ def test_the_finish_refuses_a_symlink_on_any_path_it_writes(
                     unrun,
                     mirror=stack.mirror,
                     workdir=workdir,
+                    ran_dir=tmp_path / f"{name}-ran",
                 )
 
         message = str(excinfo.value)
@@ -651,6 +726,7 @@ def test_the_finish_refuses_a_symlink_on_any_path_it_writes(
             unrun,
             mirror=stack.mirror,
             workdir=tmp_path / "unwritten-work",
+            ran_dir=tmp_path / "unwritten-ran",
         )
     assert sha is not None
     assert target.read_bytes() == b"base one\n"
@@ -666,8 +742,145 @@ def test_the_finish_refuses_a_symlink_on_any_path_it_writes(
         unrun,
         mirror=stack.mirror,
         workdir=link_parent / "work",
+        ran_dir=tmp_path / "link-ran",
     )
     assert sha2 is not None
+
+
+def test_a_draft_is_judged_on_its_own_commit_atop_the_head_under_a_ref_the_judge_removes(
+    stack, tmp_path, monkeypatch
+):
+    from saffron.finish import judge_draft
+    from saffron.gates.baseline import NewFailure
+    from saffron.gates.contract import Failure
+    from saffron.repos import mirror as git_mirror
+
+    head = stack.heads["TE-20"]
+    path = ".saffron/specs/TE-25-new.md"
+    text = _spec_md("TE-25", "Twenty-five")
+
+    def _unreachable(sha, base):
+        raise AssertionError("verify must not run")
+
+    for bad_path in (".saffron/specs/done/x.md", "CLAUDE.md"):
+        before_refs = _refs(stack.mirror)
+        with pytest.raises(ValueError, match=re.escape(bad_path)):
+            judge_draft(
+                stack.mirror,
+                head,
+                bad_path,
+                text,
+                workdir=tmp_path / "bad-work",
+                verify=_unreachable,
+            )
+        assert _refs(stack.mirror) == before_refs
+        assert len(_git(stack.mirror, "worktree", "list").splitlines()) == 1
+
+    real_add_worktree = git_mirror.add_worktree
+
+    def _plant_saffron_dir(dest: Path) -> None:
+        moved = tmp_path / "judge-saffron-outside"
+        shutil.move(str(dest / ".saffron"), str(moved))
+        (dest / ".saffron").symlink_to(moved)
+
+    def _plant_specs_dir(dest: Path) -> None:
+        shutil.move(str(dest / ".saffron" / "specs"), str(dest / "specs-moved"))
+        (dest / ".saffron" / "specs").symlink_to(Path("..") / "specs-moved")
+
+    def _plant_path_itself(dest: Path) -> None:
+        target = tmp_path / "judge-path-outside.md"
+        target.write_text("outside\n")
+        (dest / ".saffron" / "specs" / "TE-25-new.md").symlink_to(target)
+
+    def _refused_symlink(name: str, plant) -> None:
+        workdir = tmp_path / f"judge-{name}-work"
+
+        def _wrapped(mirror, sha, dest):
+            dest = real_add_worktree(mirror, sha, dest)
+            plant(dest)
+            return dest
+
+        before_refs = _refs(stack.mirror)
+        with monkeypatch.context() as m:
+            m.setattr(git_mirror, "add_worktree", _wrapped)
+            with pytest.raises(ValueError):
+                judge_draft(
+                    stack.mirror,
+                    head,
+                    path,
+                    text,
+                    workdir=workdir,
+                    verify=_unreachable,
+                )
+        assert _refs(stack.mirror) == before_refs
+        assert len(_git(stack.mirror, "worktree", "list").splitlines()) == 1
+
+    _refused_symlink("saffron-dir", _plant_saffron_dir)
+    _refused_symlink("specs-dir", _plant_specs_dir)
+    _refused_symlink("path-itself", _plant_path_itself)
+
+    workdir = tmp_path / "judge-work"
+    calls: list[tuple[str, str]] = []
+
+    def _verify_green(sha: str, base: str) -> list[NewFailure]:
+        calls.append((sha, base))
+        assert base == head
+        during = _refs(stack.mirror)
+        judge_refs = {
+            ref: v
+            for ref, v in during.items()
+            if ref.startswith("refs/heads/saffron-judge/")
+        }
+        assert judge_refs == {list(judge_refs)[0]: sha}
+        assert _git(stack.mirror, "rev-parse", f"{sha}^1") == head
+        assert _git(stack.mirror, "show", f"{sha}:{path}") == text.strip()
+        added = _git(stack.mirror, "diff", "--name-status", f"{head}..{sha}")
+        assert added.splitlines() == [f"A\t{path}"]
+        return [
+            NewFailure(
+                gate="tests",
+                failure=Failure(file="a.py", line=3, code="E1", message="boom"),
+            ),
+            NewFailure(
+                gate="size",
+                failure=Failure(file="", line=None, code="E2", message="too big"),
+            ),
+            NewFailure(
+                gate="lint",
+                failure=Failure(file="b.py", line=None, code="E3", message="bad"),
+            ),
+        ]
+
+    before_refs = _refs(stack.mirror)
+    lines = judge_draft(
+        stack.mirror, head, path, text, workdir=workdir, verify=_verify_green
+    )
+    assert lines == [
+        "[tests] a.py:3 E1: boom",
+        "[size] E2: too big",
+        "[lint] b.py:? E3: bad",
+    ]
+    assert len(calls) == 1
+    assert _refs(stack.mirror) == before_refs
+    assert len(_git(stack.mirror, "worktree", "list").splitlines()) == 1
+
+    def _verify_raise(sha: str, base: str) -> list[NewFailure]:
+        calls.append((sha, base))
+        raise RuntimeError("suite broke")
+
+    before_refs2 = _refs(stack.mirror)
+    with pytest.raises(RuntimeError, match="suite broke"):
+        judge_draft(
+            stack.mirror,
+            head,
+            path,
+            _spec_md("TE-25", "Twenty-five r2"),
+            workdir=workdir,
+            verify=_verify_raise,
+        )
+    assert len(calls) == 2
+    assert _refs(stack.mirror) == before_refs2
+    assert len(_git(stack.mirror, "worktree", "list").splitlines()) == 1
 
 
 def test_a_spec_text_outside_the_spec_directory_or_off_its_hash_is_refused_before_any_commit(
@@ -716,6 +929,7 @@ def test_a_spec_text_outside_the_spec_directory_or_off_its_hash_is_refused_befor
                     [task_id] if is_unrun else [],
                     mirror=stack.mirror,
                     workdir=tmp_path / f"bad-{task_id}-{i}",
+                    ran_dir=tmp_path / f"bad-{task_id}-{i}-ran",
                 )
             assert calls == []
             assert _git(stack.mirror, "count-objects", "-v") == before
@@ -1385,6 +1599,7 @@ def test_a_finish_handed_graded_heads_commits_atop_the_top_layers_graded_head(
         [],
         mirror=stack.mirror,
         workdir=tmp_path / "work-named",
+        ran_dir=tmp_path / "ran-named",
         heads={by_spec["TE-20"]: stack.heads["TE-20-plus"]},
     )
     assert sha is not None
@@ -1396,6 +1611,7 @@ def test_a_finish_handed_graded_heads_commits_atop_the_top_layers_graded_head(
         [],
         mirror=stack.mirror,
         workdir=tmp_path / "work-unnamed",
+        ran_dir=tmp_path / "ran-unnamed",
         heads={
             by_spec["TE-10"]: stack.heads["TE-20-plus"],
             by_spec["TE-7"]: stack.heads["TE-20-plus"],
