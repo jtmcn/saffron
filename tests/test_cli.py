@@ -10587,6 +10587,7 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
         batch_key,
         qualify,
         write,
+        judge,
         mint,
         mirror,
         specs_dir,
@@ -10843,6 +10844,7 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
             batch_key,
             qualify,
             write,
+            judge,
             mint,
             mirror,
             specs_dir,
@@ -11159,6 +11161,46 @@ def test_a_stack_batch_commits_its_finish_and_survives_a_raise(
         assert "finish: the tree is unchanged, so nothing committed" in printed
 
 
+def test_a_stack_finish_hands_commit_finish_a_ran_directory_beside_its_tree(
+    tmp_path, monkeypatch
+):
+    """`cli._stack_finish` passes `finish.commit_finish` a `ran_dir` named
+    `ran`, beside the `tree` workdir, in the batch's own finish directory."""
+    from saffron import finish as finish_module
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+
+    def _fake_run_stack_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        kwargs["finish"](3, [5, 6])
+        return "UNTIL"
+
+    monkeypatch.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
+
+    commit_calls = []
+
+    def _recording_commit_finish(
+        ledger, batch_id, unrun, *, mirror, workdir, ran_dir, heads=()
+    ):
+        commit_calls.append({"workdir": workdir, "ran_dir": ran_dir})
+        return "c" * 40
+
+    monkeypatch.setattr(finish_module, "commit_finish", _recording_commit_finish)
+    monkeypatch.setattr(finish_module, "publish_finish", lambda *a, **k: [])
+
+    _readiness_passes(monkeypatch, tmp_path)
+    home = tmp_path / "home"
+    assert main(["--home", str(home), "batch", "--stack"]) == 0
+
+    assert len(commit_calls) == 1
+    call = commit_calls[0]
+    assert call["workdir"] == home / "batches" / "v0" / "finish" / "3" / "tree"
+    assert call["ran_dir"] == home / "batches" / "v0" / "finish" / "3" / "ran"
+
+
 def test_a_stack_batch_writes_its_findings_from_the_pooled_list_its_writer_filled(
     tmp_path, monkeypatch, capsys
 ):
@@ -11429,6 +11471,139 @@ def test_a_stack_batch_publishes_its_finish_through_the_finishing_suite(
     assert len(publish_calls) == before
 
 
+def test_a_stack_batchs_follow_up_judge_runs_the_finishing_suite_on_each_draft_atop_the_top_head(
+    tmp_path, monkeypatch
+):
+    """`cli._stack_follow_ups` hands `follow_up.write_follow_ups` a `judge`
+    that calls `finish.judge_draft` atop the top layer's graded head. Its
+    `verify` is built from the finishing suite over its own judge
+    directory, beside the follow-ups export."""
+    from saffron import finish as finish_module
+    from saffron.phases import package as package_phase
+
+    rig = _follow_ups_mirror(tmp_path)
+    mirror, base_sha = rig.mirror, rig.base_sha
+
+    checkout = tmp_path / "checkout"
+    (checkout / ".saffron").mkdir(parents=True)
+    (checkout / ".saffron" / "policy.yaml").write_text("gates: {}\n")
+
+    out_dir = tmp_path / "out"
+    pinned_url = "https://github.com/o/r.git"
+
+    ledger = Ledger(tmp_path / "ledger.db")
+    ledger.upsert_repo("r", pinned_url, str(mirror), policy_sha=None)
+
+    pinned = task.PinnedBase(mirror=mirror, url=pinned_url, base_sha=base_sha)
+
+    top_fields = end_review.LayerFields(
+        spec_id="SY-2",
+        branch="saffron/SY-2",
+        pr_url="",
+        base="z" * 40,
+        head="2" * 40,
+        known="",
+        diff_base="z" * 40,
+    )
+    stack = end_review.StackReview(
+        join=None,
+        layers=[end_review.LayerReview("k-top", [])],
+        fields={"k-top": top_fields},
+    )
+
+    monkeypatch.setattr(
+        cli, "writer_left", lambda ledger_arg, batch_id, writer_usd: writer_usd
+    )
+
+    judge_calls: list[dict] = []
+
+    def _fake_write_follow_ups(ledger_arg, stack_arg, *, judge, **kwargs):
+        judge_calls.append({"result": judge(".saffron/specs/SY-3-x.md", "draft text")})
+        return []
+
+    monkeypatch.setattr(cli.follow_up, "write_follow_ups", _fake_write_follow_ups)
+
+    draft_calls: list[dict] = []
+
+    def _fake_judge_draft(mirror_, head, path, text, *, workdir, verify):
+        result = verify("c" * 40, "d" * 40)
+        draft_calls.append(
+            {
+                "mirror": mirror_,
+                "head": head,
+                "path": path,
+                "text": text,
+                "workdir": workdir,
+                "result": result,
+            }
+        )
+        return ["a rendered line"]
+
+    monkeypatch.setattr(finish_module, "judge_draft", _fake_judge_draft)
+
+    export_calls: list[tuple] = []
+
+    def _fake_export(mirror_, sha, dest):
+        export_calls.append((mirror_, sha, dest))
+        dest_saffron = dest / ".saffron"
+        dest_saffron.mkdir(parents=True, exist_ok=True)
+        # `protected` is non-empty so the finishing policy (which empties
+        # it) is distinguishable from the declared one the judge must not use.
+        (dest_saffron / "policy.yaml").write_text(
+            "gates: {}\nprotected: ['secret/**']\n"
+        )
+        (dest_saffron / "gates").mkdir(exist_ok=True)
+        return dest
+
+    monkeypatch.setattr(cli.git_mirror, "export_saffron_dir", _fake_export)
+
+    reverify_calls: list[dict] = []
+
+    class _Comparison:
+        new_failures = ("a", "b")
+
+    def _fake_reverify(**kwargs):
+        reverify_calls.append(kwargs)
+        return _Comparison()
+
+    monkeypatch.setattr(package_phase, "reverify", _fake_reverify)
+
+    make = cli._stack_follow_ups(
+        pinned=pinned,
+        repo=checkout,
+        ledger=ledger,
+        out_dir=out_dir,
+        cap_usd=5.0,
+        pooled=[],
+    )
+    result = make("3", stack)
+
+    assert result == []
+    assert judge_calls == [{"result": ["a rendered line"]}]
+
+    judge_dir = out_dir / "follow-ups" / "3-judge"
+    assert len(draft_calls) == 1
+    call = draft_calls[0]
+    assert call["mirror"] == mirror
+    assert call["head"] == top_fields.head
+    assert call["path"] == ".saffron/specs/SY-3-x.md"
+    assert call["text"] == "draft text"
+    assert call["workdir"] == judge_dir / "tree"
+    # The judge's own `verify` returns the suite's new failures, not a count.
+    assert call["result"] == ("a", "b")
+
+    assert (mirror, base_sha, judge_dir / "gates") in export_calls
+    assert len(reverify_calls) == 1
+    rcall = reverify_calls[0]
+    # The judge's `verify` runs the finishing suite's own spec and policy,
+    # never the repo's declared one (whose `protected` stays non-empty).
+    declared_policy, _ = load_policy(judge_dir / "gates")
+    expected_spec, expected_policy = finish_module.finish_suite(declared_policy)
+    assert rcall["policy"].model_dump() == expected_policy.model_dump()
+    assert rcall["policy"].protected == []
+    assert rcall["spec"] == expected_spec
+
+
 def test_a_stack_batchs_finish_reads_the_heads_its_end_review_graded(
     tmp_path, monkeypatch
 ):
@@ -11478,7 +11653,9 @@ def test_a_stack_batchs_finish_reads_the_heads_its_end_review_graded(
         finish_heads["findings"] = dict(heads)
         return dest
 
-    def _fake_commit_finish(ledger, batch_id, unrun, *, mirror, workdir, heads):
+    def _fake_commit_finish(
+        ledger, batch_id, unrun, *, mirror, workdir, ran_dir, heads
+    ):
         finish_heads["commit"] = dict(heads)
         return "c" * 40
 

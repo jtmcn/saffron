@@ -10,7 +10,11 @@ the write rather than follow the link out of the worktree. It also writes the ba
 `findings.json`, the backlog pool a delegate files by hand.
 `publish_finish` then moves a ref for the gate suite's own span, runs that
 suite, and pushes the commit to its own branch. `link_stack` links the
-pushed layers into one stack, and marks none ready.
+pushed layers into one stack, and marks none ready. A follow-up layer's
+latest text leaves the finishing commit. `commit_finish` writes it to a
+`ran_dir` instead. `judge_draft` judges one draft's own commit against
+the finishing suite, atop a given head, before a follow-up draft is ever
+minted.
 """
 
 from __future__ import annotations
@@ -24,6 +28,7 @@ from pathlib import Path
 
 from saffron.cell.runtime import CellRuntimeError
 from saffron.follow_up import Pooled
+from saffron.gates.baseline import NewFailure
 from saffron.intake import Spec
 from saffron.ledger import _REVISION_PATH, Ledger
 from saffron.phases import package as package_phase
@@ -152,18 +157,20 @@ def commit_finish(
     *,
     mirror: Path,
     workdir: Path,
+    ran_dir: Path,
     heads: Mapping[str, str] = {},
     emit: Callable[[str], None] = print,
 ) -> str | None:
     """One commit in `mirror`, atop the top layer's own entry in `heads`
     when named, else its recorded `pushed_sha`.
 
-    Writes each layer's and each task in `unrun`'s latest spec text, and
-    moves no spec into `done/` (ADR 7, amended). Raises `ValueError` naming
-    a pending path's symlinked component, read below the cut worktree,
-    before that path's own write. The worktree holds a cell's committed
-    tree, so it is untrusted. Returns the new sha, or `None` for a batch
-    with no layer or a tree the writes left unchanged."""
+    Writes each layer's and each task in `unrun`'s latest spec text, except
+    a follow-up layer's: its earliest `spec_texts` row carries the origin
+    `follow_up`, and its latest text goes to `ran_dir` instead, one emitted
+    line per text. Moves no spec into `done/` (ADR 7, amended). Raises
+    `ValueError` naming a pending path's symlinked component, read below the
+    cut worktree, before that path's own write. Returns the new sha, or
+    `None` for a batch with no layer or a tree the writes left unchanged."""
     layers = ledger.stack_layers(batch_id)
     if not layers:
         return None
@@ -171,17 +178,34 @@ def commit_finish(
     if top["pushed_sha"] is None:
         raise ValueError(f"top layer {top['spec_id']!r} has no pushed_sha")
 
+    follow_up_ids = {row["task_id"] for row in ledger.batch_follow_ups(batch_id)}
+
     pending: list[tuple[str, str]] = []
+    ran: list[tuple[str, str, str]] = []
     for layer in layers:
         row = ledger.spec_text(layer["task_id"])
-        if row is not None:
-            pending.append(_checked(row))
+        if row is None:
+            continue
+        path, text = _checked(row)
+        if layer["task_id"] in follow_up_ids:
+            ran.append((layer["spec_id"], path, text))
+        else:
+            pending.append((path, text))
     for task_id in unrun:
         row = ledger.spec_text(task_id)
         if row is None:
             emit(f"finish: task {task_id} has no spec text")
             continue
         pending.append(_checked(row))
+
+    if ran:
+        ran_dir.mkdir(parents=True, exist_ok=True)
+        for spec_id, path, text in ran:
+            dest = ran_dir / Path(path).name
+            dest.write_text(text)
+            emit(
+                f"finish: {spec_id} left out of the commit, its text written to {dest}"
+            )
 
     git_mirror.add_worktree(
         mirror, heads.get(top["task_key"], top["pushed_sha"]), workdir
@@ -212,6 +236,67 @@ def commit_finish(
         return git_mirror._git(workdir, "rev-parse", "HEAD")
     finally:
         git_mirror.remove_worktree(mirror, workdir)
+
+
+def _render_new_failure(new_failure: NewFailure) -> str:
+    """`[gate] file:line code: message`, `?` for a missing line, and no
+    `file:line ` segment at all for a failure that carries no file."""
+    failure = new_failure.failure
+    loc = ""
+    if failure.file:
+        line = failure.line if failure.line is not None else "?"
+        loc = f"{failure.file}:{line} "
+    return f"[{new_failure.gate}] {loc}{failure.code}: {failure.message}"
+
+
+def judge_draft(
+    mirror: Path,
+    head: str,
+    path: str,
+    text: str,
+    *,
+    workdir: Path,
+    verify: Callable[[str, str], Sequence[NewFailure]],
+) -> list[str]:
+    """Commit `text` at `path` atop `head`, in a worktree cut at `workdir`,
+    and run `verify(sha, head)` against it under a throwaway ref.
+
+    Raises `ValueError` naming the path, before any worktree, for a `path`
+    `_REVISION_PATH` does not fully match. Raises `ValueError` before
+    `verify` runs for a symlink on `.saffron`, `.saffron/specs` or `path`
+    itself (`_refuse_symlink`). The ref and the worktree are gone once this
+    returns or raises, and a raise from `verify` reaches the caller.
+    Returns one rendered line per new failure, in order."""
+    if re.fullmatch(_REVISION_PATH, path) is None:
+        raise ValueError(
+            f"spec text path {path!r} is not a .md file directly in .saffron/specs/"
+        )
+    git_mirror.add_worktree(mirror, head, workdir)
+    try:
+        _refuse_symlink(workdir, path)
+        (workdir / path).write_text(text)
+        git_mirror._git(workdir, "add", "-A")
+        git_mirror._git(
+            workdir,
+            "-c",
+            "user.email=saffron@localhost",
+            "-c",
+            "user.name=Saffron",
+            "commit",
+            "-q",
+            "-m",
+            f"saffron judge: {path}",
+        )
+        sha = git_mirror._git(workdir, "rev-parse", "HEAD")
+        ref = f"refs/heads/saffron-judge/{sha[:12]}"
+        git_mirror._git(mirror, "update-ref", ref, sha)
+        try:
+            failures = verify(sha, head)
+        finally:
+            git_mirror._git(mirror, "update-ref", "-d", ref)
+    finally:
+        git_mirror.remove_worktree(mirror, workdir)
+    return [_render_new_failure(failure) for failure in failures]
 
 
 def _match_pooled(pooled: Sequence[Pooled], task_key: str, row) -> Pooled | None:

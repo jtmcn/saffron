@@ -49,6 +49,7 @@ from saffron.cell.session import (
 )
 from saffron.cell.session import _SHA as _RESOLVED_SHA
 from saffron.events import Event, EventLog
+from saffron.gates.baseline import NewFailure
 from saffron.intake import Spec, load_spec
 from saffron.ledger import Ledger
 from saffron.phases import implement, review
@@ -1026,16 +1027,17 @@ def _stack_deferred_end_review(
 
 def _finish_verify(
     *, pinned: PinnedBase, repo: Path, gates_dir: Path
-) -> Callable[[str, str], int]:
-    """The `verify` callable `finish.publish_finish` runs the suite with.
+) -> Callable[[str, str], tuple[NewFailure, ...]]:
+    """The `verify` callable `finish.publish_finish` and `finish.judge_draft`
+    share, each wrapping it to its own shape.
 
     Exports `.saffron/` from the pinned mirror at the pinned base. Builds
     the finishing suite over the policy it finds there, and runs
     `package_phase.reverify` in the repo's own cell image. Returns the
-    count of new failures.
+    suite's own new failures.
     """
 
-    def verify(sha: str, base: str) -> int:
+    def verify(sha: str, base: str) -> tuple[NewFailure, ...]:
         git_mirror.export_saffron_dir(pinned.mirror, pinned.base_sha, gates_dir)
         policy, _policy_sha = load_policy(gates_dir)
         spec, finishing_policy = finish.finish_suite(policy)
@@ -1048,7 +1050,7 @@ def _finish_verify(
             image=repo_image.cell_tag(repo),
             spec=spec,
         )
-        return len(comparison.new_failures)
+        return comparison.new_failures
 
     return verify
 
@@ -1115,6 +1117,7 @@ def _stack_finish(
             print(f"finish: findings at {dest}")
 
         workdir = out_dir / "finish" / str(batch_id) / "tree"
+        ran_dir = out_dir / "finish" / str(batch_id) / "ran"
         try:
             sha = finish.commit_finish(
                 ledger,
@@ -1122,6 +1125,7 @@ def _stack_finish(
                 unrun,
                 mirror=pinned.mirror,
                 workdir=workdir,
+                ran_dir=ran_dir,
                 heads=heads,
             )
         except (git_mirror.GitError, ValueError) as exc:
@@ -1139,7 +1143,7 @@ def _stack_finish(
         print(f"finish: committed {sha}")
         try:
             slug = package_phase.github_slug(pinned.url)
-            verify = _finish_verify(
+            raw_verify = _finish_verify(
                 pinned=pinned,
                 repo=repo,
                 gates_dir=out_dir / "finish" / str(batch_id) / "gates",
@@ -1151,7 +1155,9 @@ def _stack_finish(
                 mirror=pinned.mirror,
                 url=pinned.url,
                 slug=slug,
-                verify=verify,
+                verify=lambda commit_sha, base_sha: len(
+                    raw_verify(commit_sha, base_sha)
+                ),
                 gh=_guarded_gh([]),
                 workdir=out_dir / "finish" / str(batch_id) / "push",
                 heads=heads,
@@ -1626,15 +1632,15 @@ def _stack_follow_ups(
     pooled: list[follow_up.Pooled],
 ) -> Callable[[str, end_review.StackReview], list[Candidate]]:
     """`run_stack_batch`'s `follow_ups` adapter (ADR 7, `SA-0165`). Every
-    input is read at the pinned base, once, before `follow_up.write_follow_ups`
-    runs. A broken policy then costs one line and no cell. A raise from
-    that call after `qualify` returns still pools every unaccepted finding
-    its walk never reached.
+    input but the judge's own is read at the pinned base, once, before
+    `follow_up.write_follow_ups` runs. A broken policy costs one line and
+    no cell. A raise from that call after `qualify` returns still pools
+    every unaccepted finding its walk never reached.
 
     The top layer, the join's and each layer's end-review findings, and each
     `write` call's origin read `stack.fields` through `qualify.graded_fields`.
-    A layer the end review graded at a moved head then reads that head.
-    """
+    A layer graded at a moved head reads that head. The judge's own
+    `verify` exports and loads the policy fresh for each draft it judges."""
 
     def run(batch_key: str, stack: end_review.StackReview) -> list[Candidate]:
         if not stack.layers:
@@ -1717,12 +1723,28 @@ def _stack_follow_ups(
                     minted[written] = task_id
                 return task_id
 
+            judge_dir = out_dir / "follow-ups" / f"{batch_key}-judge"
+            judge_verify = _finish_verify(
+                pinned=pinned, repo=repo, gates_dir=judge_dir / "gates"
+            )
+
+            def judge(path: str, text: str) -> Sequence[str]:
+                return finish.judge_draft(
+                    pinned.mirror,
+                    top.head,
+                    path,
+                    text,
+                    workdir=judge_dir / "tree",
+                    verify=judge_verify,
+                )
+
             return follow_up.write_follow_ups(
                 ledger,
                 stack,
                 batch_key=batch_key,
                 qualify=run_qualify,
                 write=write,
+                judge=judge,
                 mint=mint,
                 mirror=pinned.mirror,
                 specs_dir=exported / ".saffron" / "specs",
