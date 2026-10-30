@@ -220,8 +220,8 @@ the default `print` reaches the log (`:1106-1113`).
 chore spec and the repo's policy with `protected` emptied and its
 suppression scan off (`saffron/finish.py:90-111`). `cli._finish_verify`
 exports `.saffron/` at the pinned base, builds that suite and runs
-`package_phase.reverify` (`saffron/cli.py:1014-1038`). It returns the
-count of new failures (`:1038`). `reverify` runs the suite in two fresh
+`package_phase.reverify` (`saffron/cli.py:1027-1051`). It returns the
+count of new failures (`:1051`). `reverify` runs the suite in two fresh
 gate-only cells, a baseline and a head (`saffron/phases/package.py:475-586`).
 It raises `PackageError` on an errored gate or drift. `publish_finish`
 names the commit with a temporary ref while `verify` runs, since a
@@ -305,8 +305,8 @@ Every finish that drafts a follow-up escalates, so none reaches its push.
 7. **Docstrings.** `commit_finish`'s docstring, the module docstrings of
    `finish.py` and `follow_up.py`, and `write_follow_ups`'s say what
    changed. `_stack_follow_ups`'s docstring says every input is read once
-   (`saffron/cli.py:1615-1617`). The judge's `verify` exports and loads the
-   policy for each draft (`:1026-1027`), so rewrite that sentence. A function's docstring stays within ten lines. The `prose`
+   (`saffron/cli.py:1628-1630`). The judge's `verify` exports and loads the
+   policy for each draft (`:1039-1040`), so rewrite that sentence. A function's docstring stays within ten lines. The `prose`
    gate exempts a module docstring (`.saffron/gates/prose.py:66`).
 
 ## Out of scope
