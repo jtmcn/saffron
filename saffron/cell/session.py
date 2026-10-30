@@ -1957,11 +1957,11 @@ def _apply_criterion_probes(
     note: Callable[[str, bool, str], None],
 ) -> None:
     """Applies every criterion probe's and wrong version's own edit, and
-    asks its criterion's witness (items b-2750d5, b-7e69d0). Runs in a
-    Gate-only cell entered after `_probe_adequacy`'s own is torn down.
-    `pairs` pairs each criterion-probe entry with its criterion, then each
-    wrong version with the criterion that declared it. Writes each pair's
-    outcome and summary in place, and a refused pair's own
+    asks its criterion's witness (items b-2750d5, b-7e69d0, b-78a590). Runs
+    in a Gate-only cell entered after `_probe_adequacy`'s own is torn down.
+    `pairs` holds one pair per probe of each criterion-probe entry, then
+    each wrong version paired with the criterion that declared it. Writes
+    each pair's outcome and summary in place, and a refused pair's own
     `probe.probe_refusal` reason under `refusal` beside them. Appends a
     survivor's `Finding` to the `adequacy` review in `reviews`, and asks it
     a second time of the whole `tests` gate too (backlog b-b9365d).
@@ -3320,11 +3320,15 @@ def _drive_cell(
                             review.describe_probes(probed),
                         )
 
-                    # Pairs each criterion-probe entry with its criterion,
-                    # then each wrong version with the criterion that declared it.
-                    pairs: list[tuple[Criterion, dict]] = list(
-                        zip(spec.acceptance, criterion_probes, strict=True)
-                    )
+                    # Pairs each criterion-probe entry's own probes with its
+                    # criterion, then each wrong version with its own (b-78a590).
+                    pairs: list[tuple[Criterion, dict]] = [
+                        (criterion, probe)
+                        for criterion, entry in zip(
+                            spec.acceptance, criterion_probes, strict=True
+                        )
+                        for probe in entry["probes"]
+                    ]
                     declaring = [c for c in spec.acceptance if c.wrong_versions]
                     for criterion, wv_entry in zip(
                         declaring, wrong_versions, strict=True

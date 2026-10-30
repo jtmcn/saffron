@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from saffron import probe
 from saffron.agents import context
@@ -244,12 +244,12 @@ def _parse_or_reprompt[T](
     emit: Callable[[Event], None],
     on_reprompt: Callable[[str], None] | None = None,
 ) -> tuple[T | None, str | None, float]:
-    """The one re-prompt both `run_lens` and `run_wrong_versions` need. A
-    turn whose output is not the schema resumes its own session once, on
-    the budget it left. A re-prompt given less than the failed turn spent is
-    refused, and so is one carrying no session id. `on_reprompt`, when
-    given, runs with the error before the second turn starts, for the
-    lens's own announcement.
+    """The one re-prompt `run_lens`, `run_wrong_versions` and
+    `run_criterion_probes` all need. A turn whose output is not the schema
+    resumes its own session once, on the budget it left. A re-prompt given
+    less than the failed turn spent is refused, and so is one carrying no
+    session id. `on_reprompt`, when given, runs with the error before the
+    second turn starts, for the lens's own announcement.
 
     Returns the parsed answer, or the error, and every turn's summed cost.
     """
@@ -410,13 +410,48 @@ def run_review(
 
 
 class _ProbeAnswer(BaseModel):
-    """One criterion-probe session's own answer (backlog item b-2750d5): the
-    edit it names against the one claim it was shown, or none, and why."""
+    """One session's own answer against one claimed edit: the edit it
+    names, or none, and why. `_WrongVersionReport` is built on this."""
 
     model_config = ConfigDict(extra="forbid")
 
     edit: Mutant | None = None
     reason: str
+
+
+class _SentenceProbe(_ProbeAnswer):
+    """One criterion-probe session's answer for one sentence of the claim
+    it was shown (backlog item b-78a590): the sentence quoted back, plus
+    the edit that would break it, or none, and why."""
+
+    sentence: str
+
+
+# The bound both the prompt and `_CriterionProbeReport` enforce (backlog
+# item b-78a590, `SA-0328`): a claim's sentences, not its wrong versions.
+CRITERION_PROBE_CEILING = 16
+
+
+class _CriterionProbeReport(BaseModel):
+    """One criterion-probe session's whole answer: one `_SentenceProbe` per
+    sentence of the claim, in the session's own order. Refused when empty
+    or longer than `CRITERION_PROBE_CEILING`, the same bound the prompt
+    states."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    probes: list[_SentenceProbe]
+
+    @model_validator(mode="after")
+    def _within_ceiling(self) -> _CriterionProbeReport:
+        if not self.probes:
+            raise ValueError("no probes in the answer")
+        if len(self.probes) > CRITERION_PROBE_CEILING:
+            raise ValueError(
+                f"{len(self.probes)} probes, over the ceiling of "
+                f"{CRITERION_PROBE_CEILING}"
+            )
+        return self
 
 
 CRITERION_PROBE_PROMPT = context.turn_prompt("criterion-probe")
@@ -439,45 +474,16 @@ def criterion_probe_prompt(
         template=template,
         spec=claim,
         diff=diff,
+        ceiling=str(CRITERION_PROBE_CEILING),
         standing_instructions=context.standing_instructions(claude_md),
     )
 
 
-def run_criterion_probe(
-    container: str,
-    *,
-    system_prompt: str,
-    max_turns: int,
-    budget_usd: float,
-    agent: Callable[..., implement.AttemptResult],
-    spec_id: str,
-    emit: Callable[[Event], None] = lambda event: print(describe(event)),
-) -> tuple[Mutant | None, str, float, str | None]:
-    """One fresh session, asked for the edit that falsifies one claim.
-
-    No re-prompt on a bad shape, unlike `run_lens`: a criterion probe costs
-    one claim, where a lens costs a whole remit.
-    """
-    options = implement.agent_options(
-        system_prompt=system_prompt,
-        max_turns=max_turns,
-        budget_usd=budget_usd,
-        tools=REVIEW_TOOLS,
-    )
-    try:
-        attempt = agent(
-            container, prompt=CRITERION_PROBE_PROMPT, options=options, emit=emit
-        )
-    except implement.AgentFailed as failed:
-        cost = failed.attempt.cost_usd_est if failed.attempt else 0.0
-        return None, "", cost, str(failed)
-    try:
-        answer = _ProbeAnswer.model_validate(
-            json.loads(parse_output_block(attempt.text))
-        )
-    except (ValueError, ValidationError) as exc:
-        return None, "", attempt.cost_usd_est, f"not the schema: {exc}"
-    return answer.edit, answer.reason, attempt.cost_usd_est, None
+def _parse_criterion_probe_report(text: str) -> _CriterionProbeReport:
+    """One turn's text, read the way a lens's is: the `<output>` block,
+    then the schema. The ceiling check lives on the model itself, so a
+    first answer and a re-prompted one share one error shape."""
+    return _CriterionProbeReport.model_validate(json.loads(parse_output_block(text)))
 
 
 def run_criterion_probes(
@@ -495,8 +501,13 @@ def run_criterion_probes(
     emit: Callable[[Event], None] = lambda event: print(describe(event)),
 ) -> list[dict]:
     """One fresh session per criterion, in the spec's own declared order
-    (backlog item b-2750d5). Every entry is asked about, a `preserves` one
-    included, and a spec declaring none buys no session at all."""
+    (backlog items b-2750d5, b-78a590). Every entry is asked about, a
+    `preserves` one included, and a spec declaring none buys no session at
+    all. Each session lists the claim's own sentences and names one edit
+    per sentence, so a bad shape is re-prompted once through
+    `_parse_or_reprompt`: the session covers a whole claim, not one edit,
+    so the retry is worth paying for.
+    """
     entries = []
     for criterion in acceptance:
         system_prompt = criterion_probe_prompt(
@@ -506,34 +517,91 @@ def run_criterion_probes(
             claude_md=claude_md,
             prompts_dir=prompts_dir,
         )
-        edit, reason, cost, error = run_criterion_probe(
+        options = implement.agent_options(
+            system_prompt=system_prompt,
+            max_turns=max_turns,
+            budget_usd=budget_usd,
+            tools=REVIEW_TOOLS,
+        )
+        try:
+            attempt = agent(
+                container, prompt=CRITERION_PROBE_PROMPT, options=options, emit=emit
+            )
+        except implement.AgentFailed as failed:
+            cost = failed.attempt.cost_usd_est if failed.attempt else 0.0
+            entries.append(
+                {
+                    "witness": criterion.witness,
+                    "claim": criterion.claim,
+                    "cost_usd": cost,
+                    "error": str(failed),
+                    "probes": [],
+                }
+            )
+            continue
+        report, error, cost = _parse_or_reprompt(
             container,
+            attempt,
+            _parse_criterion_probe_report,
             system_prompt=system_prompt,
             max_turns=max_turns,
             budget_usd=budget_usd,
             agent=agent,
-            spec_id=spec_id,
             emit=emit,
         )
+        if error is not None:
+            entries.append(
+                {
+                    "witness": criterion.witness,
+                    "claim": criterion.claim,
+                    "cost_usd": cost,
+                    "error": error,
+                    "probes": [],
+                }
+            )
+            continue
+        assert report is not None  # `error is None` only when `parse` returned
         entries.append(
             {
                 "witness": criterion.witness,
                 "claim": criterion.claim,
-                "edit": None if edit is None else edit.model_dump(),
-                "reason": reason,
                 "cost_usd": cost,
-                "error": error,
+                "error": None,
+                "probes": [
+                    {
+                        "sentence": probe.sentence,
+                        "edit": None if probe.edit is None else probe.edit.model_dump(),
+                        "reason": probe.reason,
+                    }
+                    for probe in report.probes
+                ],
             }
         )
     return entries
 
 
 def describe_criterion_probes(entries: Sequence[Mapping[str, object]]) -> str:
-    """The one REVIEW line criterion-probing adds, counted over
-    `criterion-probes.json`'s own entries. `describe_probes` sets that
-    precedent for a line counted over the record it summarises."""
-    named = sum(1 for e in entries if e["edit"] is not None)
-    return f"criterion probes: {named} named, {len(entries) - named} unnamed"
+    """The one REVIEW line criterion-probing adds, counted over every probe
+    across every entry (backlog item b-78a590), the way
+    `describe_wrong_versions` counts versions across every entry. A probe
+    with an edit and no `refusal` is named, a null-edit probe is unnamed,
+    and a `probe.probe_refusal` refusal is refused. The tail names, in
+    entry order, the witness of each entry whose session never answered
+    the schema."""
+    probes = [
+        p for e in entries for p in cast("list[Mapping[str, object]]", e["probes"])
+    ]
+    refused = sum(1 for p in probes if p.get("refusal") is not None)
+    named = sum(1 for p in probes if p["edit"] is not None) - refused
+    unnamed = len(probes) - named - refused
+    line = (
+        f"criterion probes: {named} named over {len(entries)} criteria, "
+        f"{unnamed} unnamed, {refused} refused"
+    )
+    unanswered = [e["witness"] for e in entries if e.get("error") is not None]
+    if unanswered:
+        line += "; no session answered: " + ", ".join(str(w) for w in unanswered)
+    return line
 
 
 WRONG_VERSION_PROMPT = context.turn_prompt("wrong-version")

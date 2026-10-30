@@ -30,9 +30,9 @@ DIFF = """diff --git a/src/gap.py b/src/gap.py
 """
 
 
-def _turn(text, cost=0.1):
+def _turn(text, cost=0.1, session_id="lens-1"):
     return implement.AttemptResult(
-        session_id="lens-1",
+        session_id=session_id,
         subtype="success",
         terminal_reason="completed",
         num_turns=1,
@@ -1233,11 +1233,19 @@ def test_the_gate_results_reach_the_critic_with_the_tool_that_ran():
     assert "types: skip (no tool reported)" in summary
 
 
-# --- criterion probes: one fresh session per criterion (backlog item b-2750d5) ---
+# --- criterion probes: one fresh session per criterion (backlog items b-2750d5, b-78a590) ---
 
 
-def _probe_text(edit, reason):
-    return f"Here it is.\n<output>\n{json.dumps({'edit': edit, 'reason': reason})}\n</output>"
+def _probes_block(probes):
+    return f"Here it is.\n<output>\n{json.dumps({'probes': probes})}\n</output>"
+
+
+def _probe_text(edit, reason, sentence="the claim"):
+    return _probes_block([{"sentence": sentence, "edit": edit, "reason": reason}])
+
+
+def _expected_criterion_probe_tail(claim: str) -> str:
+    return "## The diff\n\n" + DIFF + "\n\n## The claim\n\n" + claim + "\n"
 
 
 def _probe_agent(*turns, record=None):
@@ -1261,9 +1269,9 @@ def _probe_agent(*turns, record=None):
 
 
 def test_a_session_that_answers_nothing_usable_is_recorded_and_the_next_is_still_asked():
-    """Criterion 3: an `AgentFailed` session and one whose output the schema
-    refuses each leave an entry naming what went wrong and no edit. Neither
-    stops the loop, and neither is re-prompted the way a lens is."""
+    """An `AgentFailed` session leaves an entry naming what went wrong and
+    no probes. So does a session whose output the schema refuses twice,
+    even after its own re-prompt. Neither stops the loop."""
     first = Criterion(
         claim="the guard rejects a negative amount", witness="t.py::test_a"
     )
@@ -1271,7 +1279,12 @@ def test_a_session_that_answers_nothing_usable_is_recorded_and_the_next_is_still
     failed = implement.AgentFailed("cut off", _turn("", cost=0.3))
 
     record: list[dict] = []
-    agent = _probe_agent(failed, "not a block at all", record=record)
+    agent = _probe_agent(
+        failed,
+        _turn("not a block at all", cost=0.2, session_id="s-b"),
+        _turn("still not a block", cost=0.1, session_id="s-b"),
+        record=record,
+    )
 
     entries = review.run_criterion_probes(
         "cell",
@@ -1287,17 +1300,441 @@ def test_a_session_that_answers_nothing_usable_is_recorded_and_the_next_is_still
         emit=lambda _e: None,
     )
 
-    assert len(record) == 2, "the second criterion must still be asked"
+    assert len(record) == 3, "the second criterion is re-prompted once"
     assert [e["witness"] for e in entries] == ["t.py::test_a", "t.py::test_b"]
     assert [e["claim"] for e in entries] == [first.claim, second.claim]
-    assert entries[0]["edit"] is None
+    assert entries[0]["probes"] == []
     assert "cut off" in entries[0]["error"]
     assert entries[0]["cost_usd"] == pytest.approx(0.3)
-    assert entries[1]["edit"] is None
+    assert entries[1]["probes"] == []
     assert entries[1]["error"] is not None
-    assert "not the schema" in entries[1]["error"]
-    # A refused session still spent its turn, and the task is charged for it.
-    assert entries[1]["cost_usd"] == pytest.approx(0.1)
+    assert "not the schema, even after a re-prompt" in entries[1]["error"]
+    # A refused session still spent both its turns, and the task is
+    # charged for them.
+    assert entries[1]["cost_usd"] == pytest.approx(0.3)
+
+
+def test_a_criterion_probe_session_names_one_edit_per_sentence_of_the_claim_it_is_shown(
+    monkeypatch,
+):
+    """Criterion 1: `run_criterion_probes` keeps its keywords and buys one
+    fresh session per criterion, in the spec's own order, a `preserves` one
+    included. The system prompt names the ceiling, carries no unfilled
+    slot, and is never shown a witness or another criterion's claim. Every
+    probe keeps the sentence, the edit and the reason in the session's own
+    order, out of alphabetical order included."""
+    first = Criterion(
+        claim=(
+            "The guard rejects a negative amount. It accepts zero. "
+            "It still logs the total."
+        ),
+        witness="t.py::test_a",
+    )
+    second = Criterion(
+        claim="The total never changes.",
+        witness="t.py::test_b",
+        preserves=True,
+    )
+
+    edit_log = {"file": "src/gap.py", "find": "log.info(total)", "replace": "pass"}
+    edit_guard = {"file": "src/gap.py", "find": "amount < 0", "replace": "amount <= 0"}
+
+    record: list[dict] = []
+    agent = _probe_agent(
+        _probes_block(
+            [
+                {
+                    "sentence": "It still logs the total.",
+                    "edit": edit_log,
+                    "reason": "dropping the log still runs the guard",
+                },
+                {
+                    "sentence": "The guard rejects a negative amount.",
+                    "edit": edit_guard,
+                    "reason": "flipping the comparison admits a negative amount",
+                },
+                {
+                    "sentence": "It accepts zero.",
+                    "edit": None,
+                    "reason": "nothing isolates zero from a negative amount",
+                },
+            ]
+        ),
+        _probe_text(
+            None,
+            "nothing in the diff touches the total",
+            sentence="The total never changes.",
+        ),
+        record=record,
+    )
+
+    entries = review.run_criterion_probes(
+        "cell",
+        acceptance=[first, second],
+        diff=DIFF,
+        context_md=CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+        max_turns=20,
+        budget_usd=2.0,
+        agent=agent,
+        spec_id="SY-1",
+        emit=lambda _e: None,
+    )
+
+    # Exactly two sessions, one per criterion, never one per sentence.
+    assert len(record) == 2
+
+    prompt_a = record[0]["options"]["system_prompt"]
+    prompt_b = record[1]["options"]["system_prompt"]
+    for prompt in (prompt_a, prompt_b):
+        assert "t.py::test_a" not in prompt
+        assert "t.py::test_b" not in prompt
+        assert "one key, `probes`" in prompt
+        # Hardcoded, not read off the live constant: a mutant that moves
+        # the constant must make this literal check fail too.
+        assert "Name at most 16 entries." in prompt
+        assert "{ceiling}" not in prompt
+    assert second.claim not in prompt_a
+    assert first.claim not in prompt_b
+    assert prompt_a.endswith(_expected_criterion_probe_tail(first.claim))
+    assert prompt_b.endswith(_expected_criterion_probe_tail(second.claim))
+
+    assert entries == [
+        {
+            "witness": "t.py::test_a",
+            "claim": first.claim,
+            "cost_usd": pytest.approx(0.1),
+            "error": None,
+            "probes": [
+                {
+                    "sentence": "It still logs the total.",
+                    "edit": edit_log,
+                    "reason": "dropping the log still runs the guard",
+                },
+                {
+                    "sentence": "The guard rejects a negative amount.",
+                    "edit": edit_guard,
+                    "reason": "flipping the comparison admits a negative amount",
+                },
+                {
+                    "sentence": "It accepts zero.",
+                    "edit": None,
+                    "reason": "nothing isolates zero from a negative amount",
+                },
+            ],
+        },
+        {
+            "witness": "t.py::test_b",
+            "claim": second.claim,
+            "cost_usd": pytest.approx(0.1),
+            "error": None,
+            "probes": [
+                {
+                    "sentence": "The total never changes.",
+                    "edit": None,
+                    "reason": "nothing in the diff touches the total",
+                },
+            ],
+        },
+    ]
+
+    # Patching the constant moves what the prompt states.
+    monkeypatch.setattr(review, "CRITERION_PROBE_CEILING", 4)
+    patched = review.criterion_probe_prompt(
+        claim=first.claim,
+        diff=DIFF,
+        context_md=CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+    )
+    assert "Name at most 4 entries." in patched
+    assert "Name at most 16 entries." not in patched
+
+
+def test_a_criterion_probe_answer_that_is_not_the_schema_is_reprompted_once_in_its_own_session():
+    """Criterion 2: a criterion-probe answer that is not the schema gets
+    one re-prompt. It resumes the turn's own session on the budget it
+    left, and passes its cost as `last_cost_usd`. That holds for no
+    `<output>` block, JSON that does not parse, no `probes` key, a probe
+    with no `sentence`, zero probes, and 17 probes. Exactly one probe and
+    exactly the ceiling's sixteen are both the schema, so neither is
+    re-prompted."""
+    letters = "abcdefgh"
+    criteria = [
+        Criterion(claim=f"claim {letter}", witness=f"t.py::{letter}")
+        for letter in letters
+    ]
+
+    no_block = "Plain text with no block at all."
+    bad_json = (
+        'Here it is.\n<output>\n{"probes": [{"sentence": "s", "edit": null, '
+        '"reason": "a "bad" quote"}]}\n</output>'
+    )
+    no_probes_key = 'Here it is.\n<output>\n{"foo": []}\n</output>'
+    no_sentence = (
+        'Here it is.\n<output>\n{"probes": [{"edit": null, "reason": "r"}]}\n</output>'
+    )
+    zero_probes = _probes_block([])
+    seventeen_probes = _probes_block(
+        [{"sentence": str(n), "edit": None, "reason": "r"} for n in range(17)]
+    )
+    one_probe = _probe_text(None, "only one")
+    sixteen_probes = _probes_block(
+        [{"sentence": str(n), "edit": None, "reason": "r"} for n in range(16)]
+    )
+    good = _probe_text({"file": "src/x.py", "find": "a", "replace": "b"}, "names it")
+
+    bad_first_answers = [
+        no_block,
+        bad_json,
+        no_probes_key,
+        no_sentence,
+        zero_probes,
+        seventeen_probes,
+    ]
+
+    record: list[dict] = []
+    turns = []
+    for letter, text in zip(letters[:6], bad_first_answers, strict=True):
+        turns.append(_turn(text, cost=0.3, session_id=f"s-{letter}"))
+        turns.append(_turn(good, cost=0.2, session_id=f"s-{letter}"))
+    turns.append(_turn(one_probe, cost=0.4, session_id="s-g"))
+    turns.append(_turn(sixteen_probes, cost=0.5, session_id="s-h"))
+    agent = _probe_agent(*turns, record=record)
+
+    entries = review.run_criterion_probes(
+        "cell",
+        acceptance=criteria,
+        diff=DIFF,
+        context_md=CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+        max_turns=20,
+        budget_usd=2.0,
+        agent=agent,
+        spec_id="SY-1",
+        emit=lambda _e: None,
+    )
+
+    assert len(record) == 14  # six re-prompted pairs, then two single turns
+    first_calls, second_calls = record[0:12:2], record[1:12:2]
+    assert all(call["kwargs"].get("resume") is None for call in first_calls)
+    for letter, first_call, second_call in zip(
+        letters[:6], first_calls, second_calls, strict=True
+    ):
+        assert second_call["kwargs"]["resume"] == f"s-{letter}"
+        assert (
+            second_call["options"]["system_prompt"]
+            == first_call["options"]["system_prompt"]
+        )
+        assert second_call["options"]["tools"] == review.REVIEW_TOOLS
+        assert second_call["options"]["max_budget_usd"] == pytest.approx(1.7)
+        assert second_call["kwargs"]["last_cost_usd"] == pytest.approx(0.3)
+
+    for fragment, call in zip(
+        [
+            "no <output> block in the response",
+            "Expecting ',' delimiter",
+            "probes\n  Field required",
+            "probes.0.sentence",
+            "no probes in the answer",
+            "17 probes, over the ceiling of 16",
+        ],
+        second_calls,
+        strict=True,
+    ):
+        assert fragment in call["prompt"]
+        assert call["prompt"].endswith(EXTRACTION_PROMPT)
+
+    for entry in entries[:6]:
+        assert entry["error"] is None
+        assert entry["cost_usd"] == pytest.approx(0.5)
+        assert entry["probes"] == [
+            {
+                "sentence": "the claim",
+                "edit": {"file": "src/x.py", "find": "a", "replace": "b"},
+                "reason": "names it",
+            }
+        ]
+    assert entries[6]["error"] is None
+    assert entries[6]["cost_usd"] == pytest.approx(0.4)
+    assert len(entries[6]["probes"]) == 1
+    assert entries[7]["error"] is None
+    assert entries[7]["cost_usd"] == pytest.approx(0.5)
+    assert len(entries[7]["probes"]) == 16
+
+
+def test_a_criterion_whose_session_answers_nothing_usable_is_an_error_with_no_probes_and_the_next_is_still_asked():
+    """Criterion 3: three sessions that give nothing usable are each
+    recorded with `error` set and `probes` empty, and the loop still asks
+    a fourth. A second call shows the two turns a re-prompt never follows:
+    one spent over half its budget, one carries no session id."""
+    a = Criterion(claim="claim a", witness="t.py::a")
+    b = Criterion(claim="claim b", witness="t.py::b")
+    c = Criterion(claim="claim c", witness="t.py::c")
+    d = Criterion(claim="claim d", witness="t.py::d")
+
+    failed_a = implement.AgentFailed("cut off", _turn("", cost=0.3))
+    bad_text = "Plain text with no block at all."
+    # A different cause than the first answer's, so a swapped cause reads
+    # differently from the right one.
+    bad_json = "Here it is.\n<output>\nnot json at all\n</output>"
+    good_d = _probe_text(
+        {"file": "src/x.py", "find": "a", "replace": "b"}, "names an edit"
+    )
+
+    turns = [
+        failed_a,
+        _turn(bad_text, cost=0.2, session_id="s-b"),
+        _turn(bad_json, cost=0.15, session_id="s-b"),
+        _turn(bad_text, cost=0.25, session_id="s-c"),
+        implement.AgentFailed("the cell died", _turn("", cost=0.1)),
+        _turn(good_d, cost=0.4),
+    ]
+    agent = _probe_agent(*turns)
+
+    entries = review.run_criterion_probes(
+        "cell",
+        acceptance=[a, b, c, d],
+        diff=DIFF,
+        context_md=CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+        max_turns=20,
+        budget_usd=2.0,
+        agent=agent,
+        spec_id="SY-1",
+        emit=lambda _e: None,
+    )
+
+    assert entries == [
+        {
+            "witness": "t.py::a",
+            "claim": "claim a",
+            "cost_usd": pytest.approx(0.3),
+            "error": "cut off",
+            "probes": [],
+        },
+        {
+            "witness": "t.py::b",
+            "claim": "claim b",
+            "cost_usd": pytest.approx(0.35),
+            "error": (
+                "not the schema, even after a re-prompt: "
+                "Expecting value: line 1 column 1 (char 0)"
+            ),
+            "probes": [],
+        },
+        {
+            "witness": "t.py::c",
+            "claim": "claim c",
+            "cost_usd": pytest.approx(0.35),
+            "error": "re-prompted once, then the cell died",
+            "probes": [],
+        },
+        {
+            "witness": "t.py::d",
+            "claim": "claim d",
+            "cost_usd": pytest.approx(0.4),
+            "error": None,
+            "probes": [
+                {
+                    "sentence": "the claim",
+                    "edit": {"file": "src/x.py", "find": "a", "replace": "b"},
+                    "reason": "names an edit",
+                },
+            ],
+        },
+    ]
+
+    # A second call: no re-prompt follows a first turn that left less than
+    # it spent, or one carrying no session id.
+    e = Criterion(claim="claim e", witness="t.py::e")
+    f = Criterion(claim="claim f", witness="t.py::f")
+    over_budget = _turn(bad_text, cost=0.6, session_id="s-e")
+    no_session = _turn(bad_text, cost=0.1, session_id=None)
+    agent2 = _probe_agent(over_budget, no_session)
+
+    entries2 = review.run_criterion_probes(
+        "cell",
+        acceptance=[e, f],
+        diff=DIFF,
+        context_md=CONTEXT_MD,
+        claude_md=None,
+        prompts_dir=PROMPTS,
+        max_turns=20,
+        budget_usd=1.0,
+        agent=agent2,
+        spec_id="SY-1",
+        emit=lambda _e: None,
+    )
+
+    assert entries2 == [
+        {
+            "witness": "t.py::e",
+            "claim": "claim e",
+            "cost_usd": pytest.approx(0.6),
+            "error": "not the schema: no <output> block in the response",
+            "probes": [],
+        },
+        {
+            "witness": "t.py::f",
+            "claim": "claim f",
+            "cost_usd": pytest.approx(0.1),
+            "error": "not the schema: no <output> block in the response",
+            "probes": [],
+        },
+    ]
+
+
+def test_the_criterion_probe_line_counts_edits_over_criteria_and_names_the_unanswered():
+    """Criterion 5: `describe_criterion_probes` counts named, unnamed and
+    refused probes over every entry, then names the witness of each entry
+    whose session never answered the schema."""
+    entries = [
+        {
+            "witness": "t.py::a",
+            "probes": [
+                {
+                    "sentence": "s1",
+                    "edit": {"file": "x.py", "find": "a", "replace": "b"},
+                },
+                {
+                    "sentence": "s2",
+                    "edit": {"file": "x.py", "find": "c", "replace": "d"},
+                },
+                {"sentence": "s3", "edit": None},
+            ],
+        },
+        {
+            "witness": "t.py::b",
+            "probes": [
+                {
+                    "sentence": "s1",
+                    "edit": {"file": "spec/t.py", "find": "a", "replace": "b"},
+                    "refusal": "spec/t.py is a test; a probe must target source",
+                },
+            ],
+        },
+        {"witness": "t.py::c", "probes": [], "error": "cut off"},
+        {
+            "witness": "t.py::d",
+            "probes": [],
+            "error": "not the schema: no <output> block in the response",
+        },
+    ]
+
+    line = review.describe_criterion_probes(entries)
+    assert line == (
+        "criterion probes: 2 named over 4 criteria, 1 unnamed, 1 refused; "
+        "no session answered: t.py::c, t.py::d"
+    )
+
+    only_first = review.describe_criterion_probes([entries[0]])
+    assert (
+        only_first == "criterion probes: 2 named over 1 criteria, 1 unnamed, 0 refused"
+    )
 
 
 # --- wrong versions: one session per criterion that declares any (backlog item b-7e69d0) ---

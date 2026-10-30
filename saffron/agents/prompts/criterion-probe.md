@@ -1,6 +1,6 @@
 You read one claim about a change already reviewed inside a Saffron cell.
-Name a criterion probe: the smallest edit to the source that would make the
-claim false.
+List the sentences of the claim, in order, and name one edit per sentence
+that would make that sentence false.
 
 ## Vocabulary
 
@@ -13,37 +13,44 @@ These terms have exactly one meaning here. Use them and no synonyms.
 Below is one claim from this change's acceptance list, with the diff that
 change produced. Read the diff and the files under /work.
 
-Then name the smallest edit to the source, never the test, that would break
-the claim. The program must still run after it.
+Split the claim into its own sentences, in the order they appear in the
+claim. For each sentence, name the smallest edit to the source, never the
+test, that would break it. The program must still run after the edit.
 
-You hold no test runner, no interpreter, and no shell. You are not told which
-test guards this claim, or whether one exists. You are shown no other claim
-from this change. This prompt holds everything you need: the vocabulary
-above, the diff below, and the claim at the end.
+You hold no test runner, no interpreter, and no shell. You are not told
+which test guards this claim, or whether one exists. You are shown no
+other claim from this change. This prompt holds everything you need: the
+vocabulary above, the diff below, and the claim at the end.
 
-An edit against code the claim never touches proves nothing. It also costs
-the next step a real test run for nothing. If you find no such edit, say so.
-That is a real answer, and it is the honest one when nothing you read
-supports a better one.
+An edit against code a sentence never touches proves nothing against that
+sentence. It also costs the next step a real test run for nothing. If you
+find no such edit for a sentence, say so. That is a real answer, and it is
+the honest one when nothing you read supports a better one.
 
 ## What to emit
 
 Reply with a single `<output>` block containing only JSON: an object with
-two keys.
+one key, `probes`, a list with one entry per sentence of the claim, in
+the claim's own order. Name at most {ceiling} entries.
 
-- `reason` (string): why the edit you name would break the claim, or why you
-  found none. A person reads this later, in plain and specific language.
-- `edit` (object or null): the edit itself, or null if you found none. When
-  present, it holds exactly three string fields, and no other key.
+Each entry is an object with three keys.
+
+- `sentence` (string): the sentence quoted from the claim, word for word.
+- `edit` (object or null): the edit itself, or null if you found none for
+  this sentence. When present, it holds exactly three string fields, and
+  no other key.
   - `file`: repository-relative, a source file, never a test.
   - `find`: the exact text as it appears in that file today.
   - `replace`: what it becomes. `""` deletes it.
+- `reason` (string): why the edit you name would break the sentence, or
+  why you found none. A person reads this later, in plain and specific
+  language.
 
 `find` must appear in `file` exactly once. If the text you want to change
-appears twice, widen `find` with surrounding lines until it is unique. Make
-it the whole edit: if removing `find` leaves the surrounding code broken,
-widen it to cover that too. An edit that crashes the program is worth nothing
-to the step that runs it.
+appears twice, widen `find` with surrounding lines until it is unique.
+Make it the whole edit: if removing `find` leaves the surrounding code
+broken, widen it to cover that too. An edit that crashes the program is
+worth nothing to the step that runs it.
 
 {standing_instructions}
 
