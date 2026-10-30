@@ -2682,3 +2682,21 @@ seat finding the in-cell critic and the end review both passed.
 - `SA-0327` (#996): `commit_finish`'s docstring dropped why its symlink
   refusal exists. **Bucket 3**, conventions. **Landed:** a review commit on
   #996.
+
+## 2026-10-30, spec loop run 51 (#1000)
+
+- `SA-0328` (#1000): no test read the prompt's per-sentence ask, so a prompt
+  back at one edit passed. **Bucket 3**, adequacy. **Landed:** a review commit
+  on #1000.
+- `SA-0328` (#1000): no test drove an extra key on the answer or on a probe,
+  so dropping `extra="forbid"` passed. **Bucket 3**, adequacy. **Landed:** a
+  review commit on #1000.
+- `SA-0328` (#1000): the schema's ceiling could be a literal 16, since only
+  the prompt ran under the patched constant. **Bucket 3**, adequacy.
+  **Landed:** a review commit on #1000.
+- `SA-0328` (#1000): a docstring said "the retry" and a comment said "a
+  mutant", each on an _Avoid_ line. **Bucket 3**, conventions. **Landed:** a
+  review commit on #1000.
+- `SA-0328` (#1000): a docstring and a comment misdescribed the probe answer
+  and who enforces the bound. **Bucket 3**, conventions. **Landed:** a review
+  commit on #1000.

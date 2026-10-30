@@ -293,7 +293,7 @@ for want of an anchor, so `SA-0288` packaged past its own blocker. A spec
 that added a refusal refused the specs queued below it, and its cell ended
 `EXHAUSTED`.
 
-**Placed 2026-10-30**, from the spec loop's runs 49 and 50: **b-78a590**. A
+**Placed 2026-10-30**, from the spec loop's runs 49 and 50: ~~**b-78a590**~~. A
 criterion probe names one edit against a claim of up to twelve sentences, so
 the seats still find the sentences it left.
 
