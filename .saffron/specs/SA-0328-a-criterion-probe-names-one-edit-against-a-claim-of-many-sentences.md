@@ -76,7 +76,8 @@ acceptance:
       diff, `## The claim` and the claim, names no witness node id and no
       other criterion's claim, names `probes` as the one key of the answer,
       states the value of `review.CRITERION_PROBE_CEILING`, which is 16, and
-      carries no unfilled `{ceiling}` slot. Each entry carries `witness`,
+      carries no unfilled `{ceiling}` slot. With that constant patched to
+      another value, the prompt states that value instead. Each entry carries `witness`,
       `claim`, `cost_usd`, `error` and `probes`. Each probe carries the
       `sentence`, the `edit` and the `reason` the session gave, word for
       word, in the session's own order. The witness drives one session
@@ -97,7 +98,7 @@ acceptance:
       resumed once, in that same session, with a prompt carrying that
       answer's own error and then `EXTRACTION_PROMPT`. The re-prompt keeps
       the first turn's system prompt and tools, its budget is what the first
-      turn left of the ceiling, and it passes the first turn's cost as
+      turn left of the session budget, and it passes the first turn's cost as
       `last_cost_usd`. Its answer is the record, and the entry's cost is both
       turns'. That holds for six first answers: one with no `<output>` block,
       one whose JSON does not parse, one with no `probes` key, one whose
@@ -112,7 +113,7 @@ acceptance:
       - A report with 17 probes is accepted.
       - A report with 16 probes is refused.
       - A probe with no `sentence` is accepted.
-      - The re-prompt is given the whole ceiling, not what the first turn left.
+      - The re-prompt is given the whole session budget, not what the first turn left.
       - The entry's cost is the re-prompt's alone.
       - The re-prompt's answer is read from the first turn's text.
   - claim: >-
@@ -125,7 +126,7 @@ acceptance:
       answer's own cause. One fails on its re-prompt, and its error opens
       `re-prompted once, then ` and its cost is both turns'. A fourth
       criterion after them is asked and answers. No re-prompt follows a first
-      turn that left less of the ceiling than it spent, or one carrying no
+      turn that left less of the session budget than it spent, or one carrying no
       session id, and each is recorded with `error` set and `probes` empty.
     witness: tests/test_review.py::test_a_criterion_whose_session_answers_nothing_usable_is_an_error_with_no_probes_and_the_next_is_still_asked
     wrong_versions:
@@ -263,7 +264,7 @@ the block, then the schema, then the count (`:617-626`).
 `_resolved_wrong_versions` pairs each declared version with its answer by
 position (`:593-614`). `describe_wrong_versions` counts every version across
 every entry, then names the witness of each entry whose `error` is set
-(`:698-719`).
+(`:698-717`).
 
 **How the edits are applied.** REVIEW calls `run_criterion_probes` inside
 the critic cell with `probe_budget` (`saffron/cell/session.py:3252-3264`),
@@ -392,8 +393,8 @@ spelling at the tree base to pin. `witness` reports `skip` for this spec.
 
 **Records amended by hand.** Two protected sentences were amended at
 `2db95118`, ahead of this cell, so neither goes stale under it. `DESIGN.md`
-§5.4.1's paragraph "An edit a spec could not declare" is at
-`DESIGN.md:1118-1120`. It now reads: the host "asks one fresh session per
+§5.4.1's paragraph "An edit a spec could not declare" opens at
+`DESIGN.md:1117`, and its amended sentences are `DESIGN.md:1118-1120`. They now read: the host "asks one fresh session per
 acceptance claim for one edit per sentence of that claim (`SA-0113`,
 `SA-0328`). Each edit is the smallest that would make its sentence false,
 and a session names at most sixteen". `CONTEXT.md` §4's **Criterion probe**
@@ -414,7 +415,7 @@ their existing names:
   (`:11756`) reads the edit and the reason off the entry. It pins the old
   line at `:11807`.
   `test_a_criterion_probe_its_witness_survives_is_rebutted_as_a_blocker`
-  (`:11846`) reads `outcome` off the entry at `:11916`. So do
+  (`:11846`) reads `outcome` off the entry two lines under `:11916`. So do
   `test_a_killed_or_errored_criterion_probe_files_nothing_and_stops_nothing`
   (`:12064`, `:12122`),
   `test_a_criterion_probe_nothing_could_answer_is_unproven_and_files_nothing`
@@ -428,6 +429,10 @@ their existing names:
   `:11807` and `criterion probes: 0 named over 4 criteria, 4 unnamed, 0
   refused` at `:12977`. Every other test that scripts a probe turn through
   `_probe_answer` keeps working once the helper returns the new block.
+  Sixteen cell tests declare criteria and script no probe turn, so their
+  sessions get `_drive`'s default turn (`:1476`), which is not the schema.
+  The new loop re-prompts each once, so each such criterion costs one more
+  turn and $0.10 more. No assertion in those tests pins either count.
 - `tests/test_review.py`: `_probe_text` (`:1240`) returns the same block.
   `test_a_session_that_answers_nothing_usable_is_recorded_and_the_next_is_still_asked`
   (`:1263`) scripts one refused answer and asserts no re-prompt. Under the
@@ -476,12 +481,12 @@ emits. Criterion 5's compares a line the base never prints.
   `test_a_wrong_version_answer_that_is_not_the_schema_is_reprompted_once_in_its_own_session`
   and asserts the re-prompt's recorded `prompt`, `options` and `kwargs`:
   `resume` is the first turn's session id, `last_cost_usd` its cost,
-  `max_budget_usd` the ceiling less that cost. Drive six first answers that
+  `max_budget_usd` the session budget less that cost. Drive six first answers that
   are re-prompted and two that are not, each on its own criterion, in one
   `run_criterion_probes` call or several.
 - Criterion 3 drives one `run_criterion_probes` call over four criteria:
   the three errors, then the answering fourth. A second call drives the two
-  turns no re-prompt follows: one with cost above half the ceiling, one with
+  turns no re-prompt follows: one with cost above half the session budget, one with
   `session_id` empty. Compare each entry whole.
 - Criterion 4 follows
   `test_a_criterion_probe_its_witness_survives_is_rebutted_as_a_blocker`
