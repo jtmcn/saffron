@@ -4,7 +4,7 @@ title: A criterion probe names one edit against a claim of up to twelve sentence
 status: open
 tier: 1
 filed: 2026-10-30
-specs: []
+specs: [SA-0328]
 prs: []
 commits: []
 cites: [§5.4.1, §5.5.1]
