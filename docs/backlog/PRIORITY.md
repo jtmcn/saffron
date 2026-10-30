@@ -581,7 +581,7 @@ every cell.
 deferred finish exempts the stack base's branch but none on its chain.
 
 **Placed 2026-10-24**, from the spec loop's run 47: **b-a68b24**, then
-**b-781ea4**. The witness gate passes a mutant whose find matches twice. The
+~~**b-781ea4**~~. The witness gate passes a mutant whose find matches twice. The
 finish's follow-up drafts fail to parse, so it files nothing.
 
 **Placed 2026-10-25**, from the spec loop's run 48: ~~**b-1b05be**~~, then
@@ -595,12 +595,18 @@ each name the texts a stack batch runs that are not at `base_sha`.
 `SA-0321` adds a third.
 
 **Placed 2026-10-27**, from the spec loop's run 49: **b-e0044f**, then
-**b-549012**. The finishing layer queues a follow-up whose cell ran and fails
+~~**b-549012**~~. The finishing layer queues a follow-up whose cell ran and fails
 on its drafts' prose, so a finish that drafts never pushes. A review commit is
 read by no lens until the finish.
 
 **Placed 2026-10-27**, from writing `SA-0326`: **b-bc8343**, by hand after
 `SA-0326` merges. `CONTEXT.md` names no review commit and no commit review.
+
+**Placed 2026-10-29**, from the spec loop's run 50: **b-298b1c**,
+**b-8826cf**, **b-323c97** and **b-0bd8c9**. A spec review's lost findings
+skip a layer. A rebuttal's suppression ends a green task. An adopted task
+gets no end review. A stack batch refuses a spec that meets an earlier
+batch's open layer.
 
 ### Tier 3 — real, not urgent
 
@@ -647,6 +653,9 @@ left alone.
 
 **Placed 2026-10-27**, from #985's CI run: **b-d0baf7**. A green finish
 test once found the finish's branch in the mirror.
+
+**Placed 2026-10-29**, from #990's Spec seat: **b-8971e6**. Two commands
+read a task's spec from the first sorted file for its id.
 
 ~~**22**~~, ~~**23**~~, **31**, ~~**19**~~, **20**, **53**, **54**, **14** + **55**,
 **56**, ~~**57**~~, ~~**61**~~, ~~**62**~~, **63**, ~~**64**~~, **75**, **76**, **77**.

@@ -2646,3 +2646,24 @@ seat finding the in-cell critic and the end review both passed.
   b-e0044f.
 - Run 49: `SA-0322` reached `READY_FOR_REVIEW` with a blocker the critic
   still held. **No bucket**, REBUT. **Open:** b-92c92a.
+
+## 2026-10-29, spec loop run 50 (#989, #990)
+
+- `SA-0325` (#989): REBUT silenced ruff ten times with `noqa` to keep a
+  closure inside its loop, so `integrity` ended a green task `EXHAUSTED`.
+  **No bucket**, REBUT. **Open:** b-8826cf.
+- `SA-0325` (#989): criterion 2's witness read no charged session ids and
+  no raised group's reason, so three wrong versions survived it.
+  **Bucket 3**, adequacy. **Landed:** a review commit on #989.
+- `SA-0325` (#989): `send_back` left the sent-back mark to its caller and
+  told every refusal it did not parse, which `SA-0327` reuses as is.
+  **Bucket 3**, contract. **Landed:** a review commit on #989.
+- `SA-0326` (#990): two witnesses never read the Range line's start or the
+  failed lens's error in the review file. **Bucket 3**, adequacy.
+  **Landed:** a review commit on #990.
+- `SA-0326` (#990): three helpers copied `session` and `regate` word for
+  word instead of importing them. **Bucket 3**, conventions. **Landed:** a
+  review commit on #990.
+- `SA-0326` (#990): the module docstring called the COMMIT_REVIEW attempt
+  label a phase, which finish 60's Standards lens found. **Bucket 3**,
+  conventions. **Landed:** a review commit on #990.

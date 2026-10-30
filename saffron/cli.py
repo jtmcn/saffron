@@ -1,6 +1,6 @@
-"""`saffron`: cell, batch, draft, next-id, queue, reconcile, regate, adopt,
-package, finish, watch, fold, migrate, chains, serve, replay. `ratify` and
-`gc` are still unbuilt (§4.2.1, §4.5)."""
+"""`saffron`: cell, batch, draft, next-id, queue, reconcile, regate, review,
+adopt, package, finish, watch, fold, migrate, chains, serve, replay. `ratify`
+and `gc` are still unbuilt (§4.2.1, §4.5)."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import cast
 
 from saffron import (
+    commit_review,
     draft,
     end_review,
     finish,
@@ -193,6 +194,15 @@ def main(argv: list[str] | None = None) -> int:
     regate_parser.add_argument("task_id", type=int)
     regate_parser.add_argument("--repo", type=Path, default=Path.cwd())
 
+    review_parser = subcommands.add_parser(
+        "review",
+        help="read a task's own review commits with the end review's two "
+        "lenses, charged to the task, and write their findings "
+        "(backlog item b-549012)",
+    )
+    review_parser.add_argument("task_id", type=int)
+    review_parser.add_argument("--repo", type=Path, default=Path.cwd())
+
     adopt_parser = subcommands.add_parser(
         "adopt",
         help="name a by-hand pull request as one spec's newest task's own, "
@@ -365,6 +375,9 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "regate":
             return _guarding_sigterm(lambda: _regate(args, ledger, out_dir))
+
+        if args.command == "review":
+            return _guarding_sigterm(lambda: _review(args, ledger, out_dir))
 
         if args.command == "adopt":
             return _guarding_sigterm(lambda: _adopt(args, ledger, out_dir))
@@ -2795,6 +2808,22 @@ def _regate(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     token, and a red result moves no task state."""
     repo = args.repo.resolve()
     return regate.run_regate(
+        args.task_id,
+        repo=repo,
+        ledger=ledger,
+        out_dir=out_dir,
+        mirror_path=_mirror_path(repo, args.home),
+        gh=run_gh,
+    )
+
+
+def _review(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
+    """`saffron review <task id> --repo .`: `commit_review.run_commit_review`'s
+    whole body, with `--repo` resolved and the host's ledger, batch tree,
+    mirror path and `gh` runner handed down. Charges its session to the
+    task and changes no task state (backlog item b-549012)."""
+    repo = args.repo.resolve()
+    return commit_review.run_commit_review(
         args.task_id,
         repo=repo,
         ledger=ledger,
