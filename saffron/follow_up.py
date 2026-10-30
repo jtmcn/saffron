@@ -318,12 +318,12 @@ def write_follow_ups(
             return None
 
     spent = 0.0
-    reset_reason: str | None = None
+    halt_reason: str | None = None
     candidates: list[Candidate] = []
 
     for group in qualification.groups:
-        if reset_reason is not None:
-            _pool(group, reset_reason)
+        if halt_reason is not None:
+            _pool(group, halt_reason)
             continue
 
         remainder = cap_usd - spent
@@ -398,9 +398,9 @@ def write_follow_ups(
             spent += session.cost_usd
 
             if session.resets_at is not None:
-                reset_reason = "a spec writer session met the account's rate limit"
+                halt_reason = "a spec writer session met the account's rate limit"
                 _charge(origin_task_id, session)
-                _pool(group, reset_reason)
+                _pool(group, halt_reason)
                 break
             if session.error is not None:
                 _charge(origin_task_id, session)
@@ -438,8 +438,8 @@ def write_follow_ups(
                 judged = judge(path, session.text)
             except Exception as exc:
                 _charge(origin_task_id, session)
-                reset_reason = f"judge raised {type(exc).__name__}: {exc}"
-                _pool(group, reset_reason)
+                halt_reason = f"judge raised {type(exc).__name__}: {exc}"
+                _pool(group, halt_reason)
                 break
             if judged:
                 resent = send_back(

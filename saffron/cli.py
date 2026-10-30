@@ -1029,7 +1029,7 @@ def _finish_verify(
     *, pinned: PinnedBase, repo: Path, gates_dir: Path
 ) -> Callable[[str, str], tuple[NewFailure, ...]]:
     """The `verify` callable `finish.publish_finish` and `finish.judge_draft`
-    share, each wrapping it to its own shape.
+    share. `_stack_finish` counts its result, and `judge_draft` renders it.
 
     Exports `.saffron/` from the pinned mirror at the pinned base. Builds
     the finishing suite over the policy it finds there, and runs

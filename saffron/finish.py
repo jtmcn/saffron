@@ -167,10 +167,10 @@ def commit_finish(
     Writes each layer's and each task in `unrun`'s latest spec text, except
     a follow-up layer's: its earliest `spec_texts` row carries the origin
     `follow_up`, and its latest text goes to `ran_dir` instead, one emitted
-    line per text. Moves no spec into `done/` (ADR 7, amended). Raises
-    `ValueError` naming a pending path's symlinked component, read below the
-    cut worktree, before that path's own write. Returns the new sha, or
-    `None` for a batch with no layer or a tree the writes left unchanged."""
+    line per text. Moves no spec into `done/` (ADR 7, amended). The cut
+    tree is a cell's, so a symlinked component of a pending path raises
+    `ValueError` before that path's write. Returns the new sha, or `None`
+    for no layer or an unchanged tree."""
     layers = ledger.stack_layers(batch_id)
     if not layers:
         return None
@@ -222,20 +222,25 @@ def commit_finish(
         )
         if unchanged.returncode == 0:
             return None
-        git_mirror._git(
-            workdir,
-            "-c",
-            "user.email=saffron@localhost",
-            "-c",
-            "user.name=Saffron",
-            "commit",
-            "-q",
-            "-m",
-            f"saffron batch {batch_id}: finishing layer",
-        )
-        return git_mirror._git(workdir, "rev-parse", "HEAD")
+        return _commit(workdir, f"saffron batch {batch_id}: finishing layer")
     finally:
         git_mirror.remove_worktree(mirror, workdir)
+
+
+def _commit(workdir: Path, message: str) -> str:
+    """Commit the staged tree in `workdir` as Saffron, and return its sha."""
+    git_mirror._git(
+        workdir,
+        "-c",
+        "user.email=saffron@localhost",
+        "-c",
+        "user.name=Saffron",
+        "commit",
+        "-q",
+        "-m",
+        message,
+    )
+    return git_mirror._git(workdir, "rev-parse", "HEAD")
 
 
 def _render_new_failure(new_failure: NewFailure) -> str:
@@ -276,18 +281,7 @@ def judge_draft(
         _refuse_symlink(workdir, path)
         (workdir / path).write_text(text)
         git_mirror._git(workdir, "add", "-A")
-        git_mirror._git(
-            workdir,
-            "-c",
-            "user.email=saffron@localhost",
-            "-c",
-            "user.name=Saffron",
-            "commit",
-            "-q",
-            "-m",
-            f"saffron judge: {path}",
-        )
-        sha = git_mirror._git(workdir, "rev-parse", "HEAD")
+        sha = _commit(workdir, f"saffron judge: {path}")
         ref = f"refs/heads/saffron-judge/{sha[:12]}"
         git_mirror._git(mirror, "update-ref", ref, sha)
         try:
