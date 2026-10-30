@@ -1,0 +1,1 @@
+{"at": "2026-10-30T07:01:37.246164+00:00", "batch_key": "61", "kind": "rebuttal", "payload": {"position": 4, "rebuttal": "fixed: Same fix as finding 1: the three-failure assertion also kills this reordered variant of the no-file/no-line logic. Verified directly and restored the source.", "verdict": "withdrawn"}, "repo": "saffron", "task_key": "bb3ead5b2e7ab571f18938c929a7c9ee"}
