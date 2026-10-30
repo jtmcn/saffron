@@ -514,10 +514,11 @@ _Avoid_: "mutant" for one. A mutant is declared by a criterion, is withheld from
 implementer, and must be killed. _Avoid_ "mutation testing" for the corpus number: one probe
 per finding, chosen by the lens to make its own case, is not a sample of the mutation space.
 
-**Criterion probe**: A find-and-replace edit a fresh session names to make one acceptance
-claim false. During REVIEW the host starts one session per criterion in the critic cell.
-Each session sees one claim and the diff, and is never told which test is its witness.
-Its edits are recorded in `criterion-probes.json`. A criterion probe that survives its own
+**Criterion probe**: A find-and-replace edit a fresh session names to make one sentence of
+an acceptance claim false. During REVIEW the host starts one session per criterion in the
+critic cell. Each session sees one claim and the diff, and is never told which test is its
+witness. It names one edit per sentence of the claim, at most sixteen (`SA-0328`). Its edits
+are recorded in `criterion-probes.json` under their criterion. A criterion probe that survives its own
 criterion's witness is the finding: nothing guards the claim. The host applies each one in
 a gate-only cell, and a survivor is a blocker for REBUT whether or not it anchors (`SA-0120`,
 `SA-0299`). Its claim names each test that failed under the same edit and not at head (`SA-0322`). Where the suite answered and none did, it says the whole `tests` gate stayed green.

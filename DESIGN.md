@@ -1116,7 +1116,8 @@ writing a claim now means saying what would falsify it.
 
 **An edit a spec could not declare.** The reason above is about the implementer,
 which wrote the code and the tests. During REVIEW the host asks one fresh session per acceptance claim for
-the smallest edit that would make that claim false (`SA-0113`). The session sees
+one edit per sentence of that claim (`SA-0113`, `SA-0328`). Each edit is the smallest
+that would make its sentence false, and a session names at most sixteen. The session sees
 the claim and the diff, and is never told which witness guards it. That
 withholding is what makes the edit evidence. Its author cannot see what would
 kill it, so it is not chosen to be killed. The edit is a **criterion probe**
