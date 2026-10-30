@@ -145,16 +145,16 @@ acceptance:
       and one not. Each survivor is filed as a host-filed `adequacy` blocker
       carrying its own edit as `probe` and `survived` as `probe_verdict`,
       both reach `rebuttal.json`, and the task ends `REBUTTAL_UNJUDGED`. The
-      second's session names two probes, one with a null edit and one on a
-      declared test path. Both are `unproven`, and the second carries its
-      `refusal`. The third's session fails, so its entry has `error` set and
-      `probes` empty, and nothing of it is applied. The first criterion also
-      declares one wrong version, whose edit its witness kills. Every
-      summary is compared whole: a probe's names a `criterion probe` and the
-      version's names a `wrong version`. REVIEW emits one line reading
-      `criterion probes: 3 named over 3 criteria, 1 unnamed, 1 refused; no
-      session answered: ` and the third criterion's witness, before the
-      wrong-version line.
+      second's session names three probes: one its own witness kills, one
+      with a null edit and one on a declared test path. The last two are
+      `unproven`, and the third carries its `refusal`. The third criterion's
+      session fails, so its entry has `error` set and `probes` empty, and
+      nothing of it is applied. The first criterion also declares one wrong
+      version, whose edit its witness kills. Every summary is compared
+      whole: a probe's names a `criterion probe` and the version's names a
+      `wrong version`. REVIEW emits one line reading `criterion probes: 4
+      named over 3 criteria, 1 unnamed, 1 refused; no session answered: `
+      and the third criterion's witness, before the wrong-version line.
     witness: tests/test_session.py::test_every_probe_a_session_names_is_applied_under_its_own_criterion_and_each_survivor_blocks
     wrong_versions:
       - Only the first probe of each entry is paired with its criterion.
@@ -206,7 +206,7 @@ acceptance:
 ## Context
 
 Backlog item **b-78a590**, under `DESIGN.md` §5.4.1 and §5.5.1. Every line
-below was read at `7c1fdbd5`.
+below was read at `2db95118`.
 
 **What the loop measured.** The spec loop's runs 49 and 50 each ranked
 this third (`docs/evidence/2026-10-27-spec-loop-skill-feedback-run-49.md:99`,
@@ -240,7 +240,7 @@ with `extra="forbid"` (`saffron/phases/review.py:412-419`).
 and files an answer the schema refuses as `not the schema: ` with no
 re-prompt (`saffron/phases/review.py:446-480`). Its docstring says why: a
 criterion probe "costs one claim, where a lens costs a whole remit"
-(`saffron/phases/review.py:455-457`). `run_criterion_probes` calls it once
+(`saffron/phases/review.py:458-459`). `run_criterion_probes` calls it once
 per criterion and files `witness`, `claim`, `edit`, `reason`, `cost_usd` and
 `error` (`saffron/phases/review.py:483-528`). `describe_criterion_probes`
 prints `criterion probes: {named} named, {unnamed} unnamed`
@@ -249,7 +249,7 @@ prints `criterion probes: {named} named, {unnamed} unnamed`
 **The shape this spec mirrors.** `run_wrong_versions` buys one session per
 criterion that declares versions (`saffron/phases/review.py:629-695`). An
 `AgentFailed` turn is filed through `_unresolved_wrong_versions`
-(`:675-678`). Any other turn goes through `_parse_or_reprompt` with
+(`:676-679`). Any other turn goes through `_parse_or_reprompt` with
 `_parse_wrong_version_report` (`:680-688`), and an error is filed through
 `_unresolved_wrong_versions` too (`:689-691`). `_parse_or_reprompt` resumes
 the same session once with the error and `EXTRACTION_PROMPT`, on the budget
@@ -390,14 +390,17 @@ so the seats still find the sentences it left.
 (§5.4.1). The schema, the re-prompt, the pairing loop and the line have no
 spelling at the tree base to pin. `witness` reports `skip` for this spec.
 
-**Records amended by hand.** Two protected sentences go stale. `DESIGN.md`
-§5.4.1's paragraph "An edit a spec could not declare" names one session per
-claim (`DESIGN.md:1117-1120`). It says the host "asks one fresh session per
-acceptance claim for the smallest edit that would make that claim false".
-`CONTEXT.md` §4's **Criterion
-probe** entry opens "A find-and-replace edit a fresh session names to make
-one acceptance claim false" (`CONTEXT.md:517-518`). Both are amended in
-this spec's pull request, not by the cell. Both files are `forbidden`.
+**Records amended by hand.** Two protected sentences were amended at
+`2db95118`, ahead of this cell, so neither goes stale under it. `DESIGN.md`
+§5.4.1's paragraph "An edit a spec could not declare" is at
+`DESIGN.md:1118-1120`. It now reads: the host "asks one fresh session per
+acceptance claim for one edit per sentence of that claim (`SA-0113`,
+`SA-0328`). Each edit is the smallest that would make its sentence false,
+and a session names at most sixteen". `CONTEXT.md` §4's **Criterion probe**
+entry is at `CONTEXT.md:517-520`. It now opens "A find-and-replace edit a
+fresh session names to make one sentence of an acceptance claim false". It
+adds "It names one edit per sentence of the claim, at most sixteen
+(`SA-0328`)". Both files are `forbidden`.
 
 **Existing tests keep their names.** `census` reads a renamed or deleted
 test as a removal on every attempt. Rewrite these to the new shape under
@@ -457,10 +460,18 @@ emits. Criterion 5's compares a line the base never prints.
 
 **The witnesses.**
 - Criterion 1 follows `_probe_agent` (`tests/test_review.py:1244-1260`) and
-  records each session's `options`. Compare the system prompt's tail the
-  way `_expected_wrong_version_tail` does (`tests/test_review.py:1310-1320`).
-  Compare each entry with `==` against a dict, with `pytest.approx` for
-  `cost_usd`.
+  records each session's `options`. It drives two criteria, and the second
+  is `preserves=True`, as `tests/test_session.py:11669-11673` builds one.
+  The first claim has three sentences, and the three probes quote them, one
+  each. A host that split the claim would buy three sessions for it. Assert
+  `len(record) == 2`: exactly two sessions, one per criterion. Script
+  the three sentences out of alphabetical order, so a record sorted by
+  `sentence` differs from the session's order. That is what excludes the
+  sorted wrong version. Every probe test at base shows a one-sentence claim
+  (`tests/test_review.py:1267-1270`), so this one is new. Compare the system
+  prompt's tail the way `_expected_wrong_version_tail` does
+  (`tests/test_review.py:1310-1320`). Compare each entry with `==` against a
+  dict, with `pytest.approx` for `cost_usd`.
 - Criterion 2 follows
   `test_a_wrong_version_answer_that_is_not_the_schema_is_reprompted_once_in_its_own_session`
   and asserts the re-prompt's recorded `prompt`, `options` and `kwargs`:
@@ -478,13 +489,29 @@ emits. Criterion 5's compares a line the base never prints.
   `src/x.py`'s third line and one on `src/y.py`. It follows
   `test_a_criterion_probe_nothing_could_answer_is_unproven_and_files_nothing`
   (`tests/test_session.py:12136-12205`) for the null edit and the test-path
-  edit. Script the
-  gate results in pair order: the first criterion's kill, then each
-  survivor's witness run and whole-suite run, then the wrong version's
-  kill. Assert `subsets` whole: the witness alone, then the empty subset,
-  for each survivor. Assert `criterion-probes.json`, `wrong-versions.json`
-  and `rebuttal.json`'s blockers with `==`, and the REVIEW lines as a list
-  in order, as `tests/test_session.py:12970-12979` does.
+  edit, and
+  `test_a_killed_or_errored_criterion_probe_files_nothing_and_stops_nothing`
+  (`tests/test_session.py:12064-12134`) for the two kills. The three
+  criteria are `t.py::a`, `t.py::b` and `t.py::c`. The kill is the first
+  probe in the first session's list, and the second session's kill is its
+  first probe too. `_apply_criterion_probes` walks `pairs` in order, every
+  probe of the first entry, then of the second, then the wrong version
+  (`saffron/cell/session.py:3325-3338`). A pair with a null edit, or one on
+  a test path, never joins `with_edit` (`:1986-1995`), so it asks no gate.
+  A killed pair asks its witness once and `continue`s (`:2063-2080`). A
+  survivor asks its witness, then the whole suite (`:2063`, `:2101-2110`).
+  So script seven gate results, in this order. The first kill: a `fail` on
+  `t.py::a`. The first survivor: a `pass` on `t.py::a`, then a `pass` on the
+  whole suite. The second survivor: the same two. The second criterion's
+  kill: a `fail` on `t.py::b`. The wrong version: a `fail` on `t.py::a`.
+  Assert `subsets` whole, as the one list
+  `[["t.py::a"], ["t.py::a"], [], ["t.py::a"], [], ["t.py::b"], ["t.py::a"]]`.
+  The `["t.py::b"]` is the member a host pairing every probe with the first
+  criterion gets wrong, since it would run `["t.py::a"]` there. Assert
+  `criterion-probes.json`,
+  `wrong-versions.json` and `rebuttal.json`'s blockers with `==`, and the
+  REVIEW lines as a list in order, as `tests/test_session.py:12970-12979`
+  does.
 - Criterion 5 is a unit witness over `describe_criterion_probes` with
   hand-built entries. The refused probe carries a `refusal` string and an
   edit, as `_apply_criterion_probes` writes it.
@@ -502,6 +529,7 @@ drives a claim of 16 sentences through a whole cell. A session that names
 more edits than the claim has sentences is not refused below the ceiling.
 The re-prompt is driven at the unit level, in criteria 2 and 3, and no
 whole-cell witness scripts one. Criterion 8 drives the `killed` and
-`error` outcomes, and criterion 4 the `survived` and `unproven` ones.
+`error` outcomes, and criterion 4 the `survived`, `killed` and `unproven`
+ones.
 
 Commit after each coherent step. Uncommitted work dies with the cell.
