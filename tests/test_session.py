@@ -11618,8 +11618,16 @@ def test_the_review_lens_prompt_carries_the_claim_for_a_witnessed_spec(
 # --- criterion probes: one fresh session per criterion (backlog item b-2750d5) ---
 
 
-def _probe_answer(edit, reason):
-    return f"Here it is.\n<output>\n{json.dumps({'edit': edit, 'reason': reason})}\n</output>"
+def _probes_answer(probes):
+    """The text of one `<output>` block holding `{"probes": probes}`
+    exactly, for a session naming more than one edit (backlog b-78a590)."""
+    return f"Here it is.\n<output>\n{json.dumps({'probes': probes})}\n</output>"
+
+
+def _probe_answer(edit, reason, sentence="the claim"):
+    """One `<output>` block holding `{"probes": [...]}`, one probe (backlog
+    item b-78a590), so every test that scripts one answer keeps working."""
+    return _probes_answer([{"sentence": sentence, "edit": edit, "reason": reason}])
 
 
 def _wrong_version_answer(*versions):
@@ -11784,6 +11792,9 @@ def test_the_record_pairs_each_claim_with_the_edit_its_own_session_named(
             _turn(_probe_answer(None, "nothing in the diff touches the total")),
         ),
         spec=_spec(acceptance=[first, second]),
+        # Declared test paths, so the named edit is never refused for
+        # want of one. No `tests` gate declared, so nothing is asked of it.
+        policy='gates: {}\nintegrity:\n  test_paths: ["spec/**"]\n',
     )
     assert outcome.state == "READY_FOR_REVIEW"
     entries = json.loads(
@@ -11792,19 +11803,25 @@ def test_the_record_pairs_each_claim_with_the_edit_its_own_session_named(
     assert len(entries) == 2
     assert entries[0]["witness"] == "t.py::test_a"
     assert entries[0]["claim"] == "the guard rejects a negative amount"
-    assert entries[0]["edit"] == {
+    assert entries[0]["probes"][0]["edit"] == {
         "file": "src/x.py",
         "find": "if x < 0:",
         "replace": "if False:",
     }
-    assert entries[0]["reason"] == "removing the guard lets a negative amount through"
+    assert (
+        entries[0]["probes"][0]["reason"]
+        == "removing the guard lets a negative amount through"
+    )
     assert entries[1]["witness"] == "t.py::test_b"
     assert entries[1]["claim"] == "the total never goes negative"
-    assert entries[1]["edit"] is None
-    assert entries[1]["reason"] == "nothing in the diff touches the total"
+    assert entries[1]["probes"][0]["edit"] is None
+    assert entries[1]["probes"][0]["reason"] == "nothing in the diff touches the total"
 
     (line,) = [w for w in cell.watched if w.startswith("REVIEW: criterion probes:")]
-    assert line == "REVIEW: criterion probes: 1 named, 1 unnamed"
+    assert (
+        line
+        == "REVIEW: criterion probes: 1 named over 2 criteria, 1 unnamed, 0 refused"
+    )
 
     # A spec declaring no criterion buys no session, writes no record and
     # emits no line.
@@ -11915,7 +11932,7 @@ def test_a_criterion_probe_its_witness_survives_is_rebutted_as_a_blocker(
     entries = json.loads(
         (tmp_path / "out" / "SY-1" / "criterion-probes.json").read_text()
     )
-    assert [e["outcome"] for e in entries] == ["survived", "survived"]
+    assert [e["probes"][0]["outcome"] for e in entries] == ["survived", "survived"]
 
     findings = json.loads((tmp_path / "out" / "SY-1" / "findings.json").read_text())
     (adequacy,) = [r for r in findings if r["lens"] == "adequacy"]
@@ -12121,8 +12138,8 @@ def test_a_killed_or_errored_criterion_probe_files_nothing_and_stops_nothing(
     entries = json.loads(
         (tmp_path / "out" / "SY-1" / "criterion-probes.json").read_text()
     )
-    assert [e["outcome"] for e in entries] == ["killed", "error", "killed"]
-    assert errored.summary in entries[1]["summary"]
+    assert [e["probes"][0]["outcome"] for e in entries] == ["killed", "error", "killed"]
+    assert errored.summary in entries[1]["probes"][0]["summary"]
     findings = json.loads((tmp_path / "out" / "SY-1" / "findings.json").read_text())
     (adequacy,) = [r for r in findings if r["lens"] == "adequacy"]
     assert adequacy["findings"] == []
@@ -12186,19 +12203,303 @@ def test_a_criterion_probe_nothing_could_answer_is_unproven_and_files_nothing(
     entries = json.loads(
         (tmp_path / "out" / "SY-1" / "criterion-probes.json").read_text()
     )
-    assert [e["outcome"] for e in entries] == ["unproven"] * 5
-    assert "spec/t.py" in entries[1]["summary"]
+    assert [e["probes"][0]["outcome"] for e in entries] == ["unproven"] * 5
+    assert "spec/t.py" in entries[1]["probes"][0]["summary"]
     assert (
-        "outside.py" in entries[2]["summary"]
-        or "not a relative" in entries[2]["summary"]
+        "outside.py" in entries[2]["probes"][0]["summary"]
+        or "not a relative" in entries[2]["probes"][0]["summary"]
     )
-    assert refusal_reason in entries[3]["summary"]
-    assert "t.py::e" in entries[4]["summary"]
+    assert refusal_reason in entries[3]["probes"][0]["summary"]
+    assert "t.py::e" in entries[4]["probes"][0]["summary"]
     # The mutator is entered for the refused edit alone.
     assert cell.mutated == [Mutant.model_validate(refused_edit)]
     findings = json.loads((tmp_path / "out" / "SY-1" / "findings.json").read_text())
     (adequacy,) = [r for r in findings if r["lens"] == "adequacy"]
     assert adequacy["findings"] == []
+
+
+def test_every_probe_a_session_names_is_applied_under_its_own_criterion_and_each_survivor_blocks(
+    monkeypatch, tmp_path
+):
+    """Criterion 4: `criterion-probes.json` holds every probe each session
+    named, in the spec's order, each carrying its own `outcome` and
+    `summary`. The first criterion's session names a kill then two
+    survivors. One anchors to the diff and one does not, and both reach
+    `rebuttal.json` as host-filed `adequacy` blockers. The second's names a
+    kill, a null edit and a test-path edit, the last two `unproven`. The
+    third criterion's session fails outright, so its entry has `error` set
+    and `probes` empty, and nothing of it is applied. The first
+    criterion's own wrong version is killed too, never confused with its
+    probes."""
+    from saffron.intake import Criterion, Mutant
+
+    a = Criterion(
+        claim="claim a", witness="t.py::a", wrong_versions=["a wrong version"]
+    )
+    b = Criterion(claim="claim b", witness="t.py::b")
+    c = Criterion(claim="claim c", witness="t.py::c")
+
+    kill_a = {"file": "src/x.py", "find": "assert x == 1", "replace": "ka"}
+    # Line 3 of `src/x.py` sits outside the diff's `@@ -1 +1 @@` hunk. It
+    # shares a token ("x") the diff changed, so it anchors by content.
+    anchors = {"file": "src/x.py", "find": "assert x == 1", "replace": "x2"}
+    # No token the diff touched is on its own line, so it does not anchor.
+    unanchored = {"file": "src/y.py", "find": "check(9)", "replace": "check(0)"}
+    kill_b = {"file": "src/x.py", "find": "assert x == 1", "replace": "kb"}
+    on_test_path = {"file": "spec/t.py", "find": "assert 1", "replace": "2"}
+    wrong_version_a = {"file": "src/x.py", "find": "assert x == 1", "replace": "wv"}
+
+    cell = _stub_the_runtime(
+        monkeypatch,
+        patch=_ANCHORING_DIFF,
+        gate_cell_suite=[_tests_result("pass", collected=["t.py::a", "t.py::b"])],
+    )
+    _rebuttable(monkeypatch, cell, rebut_commits=0)
+    subsets: list[list[str]] = []
+    _stub_probe_gates(
+        monkeypatch,
+        cell,
+        gate_results=[
+            _tests_result("fail", collected=["t.py::a"]),  # kill_a
+            _tests_result("pass", collected=["t.py::a"]),  # anchors survives
+            _tests_result("pass", collected=["t.py::a", "t.py::b"]),  # suite green
+            _tests_result("pass", collected=["t.py::a"]),  # unanchored survives
+            _tests_result("pass", collected=["t.py::a", "t.py::b"]),  # suite green
+            _tests_result("fail", collected=["t.py::b"]),  # kill_b
+            _tests_result("fail", collected=["t.py::a"]),  # wrong_version_a dies
+        ],
+        subsets=subsets,
+    )
+    contents = {
+        "src/x.py": "def y():\n    return 1\nassert x == 1\n",
+        "src/y.py": "def other():\n    check(9)\n",
+    }
+
+    def _read_at_head(container, path):
+        return None if container == _CRITIC_CONTAINER else contents.get(path)
+
+    monkeypatch.setattr("saffron.cell.worktree.read_at_head", _read_at_head)
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_probe_turns(
+            _turn(
+                _probes_answer(
+                    [
+                        {"sentence": "s1", "edit": kill_a, "reason": "kills it"},
+                        {
+                            "sentence": "s2",
+                            "edit": anchors,
+                            "reason": "removing the guard lets a negative through",
+                        },
+                        {
+                            "sentence": "s3",
+                            "edit": unanchored,
+                            "reason": "nothing checks the total's sign",
+                        },
+                    ]
+                )
+            ),
+            _turn(
+                _probes_answer(
+                    [
+                        {"sentence": "s1", "edit": kill_b, "reason": "kills it"},
+                        {"sentence": "s2", "edit": None, "reason": "nothing to name"},
+                        {
+                            "sentence": "s3",
+                            "edit": on_test_path,
+                            "reason": "hits the test file",
+                        },
+                    ]
+                )
+            ),
+            implement.AgentFailed("the session crashed", _turn("", cost=0.2)),
+        )
+        + [
+            _turn(
+                _wrong_version_answer(
+                    (wrong_version_a, "the wrong version matches this edit")
+                )
+            ),
+            _turn("I have addressed the findings."),
+            _turn(structured_output=_CLAIMED_FIX),
+        ],
+        spec=_spec(acceptance=[a, b, c]),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "REBUTTAL_UNJUDGED"
+    assert subsets == [
+        ["t.py::a"],
+        ["t.py::a"],
+        [],
+        ["t.py::a"],
+        [],
+        ["t.py::b"],
+        ["t.py::a"],
+    ]
+    assert cell.mutated == [
+        Mutant.model_validate(kill_a),
+        Mutant.model_validate(anchors),
+        Mutant.model_validate(anchors),
+        Mutant.model_validate(unanchored),
+        Mutant.model_validate(unanchored),
+        Mutant.model_validate(kill_b),
+        Mutant.model_validate(wrong_version_a),
+    ]
+
+    entries = json.loads(
+        (tmp_path / "out" / "SY-1" / "criterion-probes.json").read_text()
+    )
+    assert entries == [
+        {
+            "witness": "t.py::a",
+            "claim": "claim a",
+            "cost_usd": pytest.approx(0.1),
+            "error": None,
+            "probes": [
+                {
+                    "sentence": "s1",
+                    "edit": kill_a,
+                    "reason": "kills it",
+                    "outcome": "killed",
+                    "summary": (
+                        "1 of 1 witness(es) died under their own criterion probe"
+                    ),
+                },
+                {
+                    "sentence": "s2",
+                    "edit": anchors,
+                    "reason": "removing the guard lets a negative through",
+                    "outcome": "survived",
+                    "summary": (
+                        "1 of 1 witness(es) survived their own criterion probe"
+                    ),
+                },
+                {
+                    "sentence": "s3",
+                    "edit": unanchored,
+                    "reason": "nothing checks the total's sign",
+                    "outcome": "survived",
+                    "summary": (
+                        "1 of 1 witness(es) survived their own criterion probe"
+                    ),
+                },
+            ],
+        },
+        {
+            "witness": "t.py::b",
+            "claim": "claim b",
+            "cost_usd": pytest.approx(0.1),
+            "error": None,
+            "probes": [
+                {
+                    "sentence": "s1",
+                    "edit": kill_b,
+                    "reason": "kills it",
+                    "outcome": "killed",
+                    "summary": (
+                        "1 of 1 witness(es) died under their own criterion probe"
+                    ),
+                },
+                {
+                    "sentence": "s2",
+                    "edit": None,
+                    "reason": "nothing to name",
+                    "outcome": "unproven",
+                    "summary": "this session named no edit",
+                },
+                {
+                    "sentence": "s3",
+                    "edit": on_test_path,
+                    "reason": "hits the test file",
+                    "outcome": "unproven",
+                    "summary": "spec/t.py is a test; a probe must target source",
+                    "refusal": "spec/t.py is a test; a probe must target source",
+                },
+            ],
+        },
+        {
+            "witness": "t.py::c",
+            "claim": "claim c",
+            "cost_usd": pytest.approx(0.2),
+            "error": "the session crashed",
+            "probes": [],
+        },
+    ]
+
+    wrong_entries = json.loads(
+        (tmp_path / "out" / "SY-1" / "wrong-versions.json").read_text()
+    )
+    assert wrong_entries == [
+        {
+            "witness": "t.py::a",
+            "claim": "claim a",
+            "cost_usd": pytest.approx(0.1),
+            "error": None,
+            "versions": [
+                {
+                    "version": "a wrong version",
+                    "edit": wrong_version_a,
+                    "reason": "the wrong version matches this edit",
+                    "outcome": "killed",
+                    "summary": (
+                        "1 of 1 witness(es) died under their own wrong version"
+                    ),
+                },
+            ],
+        },
+    ]
+
+    record = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
+    assert record["blockers"] == [
+        {
+            "finding": 1,
+            "lens": "adequacy",
+            "file": "src/x.py",
+            "line": 3,
+            "severity": "blocker",
+            "filed_severity": None,
+            "claim": (
+                f"{review.HOST_FILED}t.py::a stayed green with the criterion's "
+                "own edit applied to src/x.py. The claim was 'claim a', and the "
+                "whole `tests` gate stayed green under the edit too."
+            ),
+            "anchored": True,
+            "probe": anchors,
+            "probe_verdict": "survived",
+        },
+        {
+            "finding": 2,
+            "lens": "adequacy",
+            "file": "src/y.py",
+            "line": 2,
+            "severity": "blocker",
+            "filed_severity": None,
+            "claim": (
+                f"{review.HOST_FILED}t.py::a stayed green with the criterion's "
+                "own edit applied to src/y.py. The claim was 'claim a', and the "
+                "whole `tests` gate stayed green under the edit too."
+            ),
+            "anchored": False,
+            "probe": unanchored,
+            "probe_verdict": "survived",
+        },
+    ]
+
+    lines = [
+        w
+        for w in cell.watched
+        if w.startswith("REVIEW: criterion probes:")
+        or w.startswith("REVIEW: wrong versions:")
+    ]
+    assert lines == [
+        "REVIEW: criterion probes: 4 named over 3 criteria, 1 unnamed, 1 refused; "
+        "no session answered: t.py::c",
+        "REVIEW: wrong versions: 1 declared, 1 expressed, 0 refused",
+    ]
 
 
 # --- wrong versions: one fresh session per criterion that declares them (b-7e69d0) ---
@@ -12747,14 +13048,14 @@ def test_a_survivor_whose_whole_suite_cannot_answer_keeps_todays_blocker(
     entries = json.loads(
         (tmp_path / "out" / "SY-1" / "criterion-probes.json").read_text()
     )
-    assert [e["outcome"] for e in entries] == [
+    assert [e["probes"][0]["outcome"] for e in entries] == [
         "survived",
         "survived",
         "survived",
         "survived",
         "unproven",
     ]
-    assert entries[4]["summary"] == (
+    assert entries[4]["probes"][0]["summary"] == (
         "an earlier edit left this cell's tree in an unknown state, so "
         "nothing after it was asked"
     )
@@ -12974,7 +13275,7 @@ def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_p
         or w.startswith("REVIEW: wrong versions:")
     ]
     assert lines == [
-        "REVIEW: criterion probes: 0 named, 4 unnamed",
+        "REVIEW: criterion probes: 0 named over 4 criteria, 4 unnamed, 0 refused",
         "REVIEW: wrong versions: 6 declared, 2 expressed, 1 refused; "
         "no session answered: t.py::d",
     ]

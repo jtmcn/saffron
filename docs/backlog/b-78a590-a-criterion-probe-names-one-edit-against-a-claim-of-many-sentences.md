@@ -1,11 +1,12 @@
 ---
 id: b-78a590
 title: A criterion probe names one edit against a claim of up to twelve sentences, so the seats still find the sentences it left
-status: open
+status: done
 tier: 1
 filed: 2026-10-30
+closed: 2026-10-30
 specs: [SA-0328]
-prs: []
+prs: [1000]
 commits: []
 cites: [§5.4.1, §5.5.1]
 related: [b-2750d5, b-7e69d0, 117, b-27bacc, b-98dc4d]
@@ -74,3 +75,4 @@ it would not notice.
 - 2026-10-30: specced as `SA-0328`, #999, through two spec review rounds. The
   design text in `DESIGN.md` §5.4.1 and the glossary entry are amended in that
   pull request.
+- 2026-10-30: done in #1000. The first cell after it merges runs the new prompt.
