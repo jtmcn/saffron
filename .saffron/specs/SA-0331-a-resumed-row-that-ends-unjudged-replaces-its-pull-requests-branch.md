@@ -3,12 +3,14 @@ id: SA-0331
 title: A resumed row's own pull request does not stop an unpackaged push onto its branch, and no merge moves a `REBUTTAL_UNJUDGED` row to `MERGED`
 type: bug
 priority: 1
-estimated_lines: 245
+depends_on: [SA-0329]
+estimated_lines: 257
 estimate_measured: true
 touches:
   - saffron/phases/package.py
   - saffron/reconcile.py
   - saffron/cli.py
+  - saffron/task.py
   - tests/test_package.py
   - tests/test_reconcile.py
 forbidden:
@@ -27,7 +29,6 @@ forbidden:
   - harness/**
   - records/**
   - hooks/**
-  - saffron/task.py
   - saffron/ledger.py
   - saffron/scheduler.py
   - saffron/regate.py
@@ -51,8 +52,8 @@ acceptance:
   - claim: >-
       `push_unpackaged_work` refuses when the outcome's own row carries a
       non-empty `pr_url`, and the remote branch stays where it was. The
-      witness drives every state in `TaskState` over a recorded head. It
-      also drives a head an operator moved and an absent branch. The row
+      witness sets the outcome's state and the row's state to every member
+      of `TaskState`, over a recorded head. It also drives a head an operator moved and an absent branch. The row
       keeps its `pushed_sha` and `pr_url`, and `gh` is never called. The note
       names the pull request, the branch and the task directory, and says
       `unmoved`. Outside that directory's path it never says `nothing`. The
@@ -61,6 +62,9 @@ acceptance:
     wrong_versions:
       - The guard fires only when the outcome ended `REBUTTAL_UNJUDGED`.
       - The guard fires only when the outcome ended `REBUTTAL_UNJUDGED` or `EXHAUSTED`.
+      - The guard spares an outcome that ended `RATE_LIMITED`, so a rate-limited rerun replaces the branch.
+      - The guard fires only while the row's own state is `CHANGES_REQUESTED`.
+      - The guard spares a row whose own state is `MERGED`.
       - The guard fires only when the remote head equals the row's `pushed_sha`, so a moved head gets the branch check's note and an absent branch is pushed.
       - The guard fires only when the remote branch exists, so an absent branch is pushed.
       - The guard asks `gh` whether the pull request is open before it refuses.
@@ -73,10 +77,11 @@ acceptance:
       - The guard empties the row's `pr_url` as it refuses.
       - The guard runs before the patch check, so a run with no patch speaks of a patch it lacks.
   - claim: >-
-      On a resumed row, `package()` in its `exhausted` mode followed by the
-      push leaves the branch unmoved at each of three ends. A `PackageError`
-      from re-verification leaves the old head, and the note names the pull
-      request. A `PackageError` from `open_draft_pr` leaves PACKAGE's squash,
+      On a resumed row, `package()` runs in its `exhausted` mode, and the
+      push follows with `package()`'s refusal or raise text, as `run_task`
+      hands it. At each of three ends the push leaves the branch where
+      `package()` left it. A `PackageError` from re-verification leaves the
+      old head, and the note names the pull request. A `PackageError` from `open_draft_pr` leaves PACKAGE's squash,
       with no `NOT PACKAGED` commit over it, and the note names the pull
       request. A refusal through `_finish` empties the row's `pr_url`, so the
       branch check refuses with its own note and names no pull request.
@@ -185,7 +190,8 @@ hold there.
 `DESIGN.md` §5.7 and `CONTEXT.md`'s `REBUTTAL_UNJUDGED` entry read as amended
 by this spec's pull request. §5.7 says the push does not replace the branch of
 a row that carries its own pull request. The entry says only a merge of that
-pull request moves the row to `MERGED`.
+pull request moves the row to `MERGED`. §4.1's `REBUTTAL_UNJUDGED` entry reads
+as amended too, with its exit to `MERGED`.
 
 **A resumed row keeps its pull request.** `CHANGES_REQUESTED` re-queues on its
 own task (`saffron/scheduler.py:136-145`). Only a `task_package` fact writes
@@ -238,11 +244,20 @@ the merge.
   own item, b-8693ef, filed in this spec's pull request.
 - Adopting a `REBUTTAL_UNJUDGED` row.
 - A child of a `REBUTTAL_UNJUDGED` parent whose latest run pushed nothing.
-  `SA-0330` owns it, and a refused push here leaves its column unset.
+  `SA-0330` owns it, and a refused push here leaves its column on an earlier
+  state.
+- PACKAGE's own lease push over a carried pull request
+  (`saffron/phases/package.py:913-919`). The second end of the table lands
+  through it.
 - A merged pull request on any other state outside the merge-only set.
 - Whether the pull request is still open. The guard asks GitHub nothing.
 
 ## Notes for the agent
+
+**`SA-0329`, the parent.** It edits `saffron/phases/package.py`,
+`saffron/task.py` and `tests/test_package.py`, so this spec stacks on it. No
+claim here turns on its code. Lines cited here were read before it, so find each
+by its text.
 
 **Edit or new.** The guard is new code, so criteria 1 and 2 declare a witness
 and no mutant. `witness` reports an honest `skip` on them. Criteria 3 to 8
@@ -254,8 +269,14 @@ those tests need no edit.
 after the patch check and before the branch check. Refuse through `_refuse`.
 Read the row from `task_rows`, and treat an empty `pr_url` as none. The note
 must stay true when PACKAGE already pushed its squash. It says this push
-leaves the branch unmoved, and it never says nothing was pushed. Update the
-docstring sentence at `saffron/phases/package.py:1067-1070`.
+leaves the branch unmoved, and it never says nothing was pushed.
+
+Update the docstring sentence at `saffron/phases/package.py:1067-1070`. That
+docstring runs 31 lines against `prose`'s limit of 10, and the gate counts each
+line past the limit (`.saffron/gates/prose.py:310-323`). A 32nd line is a new
+failure, so keep it at 31 or fewer. A prototype's rewording drew no new hit once
+its closing sentence went. An added clause can also push that sentence past 25
+words. That was measured too.
 
 A `repo_id` of `None` still reads no rows (`saffron/phases/package.py:1140-1144`),
 so the guard has nothing to read there. That stays as it is.
@@ -264,7 +285,14 @@ so the guard has nothing to read there. That stays as it is.
 the two conditions that read the set as they stand. Reread the comments at
 `saffron/reconcile.py:40`, `:44`, `:176-177`, `:194` and `:204`. The comment at
 `:44` names who attached the pull request, and `:176-177` names the two states.
-Both need the new case. The other three stay true.
+Both need the new case. The other three stay true. A comment over two lines or
+a sentence over 25 words is a new `prose` hit, and a prototype's first `:44`
+edit drew both.
+
+**The comments in `saffron/task.py`.** Correct `:917-918` and `:976-977`, which
+say no pull request exists. That is false on a row that carries one. The file's
+code does not change, and no criterion reads these comments. Write them with no
+semicolon, and keep each at two lines.
 
 **The other readers, as accepted behaviour.** These match what an `EXHAUSTED`
 row with a draft does today.
@@ -274,9 +302,10 @@ row with a draft does today.
   (`saffron/reconcile.py:195-202`). `saffron/cli.py:3182-3199` prints them.
 - A `gh` failure lands in `unasked`, printed at `saffron/cli.py:3170`.
 - `saffron/task.py:333` and `:502` then emit a `gh_unreachable` line and go on
-  as they did.
-- A parent that merged now reads `MERGED` at `saffron/task.py:491`, and its
-  child unstacks. That is the point of this half.
+  as they did. `SA-0330` is the spec that turns an unasked parent into a refusal.
+- A parent that merged now reads `MERGED` at `saffron/task.py:491` and in the
+  stacking loop at `saffron/task.py:367-369`, and its child unstacks. This note
+  rests on that existing loop. No criterion here drives it.
 
 **`_ADOPTABLE_STATES`.** Spell its four members out at `saffron/cli.py:2860`, and
 drop the unused import at `saffron/cli.py:57`. `_adopt` reads the set at
@@ -286,7 +315,9 @@ measured.
 
 **Test shape.** A plain `def` over a loop, never a parametrised test. The
 witness's state loop reads `typing.get_args(TaskState)` locally, as
-`tests/test_cli.py:2773` does. Import the guard's names inside each test, as
+`tests/test_cli.py:2773` does, and writes each member to both the outcome and
+the row. The `package` witness hands the push the text `package()` raised or
+returned, as `saffron/task.py:919` and `:929` do. Import the guard's names inside each test, as
 `tests/test_package.py:3345-3349` explains. A `package` witness drives the three
 ends on one `packageable` in the table's order. Its first two ends fail at base,
 and the third passes there. `tests/test_reconcile.py:831` is the shape for the
@@ -296,5 +327,5 @@ A `PackageResult` carrying no `pr_url` still reaches the same push, and the
 existing `tests/test_task.py` test covers that handoff. This spec does not drive
 `run_task` itself.
 
-**Size.** A prototype measured 101 changed tokens outside the test paths and 980
+**Size.** A prototype measured 150 changed tokens outside the test paths and 1025
 with them. The estimate is the second figure over four.
