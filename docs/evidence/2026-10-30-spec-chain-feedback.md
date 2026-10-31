@@ -131,4 +131,13 @@ more review of each. It cost about 5 to 6 minutes per spec.
   may not.
 - **A false finding.** One concern named a sibling spec as missing, since it sits one
   layer above the commit read. It was answered with no change.
-- **The revisions are unread again.** No reviewer read the answers to this third read.
+- **The revisions are unread again.** No reviewer read the answers to this third read,
+  apart from `SA-0331`'s.
+
+### A fourth read of `SA-0331`
+
+The operator asked for one more read, since the third answer rewrote criterion 9. It
+cost about 8 minutes and found 0 blockers, 3 concerns and 7 notes. It traced both
+reachability claims and they held. One concern was a sentence that a wrong version
+contradicted, one was already answered by a prototype run, and one was a sibling item
+resting on the same false premise. The delegate fixed the first and third by hand.
