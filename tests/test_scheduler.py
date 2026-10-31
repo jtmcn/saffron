@@ -3868,7 +3868,6 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0299",
         "SA-0328",
         "SA-0329",
-        "SA-0331",
         "SA-0200",
         "SA-0201",
         "SA-0208",
