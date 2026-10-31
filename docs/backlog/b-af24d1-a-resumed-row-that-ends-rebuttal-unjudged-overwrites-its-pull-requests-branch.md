@@ -4,7 +4,7 @@ title: A resumed row with an open pull request that ends `REBUTTAL_UNJUDGED` is 
 status: open
 tier: 1
 filed: 2026-10-11
-specs: []
+specs: [SA-0331]
 prs: []
 commits: []
 cites: [§4.2.1, §5.6, §5.7]

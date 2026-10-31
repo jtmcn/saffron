@@ -612,6 +612,9 @@ skip a layer. A rebuttal's suppression ends a green task. An adopted task
 gets no end review. A stack batch refuses a spec that meets an earlier
 batch's open layer.
 
+**Placed 2026-10-30**, from writing `SA-0331`: **b-8693ef**. A refused PACKAGE
+blanks a resumed row's pull request link, so no merge moves that row.
+
 ### Tier 3 — real, not urgent
 
 **Placed 2026-10-16**, from the spec loop's run 42: **b-60317d**.
