@@ -27,6 +27,10 @@ on an older branch when a resumed row carries an earlier push.
 push refused, and `reconcile` does not ask about it, so no merge moves it to
 `MERGED`.
 
+It leaves a third. A rerun beside another `REVIEW_INCOMPLETE` row with a pull request
+still pushes onto that branch. `SA-0331`'s guard names `CHANGES_REQUESTED`, `APPROVED`
+and `REBUTTAL_UNJUDGED`, and leaves this state out.
+
 ## Done looks like
 
 `SA-0330`'s refusal reads `REVIEW_INCOMPLETE` too, through `tasks.pushed_in_state`.

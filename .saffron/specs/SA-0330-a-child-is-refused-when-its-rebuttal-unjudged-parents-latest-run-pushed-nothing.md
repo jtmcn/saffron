@@ -201,7 +201,7 @@ on `SA-0331`, whose changes are named where they matter.
 
 - `CONTEXT.md`'s `REBUTTAL_UNJUDGED` entry says the dependent of such a row is
   refused.
-- `CONTEXT.md:185`'s **Stack base**, and ADR 7's lines 44 and 199-201, carry the
+- `CONTEXT.md:185`'s **Stack base**, and ADR 7's lines 46-47 and 203-204, carry the
   exception for a `REBUTTAL_UNJUDGED` row whose latest run pushed nothing.
 - `DESIGN.md` §3.3 reads "A dependent of an open parent stacks", followed by the
   rest of its sentence.
@@ -245,10 +245,11 @@ with no push it moves on with no check (`saffron/task.py:418-422`).
 **The stack base.** A stack batch never reaches the resolver.
 `_stack_base_candidate` qualifies the newest waiting row with a branch, a
 resolved `pushed_sha` and a `pr_url` (`saffron/scheduler.py:1021-1041`). A
-`CHANGES_REQUESTED` row keeps its `pr_url` when it resumes, since only a
+row keeps its `pr_url` through a later run of its spec, since only a
 `task_package` fact writes that column (`saffron/ledger.py:882-893`). So a stale
 `REBUTTAL_UNJUDGED` row qualifies today. `SA-0331`'s guard refuses a push on a row
-that carries a `pr_url`, in any outcome state, so every such row ends stale. A row with no push is refused there
+that carries a `pr_url`, in any outcome state, so every such row ends stale. It also
+refuses a rerun beside another row with a `pr_url` at a state it names. A row with no push is refused there
 already, with a reason that does not name its latest run (`saffron/scheduler.py:1030`).
 
 **What a batch does with a refusal.** `run_batch` attaches no run for a `Refused`
@@ -298,8 +299,8 @@ The refusal costs no cell and no token. A plain batch prints the one line
 - `REVIEW_INCOMPLETE` and every other waiting state. Their rows take the path
   they take today, including a start on `base_sha` with no push. Backlog item
   b-e9dd4c owns the `REVIEW_INCOMPLETE` gap.
-- `SA-0331`, the parent, which adds an own-row guard to `push_unpackaged_work`. A
-  push that guard refuses leaves this column on an earlier state, so the rule
+- `SA-0331`, the parent, which adds an own-row guard to `push_unpackaged_work` and
+  widens its guard on other rows. A push either guard refuses leaves this column on an earlier state, so the rule
   here reads that row as refused with no further change.
 - A `REBUTTAL_UNJUDGED` row whose own stale push lies in `base_sha`. It reads as
   landed, as the multi-parent path already reads it.
@@ -345,8 +346,9 @@ a landed parent (`saffron/task.py:367-375`). Do not align them here.
 
 **The remedy on a row with no pull request.** Such a row reads `_MERGE_OR_RERUN`,
 and its merge half does not apply. That matches the remedy text's shape at base,
-and it is accepted. On a row with a `pr_url`, `SA-0331` refuses a rerun's unpackaged
-push while that row's pull request stands, so only PACKAGE moves its branch. No
+and it is accepted. `SA-0331` refuses a rerun's unpackaged push on a row with a `pr_url`, and beside one
+at a state it names. An open pull request is not its test.
+So only PACKAGE moves its branch. No
 claim here turns on either fact.
 
 **An adopted row.** `adopt_pull_request` writes a `task_package` fact with the
@@ -379,9 +381,11 @@ of adjacent schema lines (`tests/test_ledger.py:329`), so do not split that pair
 and `_stack_base_candidate`'s (`saffron/scheduler.py:1011-1020`) say what each
 reads. The comment above `DEPENDENCY_WAITING_STATES`
 (`saffron/scheduler.py:114-115`) says a dependent stacks, and `tasks_by_spec_id`'s
-(`saffron/ledger.py:1158-1159`) lists its columns. Bring each into line, within ten
-lines. `_resolve_stacked_on`'s and `_stack_base_candidate`'s docstrings sit at that
-limit already, so trim as you add. `tasks_by_spec_id`'s first sentence holds an
+(`saffron/ledger.py:1158-1159`) lists its columns. Bring each into line. A function's
+docstring stays within ten lines, and the `prose` gate sets no such limit on a module's.
+`_resolve_stacked_on`'s, `_stack_base_candidate`'s and `run_task`'s sit at that limit
+already, so trim as you add. `tasks_by_spec_id`'s runs past it at base. It must not
+grow, and its rationale stays. Its first sentence holds an
 em-dash and a perfect tense, and the `prose` gate reads the edited sentence whole.
 
 **`base_sha` on the one-parent path.** It is optional there
@@ -404,8 +408,9 @@ carrying a `pr_url` cannot arise over `SA-0331`'s guard. It stays as the other
 side of the rule. Import `run_batch`, `Readiness` and `PinnedBase` inside the test, since
 `tests/test_batch.py:18` imports `tests/test_scheduler.py`.
 
-**Measured on a prototype.** It sat at `5560b767`, with `SA-0331`'s
-`MERGE_ONLY_STATES` line and `_ADOPTABLE_STATES` change applied. The host's SQLite
+**Measured on a prototype.** Its source equalled `f596e814`, with `SA-0331`'s
+`MERGE_ONLY_STATES` line and `_ADOPTABLE_STATES` change applied. Neither of
+`SA-0331`'s guards was on it, so this spec never ran over them. The host's SQLite
 is 3.53.1, and the schema block's `DROP COLUMN` tests passed there. All four new
 witnesses passed. Each failed with this spec's source reverted, never at
 collection. Every wrong version above was applied as an edit, and each declared

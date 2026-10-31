@@ -68,8 +68,8 @@ no spike, since no live API changes.
 
 The operator asked for the next three tier 1 items. The delegate took b-6b06e1,
 b-f603c9 and b-af24d1, and skipped item 49 and b-cab612. Item 49 waits on a runner
-role, and b-cab612 is marked by hand. Each spec had two review rounds and a last
-revision with no third review.
+role, and b-cab612 is marked by hand. Each spec had two review rounds. The operator then asked for a third read of each
+last revision, limited to its text.
 
 | Spec | First review | Second review |
 |---|---|---|
@@ -109,3 +109,26 @@ own walk stopped at the sections it was told about.
 The writers ran every wrong version, and the reviewers read every fixture, so the
 rounds were long. `make check` failed mid-chain on a `depends_on` naming a spec
 absent from the tree, which a parallel draft cannot avoid until the restack.
+
+### The third read
+
+The two-round stop left each last revision unread, so the operator asked for one
+more review of each. It cost about 5 to 6 minutes per spec.
+
+| Spec | Third read | Answered by |
+|---|---|---|
+| `SA-0329` | 0 blockers, 2 concerns, 1 note | A writer, on the operator's exit code ruling |
+| `SA-0331` | 1 blocker, 3 concerns, 3 notes | A writer, on the operator's scope ruling |
+| `SA-0330` | 0 blockers, 2 concerns, 6 notes | The delegate, by hand |
+
+- **A spec that guards a row no path writes.** `SA-0331` guarded a resumed row, as its
+  item said. No production path runs a cell on a row with a `pr_url`, since each run
+  mints a fresh row. Two reviews read that premise and passed it. The delegate measured
+  the reachable case: only `READY_FOR_REVIEW` refused among the five states tried.
+  No pre-flight check asks who writes the input a guard reads. It is the next check.
+- **The stop rule hid it.** The blocker sat in a sentence the last revision added.
+  A last revision that adds behaviour needs a read, and one that only tightens a witness
+  may not.
+- **A false finding.** One concern named a sibling spec as missing, since it sits one
+  layer above the commit read. It was answered with no change.
+- **The revisions are unread again.** No reviewer read the answers to this third read.
