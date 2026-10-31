@@ -2,7 +2,7 @@
 id: b-8693ef
 title: A refused PACKAGE blanks a resumed row's pull request link, so no merge moves that row
 status: open
-tier: 2
+tier: 3
 filed: 2026-10-30
 specs: []
 prs: []
