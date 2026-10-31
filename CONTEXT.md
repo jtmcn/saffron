@@ -747,7 +747,7 @@ A row whose latest run's push was refused can carry an earlier run's
 `pushed_sha`, and a dependent then stacks on that older branch. A stack batch
 counts the task a miss and refuses its children. A REBUT that one of its pools cut
 short ends `EXHAUSTED` instead.
-A resumed row keeps the pull request it carried, and only a merge of that pull
+A row that carries a pull request keeps it, and only a merge of that pull
 request moves it to `MERGED`.
 
 **`REVIEW_INCOMPLETE`**: A task whose REVIEW ended with a lens that produced no

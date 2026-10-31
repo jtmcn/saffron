@@ -248,9 +248,8 @@ diff ends `MERGE_FAILED`.
 **Placed 2026-10-11**, from `SA-0276`'s spec review: **b-f603c9**. A
 `REBUTTAL_UNJUDGED` parent whose push was refused still admits its child, and
 the child is cut from `base_sha` without the parent's code. Then
-**b-af24d1**: a resumed row with an open pull request that ends
-`REBUTTAL_UNJUDGED` is pushed onto that pull request's branch, and no merge
-moves it to `MERGED`.
+**b-af24d1**: a rerun that ends `REBUTTAL_UNJUDGED` is pushed onto another row's
+open pull request branch. No merge moves a row at that state to `MERGED`.
 
 **Placed 2026-10-12**, from `SA-0278`'s spec review: **b-d4b847**, then
 **b-4eaaa4** and **b-6677b6**. A mirror that lacks a task's ref starts one
