@@ -744,7 +744,7 @@ lens that started gave no verdict, so the rebuttal is not fully judged. Its
 unjudged blockers stand. No pull request opens. The cell's branch is pushed
 only when `push_unpackaged_work` succeeds, and a dependent then stacks on it.
 A row whose latest run's push was refused can carry an earlier run's
-`pushed_sha`, and a dependent then stacks on that older branch. A stack batch
+`pushed_sha`, and its dependent is refused, naming that push. A stack batch
 counts the task a miss and refuses its children. A REBUT that one of its pools cut
 short ends `EXHAUSTED` instead.
 A row that carries a pull request keeps it, and only a merge of that pull

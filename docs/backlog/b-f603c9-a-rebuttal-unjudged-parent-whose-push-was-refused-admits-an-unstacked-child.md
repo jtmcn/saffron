@@ -4,7 +4,7 @@ title: A `REBUTTAL_UNJUDGED` parent whose push was refused still admits its chil
 status: open
 tier: 1
 filed: 2026-10-11
-specs: []
+specs: [SA-0330]
 prs: []
 commits: []
 cites: [§4.2, §5.6]
