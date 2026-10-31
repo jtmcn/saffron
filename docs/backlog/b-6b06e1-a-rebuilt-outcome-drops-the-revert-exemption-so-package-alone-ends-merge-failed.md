@@ -4,7 +4,7 @@ title: "A rebuilt outcome drops the `revert` exemption, so PACKAGE run alone end
 status: open
 tier: 1
 filed: 2026-10-11
-specs: []
+specs: [SA-0329]
 prs: []
 commits: []
 cites: [§5.6, §5.7]
