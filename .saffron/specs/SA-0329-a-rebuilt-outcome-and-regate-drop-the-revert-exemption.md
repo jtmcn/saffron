@@ -3,7 +3,7 @@ id: SA-0329
 title: "A rebuilt outcome and `saffron regate` drop the `revert` exemption, so a sound diff comes back red"
 type: bug
 priority: 1
-estimated_lines: 203
+estimated_lines: 220
 estimate_measured: true
 touches:
   - saffron/phases/package.py
@@ -41,20 +41,21 @@ forbidden:
   - tests/test_queued_specs.py
 budget_usd: 38
 max_attempts: 3
-max_turns: 175
+max_turns: 210
 risk: standard
 acceptance:
   - claim: >-
       `package_phase.read_revert_exempt(task_dir)` answers `[]` for a task
       directory with no `revert-exempt.json`, and for no directory at all.
       It answers `[]` for a file older than the directory's `baseline.json`,
-      damaged or not. It returns a current file's list unchanged. A current
+      damaged or not. It returns a current file's list unchanged, and the
+      witness drives one that is unsorted and repeats a name. A current
       file is one as new as `baseline.json`, or one in a directory with no
       `baseline.json`. The witness drives a current `[]` too. It raises
       `package_phase.RevertExemptUnreadable`, naming the file, for each of
       these current files. They are invalid JSON, zero bytes, bytes that are
       not UTF-8, the JSON values `{}`, `"t.py::a"`, `null` and `3`, the lists
-      `["t.py::a", 3]` and `[null]`, and a directory at that path.
+      `["t.py::a", 3]`, `[3, "t.py::a"]` and `[null]`, and a directory at that path.
     witness: tests/test_package.py::test_the_exemption_reader_answers_for_each_state_of_the_task_directory
     wrong_versions:
       - A path that is not a regular file reads as no file, so a directory answers `[]`.
@@ -65,6 +66,9 @@ acceptance:
       - A value is passed through `list()` with no type check, so `"t.py::a"` becomes a list of characters.
       - The list is checked and its members are not, so `["t.py::a", 3]` returns.
       - Only the first member is checked, so `["t.py::a", 3]` returns.
+      - Only the last member is checked, so `[3, "t.py::a"]` returns.
+      - One string member is enough to pass, so `["t.py::a", 3]` returns.
+      - The reader sorts what it returns, so the list differs from the one the file holds.
       - Blank text answers `[]`, so a zero-byte file reads as no exemption.
       - A file older than `baseline.json` is read, so another cell's list exempts this cell's tests.
       - A file older than `baseline.json` is parsed first, so another cell's damaged file raises.
@@ -72,7 +76,8 @@ acceptance:
       - A directory with no `baseline.json` answers `[]`, so a current file loses its list.
       - A current `[]` raises, as if an empty list were damage.
       - A missing task directory raises rather than answering `[]`.
-      - The raised message names the reason and not the file.
+      - The message for a file it cannot parse or open names the reason and not the file.
+      - The message for a value that is not a list of strings names the reason and not the file.
   - claim: >-
       `ready_task` sets `revert_exempt` on the outcome it rebuilds from
       `package_phase.read_revert_exempt(task_dir)`, called through that
@@ -93,13 +98,16 @@ acceptance:
       `ready_task` returns a `Refused` whose reason names the file when the
       reader raises. It neither raises nor rebuilds an outcome. The witness
       drives a current file holding invalid JSON, `{}` and
-      `["t.py::a", 3]`, and a directory at that path.
+      `["t.py::a", 3]`, and a directory at that path. It also drives a
+      damaged current file on a task whose `tree_base` differs from its
+      `base_sha` and that no task pushed. There the mirror path stays absent.
     witness: tests/test_task.py::test_a_rebuilt_outcome_refuses_an_exemption_it_cannot_read
     wrong_versions:
       - The reader's raise escapes `ready_task`, so `saffron package` exits 2 rather than refusing.
       - The raise is caught and the outcome carries `[]`.
       - The reader runs only when the local freshness check passes, so a directory at that path answers no exemption.
       - The reason is a fixed sentence that names no file.
+      - The reader runs just above the rebuilt `CellOutcome`, after the fallback, so a refused task still writes the mirror.
   - claim: >-
       `run_regate` hands `package_phase.reverify` an `exempt` from
       `package_phase.read_revert_exempt(out_dir / <the task's spec id>)`,
@@ -195,8 +203,8 @@ Three edits. Each rests on the one before.
    subclassing `PackageError` beside `LeaseRejected` and `ParentGone`
    (`saffron/phases/package.py:71`, `saffron/phases/package.py:75`). Both callers import this module as `package_phase`
    already (`saffron/task.py:69`, `saffron/regate.py:19`). The reader alone
-   decides the file's name, its freshness and its shape. A file that is there
-   and is not a list of strings raises. An empty answer for it is the defect
+   decides the file's name, its freshness and its shape. A current file that
+   is there and is not a list of strings raises. An empty answer for it is the defect
    this spec closes, so the reader never gives one.
 2. **`ready_task`.** Call the reader through `package_phase`, and put its answer
    on the rebuilt `CellOutcome`. A raise becomes a `Refused` that carries the
@@ -258,6 +266,11 @@ records every keyword it gets. The task directory under `--home <home>` is
 `<home>/batches/v0/SA-0005`. A single fixture can serve every member of a test,
 so build it once and rewrite the file between calls. `regates` holds a row only
 after a judged run, so a decline leaves it empty.
+
+**The fallback member.** Criterion 3's last member needs `target-repo` to be a
+real git checkout with an `origin`. With no such repo the fallback's clone raises
+before it writes, so the mirror assertion checks nothing. Assert the mirror path
+is absent before asserting the reason.
 
 **Existing tests.** `_fake_reverify` takes `**kwargs`, and
 `test_ready_task_rebuilds_every_field_package_reads_from_the_cells_record`
