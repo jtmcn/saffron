@@ -63,3 +63,49 @@ The writer ran about 36 minutes, against the 19 to 30 the last chain
 measured, and most of the extra was its own `make check` and `history`
 runs. The delegate dispatched one writer and one reviewer per round, with
 no spike, since no live API changes.
+
+## `SA-0329`, `SA-0331` and `SA-0330`, three tier 1 items
+
+The operator asked for the next three tier 1 items. The delegate took b-6b06e1,
+b-f603c9 and b-af24d1, and skipped item 49 and b-cab612. Item 49 waits on a runner
+role, and b-cab612 is marked by hand. Each spec had two review rounds and a last
+revision with no third review.
+
+| Spec | First review | Second review |
+|---|---|---|
+| `SA-0329` | 0 blockers, 2 concerns, 3 notes | 0 blockers, 5 concerns, 2 notes |
+| `SA-0331` | 0 blockers, 8 concerns, 6 notes | 0 blockers, 3 concerns, 3 notes |
+| `SA-0330` | 1 blocker, 4 concerns, 5 notes | 1 blocker, 5 concerns, 5 notes |
+
+Both blockers were rendered sentences outside `touches` that the spec made false,
+in `DESIGN.md`, `CONTEXT.md` and ADR 7. Check 2 names that class, and the writer's
+own walk stopped at the sections it was told about.
+
+## What these pre-flights missed
+
+- **A prose requirement with no claim.** The first review of `SA-0329` found the
+  reader's call position in Problem text alone. The second, told to read for that
+  axis, found four more. Check 1 reads claims, so this needs its own line: read
+  each requirement in Problem and Notes, and name the claim that pins it.
+- **Sibling specs drafted in parallel.** `SA-0331`'s reconcile rule changed what
+  `SA-0330`'s fixtures could assume, and a review of each read the other's branch
+  to find it. The order changed to `SA-0329`, `SA-0331`, `SA-0330` after drafting,
+  and two writers revised over a base they had not read.
+- **A hole a second review found in the sibling.** `SA-0330`'s review found that a
+  rerun's new row passes `SA-0331`'s own-row guard. `SA-0331`'s writer measured it
+  before and after the widening. That member has no reviewer behind it.
+- **The delegate's own hand edits overclaimed again.** Reviews found three of its
+  sentences too wide. This repeats check 12's history.
+
+## What worked
+
+- **A stop at the design choice.** `SA-0330`'s writer stopped before drafting and
+  reported four arms with a measured prototype. One question settled the column.
+- **Reading a brief's rule at base.** `SA-0331`'s writer stopped on a measured case
+  the brief did not cover, and it became b-8693ef.
+
+## What the run itself got wrong
+
+The writers ran every wrong version, and the reviewers read every fixture, so the
+rounds were long. `make check` failed mid-chain on a `depends_on` naming a spec
+absent from the tree, which a parallel draft cannot avoid until the restack.

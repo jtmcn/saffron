@@ -183,7 +183,8 @@ branch. A task with no predecessor is cut from `base_sha`.
 _Avoid_: "parent" (that is a `depends_on` entry, and a predecessor need not be one).
 
 **Stack base**: A parent outside a stack order whose newest waiting task has a
-pushed branch and a pull request, from an earlier batch or cell. A stack batch stacks its first layer
+pushed branch and a pull request, from an earlier batch or cell. A `REBUTTAL_UNJUDGED`
+task whose latest run pushed nothing does not qualify (`SA-0330`). A stack batch stacks its first layer
 on that branch, and links nothing. An order has at most one. It is the qualifying parent whose
 chain holds the most other parents outside the order, counted across the whole order. Its
 chain's branches are exempt from the overlap refusal (`SA-0265`, `SA-0267`, `SA-0312`).
@@ -744,7 +745,7 @@ lens that started gave no verdict, so the rebuttal is not fully judged. Its
 unjudged blockers stand. No pull request opens. The cell's branch is pushed
 only when `push_unpackaged_work` succeeds, and a dependent then stacks on it.
 A row whose latest run's push was refused can carry an earlier run's
-`pushed_sha`, and its dependent is refused, naming that push. A stack batch
+`pushed_sha`, and its dependent is refused. A stack batch
 counts the task a miss and refuses its children. A REBUT that one of its pools cut
 short ends `EXHAUSTED` instead.
 A row that carries a pull request keeps it, and only a merge of that pull
@@ -754,8 +755,9 @@ request moves it to `MERGED`.
 findings, because its session failed or its output was not the schema. An unrun
 lens never reads as a clean review, and no finding set exists to rebut. No pull
 request opens. The cell's branch is pushed as a `REBUTTAL_UNJUDGED` task's is,
-and a dependent stacks on the push the row records. A stack batch counts the task
-a miss and refuses its children.
+and a dependent stacks on the branch of a recorded push. It is cut from `base_sha`
+when the row records none. A stack batch counts the task a miss and refuses its
+children.
 
 **`ORPHANED`**: A task whose cell was killed or crashed, awaiting reclamation by
 `saffron gc`. Its worktree and volume are deliberately preserved until then.

@@ -23,10 +23,16 @@ So a child of a `REVIEW_INCOMPLETE` parent whose latest run pushed nothing is
 still admitted. It is cut from `base_sha` when the row records no push. It stacks
 on an older branch when a resumed row carries an earlier push.
 
+`SA-0331` leaves a second gap. A resumed row that ends `REVIEW_INCOMPLETE` has its
+push refused, and `reconcile` does not ask about it, so no merge moves it to
+`MERGED`.
+
 ## Done looks like
 
 `SA-0330`'s refusal reads `REVIEW_INCOMPLETE` too, through `tasks.pushed_in_state`.
+A merged pull request on such a row moves it to `MERGED`.
 
 ## Record
 
-- 2026-10-30: filed from `SA-0330`'s first review.
+- 2026-10-30: filed from `SA-0330`'s first review. The merge gap comes from
+  `SA-0331`'s second review.
