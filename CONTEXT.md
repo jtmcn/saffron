@@ -753,9 +753,9 @@ request moves it to `MERGED`.
 **`REVIEW_INCOMPLETE`**: A task whose REVIEW ended with a lens that produced no
 findings, because its session failed or its output was not the schema. An unrun
 lens never reads as a clean review, and no finding set exists to rebut. No pull
-request opens. The cell's branch is pushed and stacked on as a
-`REBUTTAL_UNJUDGED` task's is. A stack batch counts the task a miss and refuses
-its children.
+request opens. The cell's branch is pushed as a `REBUTTAL_UNJUDGED` task's is,
+and a dependent stacks on the push the row records. A stack batch counts the task
+a miss and refuses its children.
 
 **`ORPHANED`**: A task whose cell was killed or crashed, awaiting reclamation by
 `saffron gc`. Its worktree and volume are deliberately preserved until then.

@@ -611,6 +611,9 @@ skip a layer. A rebuttal's suppression ends a green task. An adopted task
 gets no end review. A stack batch refuses a spec that meets an earlier
 batch's open layer.
 
+**Placed 2026-10-30**, from `SA-0330`'s first review: **b-e9dd4c**. A
+`REVIEW_INCOMPLETE` parent whose push was refused still admits its child.
+
 ### Tier 3 — real, not urgent
 
 **Placed 2026-10-31**, from `SA-0331`'s third read: **b-8693ef**. A refused PACKAGE

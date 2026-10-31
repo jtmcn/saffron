@@ -5,6 +5,7 @@ type: bug
 priority: 1
 estimated_lines: 85
 estimate_measured: true
+depends_on: [SA-0331]
 touches:
   - saffron/ledger.py
   - saffron/scheduler.py
@@ -74,13 +75,17 @@ acceptance:
       With one `depends_on` entry, `run_task` returns `Refused` before any cell
       starts when the parent's chosen row is `REBUTTAL_UNJUDGED` and no push
       followed that state. The reason names the parent, `REBUTTAL_UNJUDGED` and
-      the push, and no `unstacked` line prints. The witness drives three rows
-      through `cli._run_cell` with a `gh` and through `cli._batch_runner` with
-      none. They are no push, a stale push, and no push on a row newer than a
-      pushed `READY_FOR_REVIEW` row. `run_batch` over that runner ends `DRAINED`
-      and attaches no run. A push made in the state still stacks on the fetched
-      head, as does a resumed row pushed again, on a branch a review fix moved
-      past the recorded push. In both `gh` modes `READY_FOR_REVIEW`, `APPROVED`,
+      the push. No `unstacked` line prints, and no queue row is written. The
+      witness drives three rows through `cli._run_cell` with a `gh` and through
+      `cli._batch_runner` with none. They are no push, a stale push whose branch
+      still points at it, and no push on a row newer than a pushed
+      `READY_FOR_REVIEW` row. `run_batch` over that runner ends `DRAINED` and
+      attaches no run. A stale push whose branch a review fix moved is refused
+      too, in both `gh` modes. A push made in the state still stacks on the
+      fetched head, as does a resumed row pushed again, on a branch a review fix
+      moved past the recorded push. A row carrying a pull request is refused
+      when a `gh` answers open and when it cannot answer. When it answers merged,
+      the row refuses nothing. In both `gh` modes `READY_FOR_REVIEW`, `APPROVED`,
       `MERGE_TRAIN` and `REVIEW_INCOMPLETE` keep their old result, with a stale
       push and with none. With a `gh`, so does a stale `CHANGES_REQUESTED` row.
       A parent with a `MERGED` row, one retired at `base_sha`, and one with a
@@ -99,6 +104,9 @@ acceptance:
       - The refusal sits only on the path with a `gh`.
       - The cell unstacks and starts on `base_sha` instead of being refused.
       - A stale push is read from the fetched head differing from `pushed_sha`, so a stale row whose branch never moved stacks.
+      - A stale push counts as current once its branch moves, so a stale row whose branch moved stacks.
+      - A row GitHub could not be asked about is not refused.
+      - The refusal writes a queue row.
       - An older row with a push rescues a newer row with none.
       - The check runs after `_fetch_parent_head`, so an `unstacked` line prints before the refusal.
       - A different exception carries the refusal, so it escapes `run_task`.
@@ -142,8 +150,8 @@ acceptance:
       `_stack_base_candidate` does not qualify a newest waiting row that is
       `REBUTTAL_UNJUDGED` with no push after that state, so `build_queue` with
       `stack=True` refuses the child under `depends_on`. The reason names the
-      parent, `REBUTTAL_UNJUDGED` and the push. The witness drives three rows
-      that carry a pull request: a stale push, no push, and a stale row newer
+      parent, `REBUTTAL_UNJUDGED`, the push and the remedy to merge it or rerun
+      it. The witness drives three rows that carry a pull request: a stale push, no push, and a stale row newer
       than a pushed `READY_FOR_REVIEW` row. A row resumed and pushed in the
       state qualifies. So do `READY_FOR_REVIEW`, `APPROVED`, `MERGE_TRAIN` and
       `REVIEW_INCOMPLETE` rows that carry an older push.
@@ -158,6 +166,7 @@ acceptance:
       - Refused rows are filtered out of the waiting list, so an older row qualifies in their place.
       - Every waiting state is read by the new rule.
       - Only an empty `pushed_sha` refuses, so a stale push still qualifies.
+      - The remedy tells the operator to run the parent to a pull request, which it already carries.
   - claim: >-
       A stack batch counts a `Refused` result a miss, and refuses each spec
       whose `depends_on` reaches that miss before the runner sees it.
@@ -173,22 +182,26 @@ acceptance:
 ## Context
 
 Backlog item **b-f603c9**, under `DESIGN.md` §3.3, §4.2 and §5.6, and ADR 7.
-Related: 120, b-af24d1. Every line below was read at `f596e814`.
+Related: 120, b-af24d1. Every line below was read at `f596e814`. This spec stacks
+on `SA-0331`, whose changes are named where they matter.
 
-**The two sentences.** The caller lands two protected edits before this spec's
-first review. `CONTEXT.md`'s `REBUTTAL_UNJUDGED` entry says the dependent of a
-row with a refused push is refused, naming that push. `DESIGN.md` §4.2 gate 0
-counts this among the refusals that come later. §3.3 already says a dependent
-stacks only when the latest run's push succeeded.
+**The protected sentences, as landed by hand.** `CONTEXT.md`'s `REBUTTAL_UNJUDGED`
+entry says the dependent of a row with a refused push is refused, naming that
+push. `DESIGN.md` §4.2 gate 0 counts this among the refusals that come later.
+§4.2.1 says a child of a row whose latest run pushed nothing is refused. That
+holds even when the row carries an earlier run's `pushed_sha`. §3.3 already says a
+dependent stacks only when the latest run's push succeeded.
 
 **How the row gets its state and its push.** The cell writes the state
 (`saffron/cell/session.py:3774`), and `run_task` then calls
 `push_unpackaged_work` (`saffron/task.py:965`). That function records a push
 only at its end (`saffron/phases/package.py:1236`). Each refusal returns before
 that line (`saffron/phases/package.py:1118-1235`). `REBUTTAL_UNJUDGED` is not in
-`REQUEUE_STATES` (`saffron/scheduler.py:136-145`), and `saffron adopt` does not
-take it (`saffron/cli.py:2860`). So a row holds that state once, and no later
-writer records a push on it.
+`REQUEUE_STATES` (`saffron/scheduler.py:136-145`). `SA-0331` adds it to
+`MERGE_ONLY_STATES` and keeps `_ADOPTABLE_STATES`'s members exact, so `saffron
+adopt` still refuses it (`saffron/cli.py:2860`). So a row cannot re-enter that
+state, and no later writer records a push on it. `reconcile` now asks such a row
+that carries a `pr_url`, and a merge moves it to `MERGED`.
 
 **Nothing on the row tells the two runs apart.** `task_push` writes `pushed_sha`
 and `updated_at` alone (`saffron/ledger.py:899-901`). Clearing `pushed_sha` on
@@ -217,7 +230,8 @@ with no push it moves on with no check (`saffron/task.py:418-422`).
 resolved `pushed_sha` and a `pr_url` (`saffron/scheduler.py:1021-1041`). A
 `CHANGES_REQUESTED` row keeps its `pr_url` when it resumes, since only a
 `task_package` fact writes that column (`saffron/ledger.py:882-893`). So a stale
-`REBUTTAL_UNJUDGED` row qualifies today. A row with no push is refused there
+`REBUTTAL_UNJUDGED` row qualifies today. `SA-0331`'s guard refuses a push on a row
+that carries a `pr_url`, in any outcome state, so every such row ends stale. A row with no push is refused there
 already, with a reason that names no refused push (`saffron/scheduler.py:1030`).
 
 **What a batch does with a refusal.** `run_batch` attaches no run for a `Refused`
@@ -250,8 +264,11 @@ them first, or a child of a parent landed by hand is refused for good.
    it and before the deepest is picked. Raise `_StackingRefused` naming every
    such parent together.
 5. **The stack base.** `_stack_base_candidate` returns a cause under the rule,
-   ahead of its branch and pushed-sha checks. `_stack_dependency_reason` carries
-   that into the `depends_on` refusal unchanged.
+   ahead of its pushed-sha check, so a row with no push names its refused push.
+   The remedy is `_MERGE_OR_RERUN`. A carried pull request can merge, and an
+   attended cell mints a new row (`saffron/cli.py:679`), so both halves hold.
+   `_RUN_TO_PR_FIRST` is false of a row that already carries one.
+   `_stack_dependency_reason` carries that into the `depends_on` refusal.
 
 The refusal costs no cell and no token. A plain batch prints the one line
 `run_task` prints, and writes no queue row, as §4.2 says of the later refusals.
@@ -262,9 +279,11 @@ The refusal costs no cell and no token. A plain batch prints the one line
   child as a candidate, and `run_task` refuses it. The operator chose this. An
   unresolved `consumes` entry already behaves the same way.
 - `REVIEW_INCOMPLETE` and every other waiting state. Their rows take the path
-  they take today, including a start on `base_sha` with no push.
-- `SA-0331`, which adds an own-row guard to `push_unpackaged_work`. A push that
-  guard refuses leaves this column unset, so this spec needs no change for it.
+  they take today, including a start on `base_sha` with no push. Backlog item
+  b-e9dd4c owns the `REVIEW_INCOMPLETE` gap.
+- `SA-0331`, the parent, which adds an own-row guard to `push_unpackaged_work`. A
+  push that guard refuses leaves this column on an earlier state, so the rule
+  here reads that row as refused with no further change.
 - A `REBUTTAL_UNJUDGED` row whose own stale push lies in `base_sha`. It reads as
   landed, as the multi-parent path already reads it.
 - A stack batch's own `REBUTTAL_UNJUDGED` predecessor. It misses through
@@ -280,27 +299,33 @@ so leave those lines as they are. Criterion 1's column is new code. It declares
 no mutant, and `witness` will report `skip` for it. Criteria 5 and 6 hold tests
 that exist. Do not run the wrong versions yourself.
 
+**A declared `find` stays unique.** A mutant applies only where its `find` matches
+once in its file. Add no second line matching any criterion's declared `find`, in
+new code or in a helper you extract.
+
 **Every new test must fail with the source reverted.** So the admissions and the
 unchanged waiting states live inside the refusal witnesses. A separate test of
 them passes at base, and `revert` then blocks it.
 
 **The migration limit.** `saffron/record/migrate.py:469-471` writes `task_push`
-before the final `task_state`. A migrated or folded row that pushed in
+before the final `task_state`. A migrated row that pushed in
 `REBUTTAL_UNJUDGED` therefore reads as refused. That is the direction that cannot
 admit a child without its parent's code. The live ledger holds no such row
 (measured 2026-10-30). An older ledger's rows read `None` until a fold, with the
 same result. No backfill is wanted.
 
 **An adopted row.** `adopt_pull_request` writes a `task_package` fact with the
-row's own state (`saffron/ledger.py:1700`), so it sets the column too. It cannot
-reach a `REBUTTAL_UNJUDGED` row, and no other state reads the column.
+row's own state (`saffron/ledger.py:1700`), so it sets the column too. `saffron
+adopt` still refuses a `REBUTTAL_UNJUDGED` row over `SA-0331`, and no other state
+reads the column.
 
-**The schema block.** The comment below `merged_head_sha` warns that a comment
-above the last column breaks `DROP COLUMN` on SQLite 3.51.0
-(`saffron/ledger.py:153-158`). Once the new column is last, move the two lines
-about `merged_head_sha` above that column. The `prose` gate counts the block
-under the new last column as new, so keep it to two lines. Keep the measured
-fact in them.
+**The schema block.** Write the two lines about `merged_head_sha` above
+`merged_head_sha`, which is no longer the last column. They cannot stay below the
+new last column, since that block then grows past the `prose` gate's limit. They
+cannot sit above the last column either, because `saffron/ledger.py:155-157`
+measures a comment there breaking `DROP COLUMN` on SQLite 3.51.0. The block under
+the new last column counts as new, so keep it to two lines with the measured fact
+in them.
 
 **One docstring to correct.** `_touch_task` says it takes one of four literals
 (`saffron/ledger.py:706`). If `task_push` stops calling it, that count is three.
@@ -312,16 +337,15 @@ fails until it has an entry for this column. Name the function holding the rule.
 of adjacent schema lines (`tests/test_ledger.py:329`), so do not split that pair.
 
 **Other text the change makes false.** `_StackingRefused`'s docstring
-(`saffron/task.py:201-205`) and `run_task`'s (`saffron/task.py:693-695`) list
-what refuses. `_resolve_multi_parent`'s (`saffron/task.py:320-328`) and
+(`saffron/task.py:201-205`), `run_task`'s (`saffron/task.py:693-695`) and
+`Refused`'s (`saffron/task.py:540`) list what refuses. `_resolve_multi_parent`'s (`saffron/task.py:320-328`) and
 `_stack_base_candidate`'s (`saffron/scheduler.py:1011-1020`) say what each reads.
 Bring each into line, within ten lines.
 
 **`base_sha` on the one-parent path.** It is optional there
 (`saffron/task.py:446`), and `run_task` always passes it. Read it only once a row
-would refuse, so the one-parent tests with no base keep working. Raise
-`ValueError` when it is missing at that point, as `_resolve_multi_parent` does
-(`saffron/task.py:352-355`). Read retirement as that function does.
+would refuse, so the one-parent tests with no base keep working. Read retirement
+as `_resolve_multi_parent` does (`saffron/task.py:352-360`).
 
 **Fixtures.** `_pushed_saffron_repo`, `_push_stacked_branch`, `_chain_spec_text`,
 `_ceiling_spec`, `_seed_repo`, `_seed_task`, `_fake_gh_unreachable_for` and
@@ -329,17 +353,24 @@ would refuse, so the one-parent tests with no base keep working. Raise
 `tests/test_scheduler.py`, whose ids need digits, such as `SY-1000`. Give each
 case its own ledger file. `_seed_task`'s `pr_url` writes that column alone.
 `adopt_pull_request` also writes the pushed state, so it sets the new column.
-`reconcile` asks about no `REBUTTAL_UNJUDGED` row (`saffron/reconcile.py:178-181`).
-Its `MERGED` case therefore needs an older `READY_FOR_REVIEW` row with a
-`pr_url`. Import `run_batch`, `Readiness` and `PinnedBase` inside the test, since
+`reconcile` asks a `REBUTTAL_UNJUDGED` row only when it carries a `pr_url`
+(`saffron/reconcile.py:178-181`, over `SA-0331`). `_fake_gh_says_merged` answers
+`MERGED` for every url, and `_fake_gh_unreachable_for` leaves a named url unasked.
+So give a carried row its own url, and let the older-row `MERGED` case carry its
+`pr_url` on the older row alone. The stack base's row pushed in the state and
+carrying a `pr_url` cannot arise over `SA-0331`'s guard. It stays as the other
+side of the rule. Import `run_batch`, `Readiness` and `PinnedBase` inside the test, since
 `tests/test_batch.py:18` imports `tests/test_scheduler.py`.
 
-**Measured on a prototype at `f596e814`.** The host's SQLite is 3.53.1, and the
-schema block's `DROP COLUMN` tests passed there. All four new witnesses passed,
-and each failed with the source reverted, by a runtime assertion or a missing
+**Measured on a prototype.** It sat at `f596e814`, with `SA-0331`'s
+`MERGE_ONLY_STATES` line and `_ADOPTABLE_STATES` change applied. The host's SQLite is 3.53.1, and the
+schema block's `DROP COLUMN` tests passed there. All four new witnesses passed.
+Each failed with this spec's source reverted, by a runtime assertion or a missing
 key, never at collection. Every wrong version above was applied as an edit, and
-each declared mutant too. Each failed its own witness. Every hook in `make check`
-passed. The suite ran 4718 passed and 7 failed. All seven read git history the
-prototype's one-commit copy lacks, in `tests/records/test_records_integrity.py`
-and `tests/test_corpus.py`. Its source diff measured 337 changed tokens against
-the `bug` ceiling of 1300, and 1586 tokens under the test paths.
+each declared mutant too. Each failed its own witness. An earlier copy at
+`f596e814` alone passed every hook in `make check`, and its suite ran 4718 passed
+and 7 failed. All seven read git history that one-commit copy lacks, in
+`tests/records/test_records_integrity.py` and `tests/test_corpus.py`. Over
+`SA-0331`'s lines, the seven test modules this spec touches or relies on ran 496
+passed and no failures. The source diff measured 337 changed tokens against the
+`bug` ceiling of 1300.
