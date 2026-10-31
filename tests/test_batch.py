@@ -1412,11 +1412,11 @@ def test_the_until_stored_is_utc_not_the_operators_wall_clock(
 
     row = _batch_row(ledger, _latest_batch_id(ledger))
     # The conversion, asserted against a value derived the same way rather than
-    # against a literal: 06:30 Pacific is 13:30 UTC, and what this pins is the
-    # seven-hour shift, not the date it happens on.
+    # against a literal. 06:30 Pacific is 13:30 UTC in daylight time and 14:30 in
+    # standard time, and tomorrow's date picks which.
     assert row["until_ts"] == expected
     assert "T" not in row["until_ts"]
-    assert row["until_ts"].endswith(" 13:30:00")
+    assert row["until_ts"].endswith((" 13:30:00", " 14:30:00"))
     assert row["started_at"] < row["until_ts"]
 
 
