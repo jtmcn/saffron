@@ -3,7 +3,7 @@ id: SA-0329
 title: "A rebuilt outcome and `saffron regate` drop the `revert` exemption, so a sound diff comes back red"
 type: bug
 priority: 1
-estimated_lines: 220
+estimated_lines: 243
 estimate_measured: true
 touches:
   - saffron/phases/package.py
@@ -52,10 +52,13 @@ acceptance:
       witness drives one that is unsorted and repeats a name. A current
       file is one as new as `baseline.json`, or one in a directory with no
       `baseline.json`. The witness drives a current `[]` too. It raises
-      `package_phase.RevertExemptUnreadable`, naming the file, for each of
-      these current files. They are invalid JSON, zero bytes, bytes that are
+      `package_phase.RevertExemptUnreadable`, naming the file's path, for each
+      of these current files. They are invalid JSON, zero bytes, bytes that are
       not UTF-8, the JSON values `{}`, `"t.py::a"`, `null` and `3`, the lists
-      `["t.py::a", 3]`, `[3, "t.py::a"]` and `[null]`, and a directory at that path.
+      `["t.py::a", 3]`, `[3, "t.py::a"]` and `[null]`, a directory at that path,
+      and a file whose read raises `PermissionError`. The witness asserts the
+      path with `str(path) in str(exc)` on every raising member. That exception
+      subclasses `package_phase.PackageError`.
     witness: tests/test_package.py::test_the_exemption_reader_answers_for_each_state_of_the_task_directory
     wrong_versions:
       - A path that is not a regular file reads as no file, so a directory answers `[]`.
@@ -76,8 +79,11 @@ acceptance:
       - A directory with no `baseline.json` answers `[]`, so a current file loses its list.
       - A current `[]` raises, as if an empty list were damage.
       - A missing task directory raises rather than answering `[]`.
-      - The message for a file it cannot parse or open names the reason and not the file.
-      - The message for a value that is not a list of strings names the reason and not the file.
+      - The message for a file it cannot parse or open names the reason and not the file's path.
+      - The message for a value that is not a list of strings names the reason and not the file's path.
+      - Both messages name the file's base name, not its path.
+      - Only `ValueError` and `IsADirectoryError` are caught, so a `PermissionError` raises bare.
+      - The exception subclasses `ValueError`, so an uncaught one no longer reads as `PackageError`.
   - claim: >-
       `ready_task` sets `revert_exempt` on the outcome it rebuilds from
       `package_phase.read_revert_exempt(task_dir)`, called through that
@@ -95,18 +101,22 @@ acceptance:
       - The reader is handed `out_dir` rather than the task directory.
       - "`ready_task` imports the reader by name, so a replaced module attribute never reaches it."
   - claim: >-
-      `ready_task` returns a `Refused` whose reason names the file when the
-      reader raises. It neither raises nor rebuilds an outcome. The witness
+      `ready_task` returns a `Refused` when the reader raises. Its reason
+      carries the exception's text, and so names the file's path. It neither
+      raises nor rebuilds an outcome. The witness
       drives a current file holding invalid JSON, `{}` and
       `["t.py::a", 3]`, and a directory at that path. It also drives a
       damaged current file on a task whose `tree_base` differs from its
       `base_sha` and that no task pushed. There the mirror path stays absent.
+      Last, a replaced reader raises the exception with its own text, and
+      that text reaches the reason.
     witness: tests/test_task.py::test_a_rebuilt_outcome_refuses_an_exemption_it_cannot_read
     wrong_versions:
       - The reader's raise escapes `ready_task`, so `saffron package` exits 2 rather than refusing.
       - The raise is caught and the outcome carries `[]`.
       - The reader runs only when the local freshness check passes, so a directory at that path answers no exemption.
       - The reason is a fixed sentence that names no file.
+      - The reason is a fixed sentence that names the file's path and drops the exception's text.
       - The reader runs just above the rebuilt `CellOutcome`, after the fallback, so a refused task still writes the mirror.
   - claim: >-
       `run_regate` hands `package_phase.reverify` an `exempt` from
@@ -127,16 +137,20 @@ acceptance:
       - The reader is handed a directory named for the task id rather than the spec id.
       - An empty answer passes `exempt=None` rather than the empty list.
   - claim: >-
-      `run_regate` prints a `regate:` line naming the file and returns 1 when
-      the reader raises. It builds no image, calls no `reverify` and records
+      `run_regate` prints a `regate:` line and returns 1 when the reader
+      raises. The line carries the exception's text, and so names the file's
+      path. It builds no image, calls no `reverify` and records
       no re-gate. The witness drives a current file holding invalid JSON,
-      `{}` and `["t.py::a", 3]`, and a directory at that path.
+      `{}` and `["t.py::a", 3]`, and a directory at that path. Last, a replaced
+      reader raises the exception with its own text, and that text reaches
+      the line.
     witness: tests/test_regate.py::test_regate_declines_an_exemption_it_cannot_read
     wrong_versions:
       - The reader's raise escapes `run_regate`, so the command exits 2 rather than declining.
       - The raise is caught and the suite runs with no exemption.
       - The reader runs after the image build, so a decline still pays for one.
       - The decline line carries a fixed sentence that names no file.
+      - The decline line carries a fixed sentence that names the file's path and drops the exception's text.
       - The decline records a re-gate row before it returns.
   - claim: >-
       A branch `run_regate` cannot fetch still exits 2 and names itself,
@@ -204,7 +218,8 @@ Three edits. Each rests on the one before.
    (`saffron/phases/package.py:71`, `saffron/phases/package.py:75`). Both callers import this module as `package_phase`
    already (`saffron/task.py:69`, `saffron/regate.py:19`). The reader alone
    decides the file's name, its freshness and its shape. A current file that
-   is there and is not a list of strings raises. An empty answer for it is the defect
+   is there and is not a list of strings raises. So does one the reader cannot
+   open or read, for any `OSError` but a missing file. An empty answer for it is the defect
    this spec closes, so the reader never gives one.
 2. **`ready_task`.** Call the reader through `package_phase`, and put its answer
    on the rebuilt `CellOutcome`. A raise becomes a `Refused` that carries the
@@ -267,10 +282,27 @@ records every keyword it gets. The task directory under `--home <home>` is
 so build it once and rewrite the file between calls. `regates` holds a row only
 after a judged run, so a decline leaves it empty.
 
-**The fallback member.** Criterion 3's last member needs `target-repo` to be a
-real git checkout with an `origin`. With no such repo the fallback's clone raises
-before it writes, so the mirror assertion checks nothing. Assert the mirror path
-is absent before asserting the reason.
+**The fallback member.** Build criterion 3's fallback member on
+`_rt_parent_chain` (`tests/test_task.py:3309`), called as at
+`tests/test_task.py:3369`, and pass its checkout as `repo`. A real checkout makes
+the mirror assertion live. `tests/test_task.py:3476` is a refusal on the same
+fallback. With a fake repo, a read after the fallback still fails the witness, on
+the `GitError` that escapes, and the mirror assertion never runs. Assert the
+mirror path is absent before asserting the reason.
+
+**The permission member.** Replace the open that the reader reaches, for that
+path alone. Do not use `chmod`, since the suite can run as root.
+
+**One docstring.** `run_regate`'s docstring at `saffron/regate.py:136-138` lists
+a `PackageError` among the raises left to the caller. It must stop saying that of
+`RevertExemptUnreadable`. Every other `PackageError` still reaches the caller,
+as criterion 6 holds.
+
+**Measured.** Every wrong version below each witness, and every mutant, ran on a
+prototype of this spec, and each one failed its witness. That covers the ordering
+versions too: criterion 1's older file parsed first and equal mtime, criterion
+3's reader above the rebuilt `CellOutcome`, and criterion 5's reader after the
+image build. Do not run them yourself.
 
 **Existing tests.** `_fake_reverify` takes `**kwargs`, and
 `test_ready_task_rebuilds_every_field_package_reads_from_the_cells_record`
