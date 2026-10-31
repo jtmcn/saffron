@@ -3845,6 +3845,9 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0327",
         "SA-0326",
         "SA-0328",
+        "SA-0329",
+        "SA-0331",
+        "SA-0330",
     }
     directory = tmp_path / "specs"
     _arrange_measured_queue(REAL_SPECS, directory, measured)
@@ -3865,6 +3868,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0286",
         "SA-0299",
         "SA-0328",
+        "SA-0329",
         "SA-0200",
         "SA-0201",
         "SA-0208",
@@ -3966,6 +3970,8 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0318",
         "SA-0319",
         "SA-0327",
+        "SA-0330",
+        "SA-0331",
     ]
     # A precondition, not the glob check: `done/` holds far more specs than the
     # queue above, so that exact list is a check rather than a scan of nothing.

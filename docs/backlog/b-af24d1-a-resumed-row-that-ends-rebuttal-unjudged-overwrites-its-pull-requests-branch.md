@@ -1,14 +1,14 @@
 ---
 id: b-af24d1
-title: A resumed row with an open pull request that ends `REBUTTAL_UNJUDGED` is pushed onto that pull request's branch, and no merge moves it to `MERGED`
+title: A rerun that ends `REBUTTAL_UNJUDGED` is pushed onto another row's open pull request branch, and no merge moves a row at that state to `MERGED`
 status: open
 tier: 1
 filed: 2026-10-11
-specs: []
+specs: [SA-0331]
 prs: []
 commits: []
 cites: [§4.2.1, §5.6, §5.7]
-related: [120, b-f603c9]
+related: [120, b-f603c9, b-223244]
 ---
 
 ## Problem
@@ -16,8 +16,10 @@ related: [120, b-f603c9]
 Found by the second spec review of `SA-0276`, 2026-10-11. Every line below
 was read at `8272ac44`.
 
-A `CHANGES_REQUESTED` task re-queues on its own row and carries its open pull
-request into the next cell. `test_a_cell_bound_for_package_leaves_no_row_a_reconcile_can_requeue`
+This paragraph and the next rest on a premise that did not hold. A rerun runs on a fresh row (b-223244).
+The reachable case is that row beside an older `CHANGES_REQUESTED` or `APPROVED`
+row with an open pull request (`SA-0331`). As filed: a `CHANGES_REQUESTED` task
+re-queues on its own row and carries its open pull request into the next cell. `test_a_cell_bound_for_package_leaves_no_row_a_reconcile_can_requeue`
 seeds exactly that row (`tests/test_session.py:4745-4838`).
 
 Once `SA-0276` lands, such a cell can end `REBUTTAL_UNJUDGED`. PACKAGE does
@@ -36,6 +38,5 @@ request, the row stays `REBUTTAL_UNJUDGED` and never reaches `MERGED`.
 
 ## Done looks like
 
-A resumed row's open pull request is not overwritten by an unjudged
-rebuttal. A merged pull request on a `REBUTTAL_UNJUDGED` row moves it to
+A rerun's unjudged rebuttal does not overwrite a row's standing pull request. A merged pull request on a `REBUTTAL_UNJUDGED` row moves it to
 `MERGED`, as one on an `EXHAUSTED` row does.

@@ -43,6 +43,8 @@ when any `depends_on` entry is outside the plan and not on the default branch.
 Amended 2026-10-10, `SA-0265` and `SA-0267`: one such entry is allowed if it is the **stack base**, a
 parent whose newest waiting task has a pushed branch and a pull request. The
 first layer is cut from the base's branch, and the base's task is its predecessor.
+Amended by `SA-0330`: a `REBUTTAL_UNJUDGED` task whose latest run pushed nothing
+does not qualify.
 Amended by `SA-0312`: the base is the qualifying parent whose chain holds
 the most other such parents, counted across the whole plan. A parent on its
 chain needs no place in the plan. A spec naming a parent outside the plan
@@ -198,7 +200,8 @@ this decision rests on.
   plan is refused, unless that dependency is the stack base or on its chain.
   Cutting it from its predecessor would drop that code. The residual is a
   spec whose dependency has no pushed branch or pull request, or lies off
-  the base's chain. It waits for a merge, as §4.2 avoided.
+  the base's chain. A `REBUTTAL_UNJUDGED` task whose latest run pushed nothing
+  is a residual too. Each waits for a merge, as §4.2 avoided.
 - **4** upholds. Every end-review lens and every spec session runs in a critic
   cell. The host decides what qualifies.
 - **6** departs. A follow-up that carries a probe exists to kill it, and

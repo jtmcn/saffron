@@ -248,9 +248,8 @@ diff ends `MERGE_FAILED`.
 **Placed 2026-10-11**, from `SA-0276`'s spec review: **b-f603c9**. A
 `REBUTTAL_UNJUDGED` parent whose push was refused still admits its child, and
 the child is cut from `base_sha` without the parent's code. Then
-**b-af24d1**: a resumed row with an open pull request that ends
-`REBUTTAL_UNJUDGED` is pushed onto that pull request's branch, and no merge
-moves it to `MERGED`.
+**b-af24d1**: a rerun that ends `REBUTTAL_UNJUDGED` is pushed onto another row's
+open pull request branch. No merge moves a row at that state to `MERGED`.
 
 **Placed 2026-10-12**, from `SA-0278`'s spec review: **b-d4b847**, then
 **b-4eaaa4** and **b-6677b6**. A mirror that lacks a task's ref starts one
@@ -612,7 +611,14 @@ skip a layer. A rebuttal's suppression ends a green task. An adopted task
 gets no end review. A stack batch refuses a spec that meets an earlier
 batch's open layer.
 
+**Placed 2026-10-30**, from `SA-0330`'s first review: **b-e9dd4c**. A
+`REVIEW_INCOMPLETE` parent whose push was refused still admits its child.
+
 ### Tier 3 — real, not urgent
+
+**Placed 2026-10-31**, from `SA-0331`'s third read: **b-8693ef**. A refused PACKAGE
+blanks a carried pull request link, so no merge moves that row. Only a by-hand
+`saffron adopt` race reaches it today.
 
 **Placed 2026-10-16**, from the spec loop's run 42: **b-60317d**.
 `reconcile`'s `head_moved` comment says nothing judges a moved head.
