@@ -4,7 +4,7 @@ title: A resumed row's own pull request does not stop an unpackaged push onto it
 type: bug
 priority: 1
 depends_on: [SA-0329]
-estimated_lines: 257
+estimated_lines: 249
 estimate_measured: true
 touches:
   - saffron/phases/package.py
@@ -104,7 +104,8 @@ acceptance:
     wrong_versions:
       - The branch check is removed because the new guard reads as covering it.
   - claim: >-
-      Another row of this spec follows today's rule. A `REJECTED` row with a
+      Apart from the state criterion 9 adds, another row of this spec follows
+      today's rule. A `REJECTED` row with a
       pull request, an `EXHAUSTED` row with none and another spec's drafted
       row each let the push through. An `EXHAUSTED` row with a pull request
       refuses it.
@@ -112,8 +113,8 @@ acceptance:
     preserves: true
     mutant:
       file: saffron/phases/package.py
-      find: 'or (row["state"] == "EXHAUSTED" and row["pr_url"])'
-      replace: or False
+      find: 'others = [row for row in task_rows if row["task_id"] != outcome.task_id]'
+      replace: others = []
     wrong_versions:
       - The guard reads every row of the spec for a `pr_url`, so an older `REJECTED` row refuses the push.
       - The guard replaces the `others` rule, so another row's open draft no longer refuses.
@@ -178,6 +179,25 @@ acceptance:
       - The set is spelled out without `MERGE_FAILED`.
       - The set is spelled out without `NOT_IMPLEMENTED`.
       - The set is spelled out without `READY_FOR_REVIEW`.
+  - claim: >-
+      An older row of this spec, with a pull request, refuses a rerun's push
+      on a new row when it is `REBUTTAL_UNJUDGED`. The witness sets that row
+      to every member of `TaskState`, with the branch at a head this spec
+      recorded. `READY_FOR_REVIEW`, `EXHAUSTED` and `REBUTTAL_UNJUDGED` refuse,
+      and the branch stays where it was. Every other state lets the push
+      through, `REJECTED` among them. `REBUTTAL_UNJUDGED` with an empty
+      `pr_url` lets it through too.
+    witness: tests/test_package.py::test_a_new_row_does_not_replace_the_branch_of_an_unjudged_rows_pull_request
+    mutant:
+      file: saffron/phases/package.py
+      find: 'others = [row for row in task_rows if row["task_id"] != outcome.task_id]'
+      replace: others = []
+    wrong_versions:
+      - The `others` guard is left as it stands, so the rerun's push replaces the branch.
+      - The guard refuses on any state in the merge-only set, so a `NOT_IMPLEMENTED` row with a pull request refuses.
+      - '`REVIEW_INCOMPLETE` joins the guard beside `REBUTTAL_UNJUDGED`.'
+      - The guard refuses on any state with a `pr_url`.
+      - The guard refuses on `REBUTTAL_UNJUDGED` without reading its `pr_url`.
 ---
 
 ## Context
@@ -188,8 +208,8 @@ cites `DESIGN.md` §4.2.1, §5.6 and §5.7. Every line number below was read at
 hold there.
 
 `DESIGN.md` §5.7 and `CONTEXT.md`'s `REBUTTAL_UNJUDGED` entry read as amended
-by this spec's pull request. §5.7 says the push does not replace the branch of
-a row that carries its own pull request. The entry says only a merge of that
+by this spec's pull request. §5.7 says the push does not replace the branch
+when the task's own row carries a pull request. The entry says only a merge of that
 pull request moves the row to `MERGED`. §4.1's `REBUTTAL_UNJUDGED` entry reads
 as amended too, with its exit to `MERGED`.
 
@@ -254,15 +274,18 @@ the merge.
 
 ## Notes for the agent
 
+**`SA-0330`, above this spec.** It declares `depends_on: [SA-0331]`, so it builds
+on this spec's work.
+
 **`SA-0329`, the parent.** It edits `saffron/phases/package.py`,
 `saffron/task.py` and `tests/test_package.py`, so this spec stacks on it. No
 claim here turns on its code. Lines cited here were read before it, so find each
 by its text.
 
 **Edit or new.** The guard is new code, so criteria 1 and 2 declare a witness
-and no mutant. `witness` reports an honest `skip` on them. Criteria 3 to 8
+and no mutant. `witness` reports an honest `skip` on them. Criteria 3 to 9
 pin text the code already determines. Write the two new `reconcile` tests and
-the two new `package` tests. Criteria 3, 4, 5 and 8 name tests that exist, and
+the three new `package` tests. Criteria 3, 4, 5 and 8 name tests that exist, and
 those tests need no edit.
 
 **The guard.** Add it to `push_unpackaged_work` beside the `others` guard,
@@ -277,6 +300,22 @@ line past the limit (`.saffron/gates/prose.py:310-323`). A 32nd line is a new
 failure, so keep it at 31 or fewer. A prototype's rewording drew no new hit once
 its closing sentence went. An added clause can also push that sentence past 25
 words. That was measured too.
+
+**The older row.** A rerun mints a new row. `saffron/cli.py:679` passes no
+`task_id`, `saffron/task.py:680` defaults it to `None`, and
+`saffron/cell/session.py:2253` then creates a task. The older
+`REBUTTAL_UNJUDGED` row then sits in `others`, where the guard at
+`saffron/phases/package.py:1147-1151` refuses on neither of its two shapes. Its
+recorded sha passes the branch check.
+
+Measured on a prototype with the own-row guard and the `packageable` fixture,
+beside an older row with a `pr_url`. Before the widening the push landed and the
+branch moved. After it the push was refused and the branch stayed. Add only
+`REBUTTAL_UNJUDGED` to that guard, and read `pr_url` as `EXHAUSTED` does.
+`saffron/reconcile.py:6-7` keeps this module from importing the merge-only set, and
+that set also holds a state this guard must not refuse on. Correct the comment
+at `saffron/phases/package.py:1146` and name the state in the docstring sentence.
+Keep the line that binds `others` as it reads, since two mutants pin it.
 
 A `repo_id` of `None` still reads no rows (`saffron/phases/package.py:1140-1144`),
 so the guard has nothing to read there. That stays as it is.
@@ -327,5 +366,5 @@ A `PackageResult` carrying no `pr_url` still reaches the same push, and the
 existing `tests/test_task.py` test covers that handoff. This spec does not drive
 `run_task` itself.
 
-**Size.** A prototype measured 150 changed tokens outside the test paths and 1025
+**Size.** A prototype measured 169 changed tokens outside the test paths and 996
 with them. The estimate is the second figure over four.
