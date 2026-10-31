@@ -299,7 +299,7 @@ When the operator merges that pull request, the row stays `REBUTTAL_UNJUDGED`.
 So a child still reads the parent as open, and the accept rate never counts
 the merge.
 
-**The reachable row.** Measured at `fb9bee0e` on the same fixture. A new row ended
+**The reachable row.** Measured on `f596e814`'s source with the same fixture. A new row ended
 `REBUTTAL_UNJUDGED` beside another row carrying a `pr_url`, with the branch at that
 row's head. Over every member of `TaskState` on that row, `READY_FOR_REVIEW`
 and `EXHAUSTED` refused. The other 26 pushed, `CHANGES_REQUESTED`, `APPROVED`,
@@ -331,6 +331,8 @@ sent-back or approved pull request replaces its branch with work no critic judge
 - Whether the pull request is still open. The guard asks GitHub nothing. So an
   attended cell, which reconciles nothing first, reads a row a closed pull request
   has not yet moved. Its push is refused, and the patch stays in the task directory.
+  A closed answer never moves a merge-only row, so such a row refuses every later
+  unpackaged push of its spec, in a batch too.
 
 ## Notes for the agent
 
@@ -429,8 +431,10 @@ measured.
 **Test shape.** A plain `def` over a loop, never a parametrised test. Each
 witness's state loop reads `typing.get_args(TaskState)` locally, as
 `tests/test_cli.py:2773` does. Criterion 1's witness writes each member to both
-the outcome and the row. Criterion 9's writes each member to the other row alone,
-and compares the remote head with `result.pushed_sha`. Two pushes of one patch in
+the outcome and the row. Criterion 9's main loop writes each member to the other row
+alone. A second loop writes each member to the outcome, for each of the three new
+states. Reuse one row across a loop, since a row seeded per state leaves a refusing
+row behind. It compares the remote head with `result.pushed_sha`. Two pushes of one patch in
 one second can make one commit, so it never asserts that a push moved the head.
 `adopt_pull_request(row, "")` empties a row's `pr_url`. Pointing
 `packageable.outcome.task_id` at a new row puts the fixture's row below the outcome's.

@@ -612,7 +612,8 @@ gets no end review. A stack batch refuses a spec that meets an earlier
 batch's open layer.
 
 **Placed 2026-10-30**, from writing `SA-0331`: **b-8693ef**. A refused PACKAGE
-blanks a resumed row's pull request link, so no merge moves that row.
+blanks a carried pull request link, so no merge moves that row. Only a by-hand
+`saffron adopt` race reaches it today.
 
 ### Tier 3 — real, not urgent
 

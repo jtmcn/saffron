@@ -16,7 +16,7 @@ related: [120, b-f603c9, b-223244]
 Found by the second spec review of `SA-0276`, 2026-10-11. Every line below
 was read at `8272ac44`.
 
-This paragraph's premise did not hold. A rerun runs on a fresh row (b-223244).
+This paragraph and the next rest on a premise that did not hold. A rerun runs on a fresh row (b-223244).
 The reachable case is that row beside an older `CHANGES_REQUESTED` or `APPROVED`
 row with an open pull request (`SA-0331`). As filed: a `CHANGES_REQUESTED` task
 re-queues on its own row and carries its open pull request into the next cell. `test_a_cell_bound_for_package_leaves_no_row_a_reconcile_can_requeue`
@@ -38,6 +38,5 @@ request, the row stays `REBUTTAL_UNJUDGED` and never reaches `MERGED`.
 
 ## Done looks like
 
-A resumed row's open pull request is not overwritten by an unjudged
-rebuttal. A merged pull request on a `REBUTTAL_UNJUDGED` row moves it to
+A rerun's unjudged rebuttal does not overwrite a row's standing pull request. A merged pull request on a `REBUTTAL_UNJUDGED` row moves it to
 `MERGED`, as one on an `EXHAUSTED` row does.
