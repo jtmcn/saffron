@@ -80,6 +80,14 @@ class ParentGone(PackageError):
     from (§5.7's stacking half, `SA-0025`)."""
 
 
+class RevertExemptUnreadable(PackageError):
+    """`revert-exempt.json` exists, is current, and cannot be read as the
+    list of test node ids it is supposed to hold. Raised naming the file's
+    path, since the two callers each turn it into their own refusal and must
+    say which file. A host failure reading it stays an uncaught `OSError`:
+    this one means only that the record itself is bad (`DESIGN.md` §5.6)."""
+
+
 def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Every git call here inspects `returncode` *and* `stderr` — see
     `apply_patch`, where a zero exit does not mean what it looks like."""
@@ -470,6 +478,47 @@ def needs_reverification(fetch_head: str, tree_base: str) -> bool:
     """Whether the base moved since the cell ran. It picks the `MERGE_FAILED`
     note only: re-verification itself is unconditional (§5.7, principle 58)."""
     return fetch_head != tree_base
+
+
+def read_revert_exempt(task_dir: Path) -> list[str]:
+    """The `revert` exemption the newest cell under `task_dir` recorded, or
+    `[]` for no record at all.
+
+    A file older than `task_dir / "baseline.json"` is an earlier cell's
+    leftover and reads as no exemption. One at least as new, or with no
+    `baseline.json` present, is current.
+
+    A current file unreadable as a list of strings raises
+    `RevertExemptUnreadable`. Any other `OSError` escapes as raised.
+    """
+    exempt_path = task_dir / "revert-exempt.json"
+    baseline_path = task_dir / "baseline.json"
+    try:
+        baseline_mtime: float | None = baseline_path.stat().st_mtime
+    except FileNotFoundError:
+        baseline_mtime = None
+    try:
+        exempt_mtime = exempt_path.stat().st_mtime
+    except FileNotFoundError:
+        return []
+    if baseline_mtime is not None and exempt_mtime < baseline_mtime:
+        return []
+    try:
+        with exempt_path.open("r", encoding="utf-8") as handle:
+            text = handle.read()
+    except FileNotFoundError:
+        return []
+    except IsADirectoryError as is_dir:
+        raise RevertExemptUnreadable(f"{exempt_path}: {is_dir}") from is_dir
+    except UnicodeDecodeError as broken:
+        raise RevertExemptUnreadable(f"{exempt_path}: {broken}") from broken
+    try:
+        data = json.loads(text)
+    except ValueError as broken:
+        raise RevertExemptUnreadable(f"{exempt_path}: {broken}") from broken
+    if not isinstance(data, list) or not all(isinstance(item, str) for item in data):
+        raise RevertExemptUnreadable(f"{exempt_path} is not a list of test node ids")
+    return data
 
 
 def reverify(

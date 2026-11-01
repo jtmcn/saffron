@@ -133,9 +133,10 @@ def run_regate(
     current head with the task's own gates and record the count.
 
     No agent runs here, and `CLAUDE_CODE_OAUTH_TOKEN` is never read. A
-    decline prints `regate:` and its reason, then returns 1. Any other
-    raise, a failed `gh`, a `PreflightFailed`, a `PackageError`, is left
-    to the caller, which exits 2.
+    decline prints `regate:` and its reason, then returns 1, including a
+    `revert-exempt.json` this cannot read. Any other raise, a failed `gh`,
+    a `PreflightFailed`, an `OSError` reading that file, is left to the
+    caller, which exits 2.
     """
     url = package_phase.real_remote(repo)
     try:
@@ -152,8 +153,12 @@ def run_regate(
         )
         spec = _spec_at_base(exported, row["spec_id"], row["spec_sha"])
         policy, _policy_sha = load_policy(exported)
+        exempt = package_phase.read_revert_exempt(out_dir / row["spec_id"])
     except _Declined as declined:
         print(f"regate: {declined.reason}")
+        return 1
+    except package_phase.RevertExemptUnreadable as unreadable:
+        print(f"regate: {unreadable}")
         return 1
 
     cell_image = repo_image.build_cell_image(repo)
@@ -167,6 +172,7 @@ def run_regate(
         gates_dir=exported,
         image=cell_image,
         spec=spec,
+        exempt=exempt,
     )
 
     for gate, failure in comparison.new_failures:

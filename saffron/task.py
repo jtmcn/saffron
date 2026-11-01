@@ -1192,14 +1192,14 @@ def ready_task(
     mirror_path: Path,
 ) -> ReadyTask | Refused:
     """Rebuilds what `package()` needs for `spec_id`'s newest task in this
-    repo, from the ledger and the task directory alone. No live
-    `CellOutcome` is required, and nothing here writes, ledger or disk,
-    save the one path that writes `mirror_path`: the `tree_base`
-    fallback below, reached only when no task's `pushed_sha` matches it.
+    repo, from the ledger and the task directory alone. Nothing here
+    writes ledger or disk, except the `tree_base` fallback below, which
+    touches `mirror_path` only when no task's `pushed_sha` matches it.
 
-    Refuses by name, naming the spec id, the state, the pull request
-    url, and the missing, stale or unmatched file or sha. A git failure
-    in the fallback raises instead, since it is infrastructure.
+    Refuses by name: the spec id, the state, the pull request url, and
+    the missing, stale or unmatched file, sha, or exemption. A git
+    failure in the fallback, or a host failure reading the exemption,
+    raises instead.
     """
     if repo_id is None:
         return Refused(reason=f"{spec_id} has no task in this repo")
@@ -1284,6 +1284,11 @@ def ready_task(
         else ""
     )
 
+    try:
+        revert_exempt = package_phase.read_revert_exempt(task_dir)
+    except package_phase.RevertExemptUnreadable as unreadable:
+        return Refused(reason=str(unreadable))
+
     parent_branch: str | None = None
     if tree_base != base_sha:
         pushers = [
@@ -1318,6 +1323,7 @@ def ready_task(
         rebut_result=rebut_result,
         effective_risk=effective_risk,
         notes=notes,
+        revert_exempt=revert_exempt,
     )
     return ReadyTask(outcome=outcome, spec=spec, parent_branch=parent_branch)
 

@@ -1,5 +1,9 @@
+import builtins
+import errno
 import hashlib
+import io
 import json
+import os
 import sqlite3
 import subprocess
 import subprocess as sp
@@ -16,6 +20,7 @@ from saffron.gates.contract import Failure, GateResult
 from saffron.gates.suite import SuiteComparison, SuiteRun
 from saffron.intake import Criterion, Spec, parse_spec
 from saffron.ledger import Ledger
+from saffron.phases import package as package_phase
 from saffron.phases import rebut
 from saffron.phases.package import (
     APPLY_CONFLICT,
@@ -4008,3 +4013,161 @@ def test_unpackaged_work_after_a_refused_package_says_so_and_spares_a_draft(
     result = _push()
     assert result.pushed is False
     assert "not ours to replace" in result.note
+
+
+def _patched_open(target: str, fault: OSError, *, on_read: bool = False):
+    """An `open` that raises `fault` for `target` alone and defers to the
+    real one for every other path. The freshness check below reads
+    `baseline.json` through the same `Path.open` machinery."""
+    real_open = io.open
+
+    class _FaultyHandle:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info) -> bool:
+            return False
+
+        def read(self) -> str:
+            raise fault
+
+    def _open(path, *args, **kwargs):
+        if str(path) != target:
+            return real_open(path, *args, **kwargs)
+        if on_read:
+            return _FaultyHandle()
+        raise fault
+
+    return _open
+
+
+def test_the_exemption_reader_answers_for_each_state_of_the_task_directory(tmp_path):
+    """`read_revert_exempt` answers `[]` for a task directory with no
+    `revert-exempt.json`, for no directory at all, and for a file older
+    than `baseline.json`. A current file's list comes back unchanged,
+    unsorted and repeating a name.
+
+    A current file holding invalid JSON, zero bytes, undecodable bytes,
+    the wrong JSON shape, or a directory at the path, raises
+    `RevertExemptUnreadable` naming that path. A host failure opening or
+    reading a current file escapes as the identical object raised."""
+    task_dir = tmp_path / "SA-0001"
+
+    # No directory at all.
+    assert package_phase.read_revert_exempt(task_dir) == []
+
+    task_dir.mkdir()
+    # A directory with no baseline.json and no exemption file.
+    assert package_phase.read_revert_exempt(task_dir) == []
+
+    baseline = task_dir / "baseline.json"
+    exempt = task_dir / "revert-exempt.json"
+
+    def _set(path: Path, when: float) -> None:
+        os.utime(path, (when, when))
+
+    # A current file with no `baseline.json` at all: current regardless of
+    # its own age, since there is no older record to compare it against.
+    exempt.write_text(json.dumps(["t/test_none.py::test_old"]))
+    _set(exempt, 1_000.0)
+    assert package_phase.read_revert_exempt(task_dir) == ["t/test_none.py::test_old"]
+    exempt.unlink()
+
+    base_when = 1_700_000_000.0
+    baseline.write_text("{}")
+    _set(baseline, base_when)
+
+    # baseline.json exists, no exemption file yet.
+    assert package_phase.read_revert_exempt(task_dir) == []
+
+    unsorted_with_repeat = ["b::two", "a::one", "a::one"]
+    exempt.write_text(json.dumps(unsorted_with_repeat))
+    _set(exempt, base_when + 1)
+    assert package_phase.read_revert_exempt(task_dir) == unsorted_with_repeat
+
+    # Equal mtime is current: a same-instant write must not lose its list.
+    _set(exempt, base_when)
+    assert package_phase.read_revert_exempt(task_dir) == unsorted_with_repeat
+
+    # Older than baseline.json: another cell's, read as no exemption.
+    _set(exempt, base_when - 1)
+    assert package_phase.read_revert_exempt(task_dir) == []
+
+    # Older than baseline.json and damaged: still no exemption, never a
+    # raise, since staleness is decided before the file is ever opened.
+    exempt.write_text("not json")
+    _set(exempt, base_when - 1)
+    assert package_phase.read_revert_exempt(task_dir) == []
+
+    exempt.write_text(json.dumps({}))
+    _set(exempt, base_when - 1)
+    assert package_phase.read_revert_exempt(task_dir) == []
+
+    exempt.unlink()
+    exempt.mkdir()
+    _set(exempt, base_when - 1)
+    assert package_phase.read_revert_exempt(task_dir) == []
+    exempt.rmdir()
+
+    # A current `[]` is a real, empty answer, not damage.
+    exempt.write_text("[]")
+    _set(exempt, base_when + 1)
+    assert package_phase.read_revert_exempt(task_dir) == []
+
+    # A `PackageError`, which both callers catch by name, not a bare
+    # `ValueError` that would slip past them.
+    assert issubclass(package_phase.RevertExemptUnreadable, package_phase.PackageError)
+    assert not issubclass(package_phase.RevertExemptUnreadable, ValueError)
+
+    def _assert_raises_naming_the_path() -> None:
+        with pytest.raises(package_phase.RevertExemptUnreadable) as info:
+            package_phase.read_revert_exempt(task_dir)
+        assert str(exempt) in str(info.value)
+
+    exempt.write_text("not json")
+    _set(exempt, base_when + 1)
+    _assert_raises_naming_the_path()
+
+    exempt.write_bytes(b"")
+    _set(exempt, base_when + 1)
+    _assert_raises_naming_the_path()
+
+    exempt.write_bytes(b"\xff\xfe\xfa")
+    _set(exempt, base_when + 1)
+    _assert_raises_naming_the_path()
+
+    for value in ({}, "t.py::a", None, 3, ["t.py::a", 3], [3, "t.py::a"], [None]):
+        exempt.write_text(json.dumps(value))
+        _set(exempt, base_when + 1)
+        _assert_raises_naming_the_path()
+
+    exempt.unlink()
+    exempt.mkdir()
+    _set(exempt, base_when + 1)
+    _assert_raises_naming_the_path()
+    exempt.rmdir()
+
+    exempt.write_text("[]")
+    _set(exempt, base_when + 1)
+    target = str(exempt)
+    real_builtins_open, real_io_open = builtins.open, io.open
+
+    for fault in (PermissionError(), OSError(errno.EIO, "open failed")):
+        opener = _patched_open(target, fault)
+        builtins.open, io.open = opener, opener
+        try:
+            with pytest.raises(type(fault)) as info:
+                package_phase.read_revert_exempt(task_dir)
+            assert info.value is fault
+        finally:
+            builtins.open, io.open = real_builtins_open, real_io_open
+
+    read_fault = OSError(errno.EIO, "read failed")
+    opener = _patched_open(target, read_fault, on_read=True)
+    builtins.open, io.open = opener, opener
+    try:
+        with pytest.raises(OSError) as info:
+            package_phase.read_revert_exempt(task_dir)
+        assert info.value is read_fault
+    finally:
+        builtins.open, io.open = real_builtins_open, real_io_open
