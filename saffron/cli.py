@@ -54,7 +54,7 @@ from saffron.intake import Spec, load_spec
 from saffron.ledger import Ledger
 from saffron.phases import implement, review
 from saffron.phases import package as package_phase
-from saffron.reconcile import MERGE_ONLY_STATES, ReconcileResult, Regated, reconcile
+from saffron.reconcile import ReconcileResult, Regated, reconcile
 from saffron.record.fold import UnreadableTask, fold
 from saffron.record.migrate import migrate_and_push
 from saffron.record.refs import RefsRecord
@@ -2855,9 +2855,11 @@ def _review(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     )
 
 
-# States a pull request opened or fixed by hand can leave a task in.
-# `MERGE_FAILED` is the one a fix by hand most often leaves (b-619b7d).
-_ADOPTABLE_STATES = MERGE_ONLY_STATES | {"MERGE_FAILED", "READY_FOR_REVIEW"}
+# States a pull request opened or fixed by hand can leave a task in, spelled
+# out since `REBUTTAL_UNJUDGED` joined `MERGE_ONLY_STATES` and adopt refuses it.
+_ADOPTABLE_STATES = frozenset(
+    {"EXHAUSTED", "MERGE_FAILED", "NOT_IMPLEMENTED", "READY_FOR_REVIEW"}
+)
 
 _ADOPT_GH_FIELDS = "url,headRefOid,headRefName"
 

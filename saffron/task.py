@@ -914,8 +914,8 @@ def run_task(
                 print(f"{spec.id:<10} {result.state}  {result.pr_url or result.note}")
                 outcome.state = result.state
             if exhausted_package and (result is None or not result.pr_url):
-                # No pull request either way, refused or raised, so the branch
-                # is pushed as any `EXHAUSTED` task's, told why PACKAGE did not open one.
+                # A carried pull request keeps its branch unmoved.
+                # Otherwise the branch is pushed, told why PACKAGE did not open one.
                 package_note = result.note if result is not None else package_error_note
                 pushed = package_phase.push_unpackaged_work(
                     outcome,
@@ -973,8 +973,8 @@ def run_task(
                 token=token,
                 emit=emit,
             )
-            # `_finish` never ran, so this is the task's only row. No pull request
-            # exists, so `link` stays empty; a pushed branch is already in `note`.
+            # `_finish` never ran, so this is the task's only row this time.
+            # `link` stays empty even for a row that already carries one.
             index_report.append_queue_line(
                 out_dir,
                 index_report.QueueLine(

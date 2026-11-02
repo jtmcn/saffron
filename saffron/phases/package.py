@@ -1113,10 +1113,10 @@ def push_unpackaged_work(
 
     **The branch is `saffron/<SPEC-ID>`**, the same name `package()` uses,
     pushed with the same force-with-lease `push_with_lease` gives PACKAGE. It
-    pushes only when the remote branch is absent or already holds a sha this
-    spec recorded as pushed, this outcome's own task included. It never
-    pushes while another row is `READY_FOR_REVIEW`, or `EXHAUSTED` with its
-    own pull request open. Otherwise nothing is pushed.
+    refuses when the outcome's own row, or another row at `READY_FOR_REVIEW`,
+    `CHANGES_REQUESTED`, `APPROVED`, `REBUTTAL_UNJUDGED` or `EXHAUSTED`,
+    already carries a pull request. Otherwise it pushes only when the remote
+    branch is absent or already holds a sha this spec recorded as pushed.
 
     **Only a diff `scope` passes**, judged by the policy at `tree_base` — the
     one bound PACKAGE's own gates enforce before anything leaves the host.
@@ -1191,16 +1191,27 @@ def push_unpackaged_work(
         if repo_id is not None
         else []
     )
+    own = next((row for row in task_rows if row["task_id"] == outcome.task_id), None)
+    if own is not None and own["pr_url"]:
+        return _refuse(
+            f"{spec.id}'s own pull request {own['pr_url']} already stands at "
+            f"{branch}, unmoved by this push — see {outcome.task_dir}"
+        )
     others = [row for row in task_rows if row["task_id"] != outcome.task_id]
-    # The `exhausted` mode's open draft awaits review under `EXHAUSTED`.
+    # Another row's own pull request keeps its branch under EXHAUSTED,
+    # CHANGES_REQUESTED, APPROVED or REBUTTAL_UNJUDGED.
     if any(
         row["state"] == "READY_FOR_REVIEW"
-        or (row["state"] == "EXHAUSTED" and row["pr_url"])
+        or (
+            row["state"]
+            in ("EXHAUSTED", "CHANGES_REQUESTED", "APPROVED", "REBUTTAL_UNJUDGED")
+            and row["pr_url"]
+        )
         for row in others
     ):
         return _refuse(
-            f"a pull request from {spec.id} is awaiting review on {branch} — "
-            "not ours to replace"
+            f"a pull request from {spec.id} is awaiting review or a merge on "
+            f"{branch} — not ours to replace"
         )
     # A same-task rerun replaces what this task pushed earlier.
     recorded = {row["pushed_sha"] for row in task_rows if row["pushed_sha"]}
