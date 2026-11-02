@@ -241,14 +241,14 @@ and no resume.
 in-cell agent is refused every write to `.pre-commit-config.yaml`, so a spec
 that names it ends `EXHAUSTED`.
 
-**Placed 2026-10-11**, from `SA-0273`'s first spec review: **b-6b06e1**. A
+**Placed 2026-10-11**, from `SA-0273`'s first spec review: ~~**b-6b06e1**~~. A
 rebuilt outcome for PACKAGE run alone drops the `revert` exemption, so a sound
 diff ends `MERGE_FAILED`.
 
 **Placed 2026-10-11**, from `SA-0276`'s spec review: **b-f603c9**. A
 `REBUTTAL_UNJUDGED` parent whose push was refused still admits its child, and
 the child is cut from `base_sha` without the parent's code. Then
-**b-af24d1**: a rerun that ends `REBUTTAL_UNJUDGED` is pushed onto another row's
+~~**b-af24d1**~~: a rerun that ends `REBUTTAL_UNJUDGED` is pushed onto another row's
 open pull request branch. No merge moves a row at that state to `MERGED`.
 
 **Placed 2026-10-12**, from `SA-0278`'s spec review: **b-d4b847**, then
@@ -296,6 +296,11 @@ that added a refusal refused the specs queued below it, and its cell ended
 criterion probe names one edit against a claim of up to twelve sentences, so
 the seats still find the sentences it left.
 
+**Placed 2026-11-02**, from the spec loop's run 52: **b-15db6e**, moved up
+from tier 2. Its spec comes before **b-f603c9**'s `SA-0330` runs again. The
+plan checkpoint priced that spec's tests, which `size` never counts, and
+refused it before any code.
+
 ### Tier 2 — the morning after
 
 **Placed 2026-10-15**, from the spec loop's run 40: ~~**b-d31930**~~, then
@@ -323,7 +328,8 @@ name the old halts.
 **Placed 2026-10-13**, from writing `SA-0291`: **b-cd1566**, by hand after
 `SA-0291` merges. `CONTEXT.md` has no entry for a criterion's subject.
 
-**Placed 2026-10-11**, from the spec review of `SA-0274`: **b-15db6e**. The
+**Placed 2026-10-11**, from the spec review of `SA-0274`: **b-15db6e**, moved
+to tier 1 on 2026-11-02. The
 plan checkpoint still prices the tests that `size` leaves out, so an
 elevated plan can be refused when the gate would pass.
 
@@ -614,6 +620,11 @@ batch's open layer.
 **Placed 2026-10-30**, from `SA-0330`'s first review: **b-e9dd4c**. A
 `REVIEW_INCOMPLETE` parent whose push was refused still admits its child.
 
+**Placed 2026-11-02**, from the spec loop's run 52: **b-b664d1**, then
+**b-4a9207**. A citation that names one construct beside another's lines
+passes until a parent moves them, then stops the batch. A finish drafts a
+follow-up its own batch refuses, so nothing pushes.
+
 ### Tier 3 — real, not urgent
 
 **Placed 2026-10-31**, from `SA-0331`'s third read: **b-8693ef**. A refused PACKAGE
@@ -625,6 +636,9 @@ blanks a carried pull request link, so no merge moves that row. Only a by-hand
 
 **Placed 2026-10-17**, from the spec loop's run 43: **b-74a122**.
 `CONTEXT.md`'s Refusal entry lacks the citation cause.
+
+**Placed 2026-11-02**, from the spec loop's run 52: **b-e4cb58**. `CONTEXT.md`
+defines a Refusal as before any cell starts, and `ready_task` refuses after one.
 
 **Placed 2026-10-19**, from the spec loop's run 44: **b-b8f0d9**, **b-e9cd43**,
 **b-524b1a**, **b-62e00a**, **b-b33854**, **b-d149c6**, **b-0094bd**, then

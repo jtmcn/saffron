@@ -2700,3 +2700,24 @@ seat finding the in-cell critic and the end review both passed.
 - `SA-0328` (#1000): a docstring and a comment misdescribed the probe answer
   and who enforces the bound. **Bucket 3**, conventions. **Landed:** a review
   commit on #1000.
+
+## 2026-11-02, spec loop run 52 (#1008, #1010)
+
+- `SA-0329` (#1008): no test replaced the reader with one raising its own
+  text, so a refusal or decline line rebuilt from the file passed. **Bucket
+  3**, adequacy. **Landed:** a review commit on #1008.
+- `SA-0329` (#1008): the reader's witness drove no damaged file in a directory
+  with no `baseline.json`, and none drove a file gone between `stat` and
+  `open`. **Bucket 3**, adequacy. **Landed:** a review commit on #1008.
+- `SA-0329` (#1008): `run_regate`'s witness drove no directory that held no
+  file. **Bucket 3**, adequacy. **Landed:** a review commit on #1008.
+- `SA-0329` (#1008): four test comments or docstrings misdescribed what they
+  sit on, and two docstrings said "refusal" and "record" for a decline and a
+  file. **Bucket 3**, conventions. **Landed:** a review commit on #1008.
+- `SA-0331` (#1010): the guard's witness never varied the outcome's state, so
+  sparing a `RATE_LIMITED` outcome passed. **Bucket 3**, adequacy. **Landed:**
+  a review commit on #1010.
+- `SA-0331` (#1010): a claim over two scans had a witness that scanned once.
+  **Bucket 3**, adequacy. **Landed:** a review commit on #1010.
+- `SA-0331` (#1010): two comments dropped a state's backticks and a true
+  clause. **Bucket 3**, conventions. **Landed:** a review commit on #1010.

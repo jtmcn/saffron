@@ -51,3 +51,9 @@ refuses its child unless another row of the parent still waits.
 
 A child of a `REBUTTAL_UNJUDGED` parent is admitted only when that parent's
 latest run pushed. Otherwise its refusal names the parent's refused push.
+
+## Record
+
+- 2026-11-02: `SA-0330` ran in the spec loop's run 52 and ended
+  `PLAN_REJECTED` at $7.50. Its plan priced the tests that `size` leaves out
+  (b-15db6e). The spec stays queued.

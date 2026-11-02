@@ -2,7 +2,7 @@
 id: b-15db6e
 title: The plan checkpoint prices the tests that `size` no longer counts
 status: open
-tier: 2
+tier: 1
 filed: 2026-10-11
 specs: []
 prs: []
@@ -39,3 +39,8 @@ its test lines apart and the checkpoint leaves them out.
 
 - 2026-10-11: filed from the spec review of `SA-0274`, which keeps
   `saffron/agents/**` forbidden.
+- 2026-11-02: moved to tier 1 from the spec loop's run 52. `SA-0330` ended
+  `PLAN_REJECTED` at $7.50 before any code. Its plan estimated 480 lines,
+  priced at 1920 tokens. Touching `saffron/ledger.py` made it `elevated`, where
+  `size` blocks at 1300. Its spec's measured estimate outside tests was 120
+  lines. Six named witnesses made up most of the rest.

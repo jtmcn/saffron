@@ -1,11 +1,12 @@
 ---
 id: b-6b06e1
 title: "A rebuilt outcome drops the `revert` exemption, so PACKAGE run alone ends `MERGE_FAILED`"
-status: open
+status: done
+closed: 2026-11-02
 tier: 1
 filed: 2026-10-11
 specs: [SA-0329]
-prs: []
+prs: [1008]
 commits: []
 cites: [§5.6, §5.7]
 related: [b-4a63b7, b-883f74]
@@ -41,3 +42,4 @@ set. A witness drives a task directory with the file and one without it.
 - 2026-10-11: filed from `SA-0273`'s first spec review. `SA-0266` is not
   edited by that spec.
 - 2026-10-17: `regate`'s case added from the spec loop's run 43 (#899).
+- 2026-11-02: done in #1008 (`SA-0329`), from the spec loop's run 52.
