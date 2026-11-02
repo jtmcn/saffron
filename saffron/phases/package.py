@@ -1185,7 +1185,7 @@ def push_unpackaged_work(
         return _refuse(str(exc))
 
     # `tasks_by_repo`, not `tasks_by_spec_id`: the latter carries no `pr_url`
-    # (`saffron/ledger.py`), and the second guard below needs one.
+    # (`saffron/ledger.py`), and both guards below read it.
     task_rows = (
         [row for row in ledger.tasks_by_repo(repo_id) if row["spec_id"] == spec.id]
         if repo_id is not None
