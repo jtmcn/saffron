@@ -251,8 +251,8 @@ same push beside an `APPROVED` row too.
 `PROVIDER_UNREACHABLE`, `PREFLIGHT_FAILED` or an unmarked `CellRuntimeError`
 (`saffron/batch.py:902`, `:908`). Only `_finish` (`saffron/phases/package.py:998`)
 and `adopt_pull_request` (`saffron/ledger.py:1700`) write a `pr_url`. `_finish`
-writes `READY_FOR_REVIEW`, `MERGE_FAILED` or `EXHAUSTED` (`saffron/phases/package.py:633-634`), and no raise
-follows it that could be offered again. `saffron adopt` refuses all but four states
+writes the state `_state` chose, `READY_FOR_REVIEW`, `MERGE_FAILED` or `EXHAUSTED`. `_state` sits at
+`saffron/phases/package.py:633-634`. No raise follows `_finish` that could be offered again. `saffron adopt` refuses all but four states
 (`saffron/cli.py:2860`, `:2911`). Of those four, only an `EXHAUSTED` row can be
 offered again, after its PACKAGE raised unmarked (`saffron/task.py:906-911`). So a
 by-hand adoption in that instant is the one way left.
