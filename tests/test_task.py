@@ -3105,7 +3105,7 @@ def test_a_rebuilt_outcome_refuses_an_exemption_it_cannot_read(tmp_path, monkeyp
         assert result.reason == expected_reason
 
     # Stacked, with no task holding `tree_base` as its own `pushed_sha`.
-    # The refusal reaches the fallback first, so the mirror stays untouched.
+    # The refusal comes before the fallback, so the mirror stays untouched.
     checkout, shas = _rt_parent_chain(tmp_path)
     out_dir, task_dir = _rt_ready_with_exempt(
         ledger, repo_id, spec_id="RT-E", out_root=tmp_path, tree_base=shas["P"]
@@ -3134,6 +3134,23 @@ def test_a_rebuilt_outcome_refuses_an_exemption_it_cannot_read(tmp_path, monkeyp
     out_dir, _ = _rt_ready_with_exempt(
         ledger, repo_id, spec_id="RT-F", out_root=tmp_path
     )
+
+    # A replaced reader's own text is the reason, unrebuilt.
+    def _own_text(_task_dir: Path) -> list[str]:
+        raise package_phase.RevertExemptUnreadable("the reader's own text")
+
+    monkeypatch.setattr(package_phase, "read_revert_exempt", _own_text)
+    result = task_module.ready_task(
+        "RT-F",
+        repo=tmp_path / "target-repo",
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir,
+        mirror_path=tmp_path / "mirror-F.git",
+    )
+    assert isinstance(result, task_module.Refused)
+    assert result.reason == "the reader's own text"
+
     for fault in (PermissionError("denied"), OSError(errno.EIO, "io error")):
 
         def _raising(_task_dir: Path, fault=fault) -> list[str]:

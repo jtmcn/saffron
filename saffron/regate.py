@@ -135,8 +135,8 @@ def run_regate(
     No agent runs here, and `CLAUDE_CODE_OAUTH_TOKEN` is never read. A
     decline prints `regate:` and its reason, then returns 1, including a
     `revert-exempt.json` this cannot read. Any other raise, a failed `gh`,
-    a `PreflightFailed`, an `OSError` reading that file, is left to the
-    caller, which exits 2.
+    a `PreflightFailed`, any other `PackageError`, an `OSError` reading
+    that file, is left to the caller, which exits 2.
     """
     url = package_phase.real_remote(repo)
     try:

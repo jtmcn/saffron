@@ -1192,14 +1192,14 @@ def ready_task(
     mirror_path: Path,
 ) -> ReadyTask | Refused:
     """Rebuilds what `package()` needs for `spec_id`'s newest task in this
-    repo, from the ledger and the task directory alone. Nothing here
-    writes ledger or disk, except the `tree_base` fallback below, which
-    touches `mirror_path` only when no task's `pushed_sha` matches it.
+    repo, with no live `CellOutcome`, from the ledger and the task
+    directory alone. Nothing writes ledger or disk, except the `tree_base`
+    fallback, which touches `mirror_path` when no `pushed_sha` matches it.
 
-    Refuses by name: the spec id, the state, the pull request url, and
-    the missing, stale or unmatched file, sha, or exemption. A git
-    failure in the fallback, or a host failure reading the exemption,
-    raises instead.
+    Refuses by name: the spec id, the state, the pull request url, the
+    missing, stale or unmatched file or sha, and a damaged current
+    exemption. A git failure in the fallback, or a host failure reading
+    the exemption, raises instead.
     """
     if repo_id is None:
         return Refused(reason=f"{spec_id} has no task in this repo")

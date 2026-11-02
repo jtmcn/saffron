@@ -4017,8 +4017,7 @@ def test_unpackaged_work_after_a_refused_package_says_so_and_spares_a_draft(
 
 def _patched_open(target: str, fault: OSError, *, on_read: bool = False):
     """An `open` that raises `fault` for `target` alone and defers to the
-    real one for every other path. The freshness check below reads
-    `baseline.json` through the same `Path.open` machinery."""
+    real one for every other path."""
     real_open = io.open
 
     class _FaultyHandle:
@@ -4073,6 +4072,18 @@ def test_the_exemption_reader_answers_for_each_state_of_the_task_directory(tmp_p
     assert package_phase.read_revert_exempt(task_dir) == ["t/test_none.py::test_old"]
     exempt.unlink()
 
+    # Current for the same reason, so a damaged one raises.
+    for payload in ("not json", "{}"):
+        exempt.write_text(payload)
+        _set(exempt, 1_000.0)
+        with pytest.raises(package_phase.RevertExemptUnreadable):
+            package_phase.read_revert_exempt(task_dir)
+    exempt.unlink()
+    exempt.mkdir()
+    with pytest.raises(package_phase.RevertExemptUnreadable):
+        package_phase.read_revert_exempt(task_dir)
+    exempt.rmdir()
+
     base_when = 1_700_000_000.0
     baseline.write_text("{}")
     _set(baseline, base_when)
@@ -4114,8 +4125,8 @@ def test_the_exemption_reader_answers_for_each_state_of_the_task_directory(tmp_p
     _set(exempt, base_when + 1)
     assert package_phase.read_revert_exempt(task_dir) == []
 
-    # A `PackageError`, which both callers catch by name, not a bare
-    # `ValueError` that would slip past them.
+    # A `PackageError`, so an uncaught one still reads as one, and no
+    # `ValueError`.
     assert issubclass(package_phase.RevertExemptUnreadable, package_phase.PackageError)
     assert not issubclass(package_phase.RevertExemptUnreadable, ValueError)
 
@@ -4161,6 +4172,14 @@ def test_the_exemption_reader_answers_for_each_state_of_the_task_directory(tmp_p
             assert info.value is fault
         finally:
             builtins.open, io.open = real_builtins_open, real_io_open
+
+    # Gone between its `stat` and its `open`, it reads as no file.
+    opener = _patched_open(target, FileNotFoundError())
+    builtins.open, io.open = opener, opener
+    try:
+        assert package_phase.read_revert_exempt(task_dir) == []
+    finally:
+        builtins.open, io.open = real_builtins_open, real_io_open
 
     read_fault = OSError(errno.EIO, "read failed")
     opener = _patched_open(target, read_fault, on_read=True)

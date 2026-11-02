@@ -438,9 +438,8 @@ def test_regate_prints_the_singular_for_exactly_one_new_failure(
     assert "1 new failures" not in out
 
 
-def _seed_green_regate(monkeypatch, tmp_path):
-    """A fixture and a seeded, judgeable task, with `gh`, the image build
-    and the probe faked so `cli.main`'s own `regate` reaches `reverify`."""
+def _seed_green_regate(tmp_path):
+    """A fixture and a seeded, judgeable task."""
     fixture = _build_fixture(tmp_path)
     home = tmp_path / "home"
     work = fixture.work.resolve()
@@ -471,7 +470,7 @@ def test_regate_passes_reverify_the_exemption_its_task_directory_holds(
     `baseline.json` there, and `[]` again for a file older than it.
     Replacing the reader has its own answer reach the call, over that same
     directory."""
-    _fixture, home, work, task_id = _seed_green_regate(monkeypatch, tmp_path)
+    _fixture, home, work, task_id = _seed_green_regate(tmp_path)
     task_dir = home / "batches" / "v0" / SPEC_ID
 
     def _regate() -> dict:
@@ -495,6 +494,7 @@ def test_regate_passes_reverify_the_exemption_its_task_directory_holds(
 
     # A current file with no `baseline.json` at all: current regardless.
     task_dir.mkdir(parents=True)
+    assert _regate()["exempt"] == []
     exempt_path = task_dir / "revert-exempt.json"
     exempt_path.write_text(json.dumps(["t/test_a.py::test_one"]))
     assert _regate()["exempt"] == ["t/test_a.py::test_one"]
@@ -530,7 +530,7 @@ def test_regate_declines_an_exemption_it_cannot_read(monkeypatch, tmp_path, caps
     any image build, `reverify` call or recorded re-gate. A host failure
     reading the file is no decline: `cli.main` exits 2 on it, with no
     `regate:` line, and nothing else runs either."""
-    _fixture, home, work, task_id = _seed_green_regate(monkeypatch, tmp_path)
+    _fixture, home, work, task_id = _seed_green_regate(tmp_path)
     task_dir = home / "batches" / "v0" / SPEC_ID
     task_dir.mkdir(parents=True)
     exempt_path = task_dir / "revert-exempt.json"
@@ -581,6 +581,19 @@ def test_regate_declines_an_exemption_it_cannot_read(monkeypatch, tmp_path, caps
             exempt_path.rmdir()
         else:
             exempt_path.unlink()
+
+    # A replaced reader's own text reaches the line, unrebuilt.
+    def _own_text(_task_dir: Path) -> list[str]:
+        raise package_phase.RevertExemptUnreadable("the reader's own text")
+
+    monkeypatch.setattr(package_phase, "read_revert_exempt", _own_text)
+    build_calls, reverify_calls = _prepare()
+    result = cli.main(["--home", str(home), "regate", str(task_id), "--repo", "."])
+    out = capsys.readouterr().out
+    assert result == 1
+    assert "regate: the reader's own text" in out
+    assert build_calls == []
+    assert reverify_calls == []
 
     # A host failure is no decline: `cli.main`'s own catch-all exits 2, and
     # prints no `regate:` line.

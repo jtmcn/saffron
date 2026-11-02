@@ -83,9 +83,9 @@ class ParentGone(PackageError):
 class RevertExemptUnreadable(PackageError):
     """`revert-exempt.json` exists, is current, and cannot be read as the
     list of test node ids it is supposed to hold. Raised naming the file's
-    path, since the two callers each turn it into their own refusal and must
+    path, since the two callers turn it into a `Refused` or a decline and must
     say which file. A host failure reading it stays an uncaught `OSError`:
-    this one means only that the record itself is bad (`DESIGN.md` §5.6)."""
+    this one means only that the file itself is bad (`DESIGN.md` §5.6)."""
 
 
 def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -482,7 +482,7 @@ def needs_reverification(fetch_head: str, tree_base: str) -> bool:
 
 def read_revert_exempt(task_dir: Path) -> list[str]:
     """The `revert` exemption the newest cell under `task_dir` recorded, or
-    `[]` for no record at all.
+    `[]` for no file at all.
 
     A file older than `task_dir / "baseline.json"` is an earlier cell's
     leftover and reads as no exemption. One at least as new, or with no
