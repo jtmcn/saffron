@@ -1,11 +1,12 @@
 ---
 id: b-af24d1
 title: A rerun that ends `REBUTTAL_UNJUDGED` is pushed onto another row's open pull request branch, and no merge moves a row at that state to `MERGED`
-status: open
+status: done
+closed: 2026-11-02
 tier: 1
 filed: 2026-10-11
 specs: [SA-0331]
-prs: []
+prs: [1010]
 commits: []
 cites: [§4.2.1, §5.6, §5.7]
 related: [120, b-f603c9, b-223244]
@@ -40,3 +41,7 @@ request, the row stays `REBUTTAL_UNJUDGED` and never reaches `MERGED`.
 
 A rerun's unjudged rebuttal does not overwrite a row's standing pull request. A merged pull request on a `REBUTTAL_UNJUDGED` row moves it to
 `MERGED`, as one on an `EXHAUSTED` row does.
+
+## Record
+
+- 2026-11-02: done in #1010 (`SA-0331`), stacked on #1008, from the spec loop's run 52.

@@ -80,6 +80,14 @@ class ParentGone(PackageError):
     from (§5.7's stacking half, `SA-0025`)."""
 
 
+class RevertExemptUnreadable(PackageError):
+    """`revert-exempt.json` exists, is current, and cannot be read as the
+    list of test node ids it is supposed to hold. Raised naming the file's
+    path, since the two callers turn it into a `Refused` or a decline and must
+    say which file. A host failure reading it stays an uncaught `OSError`:
+    this one means only that the file itself is bad (`DESIGN.md` §5.6)."""
+
+
 def _run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Every git call here inspects `returncode` *and* `stderr` — see
     `apply_patch`, where a zero exit does not mean what it looks like."""
@@ -470,6 +478,47 @@ def needs_reverification(fetch_head: str, tree_base: str) -> bool:
     """Whether the base moved since the cell ran. It picks the `MERGE_FAILED`
     note only: re-verification itself is unconditional (§5.7, principle 58)."""
     return fetch_head != tree_base
+
+
+def read_revert_exempt(task_dir: Path) -> list[str]:
+    """The `revert` exemption the newest cell under `task_dir` recorded, or
+    `[]` for no file at all.
+
+    A file older than `task_dir / "baseline.json"` is an earlier cell's
+    leftover and reads as no exemption. One at least as new, or with no
+    `baseline.json` present, is current.
+
+    A current file unreadable as a list of strings raises
+    `RevertExemptUnreadable`. Any other `OSError` escapes as raised.
+    """
+    exempt_path = task_dir / "revert-exempt.json"
+    baseline_path = task_dir / "baseline.json"
+    try:
+        baseline_mtime: float | None = baseline_path.stat().st_mtime
+    except FileNotFoundError:
+        baseline_mtime = None
+    try:
+        exempt_mtime = exempt_path.stat().st_mtime
+    except FileNotFoundError:
+        return []
+    if baseline_mtime is not None and exempt_mtime < baseline_mtime:
+        return []
+    try:
+        with exempt_path.open("r", encoding="utf-8") as handle:
+            text = handle.read()
+    except FileNotFoundError:
+        return []
+    except IsADirectoryError as is_dir:
+        raise RevertExemptUnreadable(f"{exempt_path}: {is_dir}") from is_dir
+    except UnicodeDecodeError as broken:
+        raise RevertExemptUnreadable(f"{exempt_path}: {broken}") from broken
+    try:
+        data = json.loads(text)
+    except ValueError as broken:
+        raise RevertExemptUnreadable(f"{exempt_path}: {broken}") from broken
+    if not isinstance(data, list) or not all(isinstance(item, str) for item in data):
+        raise RevertExemptUnreadable(f"{exempt_path} is not a list of test node ids")
+    return data
 
 
 def reverify(
@@ -1064,10 +1113,10 @@ def push_unpackaged_work(
 
     **The branch is `saffron/<SPEC-ID>`**, the same name `package()` uses,
     pushed with the same force-with-lease `push_with_lease` gives PACKAGE. It
-    pushes only when the remote branch is absent or already holds a sha this
-    spec recorded as pushed, this outcome's own task included. It never
-    pushes while another row is `READY_FOR_REVIEW`, or `EXHAUSTED` with its
-    own pull request open. Otherwise nothing is pushed.
+    refuses beside another row at `READY_FOR_REVIEW`, or when the outcome's
+    own row or another at `CHANGES_REQUESTED`, `APPROVED`, `REBUTTAL_UNJUDGED`
+    or `EXHAUSTED` carries a pull request. Else it pushes only when the remote
+    branch is absent or already holds a sha this spec recorded as pushed.
 
     **Only a diff `scope` passes**, judged by the policy at `tree_base` — the
     one bound PACKAGE's own gates enforce before anything leaves the host.
@@ -1136,22 +1185,33 @@ def push_unpackaged_work(
         return _refuse(str(exc))
 
     # `tasks_by_repo`, not `tasks_by_spec_id`: the latter carries no `pr_url`
-    # (`saffron/ledger.py`), and the second guard below needs one.
+    # (`saffron/ledger.py`), and both guards below read it.
     task_rows = (
         [row for row in ledger.tasks_by_repo(repo_id) if row["spec_id"] == spec.id]
         if repo_id is not None
         else []
     )
+    own = next((row for row in task_rows if row["task_id"] == outcome.task_id), None)
+    if own is not None and own["pr_url"]:
+        return _refuse(
+            f"{spec.id}'s own pull request {own['pr_url']} already stands at "
+            f"{branch}, unmoved by this push — see {outcome.task_dir}"
+        )
     others = [row for row in task_rows if row["task_id"] != outcome.task_id]
-    # The `exhausted` mode's open draft awaits review under `EXHAUSTED`.
+    # Another row keeps its branch at `READY_FOR_REVIEW`, or carrying a pull
+    # request at `EXHAUSTED`, `CHANGES_REQUESTED`, `APPROVED` or `REBUTTAL_UNJUDGED`.
     if any(
         row["state"] == "READY_FOR_REVIEW"
-        or (row["state"] == "EXHAUSTED" and row["pr_url"])
+        or (
+            row["state"]
+            in ("EXHAUSTED", "CHANGES_REQUESTED", "APPROVED", "REBUTTAL_UNJUDGED")
+            and row["pr_url"]
+        )
         for row in others
     ):
         return _refuse(
-            f"a pull request from {spec.id} is awaiting review on {branch} — "
-            "not ours to replace"
+            f"a pull request from {spec.id} is awaiting review or a merge on "
+            f"{branch} — not ours to replace"
         )
     # A same-task rerun replaces what this task pushed earlier.
     recorded = {row["pushed_sha"] for row in task_rows if row["pushed_sha"]}

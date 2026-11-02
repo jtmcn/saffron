@@ -15,6 +15,7 @@ from saffron.reconcile import (
     IN_FLIGHT_STATES,
     PR_PENDING_STATES,
     HeadMoved,
+    Regated,
     reconcile,
 )
 
@@ -334,6 +335,12 @@ def _merged_head(ledger, task_id):
     return ledger._db.execute(
         "SELECT merged_head_sha FROM tasks WHERE task_id = ?", (task_id,)
     ).fetchone()["merged_head_sha"]
+
+
+def _pushed_sha(ledger, task_id):
+    return ledger._db.execute(
+        "SELECT pushed_sha FROM tasks WHERE task_id = ?", (task_id,)
+    ).fetchone()["pushed_sha"]
 
 
 def test_a_merge_records_the_commit_its_pull_request_merged_at(ledger):
@@ -904,6 +911,145 @@ def test_an_exhausted_task_moves_on_no_answer_but_a_merge(ledger):
     assert sorted(gh.calls) == sorted(answers)
     assert _state(ledger, no_pr_null) == "EXHAUSTED"
     assert _state(ledger, no_pr_empty) == "EXHAUSTED"
+
+
+# --- A `REBUTTAL_UNJUDGED` row carrying a pull request (`SA-0331`) ---
+
+
+def test_a_merged_pull_request_moves_its_rebuttal_unjudged_row_to_merged(ledger):
+    """A pull request carried by a `REBUTTAL_UNJUDGED` row can merge like any
+    other's. The merged answer applies through the writes a pending row's
+    merge already uses. A crash-recovered row with its head on the ledger
+    completes with no `gh` call."""
+    repo_id = _repo(ledger)
+    moved_url = "https://github.com/jtmcn/saffron/pull/811"
+    moved = _task(ledger, repo_id, spec_id="SA-9801", state="REBUTTING")
+    ledger.set_task_package(
+        moved,
+        "REBUTTAL_UNJUDGED",
+        branch="saffron/SA-9801",
+        pushed_sha=_PUSHED,
+        pr_url=moved_url,
+    )
+    crashed_url = "https://github.com/jtmcn/saffron/pull/812"
+    crashed = _task(ledger, repo_id, spec_id="SA-9802", state="REBUTTING")
+    ledger.set_task_package(
+        crashed,
+        "REBUTTAL_UNJUDGED",
+        branch="saffron/SA-9802",
+        pushed_sha=_PUSHED,
+        pr_url=crashed_url,
+    )
+    ledger.record_merged_head(crashed, _FIXED)
+    gh = _FakeGh(
+        {moved_url: {"state": "MERGED", "reviewDecision": None, "headRefOid": _FIXED}}
+    )
+
+    result = reconcile(ledger, repo_id, gh=gh)
+
+    assert set(result.merged) == {moved, crashed}
+    assert _state(ledger, moved) == "MERGED"
+    assert _state(ledger, crashed) == "MERGED"
+    assert _merged_head(ledger, moved) == _FIXED
+    assert result.head_moved == [HeadMoved(moved, _PUSHED, _FIXED)]
+    assert crashed_url not in gh.calls
+
+
+def test_a_rebuttal_unjudged_row_is_asked_and_moves_on_no_answer_but_a_merge(ledger):
+    """Every other answer about a `REBUTTAL_UNJUDGED` row's pull request
+    leaves it `REBUTTAL_UNJUDGED`. The nine rows with a pull request drive
+    every answer `_pr_status` can give: the six it returns as an object, and
+    the three it turns into `None`. One of the six also carries a moved
+    head and a matching re-gate, reported without writing `pushed_sha`."""
+    repo_id = _repo(ledger)
+
+    def _rebutting(spec_id, url):
+        task_id = _task(ledger, repo_id, spec_id=spec_id, state="REBUTTING")
+        ledger.set_task_package(
+            task_id,
+            "REBUTTAL_UNJUDGED",
+            branch=f"saffron/{spec_id}",
+            pushed_sha=_PUSHED,
+            pr_url=url,
+        )
+        return task_id
+
+    claimed = {
+        "closed": ({"state": "CLOSED", "reviewDecision": None}, "SA-9811"),
+        "changes-requested": (
+            {
+                "state": "OPEN",
+                "reviewDecision": "CHANGES_REQUESTED",
+                "headRefOid": _FIXED,
+            },
+            "SA-9812",
+        ),
+        "marked-ready": (
+            {"state": "OPEN", "reviewDecision": None, "isDraft": False},
+            "SA-9813",
+        ),
+        "open-draft": (
+            {"state": "OPEN", "reviewDecision": None, "isDraft": True},
+            "SA-9814",
+        ),
+        "open-no-isdraft-field": ({"state": "OPEN", "reviewDecision": None}, "SA-9815"),
+        "unrecognised-state": (
+            {"state": "SOMETHING_NEW", "reviewDecision": None},
+            "SA-9816",
+        ),
+    }
+    answers: dict[str, dict | str | list | None] = {}
+    task_ids: dict[str, int] = {}
+    for i, (label, (pr, spec_id)) in enumerate(claimed.items()):
+        url = f"https://github.com/jtmcn/saffron/pull/{800 + i}"
+        task_ids[label] = _rebutting(spec_id, url)
+        answers[url] = pr
+
+    unanswerable = {
+        "nonzero-exit": (None, "SA-9820"),
+        "unparseable": ("not json", "SA-9821"),
+        "wrong-shape": ([], "SA-9822"),
+    }
+    for i, (label, (answer, spec_id)) in enumerate(unanswerable.items()):
+        url = f"https://github.com/jtmcn/saffron/pull/{810 + i}"
+        task_ids[label] = _rebutting(spec_id, url)
+        answers[url] = answer
+
+    no_pr_null = _task(ledger, repo_id, spec_id="SA-9830", state="REBUTTAL_UNJUDGED")
+    no_pr_empty = _task(
+        ledger, repo_id, spec_id="SA-9831", state="REBUTTAL_UNJUDGED", pr_url=""
+    )
+
+    moved = task_ids["changes-requested"]
+    ledger.record_regate(moved, head_sha=_FIXED, baseline_sha="z" * 40, new_failures=3)
+
+    gh = _FakeGh(answers)
+    result = reconcile(ledger, repo_id, gh=gh)
+
+    for label in claimed:
+        task_id = task_ids[label]
+        assert _state(ledger, task_id) == "REBUTTAL_UNJUDGED"
+        assert task_id not in result.unasked
+    for label in unanswerable:
+        task_id = task_ids[label]
+        assert _state(ledger, task_id) == "REBUTTAL_UNJUDGED"
+        assert task_id in result.unasked
+    assert result.merged == result.rejected == result.changes_requested == []
+    assert result.approved == []
+    assert sorted(gh.calls) == sorted(answers)
+    assert _state(ledger, no_pr_null) == "REBUTTAL_UNJUDGED"
+    assert _state(ledger, no_pr_empty) == "REBUTTAL_UNJUDGED"
+
+    # Reported, not acted on: the moved head and its matching re-gate show
+    # up, and `pushed_sha` stays at the head this task pushed.
+    assert HeadMoved(moved, _PUSHED, _FIXED) in result.head_moved
+    assert Regated(moved, _FIXED, 3) in result.regated
+    assert _pushed_sha(ledger, moved) == _PUSHED
+
+    # A second scan reports both again.
+    again = reconcile(ledger, repo_id, gh=gh)
+    assert HeadMoved(moved, _PUSHED, _FIXED) in again.head_moved
+    assert Regated(moved, _FIXED, 3) in again.regated
 
 
 # --- `saffron adopt`'s row: a `NOT_IMPLEMENTED` task with a by-hand pull

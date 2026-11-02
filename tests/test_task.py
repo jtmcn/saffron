@@ -4,6 +4,7 @@ packaged (`DESIGN.md` §6). `run_one_cell`, `push_unpackaged_work` and
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -2924,6 +2925,248 @@ def test_ready_task_rebuilds_every_field_package_reads_from_the_cells_record(
     assert result.parent_branch is None
     assert result.spec.id == "RT-1"
     assert not mirror_path.exists()
+    ledger.close()
+
+
+def _rt_ready_with_exempt(
+    ledger: Ledger,
+    repo_id: int,
+    *,
+    spec_id: str,
+    out_root: Path,
+    tree_base: str = "a" * 40,
+    base_sha: str = "a" * 40,
+) -> tuple[Path, Path]:
+    """A `READY_FOR_REVIEW` task of `spec_id`, with a patch and a baseline
+    already seeded, ready for the caller to drop its own
+    `revert-exempt.json` beside them."""
+    spec_sha = hashlib.sha256(_RT_TEXT.encode()).hexdigest()
+    task_id = _rt_task(
+        ledger, repo_id, spec_id=spec_id, spec_sha=spec_sha, base_sha=base_sha
+    )
+    ledger.record_spec_text(
+        task_id,
+        origin="revision",
+        spec_id=spec_id,
+        path=".saffron/specs/RT.md",
+        text=_RT_TEXT,
+    )
+    ledger.set_task_state(task_id, "READY_FOR_REVIEW")
+    out_dir = out_root / f"out-{spec_id}"
+    task_dir = out_dir / spec_id
+    _rt_write_patch(task_dir, base_sha=base_sha, tree_base=tree_base, head_sha="c" * 40)
+    _rt_seed_records(task_dir)
+    return out_dir, task_dir
+
+
+def test_a_rebuilt_outcome_carries_the_exemption_its_task_directory_holds(
+    tmp_path, monkeypatch
+):
+    """The outcome `ready_task` rebuilds carries `read_revert_exempt`'s own
+    answer for the task directory: `[]` with no file, a current file's own
+    list, and `[]` again for a file older than `baseline.json`.
+
+    Replacing the reader shows the call reaches it through
+    `package_phase`, over the task directory and not `out_dir`."""
+    ledger, repo_id = _rt_ledger(tmp_path)
+
+    # No exemption file at all.
+    out_dir_none, task_dir_none = _rt_ready_with_exempt(
+        ledger, repo_id, spec_id="RT-NONE", out_root=tmp_path
+    )
+    result_none = task_module.ready_task(
+        "RT-NONE",
+        repo=tmp_path / "target-repo",
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir_none,
+        mirror_path=tmp_path / "mirror-none.git",
+    )
+    assert isinstance(result_none, task_module.ReadyTask)
+    assert result_none.outcome.revert_exempt == []
+
+    # A current file, unsorted and repeating a name.
+    out_dir_cur, task_dir_cur = _rt_ready_with_exempt(
+        ledger, repo_id, spec_id="RT-CUR", out_root=tmp_path
+    )
+    current = [
+        "t/test_b.py::test_two",
+        "t/test_a.py::test_one",
+        "t/test_a.py::test_one",
+    ]
+    exempt_cur = task_dir_cur / "revert-exempt.json"
+    exempt_cur.write_text(json.dumps(current))
+    baseline_mtime = (task_dir_cur / "baseline.json").stat().st_mtime
+    _rt_set_mtime(exempt_cur, baseline_mtime + 1.0)
+    result_cur = task_module.ready_task(
+        "RT-CUR",
+        repo=tmp_path / "target-repo",
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir_cur,
+        mirror_path=tmp_path / "mirror-cur.git",
+    )
+    assert isinstance(result_cur, task_module.ReadyTask)
+    assert result_cur.outcome.revert_exempt == current
+
+    # A file older than baseline.json: another cell's, read as no exemption.
+    out_dir_stale, task_dir_stale = _rt_ready_with_exempt(
+        ledger, repo_id, spec_id="RT-STALE", out_root=tmp_path
+    )
+    exempt_stale = task_dir_stale / "revert-exempt.json"
+    exempt_stale.write_text(json.dumps(["t/test_c.py::test_three"]))
+    baseline_mtime = (task_dir_stale / "baseline.json").stat().st_mtime
+    _rt_set_mtime(exempt_stale, baseline_mtime - 1.0)
+    result_stale = task_module.ready_task(
+        "RT-STALE",
+        repo=tmp_path / "target-repo",
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir_stale,
+        mirror_path=tmp_path / "mirror-stale.git",
+    )
+    assert isinstance(result_stale, task_module.ReadyTask)
+    assert result_stale.outcome.revert_exempt == []
+
+    # Replacing the reader has its own answer reach the rebuilt outcome,
+    # called with the task directory itself, never `out_dir`.
+    out_dir_repl, task_dir_repl = _rt_ready_with_exempt(
+        ledger, repo_id, spec_id="RT-REPL", out_root=tmp_path
+    )
+    calls: list[Path] = []
+
+    def _fake_reader(given: Path) -> list[str]:
+        calls.append(given)
+        return ["replaced::node"]
+
+    monkeypatch.setattr(package_phase, "read_revert_exempt", _fake_reader)
+    result_repl = task_module.ready_task(
+        "RT-REPL",
+        repo=tmp_path / "target-repo",
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir_repl,
+        mirror_path=tmp_path / "mirror-repl.git",
+    )
+    assert isinstance(result_repl, task_module.ReadyTask)
+    assert result_repl.outcome.revert_exempt == ["replaced::node"]
+    assert calls == [task_dir_repl]
+    ledger.close()
+
+
+def test_a_rebuilt_outcome_refuses_an_exemption_it_cannot_read(tmp_path, monkeypatch):
+    """`ready_task` turns `RevertExemptUnreadable` into a `Refused` whose
+    reason carries the exception's own text and so names the file. That
+    covers invalid JSON, the wrong JSON shape, and a directory at the path.
+
+    On a task whose `tree_base` differs from its `base_sha` and that no
+    task pushed, the refusal reaches the reader before the fallback.
+    Otherwise it would fetch from the mirror, which stays untouched.
+
+    A host failure reading the file is no refusal: it escapes through
+    `ready_task` as the identical object raised."""
+    ledger, repo_id = _rt_ledger(tmp_path)
+
+    def _damage(spec_id: str, payload: str | None, *, as_dir: bool = False) -> Path:
+        out_dir, task_dir = _rt_ready_with_exempt(
+            ledger, repo_id, spec_id=spec_id, out_root=tmp_path
+        )
+        exempt_path = task_dir / "revert-exempt.json"
+        if as_dir:
+            exempt_path.mkdir()
+        else:
+            assert payload is not None
+            exempt_path.write_text(payload)
+        baseline_mtime = (task_dir / "baseline.json").stat().st_mtime
+        _rt_set_mtime(exempt_path, baseline_mtime + 1.0)
+        return out_dir
+
+    for spec_id, payload, as_dir in (
+        ("RT-A", "not json", False),
+        ("RT-B", "{}", False),
+        ("RT-C", json.dumps(["t.py::a", 3]), False),
+        ("RT-D", None, True),
+    ):
+        out_dir = _damage(spec_id, payload, as_dir=as_dir)
+        with pytest.raises(package_phase.RevertExemptUnreadable) as info:
+            package_phase.read_revert_exempt(out_dir / spec_id)
+        expected_reason = str(info.value)
+        result = task_module.ready_task(
+            spec_id,
+            repo=tmp_path / "target-repo",
+            repo_id=repo_id,
+            ledger=ledger,
+            out_dir=out_dir,
+            mirror_path=tmp_path / f"mirror-{spec_id}.git",
+        )
+        assert isinstance(result, task_module.Refused)
+        # Equal, not a path substring: a fixed sentence naming only the
+        # file would pass a looser check but fails this one.
+        assert result.reason == expected_reason
+
+    # Stacked, with no task holding `tree_base` as its own `pushed_sha`.
+    # The refusal comes before the fallback, so the mirror stays untouched.
+    checkout, shas = _rt_parent_chain(tmp_path)
+    out_dir, task_dir = _rt_ready_with_exempt(
+        ledger, repo_id, spec_id="RT-E", out_root=tmp_path, tree_base=shas["P"]
+    )
+    exempt_path = task_dir / "revert-exempt.json"
+    exempt_path.write_text("not json")
+    baseline_mtime = (task_dir / "baseline.json").stat().st_mtime
+    _rt_set_mtime(exempt_path, baseline_mtime + 1.0)
+    with pytest.raises(package_phase.RevertExemptUnreadable) as info:
+        package_phase.read_revert_exempt(task_dir)
+    expected_reason = str(info.value)
+    mirror_path = tmp_path / "mirror-E.git"
+    result = task_module.ready_task(
+        "RT-E",
+        repo=checkout,
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir,
+        mirror_path=mirror_path,
+    )
+    assert not mirror_path.exists()
+    assert isinstance(result, task_module.Refused)
+    assert result.reason == expected_reason
+
+    # A host failure is no refusal.
+    out_dir, _ = _rt_ready_with_exempt(
+        ledger, repo_id, spec_id="RT-F", out_root=tmp_path
+    )
+
+    # A replaced reader's own text is the reason, unrebuilt.
+    def _own_text(_task_dir: Path) -> list[str]:
+        raise package_phase.RevertExemptUnreadable("the reader's own text")
+
+    monkeypatch.setattr(package_phase, "read_revert_exempt", _own_text)
+    result = task_module.ready_task(
+        "RT-F",
+        repo=tmp_path / "target-repo",
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir,
+        mirror_path=tmp_path / "mirror-F.git",
+    )
+    assert isinstance(result, task_module.Refused)
+    assert result.reason == "the reader's own text"
+
+    for fault in (PermissionError("denied"), OSError(errno.EIO, "io error")):
+
+        def _raising(_task_dir: Path, fault=fault) -> list[str]:
+            raise fault
+
+        monkeypatch.setattr(package_phase, "read_revert_exempt", _raising)
+        with pytest.raises(type(fault)) as info:
+            task_module.ready_task(
+                "RT-F",
+                repo=tmp_path / "target-repo",
+                repo_id=repo_id,
+                ledger=ledger,
+                out_dir=out_dir,
+                mirror_path=tmp_path / "mirror-F.git",
+            )
+        assert info.value is fault
     ledger.close()
 
 

@@ -9,6 +9,7 @@ and `gh` are faked. The mirror, the fetches and the merge base stay real git.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -435,6 +436,185 @@ def test_regate_prints_the_singular_for_exactly_one_new_failure(
     out = capsys.readouterr().out
     assert "1 new failure" in out
     assert "1 new failures" not in out
+
+
+def _seed_green_regate(tmp_path):
+    """A fixture and a seeded, judgeable task."""
+    fixture = _build_fixture(tmp_path)
+    home = tmp_path / "home"
+    work = fixture.work.resolve()
+    mirror_path = cli._mirror_path(work, home)
+    pr_url = "https://github.com/o/r/pull/9"
+
+    ledger = Ledger(home / "ledger.db")
+    task_id = _seed_task(
+        ledger,
+        origin_url=fixture.origin_url,
+        mirror_path=mirror_path,
+        base_sha=fixture.base_sha,
+        spec_sha=fixture.spec_sha,
+        branch="saffron/SA-0005",
+        pr_url=pr_url,
+        pushed_sha=fixture.packaged_sha,
+    )
+    ledger.close()
+    return fixture, home, work, task_id
+
+
+def test_regate_passes_reverify_the_exemption_its_task_directory_holds(
+    monkeypatch, tmp_path
+):
+    """`run_regate` hands `reverify` an `exempt` built from
+    `package_phase.read_revert_exempt(out_dir / row["spec_id"])`: `[]` with
+    no task directory, a current file's own list even with no
+    `baseline.json` there, and `[]` again for a file older than it.
+    Replacing the reader has its own answer reach the call, over that same
+    directory."""
+    _fixture, home, work, task_id = _seed_green_regate(tmp_path)
+    task_dir = home / "batches" / "v0" / SPEC_ID
+
+    def _regate() -> dict:
+        monkeypatch.setattr(
+            cli, "run_gh", _gh_pr_view("https://x/pull/9", "OPEN", "main", [])
+        )
+        monkeypatch.setattr(
+            repo_image, "build_cell_image", lambda repo: "fake-image:tag"
+        )
+        _install_probe_fakes(monkeypatch, [])
+        reverify_calls: list = []
+        monkeypatch.setattr(package_phase, "reverify", _fake_reverify(reverify_calls))
+        monkeypatch.chdir(work)
+        result = cli.main(["--home", str(home), "regate", str(task_id), "--repo", "."])
+        assert result == 0
+        return reverify_calls[-1]
+
+    # No task directory at all.
+    assert not task_dir.exists()
+    assert _regate()["exempt"] == []
+
+    # A current file with no `baseline.json` at all: current regardless.
+    task_dir.mkdir(parents=True)
+    assert _regate()["exempt"] == []
+    exempt_path = task_dir / "revert-exempt.json"
+    exempt_path.write_text(json.dumps(["t/test_a.py::test_one"]))
+    assert _regate()["exempt"] == ["t/test_a.py::test_one"]
+
+    # A current file once `baseline.json` exists too.
+    baseline_path = task_dir / "baseline.json"
+    baseline_path.write_text("{}")
+    os.utime(baseline_path, (2_000_000.0, 2_000_000.0))
+    os.utime(exempt_path, (2_000_000.0 + 1.0, 2_000_000.0 + 1.0))
+    assert _regate()["exempt"] == ["t/test_a.py::test_one"]
+
+    # Older than `baseline.json`: another cell's, read as no exemption.
+    os.utime(exempt_path, (2_000_000.0 - 1.0, 2_000_000.0 - 1.0))
+    assert _regate()["exempt"] == []
+
+    # Replacing the reader has its own answer reach the call, over the
+    # task directory under `out_dir`, not `out_dir` itself.
+    calls: list[Path] = []
+
+    def _fake_reader(given: Path) -> list[str]:
+        calls.append(given)
+        return ["replaced::node"]
+
+    monkeypatch.setattr(package_phase, "read_revert_exempt", _fake_reader)
+    assert _regate()["exempt"] == ["replaced::node"]
+    assert calls == [task_dir]
+
+
+def test_regate_declines_an_exemption_it_cannot_read(monkeypatch, tmp_path, capsys):
+    """`run_regate` prints one `regate:` line naming the file and returns 1
+    when the reader raises `RevertExemptUnreadable`. That covers invalid
+    JSON, the wrong JSON shape, and a directory at the path, each before
+    any image build, `reverify` call or recorded re-gate. A host failure
+    reading the file is no decline: `cli.main` exits 2 on it, with no
+    `regate:` line, and nothing else runs either."""
+    _fixture, home, work, task_id = _seed_green_regate(tmp_path)
+    task_dir = home / "batches" / "v0" / SPEC_ID
+    task_dir.mkdir(parents=True)
+    exempt_path = task_dir / "revert-exempt.json"
+
+    def _prepare() -> tuple[list, list]:
+        monkeypatch.setattr(
+            cli, "run_gh", _gh_pr_view("https://x/pull/9", "OPEN", "main", [])
+        )
+        build_calls: list = []
+        monkeypatch.setattr(
+            repo_image,
+            "build_cell_image",
+            lambda repo: build_calls.append(repo) or "fake-image:tag",
+        )
+        _install_probe_fakes(monkeypatch, [])
+        reverify_calls: list = []
+        monkeypatch.setattr(package_phase, "reverify", _fake_reverify(reverify_calls))
+        monkeypatch.chdir(work)
+        return build_calls, reverify_calls
+
+    for payload, as_dir in (
+        ("not json", False),
+        ("{}", False),
+        (json.dumps(["t.py::a", 3]), False),
+        (None, True),
+    ):
+        if as_dir:
+            exempt_path.mkdir()
+        else:
+            exempt_path.write_text(payload)
+        with pytest.raises(package_phase.RevertExemptUnreadable) as info:
+            package_phase.read_revert_exempt(task_dir)
+        expected_line = f"regate: {info.value}"
+        build_calls, reverify_calls = _prepare()
+        result = cli.main(["--home", str(home), "regate", str(task_id), "--repo", "."])
+        out = capsys.readouterr().out
+        assert result == 1
+        assert out.count("regate:") == 1
+        # The whole exception text, not a path substring: a fixed sentence
+        # naming only the file would pass a looser check but fails this one.
+        assert expected_line in out
+        assert build_calls == []
+        assert reverify_calls == []
+        ledger = Ledger(home / "ledger.db")
+        assert ledger.regate(task_id) is None
+        ledger.close()
+        if as_dir:
+            exempt_path.rmdir()
+        else:
+            exempt_path.unlink()
+
+    # A replaced reader's own text reaches the line, unrebuilt.
+    def _own_text(_task_dir: Path) -> list[str]:
+        raise package_phase.RevertExemptUnreadable("the reader's own text")
+
+    monkeypatch.setattr(package_phase, "read_revert_exempt", _own_text)
+    build_calls, reverify_calls = _prepare()
+    result = cli.main(["--home", str(home), "regate", str(task_id), "--repo", "."])
+    out = capsys.readouterr().out
+    assert result == 1
+    assert "regate: the reader's own text" in out
+    assert build_calls == []
+    assert reverify_calls == []
+
+    # A host failure is no decline: `cli.main`'s own catch-all exits 2, and
+    # prints no `regate:` line.
+    exempt_path.write_text("[]")
+    for fault in (PermissionError("denied"), OSError(errno.EIO, "io error")):
+
+        def _raising(_task_dir: Path, fault=fault) -> list[str]:
+            raise fault
+
+        monkeypatch.setattr(package_phase, "read_revert_exempt", _raising)
+        build_calls, reverify_calls = _prepare()
+        result = cli.main(["--home", str(home), "regate", str(task_id), "--repo", "."])
+        out = capsys.readouterr().out
+        assert result == 2
+        assert "regate:" not in out
+        assert f"saffron: {type(fault).__name__}: {fault}" in out
+        assert build_calls == []
+        assert reverify_calls == []
+        ledger = Ledger(home / "ledger.db")
+        assert ledger.regate(task_id) is None
+        ledger.close()
 
 
 def test_regate_refuses_each_task_it_cannot_judge_before_any_cell_and_exits_one(

@@ -914,8 +914,8 @@ def run_task(
                 print(f"{spec.id:<10} {result.state}  {result.pr_url or result.note}")
                 outcome.state = result.state
             if exhausted_package and (result is None or not result.pr_url):
-                # No pull request either way, refused or raised, so the branch
-                # is pushed as any `EXHAUSTED` task's, told why PACKAGE did not open one.
+                # A carried pull request keeps its branch unmoved.
+                # Otherwise the branch is pushed, told why PACKAGE did not open one.
                 package_note = result.note if result is not None else package_error_note
                 pushed = package_phase.push_unpackaged_work(
                     outcome,
@@ -973,8 +973,8 @@ def run_task(
                 token=token,
                 emit=emit,
             )
-            # `_finish` never ran, so this is the task's only row. No pull request
-            # exists, so `link` stays empty; a pushed branch is already in `note`.
+            # `_finish` never ran, so `link` stays empty, even on a row that
+            # carries a pull request. A pushed branch is already in `note`.
             index_report.append_queue_line(
                 out_dir,
                 index_report.QueueLine(
@@ -1192,14 +1192,14 @@ def ready_task(
     mirror_path: Path,
 ) -> ReadyTask | Refused:
     """Rebuilds what `package()` needs for `spec_id`'s newest task in this
-    repo, from the ledger and the task directory alone. No live
-    `CellOutcome` is required, and nothing here writes, ledger or disk,
-    save the one path that writes `mirror_path`: the `tree_base`
-    fallback below, reached only when no task's `pushed_sha` matches it.
+    repo, with no live `CellOutcome`, from the ledger and the task
+    directory alone. Nothing writes ledger or disk, except the `tree_base`
+    fallback, which touches `mirror_path` when no `pushed_sha` matches it.
 
-    Refuses by name, naming the spec id, the state, the pull request
-    url, and the missing, stale or unmatched file or sha. A git failure
-    in the fallback raises instead, since it is infrastructure.
+    Refuses by name: the spec id, the state, the pull request url, the
+    missing, stale or unmatched file or sha, and a damaged current
+    exemption. A git failure in the fallback, or a host failure reading
+    the exemption, raises instead.
     """
     if repo_id is None:
         return Refused(reason=f"{spec_id} has no task in this repo")
@@ -1284,6 +1284,11 @@ def ready_task(
         else ""
     )
 
+    try:
+        revert_exempt = package_phase.read_revert_exempt(task_dir)
+    except package_phase.RevertExemptUnreadable as unreadable:
+        return Refused(reason=str(unreadable))
+
     parent_branch: str | None = None
     if tree_base != base_sha:
         pushers = [
@@ -1318,6 +1323,7 @@ def ready_task(
         rebut_result=rebut_result,
         effective_risk=effective_risk,
         notes=notes,
+        revert_exempt=revert_exempt,
     )
     return ReadyTask(outcome=outcome, spec=spec, parent_branch=parent_branch)
 

@@ -41,9 +41,9 @@ def run_gh(argv: list[str]) -> subprocess.CompletedProcess[str]:
 # `MERGED`/`REJECTED` stay out, so a row never moves backwards once gh errors on it.
 PR_PENDING_STATES = frozenset({"READY_FOR_REVIEW", "APPROVED", "CHANGES_REQUESTED"})
 
-# A merge is the one answer that moves a settled task in these states, whether
-# PACKAGE opened its pull request or `saffron adopt` attached it (b-a7e5f3).
-MERGE_ONLY_STATES = frozenset({"EXHAUSTED", "NOT_IMPLEMENTED"})
+# A merge is the one answer that moves a settled task in these states,
+# however PACKAGE or `saffron adopt` attached its pull request.
+MERGE_ONLY_STATES = frozenset({"EXHAUSTED", "NOT_IMPLEMENTED", "REBUTTAL_UNJUDGED"})
 
 # §4.2.1: a corpse only at a batch scan's own premise (one batch runs at a
 # time). Neither `queue` nor `reconcile` is a batch scan, so this is
@@ -173,8 +173,8 @@ def reconcile(
 
     for row in rows:
         state, pr_url = row["state"], row["pr_url"]
-        # `EXHAUSTED` and `NOT_IMPLEMENTED` are askable too, below, through
-        # `MERGE_ONLY_STATES`.
+        # `EXHAUSTED`, `NOT_IMPLEMENTED` and `REBUTTAL_UNJUDGED` are askable
+        # too, below, through `MERGE_ONLY_STATES`.
         if not pr_url or (
             state not in PR_PENDING_STATES and state not in MERGE_ONLY_STATES
         ):

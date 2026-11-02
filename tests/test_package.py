@@ -1,5 +1,9 @@
+import builtins
+import errno
 import hashlib
+import io
 import json
+import os
 import sqlite3
 import subprocess
 import subprocess as sp
@@ -16,6 +20,7 @@ from saffron.gates.contract import Failure, GateResult
 from saffron.gates.suite import SuiteComparison, SuiteRun
 from saffron.intake import Criterion, Spec, parse_spec
 from saffron.ledger import Ledger
+from saffron.phases import package as package_phase
 from saffron.phases import rebut
 from saffron.phases.package import (
     APPLY_CONFLICT,
@@ -3515,6 +3520,258 @@ def _earlier_task(packageable, state, pushed_sha):
     ledger.record_push(task_id, pushed_sha)
 
 
+def _another_row(packageable, state, pushed_sha, pr_url=""):
+    """Another task row of this spec, with the head it recorded and the
+    pull request it carries, if any (`""` reads as none)."""
+    ledger = packageable.ledger
+    run_id = ledger.create_run(packageable.repo_id, packageable.base)
+    task_id = ledger.create_task(run_id, "SA-0005", "s" * 40, branch="saffron/SA-0005")
+    ledger.set_task_state(task_id, state)
+    ledger.record_push(task_id, pushed_sha)
+    if pr_url:
+        ledger.adopt_pull_request(task_id, pr_url)
+    return task_id
+
+
+def test_a_row_carrying_its_pull_request_keeps_that_branch_whatever_its_outcome(
+    packageable, monkeypatch
+):
+    """`push_unpackaged_work` refuses when the outcome's own row already
+    carries a pull request. This holds whatever state the row or the
+    outcome takes, and whatever the remote branch does (`SA-0331`)."""
+    import typing
+
+    from saffron.ledger import TaskState
+    from saffron.phases import package as package_module
+    from saffron.phases.package import push_unpackaged_work
+
+    def _gh_must_not_run(*_a, **_k):
+        raise AssertionError("gh must not be reached")
+
+    monkeypatch.setattr(package_module, "run_gh", _gh_must_not_run)
+    monkeypatch.setattr(package_module, "open_draft_pr", _gh_must_not_run)
+
+    work = packageable.work
+    pr_url = "https://github.com/o/r/pull/42"
+    task_dir = packageable.outcome.task_dir
+    git(work, "push", "-q", "origin", f"{packageable.base}:refs/heads/saffron/SA-0005")
+    packageable.ledger.record_push(packageable.task_id, packageable.base)
+    packageable.ledger.adopt_pull_request(packageable.task_id, pr_url)
+
+    for state in typing.get_args(TaskState):
+        packageable.ledger.set_task_state(packageable.task_id, state)
+        packageable.outcome.state = state
+        result = push_unpackaged_work(
+            packageable.outcome, **packageable.unpackaged_kwargs
+        )
+
+        assert result.pushed is False, state
+        assert pr_url in result.note, state
+        assert "saffron/SA-0005" in result.note, state
+        assert str(task_dir) in result.note, state
+        assert "unmoved" in result.note, state
+        assert "nothing" not in result.note, state
+        row = _state(packageable.ledger, packageable.task_id)
+        assert row["pushed_sha"] == packageable.base, state
+        assert row["pr_url"] == pr_url, state
+
+    assert any(
+        "not pushing unpackaged work" in describe(event) for event in packageable.events
+    )
+
+    # A head an operator moved still refuses, unexamined.
+    git(work, "checkout", "-q", "-B", "saffron/SA-0005", packageable.base)
+    (work / "f.txt").write_text("a\nb\nOPERATOR\nd\ne\n")
+    git(work, "commit", "-qam", "operator's own fix")
+    git(work, "push", "-q", "-f", "origin", "saffron/SA-0005")
+    git(work, "checkout", "-q", "main")
+
+    moved = push_unpackaged_work(packageable.outcome, **packageable.unpackaged_kwargs)
+    assert moved.pushed is False
+    assert pr_url in moved.note
+
+    # An absent branch still refuses too.
+    git(work, "push", "-q", "origin", "--delete", "saffron/SA-0005")
+    absent = push_unpackaged_work(packageable.outcome, **packageable.unpackaged_kwargs)
+    assert absent.pushed is False
+    assert pr_url in absent.note
+
+    # With no patch the note stays the no-commits one, unmoved by the own
+    # row's pull request.
+    packageable.outcome.task_dir = packageable.out_dir / "no-patch-here"
+    packageable.outcome.task_dir.mkdir()
+    no_patch = push_unpackaged_work(
+        packageable.outcome, **packageable.unpackaged_kwargs
+    )
+    assert no_patch.note == "no commits, nothing to push"
+
+
+def test_an_exhausted_package_leaves_the_branch_of_a_carried_pull_request_unmoved(
+    packageable, monkeypatch
+):
+    """On a row that already carries a pull request, each of `package()`'s
+    three exhausted-mode ends leaves the branch exactly where that end
+    left it (`SA-0331`). The first two fail at base. The third already
+    passes."""
+    from saffron.phases import package as package_module
+    from saffron.phases.package import PackageError, package, push_unpackaged_work
+
+    work = packageable.work
+    pr_url = "https://github.com/o/r/pull/77"
+
+    def gh(argv):
+        return sp.CompletedProcess(argv, 0, stdout="https://x/pull/999\n")
+
+    git(work, "push", "-q", "origin", f"{packageable.base}:refs/heads/saffron/SA-0005")
+    packageable.ledger.record_push(packageable.task_id, packageable.base)
+    packageable.ledger.adopt_pull_request(packageable.task_id, pr_url)
+
+    # End 1: re-verification raises before any push, so the old head stands.
+    def _raising_reverify(**_k):
+        raise PackageError("the gate toolchain broke")
+
+    monkeypatch.setattr(package_module, "reverify", _raising_reverify)
+    with pytest.raises(PackageError) as first_raise:
+        package(packageable.outcome, gh=gh, exhausted=True, **packageable.kwargs)
+    first = push_unpackaged_work(
+        packageable.outcome,
+        **packageable.unpackaged_kwargs,
+        package_refusal=str(first_raise.value),
+    )
+    assert first.pushed is False
+    assert pr_url in first.note
+    assert (
+        remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=work)
+        == packageable.base
+    )
+    row = _state(packageable.ledger, packageable.task_id)
+    assert row["pr_url"] == pr_url
+    assert row["pushed_sha"] == packageable.base
+
+    # End 2: opening the pull request raises after PACKAGE's own push lands.
+    monkeypatch.setattr(package_module, "reverify", lambda **_k: _reverified())
+
+    def _raising_open_draft_pr(**_k):
+        raise PackageError("gh is unreachable")
+
+    monkeypatch.setattr(package_module, "open_draft_pr", _raising_open_draft_pr)
+    with pytest.raises(PackageError) as second_raise:
+        package(packageable.outcome, gh=gh, exhausted=True, **packageable.kwargs)
+    squashed = remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=work)
+    assert squashed != packageable.base
+    second = push_unpackaged_work(
+        packageable.outcome,
+        **packageable.unpackaged_kwargs,
+        package_refusal=str(second_raise.value),
+    )
+    assert second.pushed is False
+    assert pr_url in second.note
+    assert remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=work) == squashed
+    row = _state(packageable.ledger, packageable.task_id)
+    assert row["pr_url"] == pr_url
+    assert row["pushed_sha"] == squashed
+
+    # End 3: a conflict refuses through `_finish`, emptying the carried
+    # pull request. The branch check then refuses on its own terms.
+    (work / "f.txt").write_text("a\nb\nMAIN_TOOK_IT\nd\ne\n")
+    git(work, "commit", "-qam", "main moved under the exhausted row")
+    git(work, "push", "-q", "origin", "main")
+
+    third_result = package(
+        packageable.outcome, gh=gh, exhausted=True, **packageable.kwargs
+    )
+    assert third_result.state == "EXHAUSTED"
+    assert third_result.pr_url == ""
+    third = push_unpackaged_work(
+        packageable.outcome,
+        **packageable.unpackaged_kwargs,
+        package_refusal=third_result.note,
+    )
+    assert third.pushed is False
+    assert "pull request" not in third.note
+    assert remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=work) == squashed
+    row = _state(packageable.ledger, packageable.task_id)
+    assert row["pr_url"] == ""
+
+
+def test_another_row_with_a_standing_pull_request_keeps_that_branch(packageable):
+    """Another row of this spec, carrying a pull request, refuses a
+    rerun's push at `READY_FOR_REVIEW`, `EXHAUSTED`, `CHANGES_REQUESTED`,
+    `APPROVED` and `REBUTTAL_UNJUDGED` (`SA-0331`). Every other state lets
+    the push through, and so does an empty `pr_url` on any of the five.
+    This holds on either side of the outcome's own task id."""
+    import typing
+
+    from saffron.ledger import TaskState
+    from saffron.phases.package import push_unpackaged_work
+
+    work = packageable.work
+    pr_url = "https://github.com/o/r/pull/88"
+    refusing = {
+        "READY_FOR_REVIEW",
+        "EXHAUSTED",
+        "CHANGES_REQUESTED",
+        "APPROVED",
+        "REBUTTAL_UNJUDGED",
+    }
+    git(work, "push", "-q", "origin", f"{packageable.base}:refs/heads/saffron/SA-0005")
+
+    def _drive(other_id):
+        packageable.ledger.adopt_pull_request(other_id, pr_url)
+        for state in typing.get_args(TaskState):
+            packageable.ledger.set_task_state(other_id, state)
+            result = push_unpackaged_work(
+                packageable.outcome, **packageable.unpackaged_kwargs
+            )
+            if state in refusing:
+                assert result.pushed is False, state
+                assert "awaiting review or a merge" in result.note, state
+                assert "not ours to replace" in result.note, state
+            else:
+                assert result.pushed is True, state
+
+        # Each new state refuses whatever state the outcome holds.
+        own_state = packageable.outcome.state
+        for state in ("CHANGES_REQUESTED", "APPROVED", "REBUTTAL_UNJUDGED"):
+            packageable.ledger.set_task_state(other_id, state)
+            for outcome_state in typing.get_args(TaskState):
+                packageable.outcome.state = outcome_state
+                result = push_unpackaged_work(
+                    packageable.outcome, **packageable.unpackaged_kwargs
+                )
+                assert result.pushed is False, (state, outcome_state)
+                assert "not ours to replace" in result.note, (state, outcome_state)
+        packageable.outcome.state = own_state
+
+        # An empty `pr_url` lets every new state through. `READY_FOR_REVIEW`
+        # still refuses with none.
+        packageable.ledger.adopt_pull_request(other_id, "")
+        for state in refusing:
+            packageable.ledger.set_task_state(other_id, state)
+            result = push_unpackaged_work(
+                packageable.outcome, **packageable.unpackaged_kwargs
+            )
+            if state == "READY_FOR_REVIEW":
+                assert result.pushed is False, state
+            else:
+                assert result.pushed is True, state
+        # Left harmless: a loop over a set ends on an arbitrary member, and
+        # a trailing `READY_FOR_REVIEW` would refuse every later call too.
+        packageable.ledger.set_task_state(other_id, "MERGED")
+
+    # The other row above the outcome's own task id.
+    above = _another_row(packageable, "DRAFT", packageable.base)
+    _drive(above)
+
+    # The fixture's own row becomes the other row below the outcome's,
+    # recorded at wherever the branch sits once the outcome moves on.
+    below = packageable.task_id
+    current_head = remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=work)
+    new_outcome_id = _another_row(packageable, "DRAFT", current_head)
+    packageable.outcome.task_id = new_outcome_id
+    _drive(below)
+
+
 def test_unpackaged_work_outside_its_touches_is_not_pushed(packageable):
     """PACKAGE pushes only a diff `scope` passed. Without the same check, a
     workflow edit in red work reaches CI that runs on every push."""
@@ -4008,3 +4265,180 @@ def test_unpackaged_work_after_a_refused_package_says_so_and_spares_a_draft(
     result = _push()
     assert result.pushed is False
     assert "not ours to replace" in result.note
+
+
+def _patched_open(target: str, fault: OSError, *, on_read: bool = False):
+    """An `open` that raises `fault` for `target` alone and defers to the
+    real one for every other path."""
+    real_open = io.open
+
+    class _FaultyHandle:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info) -> bool:
+            return False
+
+        def read(self) -> str:
+            raise fault
+
+    def _open(path, *args, **kwargs):
+        if str(path) != target:
+            return real_open(path, *args, **kwargs)
+        if on_read:
+            return _FaultyHandle()
+        raise fault
+
+    return _open
+
+
+def test_the_exemption_reader_answers_for_each_state_of_the_task_directory(tmp_path):
+    """`read_revert_exempt` answers `[]` for a task directory with no
+    `revert-exempt.json`, for no directory at all, and for a file older
+    than `baseline.json`. A current file's list comes back unchanged,
+    unsorted and repeating a name.
+
+    A current file holding invalid JSON, zero bytes, undecodable bytes,
+    the wrong JSON shape, or a directory at the path, raises
+    `RevertExemptUnreadable` naming that path. A host failure opening or
+    reading a current file escapes as the identical object raised."""
+    task_dir = tmp_path / "SA-0001"
+
+    # No directory at all.
+    assert package_phase.read_revert_exempt(task_dir) == []
+
+    task_dir.mkdir()
+    # A directory with no baseline.json and no exemption file.
+    assert package_phase.read_revert_exempt(task_dir) == []
+
+    baseline = task_dir / "baseline.json"
+    exempt = task_dir / "revert-exempt.json"
+
+    def _set(path: Path, when: float) -> None:
+        os.utime(path, (when, when))
+
+    # A current file with no `baseline.json` at all: current regardless of
+    # its own age, since there is no older record to compare it against.
+    exempt.write_text(json.dumps(["t/test_none.py::test_old"]))
+    _set(exempt, 1_000.0)
+    assert package_phase.read_revert_exempt(task_dir) == ["t/test_none.py::test_old"]
+    exempt.unlink()
+
+    # Current for the same reason, so a damaged one raises.
+    for payload in ("not json", "{}"):
+        exempt.write_text(payload)
+        _set(exempt, 1_000.0)
+        with pytest.raises(package_phase.RevertExemptUnreadable):
+            package_phase.read_revert_exempt(task_dir)
+    exempt.unlink()
+    exempt.mkdir()
+    with pytest.raises(package_phase.RevertExemptUnreadable):
+        package_phase.read_revert_exempt(task_dir)
+    exempt.rmdir()
+
+    base_when = 1_700_000_000.0
+    baseline.write_text("{}")
+    _set(baseline, base_when)
+
+    # baseline.json exists, no exemption file yet.
+    assert package_phase.read_revert_exempt(task_dir) == []
+
+    unsorted_with_repeat = ["b::two", "a::one", "a::one"]
+    exempt.write_text(json.dumps(unsorted_with_repeat))
+    _set(exempt, base_when + 1)
+    assert package_phase.read_revert_exempt(task_dir) == unsorted_with_repeat
+
+    # Equal mtime is current: a same-instant write must not lose its list.
+    _set(exempt, base_when)
+    assert package_phase.read_revert_exempt(task_dir) == unsorted_with_repeat
+
+    # Older than baseline.json: another cell's, read as no exemption.
+    _set(exempt, base_when - 1)
+    assert package_phase.read_revert_exempt(task_dir) == []
+
+    # Older than baseline.json and damaged: still no exemption, never a
+    # raise, since staleness is decided before the file is ever opened.
+    exempt.write_text("not json")
+    _set(exempt, base_when - 1)
+    assert package_phase.read_revert_exempt(task_dir) == []
+
+    exempt.write_text(json.dumps({}))
+    _set(exempt, base_when - 1)
+    assert package_phase.read_revert_exempt(task_dir) == []
+
+    exempt.unlink()
+    exempt.mkdir()
+    _set(exempt, base_when - 1)
+    assert package_phase.read_revert_exempt(task_dir) == []
+    exempt.rmdir()
+
+    # A current `[]` is a real, empty answer, not damage.
+    exempt.write_text("[]")
+    _set(exempt, base_when + 1)
+    assert package_phase.read_revert_exempt(task_dir) == []
+
+    # A `PackageError`, so an uncaught one still reads as one, and no
+    # `ValueError`.
+    assert issubclass(package_phase.RevertExemptUnreadable, package_phase.PackageError)
+    assert not issubclass(package_phase.RevertExemptUnreadable, ValueError)
+
+    def _assert_raises_naming_the_path() -> None:
+        with pytest.raises(package_phase.RevertExemptUnreadable) as info:
+            package_phase.read_revert_exempt(task_dir)
+        assert str(exempt) in str(info.value)
+
+    exempt.write_text("not json")
+    _set(exempt, base_when + 1)
+    _assert_raises_naming_the_path()
+
+    exempt.write_bytes(b"")
+    _set(exempt, base_when + 1)
+    _assert_raises_naming_the_path()
+
+    exempt.write_bytes(b"\xff\xfe\xfa")
+    _set(exempt, base_when + 1)
+    _assert_raises_naming_the_path()
+
+    for value in ({}, "t.py::a", None, 3, ["t.py::a", 3], [3, "t.py::a"], [None]):
+        exempt.write_text(json.dumps(value))
+        _set(exempt, base_when + 1)
+        _assert_raises_naming_the_path()
+
+    exempt.unlink()
+    exempt.mkdir()
+    _set(exempt, base_when + 1)
+    _assert_raises_naming_the_path()
+    exempt.rmdir()
+
+    exempt.write_text("[]")
+    _set(exempt, base_when + 1)
+    target = str(exempt)
+    real_builtins_open, real_io_open = builtins.open, io.open
+
+    for fault in (PermissionError(), OSError(errno.EIO, "open failed")):
+        opener = _patched_open(target, fault)
+        builtins.open, io.open = opener, opener
+        try:
+            with pytest.raises(type(fault)) as info:
+                package_phase.read_revert_exempt(task_dir)
+            assert info.value is fault
+        finally:
+            builtins.open, io.open = real_builtins_open, real_io_open
+
+    # Gone between its `stat` and its `open`, it reads as no file.
+    opener = _patched_open(target, FileNotFoundError())
+    builtins.open, io.open = opener, opener
+    try:
+        assert package_phase.read_revert_exempt(task_dir) == []
+    finally:
+        builtins.open, io.open = real_builtins_open, real_io_open
+
+    read_fault = OSError(errno.EIO, "read failed")
+    opener = _patched_open(target, read_fault, on_read=True)
+    builtins.open, io.open = opener, opener
+    try:
+        with pytest.raises(OSError) as info:
+            package_phase.read_revert_exempt(task_dir)
+        assert info.value is read_fault
+    finally:
+        builtins.open, io.open = real_builtins_open, real_io_open
