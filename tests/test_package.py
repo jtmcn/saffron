@@ -3730,6 +3730,19 @@ def test_another_row_with_a_standing_pull_request_keeps_that_branch(packageable)
             else:
                 assert result.pushed is True, state
 
+        # Each new state refuses whatever state the outcome holds.
+        own_state = packageable.outcome.state
+        for state in ("CHANGES_REQUESTED", "APPROVED", "REBUTTAL_UNJUDGED"):
+            packageable.ledger.set_task_state(other_id, state)
+            for outcome_state in typing.get_args(TaskState):
+                packageable.outcome.state = outcome_state
+                result = push_unpackaged_work(
+                    packageable.outcome, **packageable.unpackaged_kwargs
+                )
+                assert result.pushed is False, (state, outcome_state)
+                assert "not ours to replace" in result.note, (state, outcome_state)
+        packageable.outcome.state = own_state
+
         # An empty `pr_url` lets every new state through. `READY_FOR_REVIEW`
         # still refuses with none.
         packageable.ledger.adopt_pull_request(other_id, "")

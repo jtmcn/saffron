@@ -973,8 +973,8 @@ def run_task(
                 token=token,
                 emit=emit,
             )
-            # `_finish` never ran, so this is the task's only row this time.
-            # `link` stays empty even for a row that already carries one.
+            # `_finish` never ran, so `link` stays empty, even on a row that
+            # carries a pull request. A pushed branch is already in `note`.
             index_report.append_queue_line(
                 out_dir,
                 index_report.QueueLine(

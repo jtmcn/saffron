@@ -1046,6 +1046,11 @@ def test_a_rebuttal_unjudged_row_is_asked_and_moves_on_no_answer_but_a_merge(led
     assert Regated(moved, _FIXED, 3) in result.regated
     assert _pushed_sha(ledger, moved) == _PUSHED
 
+    # A second scan reports both again.
+    again = reconcile(ledger, repo_id, gh=gh)
+    assert HeadMoved(moved, _PUSHED, _FIXED) in again.head_moved
+    assert Regated(moved, _FIXED, 3) in again.regated
+
 
 # --- `saffron adopt`'s row: a `NOT_IMPLEMENTED` task with a by-hand pull
 # request named onto it (b-a7e5f3) ---

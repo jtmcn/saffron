@@ -42,7 +42,7 @@ def run_gh(argv: list[str]) -> subprocess.CompletedProcess[str]:
 PR_PENDING_STATES = frozenset({"READY_FOR_REVIEW", "APPROVED", "CHANGES_REQUESTED"})
 
 # A merge is the one answer that moves a settled task in these states,
-# however PACKAGE, `saffron adopt` or REBUT attaches its pull request.
+# however PACKAGE or `saffron adopt` attached its pull request.
 MERGE_ONLY_STATES = frozenset({"EXHAUSTED", "NOT_IMPLEMENTED", "REBUTTAL_UNJUDGED"})
 
 # §4.2.1: a corpse only at a batch scan's own premise (one batch runs at a
