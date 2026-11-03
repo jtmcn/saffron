@@ -38,21 +38,22 @@ forbidden:
   - tests/test_task.py
   - tests/test_suite.py
   - tests/test_size.py
-budget_usd: 40
+budget_usd: 44
 max_attempts: 3
-max_turns: 200
+max_turns: 240
 risk: standard
 acceptance:
   - claim: >-
       The plan carries a required integer `estimated_test_lines`, from 0 up to
       its `estimated_lines`. `estimated_lines` keeps its whole-diff meaning.
       `validate_plan` raises `PlanNotSchema` for a plan that omits the field,
-      and for each of the values -1, 2.5 and `estimated_lines` plus one. It
+      and for each of the values `null`, -1, 2.5 and `estimated_lines` plus one. It
       accepts 0 and `estimated_lines` itself, and the returned plan carries the
       value it was given.
     witness: tests/test_artifacts.py::test_a_plan_carries_its_test_lines_within_its_whole_estimate
     wrong_versions:
       - The field defaults to 0, so a plan that omits it is accepted.
+      - The field is typed `int | None`, so a plan giving `null` is accepted.
       - The field is checked against 0 alone, so a value above `estimated_lines` is accepted.
       - The upper bound is strict, so a plan whose every line is under a test path is refused.
       - The bound raises a plain `PlanRejected` after validation, so the shape failure gets no re-prompt.
@@ -209,7 +210,7 @@ for this repo.
    `saffron/agents/context.py`. With patterns declared the rendered text names
    each one. With none it says the repo declares none, so the field is 0. The
    `estimated_lines` bullet's sentence about multiplying by 4 says the test
-   lines are taken off first.
+   lines are taken off first where the repo declares test paths.
 5. **The author's figure is compared with the right number.**
    `estimate_section` says the figure counts changed lines outside the repo's
    declared test paths. It names `estimated_lines` less `estimated_test_lines`
