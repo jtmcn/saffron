@@ -11,10 +11,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Sequence
 from pathlib import PurePosixPath
 from typing import Literal
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from saffron.agents import context
 from saffron.gates.core.scope import matches
@@ -79,6 +80,18 @@ class Plan(BaseModel):
     then judged against the token ceiling `size_gate` applies to the diff.
     Required, not defaulted: a ceiling nothing estimates against is not a
     control (§5.3's plan checkpoint spends zero model calls to reject early)."""
+    estimated_test_lines: int = Field(ge=0)
+    """The share of `estimated_lines` under the repo's declared test paths,
+    which `size_gate` leaves out of its count (b-15db6e)."""
+
+    @model_validator(mode="after")
+    def _test_lines_within_the_whole(self) -> Plan:
+        if self.estimated_test_lines > self.estimated_lines:
+            raise ValueError(
+                f"estimated_test_lines {self.estimated_test_lines} exceeds "
+                f"estimated_lines {self.estimated_lines}"
+            )
+        return self
 
 
 class ScopeProposalNotSchema(PlanRejected):
@@ -301,6 +314,7 @@ def judge_estimate(
     spec_type: str,
     risk: str,
     elevate_on: list[str],
+    test_paths: Sequence[str],
 ) -> str | None:
     """Judge the plan's own priced estimate against `size`'s ceiling, at the
     tier `effective_risk` derives from the plan's own `files_to_change`. A
@@ -310,9 +324,11 @@ def judge_estimate(
     blocks: raises `PlanRejected`, carrying a copy of the `size` gate's
     failure message that a test pins to `size_gate`'s own. Over it and
     advisory: returns the sentence the checkpoint emits instead of rejecting.
+    Test lines are left out only where `test_paths` are declared, as `size` does.
     """
     ceiling = _CEILINGS.get(spec_type, _DEFAULT_CEILING)
-    priced = plan.estimated_lines * _TOKENS_PER_LINE
+    left_out = plan.estimated_test_lines if test_paths else 0
+    priced = (plan.estimated_lines - left_out) * _TOKENS_PER_LINE
     if priced <= ceiling:
         return None
 
@@ -320,16 +336,21 @@ def judge_estimate(
     gate_message = (
         f"{priced} changed tokens exceeds the {spec_type} ceiling of {ceiling}"
     )
+    not_counted = (
+        f", {left_out} of its lines under the declared test paths not counted"
+        if left_out
+        else ""
+    )
     if size_blocks(tier):
         rejected = PlanRejected(
             f"plan's own estimate exceeds the {spec_type} ceiling at {tier}, "
-            f"where `size` blocks: {gate_message}"
+            f"where `size` blocks: {gate_message}{not_counted}"
         )
         rejected.risk_tier = tier
         raise rejected
 
     return (
-        f"advisory estimate: {plan.estimated_lines} lines, priced at "
+        f"advisory estimate: {plan.estimated_lines} lines{not_counted}, priced at "
         f"{priced} changed tokens, exceed the {spec_type} ceiling of "
         f"{ceiling}, and `size` is advisory at {tier}, the tier from the "
         f"plan's files, so the plan stands"

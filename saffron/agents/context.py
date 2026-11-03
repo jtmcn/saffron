@@ -244,9 +244,18 @@ def estimate_section(estimated_lines: int | None) -> str:
     return (
         "\n## Author's size estimate\n\n"
         f"The spec's author estimates this change at about {estimated_lines} "
-        "changed lines, added plus removed, the same unit the plan's own "
-        "estimated_lines field takes.\n"
+        "changed lines, added plus removed, outside the repo's declared test "
+        "paths. Compare it with the plan's estimated_lines less its "
+        "estimated_test_lines.\n"
     )
+
+
+def declared_test_paths(test_paths: Sequence[str]) -> str:
+    """The repo's declared test paths, as the plan prompt names them. `size`
+    leaves out every file under one, and with none declared it counts all."""
+    if not test_paths:
+        return "This repo declares no test paths, so give 0."
+    return "This repo declares " + ", ".join(f"`{p}`" for p in test_paths) + "."
 
 
 def standing_instructions(claude_md: str | None) -> str:
