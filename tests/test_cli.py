@@ -5569,6 +5569,7 @@ def test_the_plan_checkpoint_still_rejects_what_the_refusal_could_not_decide(
                 "risks": [],
                 "blocking_questions": [],
                 "estimated_lines": 5,
+                "estimated_test_lines": 0,
             }
         )
         + "</output>"

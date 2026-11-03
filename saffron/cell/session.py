@@ -635,6 +635,7 @@ def plan_checkpoint(
     spec: CellSpec,
     protected: list[str],
     elevate_on: list[str],
+    test_paths: Sequence[str],
     agent: Callable[..., AttemptResult],
     emit: Callable[[Event], None] = lambda event: print(describe(event)),
 ) -> tuple[AttemptResult, str, float]:
@@ -737,7 +738,7 @@ def plan_checkpoint(
                 spent += attempt.cost_usd_est
                 continue
             advisory = artifacts.judge_estimate(
-                plan, spec.spec_type, spec.risk, elevate_on
+                plan, spec.spec_type, spec.risk, elevate_on, test_paths
             )
             if advisory is not None:
                 emit(
@@ -2396,6 +2397,7 @@ def _drive_cell(
             + context.unwritable_touches_section(spec.touches),
             witnesses=context.witnesses_block(spec.acceptance),
             standing_instructions=context.standing_instructions(claude_md),
+            test_paths=context.declared_test_paths(policy.integrity.test_paths),
         )
         options = implement.agent_options(
             system_prompt=system_prompt,
@@ -2452,6 +2454,7 @@ def _drive_cell(
                 spec=spec,
                 protected=policy.protected,
                 elevate_on=policy.elevate_on,
+                test_paths=policy.integrity.test_paths,
                 agent=agent,
                 emit=emit,
             )

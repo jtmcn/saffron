@@ -2072,9 +2072,9 @@ _JOINED: tuple[tuple[Event, str], ...] = (
             spec_id="x",
             phase="IMPLEMENT",
             label="PLAN",
-            detail="accepted, sha256 841501830587",
+            detail="accepted, sha256 976f16ce8e85",
         ),
-        "PLAN: accepted, sha256 841501830587",
+        "PLAN: accepted, sha256 976f16ce8e85",
     ),
     (
         Attempt(

@@ -337,6 +337,7 @@ _PLAN = {
     "risks": [],
     "blocking_questions": [],
     "estimated_lines": 10,
+    "estimated_test_lines": 0,
 }
 
 
@@ -382,7 +383,7 @@ def _block(plan):
     return f"Here is the plan.\n<output>\n{json.dumps(plan)}\n</output>"
 
 
-def _checkpoint_plan(spec, plan, elevate_on):
+def _checkpoint_plan(spec, plan, elevate_on, test_paths=()):
     """The one call site the criterion-1 cases drive the plan checkpoint
     through, so no loop below needs its own closure (B023)."""
     agent = _agent(_block(plan))
@@ -392,6 +393,7 @@ def _checkpoint_plan(spec, plan, elevate_on):
         spec=spec,
         protected=[],
         elevate_on=elevate_on,
+        test_paths=list(test_paths),
         agent=agent,
         emit=lambda _event: None,
     )
@@ -474,6 +476,80 @@ def test_the_plan_checkpoint_rejects_an_estimate_exactly_where_size_would_block(
                     _checkpoint_plan(spec, plan, policy.elevate_on)
 
 
+def _two_block_patch(outside_tokens, test_tokens):
+    """One block outside the test paths and one under `tests/`, each of
+    single-token lines, so `size` can subtract the second alone."""
+    blocks = []
+    for path, n in (("src/x.py", outside_tokens), ("tests/test_x.py", test_tokens)):
+        blocks += [
+            f"diff --git a/{path} b/{path}\n",
+            f"--- a/{path}\n+++ b/{path}\n",
+            f"@@ -0,0 +1,{n} @@\n",
+            "+x\n" * n,
+        ]
+    return "".join(blocks)
+
+
+def test_the_plan_checkpoint_leaves_out_the_test_lines_size_leaves_out():
+    """SA-0333 AC2: the checkpoint rejects exactly where `size` blocks the diff
+    the plan describes. Each policy, one declaring `tests/*.py` and one
+    declaring none, gets the same test lines in the plan and the diff."""
+    from pathlib import Path
+
+    from saffron.gates.core.size import _CEILINGS, _DEFAULT_CEILING, _TOKENS_PER_LINE
+    from saffron.repos.policy import IntegrityPatterns
+    from tests.test_suite import _Spec, _Tree
+
+    touches = ["src/**", "infra/**", "tests/**"]
+    test_lines = 50
+    for test_paths in (["tests/*.py"], []):
+        policy = policy_mod.Policy(
+            gates={"lint": policy_mod.GateDeclaration()},
+            elevate_on=["infra/**"],
+            integrity=IntegrityPatterns(test_paths=test_paths),
+        )
+        for spec_type in ("bug", "feature", "refactor", "docs"):
+            ceiling = _CEILINGS.get(spec_type, _DEFAULT_CEILING)
+            for route in _TIER_ROUTES:
+                for outside in (ceiling // 4, ceiling // 4 + 1):
+                    plan, risk = _route_plan_and_risk(route, outside + test_lines)
+                    plan = plan | {"estimated_test_lines": test_lines}
+                    counted = outside + (0 if test_paths else test_lines)
+                    blocks = (
+                        counted * _TOKENS_PER_LINE > ceiling
+                        and route != "no_elevate_on_path"
+                    )
+
+                    suite = GateSuite(
+                        gates={"lint": Path("/gates/.saffron/gates/lint")},
+                        spec=_Spec(risk=risk, touches=touches, spec_type=spec_type),
+                        policy=policy,
+                        diff_base="base",
+                    )
+                    patch = _two_block_patch(
+                        outside * _TOKENS_PER_LINE, test_lines * _TOKENS_PER_LINE
+                    )
+                    comparison = suite.against(
+                        _Tree(changed=plan["files_to_change"], patch=patch),
+                        suite.baseline(_Tree()),
+                    )
+                    size_failures = [
+                        nf for nf in comparison.new_failures if nf.gate == "size"
+                    ]
+                    case = (test_paths, spec_type, route, outside)
+                    assert len(size_failures) == (1 if blocks else 0), case
+
+                    spec = _spec(risk=risk, touches=touches, spec_type=spec_type)
+                    if blocks:
+                        with pytest.raises(artifacts.PlanRejected) as excinfo:
+                            _checkpoint_plan(spec, plan, policy.elevate_on, test_paths)
+                        assert size_failures[0].failure.message in str(excinfo.value), (
+                            case
+                        )
+                    else:
+                        _checkpoint_plan(spec, plan, policy.elevate_on, test_paths)
+
+
 def test_an_estimate_over_an_advisory_ceiling_is_recorded_and_the_plan_stands():
     """AC2: `size` advisory at `standard` records one event and the plan
     stands. Exactly at the ceiling, the checkpoint says nothing at all."""
@@ -493,6 +569,7 @@ def test_an_estimate_over_an_advisory_ceiling_is_recorded_and_the_plan_stands():
         spec=spec,
         protected=[],
         elevate_on=[],
+        test_paths=[],
         agent=_agent(_block(over)),
         emit=events.append,
     )
@@ -517,6 +594,7 @@ def test_an_estimate_over_an_advisory_ceiling_is_recorded_and_the_plan_stands():
         spec=spec,
         protected=[],
         elevate_on=[],
+        test_paths=[],
         agent=_agent(_block(at_ceiling)),
         emit=no_events.append,
     )
@@ -524,6 +602,66 @@ def test_an_estimate_over_an_advisory_ceiling_is_recorded_and_the_plan_stands():
 
 
 _ELEVATE_ON_INFRA = 'gates: {}\nelevate_on: ["infra/**"]\n'
+
+
+def _test_lines_bullet(prompt):
+    """The `estimated_test_lines` bullet alone, up to the next field or the
+    blank line after it, since the constraints block also lists `touches`."""
+    start = prompt.index("- `estimated_test_lines`")
+    rest = prompt[start:]
+    ends = [i for i in (rest.find("\n   - ", 1), rest.find("\n\n")) if i > 0]
+    return rest[: min(ends)] if ends else rest
+
+
+def test_a_cell_names_and_prices_the_test_paths_its_base_policy_declares(
+    monkeypatch, tmp_path
+):
+    """SA-0333 AC4: a cell reads `test_paths` from the policy at base. The
+    prompt's `estimated_test_lines` field names each declared pattern, and
+    the checkpoint prices against them, whatever the working copy says."""
+    from saffron.gates.core.size import _CEILINGS
+
+    ceiling = _CEILINGS["feature"]
+    touches = ["src/**", "infra/**", "tests/**"]
+    spec = _spec(risk="standard", touches=touches, spec_type="feature")
+    plan = _PLAN | {
+        "files_to_change": ["tests/test_x.py", "infra/deploy.tf"],
+        "estimated_lines": ceiling // 4 + 20,
+        "estimated_test_lines": 40,
+    }
+
+    declares = (
+        'gates: {}\nelevate_on: ["infra/**"]\n'
+        'integrity:\n  test_paths: ["tests/*.py", "harness/tests/**"]\n'
+    )
+    cell1 = _stub_the_runtime(monkeypatch)
+    outcome1, _ledger1 = _drive(
+        monkeypatch,
+        tmp_path / "run1",
+        cell=cell1,
+        spec=spec,
+        policy="gates: {}\n",
+        base_policy=declares,
+        turns=[_turn(_block(plan)), _turn()],
+    )
+    field = _test_lines_bullet(cell1.system_prompts[0])
+    assert "`tests/*.py`" in field
+    assert "`harness/tests/**`" in field
+    assert outcome1.state == "READY_FOR_REVIEW"
+
+    cell2 = _stub_the_runtime(monkeypatch)
+    outcome2, _ledger2 = _drive(
+        monkeypatch,
+        tmp_path / "run2",
+        cell=cell2,
+        spec=spec,
+        policy='gates: {}\nintegrity:\n  test_paths: ["tests/**"]\n',
+        base_policy=_ELEVATE_ON_INFRA,
+        turns=[_turn(_block(plan))],
+    )
+    field = _test_lines_bullet(cell2.system_prompts[0])
+    assert "tests/" not in field
+    assert outcome2.state == "PLAN_REJECTED"
 
 
 def test_the_cell_goes_on_past_an_advisory_estimate_and_stops_where_size_blocks(
@@ -607,6 +745,7 @@ def test_an_accepted_plan_costs_exactly_one_turn():
         spec=_spec(),
         protected=["DESIGN.md"],
         elevate_on=[],
+        test_paths=[],
         agent=agent,
         emit=lambda _event: None,
     )
@@ -627,6 +766,7 @@ def test_a_plan_outside_touches_is_rejected_without_a_second_turn():
             spec=_spec(),
             protected=[],
             elevate_on=[],
+            test_paths=[],
             agent=agent,
             emit=lambda _event: None,
         )
@@ -641,6 +781,7 @@ def test_output_that_is_not_the_schema_is_re_prompted_exactly_once():
         spec=_spec(),
         protected=[],
         elevate_on=[],
+        test_paths=[],
         agent=agent,
         emit=lambda _event: None,
     )
@@ -666,6 +807,7 @@ def test_a_turn_with_no_session_id_is_never_resumed():
             spec=_spec(),
             protected=[],
             elevate_on=[],
+            test_paths=[],
             agent=agent,
             emit=lambda _event: None,
         )
@@ -680,6 +822,7 @@ def test_a_second_schema_failure_rejects_rather_than_asking_again():
             spec=_spec(),
             protected=[],
             elevate_on=[],
+            test_paths=[],
             agent=agent,
             emit=lambda _event: None,
         )
@@ -706,6 +849,7 @@ def test_a_proposal_outside_touches_ends_the_checkpoint_in_one_turn():
             spec=_spec(),
             protected=[],
             elevate_on=[],
+            test_paths=[],
             agent=agent,
             emit=lambda _event: None,
         )
@@ -726,6 +870,7 @@ def test_a_refused_proposal_is_reprompted_and_a_plan_can_follow():
         spec=_spec(),
         protected=[],
         elevate_on=[],
+        test_paths=[],
         agent=agent,
         emit=lambda _event: None,
     )
@@ -747,6 +892,7 @@ def test_a_proposal_refused_twice_ends_as_plan_rejected():
             spec=_spec(),
             protected=[],
             elevate_on=[],
+            test_paths=[],
             agent=agent,
             emit=lambda _event: None,
         )
@@ -803,6 +949,7 @@ def test_sa_0005s_own_criteria_reach_scope_review_naming_cli_py():
             spec=cell_spec,
             protected=[],
             elevate_on=[],
+            test_paths=[],
             agent=agent,
             emit=lambda _event: None,
         )
@@ -2227,6 +2374,7 @@ def test_the_implement_prompt_routes_each_unwritable_touch_and_no_other(
         constraints=context.constraints_block(spec2.touches, spec2.forbidden, []),
         witnesses=context.witnesses_block(spec2.acceptance),
         standing_instructions=context.standing_instructions(None),
+        test_paths=context.declared_test_paths([]),
     )
     assert cell2.system_prompts[0] == expected
 
@@ -7506,6 +7654,7 @@ def test_a_crashed_plan_turn_keeps_its_own_exception_and_its_cost():
             spec=_spec(),
             protected=[],
             elevate_on=[],
+            test_paths=[],
             agent=_crash,
             emit=lambda _event: None,
         )

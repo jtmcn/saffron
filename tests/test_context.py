@@ -460,6 +460,7 @@ def _assembled_implement_prompt() -> str:
         constraints=context.constraints_block(["src/**"], [], []),
         witnesses="",
         standing_instructions="",
+        test_paths=context.declared_test_paths([]),
     )
 
 
@@ -474,6 +475,7 @@ def test_claude_md_reaches_the_implement_prompt_verbatim():
         constraints="",
         witnesses="",
         standing_instructions=context.standing_instructions(rules),
+        test_paths=context.declared_test_paths([]),
     )
     assert "## This repository's standing instructions" in prompt
     assert "- Never collapse `error` into `fail`." in prompt
@@ -542,6 +544,18 @@ def _field_sentences(prompt: str, field: str) -> list[str]:
     joined = " ".join(line.strip() for line in _bullet(prompt, field).splitlines())
     text = joined.lower().replace(f"`{field}`", "")
     return [s.strip() for s in text.split(".") if s.strip()]
+
+
+def test_the_authors_estimate_is_named_against_the_plans_lines_outside_test_paths():
+    """SA-0333 AC5: an author measures with `size`, which leaves the test
+    paths out. So the section compares the figure with the plan's lines
+    outside them, never with the whole `estimated_lines`."""
+    text = context.estimate_section(120)
+    assert "120" in text
+    assert "outside" in text and "test paths" in text
+    assert "estimated_test_lines" in text
+    assert "estimated_lines" in text.replace("estimated_test_lines", "")
+    assert "same unit" not in text
 
 
 def test_the_plan_field_says_estimated_lines_counts_lines_not_tokens():
@@ -626,6 +640,7 @@ def test_the_implement_prompt_leaves_running_wrong_versions_to_the_host():
             constraints=context.constraints_block(["src/**"], [], []),
             witnesses=witnesses,
             standing_instructions="",
+            test_paths=context.declared_test_paths([]),
         )
         remainder = prompt.replace(vocabulary, "").replace(spec_body, "")
         paragraphs = remainder.split("\n\n")

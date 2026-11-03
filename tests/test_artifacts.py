@@ -28,6 +28,7 @@ def _plan(**overrides) -> str:
         "risks": [],
         "blocking_questions": [],
         "estimated_lines": 10,
+        "estimated_test_lines": 0,
     }
     payload.update(overrides)
     import json
@@ -205,7 +206,80 @@ def test_a_plan_estimating_over_the_ceiling_is_rejected():
         spec_type="feature",
     )
     with pytest.raises(PlanRejected, match=f"exceeds the feature ceiling of {ceiling}"):
-        judge_estimate(plan, "feature", "elevated", [])
+        judge_estimate(plan, "feature", "elevated", [], [])
+
+
+def test_a_plan_carries_its_test_lines_within_its_whole_estimate():
+    """SA-0333 AC1: `estimated_test_lines` is required, from 0 up to the
+    plan's whole `estimated_lines`. A value outside that is a shape failure,
+    the one rejection that earns a re-prompt."""
+    import json
+
+    from saffron.agents.artifacts import PlanNotSchema
+
+    def validate(raw):
+        return validate_plan(
+            raw, touches=TOUCHES, forbidden=[], protected=[], spec_type="feature"
+        )
+
+    whole = 10
+    payload = json.loads(parse_output_block(_plan(estimated_lines=whole)))
+    del payload["estimated_test_lines"]
+    with pytest.raises(PlanNotSchema):
+        validate("<output>" + json.dumps(payload) + "</output>")
+
+    for bad in (None, -1, 2.5, whole + 1):
+        with pytest.raises(PlanNotSchema):
+            validate(_plan(estimated_lines=whole, estimated_test_lines=bad))
+
+    for good in (0, whole):
+        plan = validate(_plan(estimated_lines=whole, estimated_test_lines=good))
+        assert plan.estimated_test_lines == good
+        assert plan.estimated_lines == whole
+
+
+def test_the_estimate_messages_name_the_test_lines_left_out():
+    """SA-0333 AC3: where the repo declares test paths, the rejection and the
+    advisory sentence each name the test lines left out. With none declared,
+    `size` counts them, so neither message names them."""
+    import re
+
+    from saffron.agents.artifacts import Plan, judge_estimate
+    from saffron.gates.core.size import _CEILINGS, _TOKENS_PER_LINE
+
+    ceiling = _CEILINGS["bug"]
+    whole, tests_ = 400, 37
+    plan = Plan(
+        understanding="u",
+        approach="a",
+        files_to_change=["src/x.py", "tests/test_x.py"],
+        test_strategy="t",
+        estimated_lines=whole,
+        estimated_test_lines=tests_,
+    )
+    figure = re.compile(rf"\b{tests_}\b")
+
+    def messages(test_paths):
+        with pytest.raises(PlanRejected) as excinfo:
+            judge_estimate(plan, "bug", "elevated", [], test_paths)
+        advisory = judge_estimate(plan, "bug", "standard", [], test_paths)
+        assert advisory is not None
+        return str(excinfo.value), advisory
+
+    priced = (whole - tests_) * _TOKENS_PER_LINE
+    assert priced > ceiling
+    rejection, advisory = messages(["spec/**"])
+    for text in (rejection, advisory):
+        assert figure.search(text), text
+        assert re.search(rf"\b{tests_}\b[^.]*\btest paths\b", text), text
+    assert re.search(rf"\b{whole}\b", advisory)
+    assert re.search(rf"\b{priced}\b", advisory)
+    assert f"{whole * _TOKENS_PER_LINE}" not in advisory
+
+    rejection, advisory = messages([])
+    for text in (rejection, advisory):
+        assert not figure.search(text), text
+    assert re.search(rf"\b{whole * _TOKENS_PER_LINE}\b", advisory)
 
 
 def test_a_plan_estimating_at_the_ceiling_is_accepted():
@@ -221,7 +295,7 @@ def test_a_plan_estimating_at_the_ceiling_is_accepted():
         spec_type="feature",
     )
     assert plan.estimated_lines == ceiling // 4
-    assert judge_estimate(plan, "feature", "elevated", []) is None
+    assert judge_estimate(plan, "feature", "elevated", [], []) is None
 
 
 def test_validate_plan_and_size_gate_agree_on_the_ceiling():
@@ -240,7 +314,7 @@ def test_validate_plan_and_size_gate_agree_on_the_ceiling():
         spec_type="bug",
     )
     with pytest.raises(PlanRejected, match=f"exceeds the bug ceiling of {ceiling}"):
-        judge_estimate(plan, "bug", "elevated", [])
+        judge_estimate(plan, "bug", "elevated", [], [])
 
 
 def test_the_plan_checkpoint_prices_an_estimate_at_four_tokens_a_line():
@@ -265,7 +339,7 @@ def test_the_plan_checkpoint_prices_an_estimate_at_four_tokens_a_line():
             protected=[],
             spec_type=spec_type,
         )
-        assert artifacts.judge_estimate(within, spec_type, "elevated", []) is None
+        assert artifacts.judge_estimate(within, spec_type, "elevated", [], []) is None
 
         over = validate_plan(
             _plan(estimated_lines=over_ceiling),
@@ -278,11 +352,11 @@ def test_the_plan_checkpoint_prices_an_estimate_at_four_tokens_a_line():
         assert gate_result.status == "fail"
 
         with pytest.raises(PlanRejected) as excinfo:
-            artifacts.judge_estimate(over, spec_type, "elevated", [])
+            artifacts.judge_estimate(over, spec_type, "elevated", [], [])
         assert gate_result.failures[0].message in str(excinfo.value)
         assert excinfo.value.risk_tier == "elevated"
 
-        advisory = artifacts.judge_estimate(over, spec_type, "standard", [])
+        advisory = artifacts.judge_estimate(over, spec_type, "standard", [], [])
         assert advisory is not None
         assert str(over_ceiling) in advisory
         assert str(over_ceiling * 4) in advisory
@@ -351,7 +425,7 @@ def test_the_advisory_set_and_the_plan_checkpoint_ask_one_function_whether_size_
         spec_type="feature",
     )
     with pytest.raises(PlanRejected):
-        artifacts.judge_estimate(plan, "feature", "standard", [])
+        artifacts.judge_estimate(plan, "feature", "standard", [], [])
 
 
 def test_the_artifact_is_hashed_at_validation():

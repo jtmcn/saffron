@@ -25,11 +25,15 @@ These terms have exactly one meaning here. Use them and no synonyms.
      as underspecified, so use it only when the task genuinely cannot proceed.
    - `estimated_lines` (integer): your own guess at changed lines, added
      plus removed, across the whole diff. State it in lines, and never in
-     tokens. The `size` gate counts about 4 changed tokens a line. The host
-     multiplies your estimate by 4 before it compares the total with the
+     tokens. The `size` gate counts about 4 changed tokens a line. Where the
+     repo declares test paths, the host first takes off your
+     `estimated_test_lines`. It multiplies the rest by 4 and compares that total with the
      ceiling. Divide a size stated in tokens by 4 to get lines. A plan over
      the ceiling is rejected only where `size` blocks. Elsewhere the plan
      stands.
+   - `estimated_test_lines` (integer): how many of those lines fall in files
+     under the repo's declared test paths, from 0 up to `estimated_lines`.
+     The `size` gate leaves those files out of its count. {test_paths}
 
    If, before writing any code, you determine that `touches` cannot satisfy
    the acceptance criteria — because what a criterion asks for lives in a
