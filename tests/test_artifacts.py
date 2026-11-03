@@ -268,7 +268,7 @@ def test_the_estimate_messages_name_the_test_lines_left_out():
 
     priced = (whole - tests_) * _TOKENS_PER_LINE
     assert priced > ceiling
-    rejection, advisory = messages(["tests/**"])
+    rejection, advisory = messages(["spec/**"])
     for text in (rejection, advisory):
         assert figure.search(text), text
         assert re.search(rf"\b{tests_}\b[^.]*\btest paths\b", text), text

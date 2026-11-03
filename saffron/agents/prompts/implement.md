@@ -26,8 +26,8 @@ These terms have exactly one meaning here. Use them and no synonyms.
    - `estimated_lines` (integer): your own guess at changed lines, added
      plus removed, across the whole diff. State it in lines, and never in
      tokens. The `size` gate counts about 4 changed tokens a line. Where the
-     repo declares test paths, the host first takes off your test lines
-     below. It multiplies the rest by 4 and compares that total with the
+     repo declares test paths, the host first takes off your
+     `estimated_test_lines`. It multiplies the rest by 4 and compares that total with the
      ceiling. Divide a size stated in tokens by 4 to get lines. A plan over
      the ceiling is rejected only where `size` blocks. Elsewhere the plan
      stands.

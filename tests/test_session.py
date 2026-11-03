@@ -492,7 +492,7 @@ def _two_block_patch(outside_tokens, test_tokens):
 
 def test_the_plan_checkpoint_leaves_out_the_test_lines_size_leaves_out():
     """SA-0333 AC2: the checkpoint rejects exactly where `size` blocks the diff
-    the plan describes. Each policy, one declaring `tests/**` and one
+    the plan describes. Each policy, one declaring `tests/*.py` and one
     declaring none, gets the same test lines in the plan and the diff."""
     from pathlib import Path
 
@@ -502,7 +502,7 @@ def test_the_plan_checkpoint_leaves_out_the_test_lines_size_leaves_out():
 
     touches = ["src/**", "infra/**", "tests/**"]
     test_lines = 50
-    for test_paths in (["tests/**"], []):
+    for test_paths in (["tests/*.py"], []):
         policy = policy_mod.Policy(
             gates={"lint": policy_mod.GateDeclaration()},
             elevate_on=["infra/**"],
@@ -632,7 +632,7 @@ def test_a_cell_names_and_prices_the_test_paths_its_base_policy_declares(
 
     declares = (
         'gates: {}\nelevate_on: ["infra/**"]\n'
-        'integrity:\n  test_paths: ["tests/**", "harness/tests/**"]\n'
+        'integrity:\n  test_paths: ["tests/*.py", "harness/tests/**"]\n'
     )
     cell1 = _stub_the_runtime(monkeypatch)
     outcome1, _ledger1 = _drive(
@@ -645,7 +645,7 @@ def test_a_cell_names_and_prices_the_test_paths_its_base_policy_declares(
         turns=[_turn(_block(plan)), _turn()],
     )
     field = _test_lines_bullet(cell1.system_prompts[0])
-    assert "`tests/**`" in field
+    assert "`tests/*.py`" in field
     assert "`harness/tests/**`" in field
     assert outcome1.state == "READY_FOR_REVIEW"
 
@@ -660,7 +660,7 @@ def test_a_cell_names_and_prices_the_test_paths_its_base_policy_declares(
         turns=[_turn(_block(plan))],
     )
     field = _test_lines_bullet(cell2.system_prompts[0])
-    assert "tests/**" not in field
+    assert "tests/" not in field
     assert outcome2.state == "PLAN_REJECTED"
 
 

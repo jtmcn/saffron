@@ -337,7 +337,7 @@ def judge_estimate(
         f"{priced} changed tokens exceeds the {spec_type} ceiling of {ceiling}"
     )
     not_counted = (
-        f", {left_out} of its lines under the declared test paths not counted"
+        f", {left_out} of the plan's lines under the declared test paths not counted"
         if left_out
         else ""
     )
