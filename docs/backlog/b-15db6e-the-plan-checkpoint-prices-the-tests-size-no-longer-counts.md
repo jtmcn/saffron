@@ -4,7 +4,7 @@ title: The plan checkpoint prices the tests that `size` no longer counts
 status: open
 tier: 1
 filed: 2026-10-11
-specs: []
+specs: [SA-0333]
 prs: []
 commits: []
 cites: [§5.3, §5.4]

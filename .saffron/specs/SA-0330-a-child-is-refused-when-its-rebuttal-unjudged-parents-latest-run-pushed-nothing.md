@@ -5,7 +5,7 @@ type: bug
 priority: 1
 estimated_lines: 120
 estimate_measured: true
-depends_on: [SA-0331]
+depends_on: [SA-0333]
 touches:
   - saffron/ledger.py
   - saffron/scheduler.py
@@ -194,8 +194,9 @@ acceptance:
 ## Context
 
 Backlog item **b-f603c9**, under `DESIGN.md` §3.3, §4.2 and §5.6, and ADR 7.
-Related: 120, b-af24d1. Every line below was read at `f596e814`. This spec stacks
-on `SA-0331`, whose changes are named where they matter.
+Related: 120, b-af24d1. Every line below was read at `f596e814`. `SA-0331` merged
+as #1010, and its changes are named where they matter. This spec stacks on
+`SA-0333`, whose plan checkpoint stops pricing test lines (b-15db6e).
 
 **The protected text, as amended by hand.** No cell edits these.
 
@@ -210,7 +211,8 @@ on `SA-0331`, whose changes are named where they matter.
   An earlier run's `pushed_sha` on that row changes nothing.
 
 **How the row gets its state and its push.** The cell writes the state
-(`saffron/cell/session.py:3774`), and `run_task` then calls
+with `ledger.set_task_state` at the end of `run_one_cell`
+(`saffron/cell/session.py`). Then `run_task` calls
 `push_unpackaged_work` (`saffron/task.py:965`). That function records a push
 only at its end (`saffron/phases/package.py:1236`). Each refusal returns before
 that line (`saffron/phases/package.py:1118-1235`). `REBUTTAL_UNJUDGED` is not in
