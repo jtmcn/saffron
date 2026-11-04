@@ -39,3 +39,58 @@ last one is the operator's settled arm, and the spec names it as out of scope.
 fetch", "no row" or "no event", needs a witness that first observes the
 positive case through the same instrument. Pre-flight check 1 is the place
 for it.
+
+## `SA-0335`, from b-4eaaa4
+
+The writer drafted at no split: 33 source lines measured, and about 3000 test
+tokens over 15 criteria, one per writer the item lists. It found that eleven
+existing CLI tests would push to GitHub at exit, so the spec adds a
+`GIT_ALLOW_PROTOCOL=file` fixture.
+
+| Round | Blockers | Concerns | Notes |
+|---|---|---|---|
+| First review | 1 | 6 | 3 |
+| Second review | 0 | 3 | 4 |
+
+- **Round 1's blocker** was the stack's class again. Re-pushing an up-to-date
+  ref exits 0 and changes nothing, so "pushed once" had no instrument. The fix
+  counts `git push` argv, and first sees one push for a key appended three
+  times.
+- **Round 2** found criterion 4's "no line names a pushed key" with no pushed
+  key in its arrangement. A final pass added one, with no third review.
+- The operator kept all 15 criteria. The budget went to $69 and the turns to
+  360, since the closest row, `SA-0330`, was cut off at its ceiling.
+- The writer measured the git behaviour in the cell image, whose git is
+  2.47.3. The reviewers had assumed 2.39.5 from a stale agent prompt.
+
+## `SA-0336`, from b-6677b6
+
+The writer drafted at no split: 20 source lines measured. It landed the new
+`RecordAppendEvent` kind by hand, in `events.py`, the vocabulary and its
+render, since a cell cannot touch them.
+
+| Round | Blockers | Concerns | Notes |
+|---|---|---|---|
+| First review | 2 | 2 | 3 |
+| Second review | 0 | 2 | 3 |
+
+- **Round 1's scope blocker** came from prototyping on the parents' source
+  diffs without their tests. A regate test that `SA-0334` reseeds breaks once
+  the append writes its task's log. A full suite stacked on both parents' whole
+  diffs found that one test and no other.
+- **Round 1's witness blocker** was an arrangement. Two tasks driven one after
+  the other let "spec id from the newest task" pass.
+- **Round 2** found a set check and a swallowed refusal that the witnesses
+  would pass. A final pass pinned both, with no third review.
+
+## What the chain says about the pre-flight
+
+Five of the six blockers across the three specs were one class. A negative
+clause or an ordering had a witness with no instrument that could see the
+positive case. The sixth came from a prototype built without its parents'
+tests. Two checks would have caught all six before any review:
+
+- For each negative clause, name the instrument, and make the witness see the
+  positive case through it first.
+- Prototype a stacked spec on its parents' whole diffs, tests included, and run
+  the full suite there.
