@@ -878,7 +878,7 @@ class Ledger:
             return None
         if fact.kind == "task_package":
             # Rolls the spend up the same way `task_state` does: PACKAGE's
-            # own write is now the only one a returning task gets (b-dce9a4). `pushed_in_state` is set to the state this fact carries, and a later `task_state` write leaves it as it is (SA-0332).
+            # own write is now the only one a returning task gets (b-dce9a4).
             self._db.execute(
                 "UPDATE tasks SET state = ?, branch = ?, pushed_sha = ?, pr_url = ?, "
                 "added = ?, removed = ?, pushed_in_state = ?, updated_at = ?, "
@@ -900,7 +900,7 @@ class Ledger:
             return None
         if fact.kind == "task_push":
             # `pushed_in_state` reads the row's own `state` as it stood before this write, not `_touch_task`'s one-column shape.
-            # SQLite evaluates every `SET` expression against the pre-update row, so this is the state the push landed in (SA-0332).
+            # SQLite evaluates every `SET` expression against the pre-update row, so this is the state the push landed in (SA-0330).
             self._db.execute(
                 "UPDATE tasks SET pushed_sha = ?, pushed_in_state = state, "
                 "updated_at = ? WHERE task_id = ?",
@@ -1165,7 +1165,7 @@ class Ledger:
     def tasks_by_spec_id(self, repo_id: int, spec_id: str) -> list[sqlite3.Row]:
         """Every task this repo ran for one `spec_id`, across every `spec_sha`,
         oldest first, carrying `branch`, `pushed_sha` and `pushed_in_state`
-        beside what `tasks_by_spec` already carries (`SA-0026`, `SA-0332`).
+        beside what `tasks_by_spec` already carries (`SA-0026`, `SA-0330`).
 
         Spans every `spec_sha`, not just the one the spec has on disk today:
         the caller this serves (`task._resolve_stacked_on`) never reads the

@@ -342,7 +342,7 @@ def test_a_push_records_the_state_its_row_held_and_a_fold_rebuilds_it(tmp_path, 
     """`tasks.pushed_in_state`: a `task_push` fact sets it to the state its
     row holds at that fact. A `task_package` fact sets it to the state
     that fact carries. A later state write leaves it, so a push from
-    before that write reads as stale (`SA-0332`)."""
+    before that write reads as stale (`SA-0330`)."""
     source_path, fold_path = tmp_path / "source.db", tmp_path / "fold.db"
     source = Ledger(source_path, record=record)
     into = Ledger(fold_path)
@@ -352,7 +352,7 @@ def test_a_push_records_the_state_its_row_held_and_a_fold_rebuilds_it(tmp_path, 
     source.set_task_state(pushed_in_state, "REBUTTAL_UNJUDGED")
     source.record_push(pushed_in_state, "1" * 40)
 
-    # A stale push: pushed while REVIEWING, then moved on with no push.
+    # A stale push: pushed while `REVIEWING`, then moved on with no push.
     stale = _minimal(source, "SA-51")
     source.set_task_state(stale, "REVIEWING")
     source.record_push(stale, "2" * 40)

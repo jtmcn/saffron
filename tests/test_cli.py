@@ -1800,7 +1800,7 @@ def _gh_open(argv):
 def test_a_child_of_a_rebuttal_unjudged_parent_stacks_only_on_its_latest_runs_push(
     tmp_path, monkeypatch, capsys
 ):
-    """`SA-0332`: a parent whose chosen row is `REBUTTAL_UNJUDGED` refuses
+    """`SA-0330`: a parent whose chosen row is `REBUTTAL_UNJUDGED` refuses
     the child before any cell starts. The exception is a parent whose
     latest run pushed in that state, or one that already landed by
     another row. Driven through `cli._run_cell` with a `gh`, and through
@@ -1888,8 +1888,8 @@ def test_a_child_of_a_rebuttal_unjudged_parent_stacks_only_on_its_latest_runs_pu
         assert _task_count(ledger) == before
         ledger.close()
 
-    # Case 2: a stale push, pushed while READY_FOR_REVIEW then moved to
-    # REBUTTAL_UNJUDGED with no further push. Refused whether `gh` answers or cannot be reached.
+    # Case 2: a stale push, pushed while `READY_FOR_REVIEW` then moved to
+    # `REBUTTAL_UNJUDGED` with no further push. Refused whether `gh` answers or cannot be reached.
     for reachable in (True, False):
         repo, main_branch = _pushed_saffron_repo(
             tmp_path,
@@ -2331,7 +2331,7 @@ def test_a_child_of_a_rebuttal_unjudged_parent_stacks_only_on_its_latest_runs_pu
 def test_a_multi_parent_child_is_refused_for_any_open_parent_whose_latest_run_pushed_nothing(
     tmp_path, monkeypatch, capsys
 ):
-    """`SA-0332`: with two or more `depends_on` entries, `_resolve_multi_parent`
+    """`SA-0330`: with two or more `depends_on` entries, `_resolve_multi_parent`
     refuses for any open parent whose chosen row is `REBUTTAL_UNJUDGED`
     with no push after that state. This holds whatever its place among
     the open parents, and runs ahead of the off-chain check. Driven
@@ -2343,7 +2343,7 @@ def test_a_multi_parent_child_is_refused_for_any_open_parent_whose_latest_run_pu
     def _no_cell(*_a, **_k):
         raise AssertionError("run_one_cell must not run for a refused task")
 
-    # The deepest parent, TE-B, is REBUTTAL_UNJUDGED with no push. Refused
+    # The deepest parent, TE-B, is `REBUTTAL_UNJUDGED` with no push. Refused
     # through `cli._run_cell` with a `gh`, and through `cli._batch_runner` with none.
     for use_gh in (False, True):
         repo, main_branch = _pushed_saffron_repo(
@@ -2575,7 +2575,7 @@ def test_a_multi_parent_child_is_refused_for_any_open_parent_whose_latest_run_pu
     assert "their latest run pushed nothing" in excinfo.value.reason
     ledger.close()
 
-    # TE-73 pushed again while REBUTTAL_UNJUDGED still stacks on its new
+    # TE-73 pushed again while `REBUTTAL_UNJUDGED` still stacks on its new
     # head, and so does a resumed TE-73 pushed a second time.
     for second_push in ("in_state", "resumed"):
         ledger = Ledger(tmp_path / f"qualifies-{second_push}.db")
@@ -2615,7 +2615,7 @@ def test_a_multi_parent_child_is_refused_for_any_open_parent_whose_latest_run_pu
         assert (stacked_on, branch) == (head73, "saffron/TE-73"), second_push
         ledger.close()
 
-    # An older row for TE-73 is REBUTTAL_UNJUDGED and stale, but a newer
+    # An older row for TE-73 is `REBUTTAL_UNJUDGED` and stale, but a newer
     # row fully qualifies. The newest row decides, so TE-73 is not refused.
     ledger = Ledger(tmp_path / "newest-decides.db")
     repo_id = _seed_repo(tmp_path, ledger, "/o")
@@ -2661,7 +2661,7 @@ def test_a_multi_parent_child_is_refused_for_any_open_parent_whose_latest_run_pu
     assert (stacked_on, branch) == (head73, "saffron/TE-73")
     ledger.close()
 
-    # TE-73 has a MERGED row, and also a stale REBUTTAL_UNJUDGED one. The
+    # TE-73 has a `MERGED` row, and also a stale `REBUTTAL_UNJUDGED` one. The
     # merged row still lands it, whatever its other rows look like.
     ledger = Ledger(tmp_path / "landed-with-stale-sibling.db")
     repo_id = _seed_repo(tmp_path, ledger, "/o")
@@ -2702,8 +2702,8 @@ def test_a_multi_parent_child_is_refused_for_any_open_parent_whose_latest_run_pu
     assert (stacked_on, branch) == (head71, "saffron/TE-71")
     ledger.close()
 
-    # A deepest REVIEW_INCOMPLETE parent with no push still starts
-    # unstacked, as it does today: the new rule reads only REBUTTAL_UNJUDGED.
+    # A deepest `REVIEW_INCOMPLETE` parent with no push still starts
+    # unstacked, as it does today: the new rule reads only `REBUTTAL_UNJUDGED`.
     ledger = Ledger(tmp_path / "review-incomplete.db")
     repo_id = _seed_repo(tmp_path, ledger, "/o")
     t71 = _seed_task(
@@ -2731,7 +2731,7 @@ def test_a_multi_parent_child_is_refused_for_any_open_parent_whose_latest_run_pu
     assert [e for e in seen if e.step == "unstacked"]
     ledger.close()
 
-    # A parent with a MERGED row is not open, so it is never named by the
+    # A parent with a `MERGED` row is not open, so it is never named by the
     # new rule, whatever its other rows look like.
     ledger = Ledger(tmp_path / "landed-not-open.db")
     repo_id = _seed_repo(tmp_path, ledger, "/o")

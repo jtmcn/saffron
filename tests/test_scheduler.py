@@ -3013,7 +3013,7 @@ def test_a_stack_order_refuses_a_child_whose_stack_base_pushed_nothing_in_its_la
     tmp_path, ledger
 ):
     """`_stack_base_candidate` refuses a newest waiting row that is
-    `REBUTTAL_UNJUDGED` with no push after that state (`SA-0332`). This
+    `REBUTTAL_UNJUDGED` with no push after that state (`SA-0330`). This
     runs ahead of its pushed-sha check, so a row with no push names its
     latest run. A row resumed and pushed in the state qualifies. So does
     every other waiting state carrying an older push, since the new rule
@@ -3057,8 +3057,8 @@ def test_a_stack_order_refuses_a_child_whose_stack_base_pushed_nothing_in_its_la
         depends_on=["TB-REBUTRESUMED"],
     )
 
-    # TB-REBUTSTALE: carries a pull request, pushed while READY_FOR_REVIEW
-    # and never pushed again after moving to REBUTTAL_UNJUDGED.
+    # TB-REBUTSTALE: carries a pull request, pushed while `READY_FOR_REVIEW`
+    # and never pushed again after moving to `REBUTTAL_UNJUDGED`.
     stale = _task_at(
         ledger, repo_id, spec_id="TB-REBUTSTALE", spec_sha="s", state="READY_FOR_REVIEW"
     )
@@ -3072,7 +3072,7 @@ def test_a_stack_order_refuses_a_child_whose_stack_base_pushed_nothing_in_its_la
     )
     ledger.set_task_state(stale, "REBUTTAL_UNJUDGED")
 
-    # TB-REBUTNOPUSH: REBUTTAL_UNJUDGED, never pushed at all.
+    # TB-REBUTNOPUSH: `REBUTTAL_UNJUDGED`, never pushed at all.
     _task_at(
         ledger,
         repo_id,
@@ -3082,7 +3082,7 @@ def test_a_stack_order_refuses_a_child_whose_stack_base_pushed_nothing_in_its_la
     )
 
     # TB-REBUTNEWEST: an older, fully-qualifying row is hidden by a newer
-    # REBUTTAL_UNJUDGED row with a stale push. The newest row decides.
+    # `REBUTTAL_UNJUDGED` row with a stale push. The newest row decides.
     older = _task_at(
         ledger,
         repo_id,
@@ -3116,7 +3116,7 @@ def test_a_stack_order_refuses_a_child_whose_stack_base_pushed_nothing_in_its_la
     ledger.set_task_state(newer, "REBUTTAL_UNJUDGED")
 
     # TB-REBUTRESUMED: pushed stale, resumed, and pushed again while
-    # REBUTTAL_UNJUDGED. The second push is current, so it qualifies.
+    # `REBUTTAL_UNJUDGED`. The second push is current, so it qualifies.
     resumed = _task_at(
         ledger,
         repo_id,
@@ -3175,7 +3175,7 @@ def test_a_stack_order_refuses_a_child_whose_stack_base_pushed_nothing_in_its_la
     )
 
     # Every other waiting state still qualifies with a push recorded in an
-    # earlier state: the new rule reads only REBUTTAL_UNJUDGED.
+    # earlier state: the new rule reads only `REBUTTAL_UNJUDGED`.
     for state in ("READY_FOR_REVIEW", "APPROVED", "MERGE_TRAIN", "REVIEW_INCOMPLETE"):
         spec_id = f"TB-OLD-{state}"
         other = _task_at(

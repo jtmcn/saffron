@@ -113,7 +113,7 @@ DONE_STATES = frozenset(
 DEPENDENCY_MERGED = "MERGED"
 
 # Not landed, and §4.2 admits each. A dependent stacks on the parent's pushed branch rather than `base_sha` (`task._resolve_stacked_on`, `SA-0026`).
-# A `REBUTTAL_UNJUDGED` member instead refuses the dependent when its latest run pushed nothing, unless it already landed (`SA-0332`).
+# A `REBUTTAL_UNJUDGED` member instead refuses the dependent when its latest run pushed nothing, unless it already landed (`SA-0330`).
 DEPENDENCY_WAITING_STATES = frozenset(
     {
         "READY_FOR_REVIEW",
@@ -133,7 +133,7 @@ DEPENDENCY_DEAD_STATES = frozenset({"REJECTED", "EXHAUSTED"})
 
 def _stale_rebuttal_unjudged(row: sqlite3.Row) -> bool:
     """Whether `row` is `REBUTTAL_UNJUDGED` with no push recorded in that
-    state: `pushed_in_state` is anything else, `None` included (`SA-0332`).
+    state: `pushed_in_state` is anything else, `None` included (`SA-0330`).
     `REBUTTAL_UNJUDGED` cannot be re-entered (`SA-0331`), so nothing later
     ever makes such a push current again. The one rule `task.py`'s
     one-parent and multi-parent resolvers and `_stack_base_candidate` all
@@ -1029,7 +1029,7 @@ def _stack_base_candidate(
     `gh`: the newest row in `DEPENDENCY_WAITING_STATES`. It qualifies only
     with a `branch`, a resolved `pushed_sha`, and a `pr_url` on that row.
     A stale `REBUTTAL_UNJUDGED` row refuses as `_MERGE_OR_RERUN` first
-    (`SA-0332`). `pr_url_by_task` comes from `ledger.tasks_by_repo`.
+    (`SA-0330`). `pr_url_by_task` comes from `ledger.tasks_by_repo`.
     """
     rows = ledger.tasks_by_spec_id(repo_id, dep)
     waiting = [row for row in rows if row["state"] in DEPENDENCY_WAITING_STATES]

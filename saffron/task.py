@@ -19,8 +19,7 @@ What stays outside, deliberately, except the refusals named below:
   two paths for good reasons — a batch refuses at scan time so a night never
   pays for the cell, and pays for the mirror once per run (§4.2.1); an
   attended run has no scan and pays per task. Folding either in would force
-  one of those to move. A stale `REBUTTAL_UNJUDGED` parent refuses here
-  too, by the same timing (`SA-0332`).
+  one of those to move.
 - **The one exception.** An unresolved `consumes` entry needs the tree base
   it must resolve against. Neither caller knows that base until
   `_resolve_stacked_on` has run, so this refusal returns `Refused` from here
@@ -29,6 +28,8 @@ What stays outside, deliberately, except the refusals named below:
   at `base_sha`. The scan never reads it, so `run_task` re-runs the gate 0
   refusals that need no GitHub against it, keyed on `task_id`. The open-PR
   and dependency refusals are not re-run.
+- **A stale parent.** No scan reads whether a `REBUTTAL_UNJUDGED` parent's
+  latest run pushed, so `_resolve_stacked_on` refuses that child (`SA-0330`).
 - **`CELL_EXIT`.** An exit code is the process contract `saffron cell` owes a
   script, not a fact about a task; `run_batch` would have to ignore it.
 - **The `CLAUDE_CODE_OAUTH_TOKEN` read.** Scoped to the invocation
@@ -204,7 +205,7 @@ class _StackingRefused(Exception):
     lie on no one chain (b-1572e7). Also raised when an on-chain
     parent's fetched head is not an ancestor of the deepest parent's.
     Also raised for an open `REBUTTAL_UNJUDGED` parent with no push in
-    that state, unless it already landed (`SA-0332`). `run_task` catches
+    that state, unless it already landed (`SA-0330`). `run_task` catches
     this and returns `Refused` before any cell starts."""
 
     def __init__(self, reason: str) -> None:
@@ -319,11 +320,11 @@ def _parent_landed(
     a retirement at `base_sha`, or a row's push already an ancestor of it.
     These are `_resolve_multi_parent`'s own three readings, read here for
     the one-parent path's exception to refusing a stale `REBUTTAL_UNJUDGED`
-    row. A landed parent keeps the path it takes today (`SA-0332`).
+    row. A landed parent keeps the path it takes today (`SA-0330`).
 
     `base_sha` is read only to reach this point. A caller with none, and
     no `MERGED` row to answer, counts as not landed rather than raising,
-    since some one-parent tests pass no base.
+    since `base_sha` is optional on the one-parent path.
     """
     if any(row["state"] == "MERGED" for row in rows):
         return True
@@ -358,7 +359,7 @@ def _resolve_multi_parent(
     A parent with no task counts for nothing, the gap the module
     docstring names. Once one remains, `.saffron` is exported at
     `base_sha` to read every live spec's `depends_on` and `specs/done/`.
-    A stale `REBUTTAL_UNJUDGED` parent refuses on its own (`SA-0332`).
+    A stale `REBUTTAL_UNJUDGED` parent refuses on its own (`SA-0330`).
     Every other open parent must lie on the deepest one's chain, or this
     raises `_StackingRefused`, as must each fetched head against it.
     """
@@ -418,7 +419,7 @@ def _resolve_multi_parent(
         return None, None
 
     # Ahead of the chain check, so an off-chain stale parent is named for
-    # this reason, not the chain one (SA-0332). Landed parents never reach here.
+    # this reason, not the chain one (SA-0330). Landed parents never reach here.
     stale = sorted(
         dep for dep, row in stack_rows.items() if _stale_rebuttal_unjudged(row)
     )
@@ -502,7 +503,7 @@ def _resolve_stacked_on(
     is exactly the defect `SA-0026` closed.
 
     One entry stacks on its own newest waiting row, or refuses a stale
-    `REBUTTAL_UNJUDGED` one (`SA-0332`). Two or more apply `_resolve_multi_parent`'s
+    `REBUTTAL_UNJUDGED` one (`SA-0330`). Two or more apply `_resolve_multi_parent`'s
     rule instead (b-1572e7), which needs `base_sha` once any entry has a task. Raises
     `_StackingRefused`, which `run_task` turns into `Refused` before any cell starts.
     """
@@ -570,7 +571,7 @@ def _resolve_stacked_on(
                     detail=f"newest task is CHANGES_REQUESTED for {parent_id}",
                 )
             )
-    # Ahead of the fetch, in both `gh` modes (SA-0332): a stale row has
+    # Ahead of the fetch, in both `gh` modes (SA-0330): a stale row has
     # nothing worth fetching unless its parent already landed by another row.
     if _stale_rebuttal_unjudged(newest) and not _parent_landed(
         rows, parent_id, mirror=mirror, base_sha=base_sha
@@ -599,7 +600,7 @@ class Refused:
     not read it there. Or, for a task holding a stack batch's recorded spec
     text (ADR 7), a gate 0 refusal that needs no GitHub refused that text.
     Or an open parent is `REBUTTAL_UNJUDGED` with no push in that state,
-    unless it already landed (`SA-0332`). Carries only `reason`, the same
+    unless it already landed (`SA-0330`). Carries only `reason`, the same
     text `run_task` prints on the refused line. No run and no task row
     exist for a caller to read anything else back from."""
 
@@ -751,7 +752,7 @@ def run_task(
     on the outcome is PACKAGE's own, not the pre-packaging `READY_FOR_REVIEW`.
     Returns `Refused` before any cell exists: for an unresolved
     `spec.consumes`, a refused recorded text, open parents on no one chain,
-    or a stale `REBUTTAL_UNJUDGED` parent (`b-1572e7`, `SA-0332`). A base the mirror lacks raises `GitError`."""
+    or a stale `REBUTTAL_UNJUDGED` parent (`b-1572e7`, `SA-0330`). A base the mirror lacks raises `GitError`."""
     if task_id is not None:
         recorded = _recorded_spec_text(ledger, task_id, spec, base)
         if isinstance(recorded, Refused):
