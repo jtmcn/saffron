@@ -1791,6 +1791,936 @@ def test_an_attended_cell_whose_open_parents_lie_on_no_one_chain_is_refused_befo
     ledger.close()
 
 
+def _gh_open(argv):
+    return subprocess.CompletedProcess(
+        argv, 0, '{"state": "OPEN", "reviewDecision": null}', ""
+    )
+
+
+def test_a_child_of_a_rebuttal_unjudged_parent_stacks_only_on_its_latest_runs_push(
+    tmp_path, monkeypatch, capsys
+):
+    """`SA-0332`: a parent whose chosen row is `REBUTTAL_UNJUDGED` refuses
+    the child before any cell starts. The exception is a parent whose
+    latest run pushed in that state, or one that already landed by
+    another row. Driven through `cli._run_cell` with a `gh`, and through
+    `cli._batch_runner` with none.
+    """
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
+
+    def _no_cell(*_a, **_k):
+        raise AssertionError("run_one_cell must not run for a refused task")
+
+    def _task_count(ledger):
+        return ledger._db.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+
+    # Case 1: no push at all, carrying a pull request. Refused in both `gh`
+    # modes, and no queue row is written on the unattended path.
+    for use_gh in (False, True):
+        repo, main_branch = _pushed_saffron_repo(
+            tmp_path,
+            f"repo-nopush-{use_gh}",
+            [("p9000.md", _chain_spec_text("SY-9000"))],
+        )
+        ledger = Ledger(tmp_path / f"nopush-{use_gh}.db")
+        repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
+        _seed_task(
+            ledger,
+            repo_id,
+            spec_id="SY-9000",
+            state="REBUTTAL_UNJUDGED",
+            pr_url="https://example.invalid/pull/nopush",
+        )
+        before = _task_count(ledger)
+        monkeypatch.setattr("saffron.task.run_one_cell", _no_cell)
+
+        if use_gh:
+            args = _namespace(repo, tmp_path)
+            args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
+            monkeypatch.setattr("saffron.cli.run_gh", _gh_open)
+            result = cli._run_cell(args, ledger, tmp_path / "out")
+            printed = capsys.readouterr().out
+            assert result == 1
+        else:
+            from saffron.batch import run_batch
+            from tests.test_batch import _ready
+
+            mirror, url = _mirror_of(tmp_path, repo, name="nopush-mirror.git")
+            base_sha = _rev_parse(repo, main_branch)
+            candidate = Candidate(
+                path=Path("SY-2.md"),
+                spec=intake.Spec(
+                    id="SY-2",
+                    title="t",
+                    type="feature",
+                    touches=["src/**"],
+                    depends_on=["SY-9000"],
+                ),
+                spec_sha="s" * 64,
+                task_id=None,
+            )
+            runner = cli._batch_runner(
+                pinned=task.PinnedBase(mirror=mirror, url=url, base_sha=base_sha),
+                repo_id=lambda rid=repo_id: rid,
+                repo=repo,
+                ledger=ledger,
+                out_dir=tmp_path / "out",
+            )
+            returned = runner(candidate)
+            assert isinstance(returned, task.Refused)
+            printed = returned.reason
+
+            reason = run_batch(
+                [candidate],
+                ledger,
+                budget_usd=50.0,
+                until=None,
+                runner=runner,
+                rescan=lambda: [],
+                readiness_check=_ready,
+            )
+            assert reason == "DRAINED"
+
+        assert "SY-9000 is REBUTTAL_UNJUDGED" in printed
+        assert "its latest run pushed nothing" in printed
+        assert "push was refused" not in printed
+        assert "unstacked" not in printed
+        assert _task_count(ledger) == before
+        ledger.close()
+
+    # Case 2: a stale push, pushed while READY_FOR_REVIEW then moved to
+    # REBUTTAL_UNJUDGED with no further push. Refused whether `gh` answers or cannot be reached.
+    for reachable in (True, False):
+        repo, main_branch = _pushed_saffron_repo(
+            tmp_path,
+            f"repo-stale-{reachable}",
+            [("p9000.md", _chain_spec_text("SY-9000"))],
+        )
+        head = _push_stacked_branch(repo, "saffron/SY-9000", main_branch)
+        _git(repo, "checkout", "-q", main_branch)
+        args = _namespace(repo, tmp_path)
+        args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
+
+        ledger = Ledger(tmp_path / f"stale-{reachable}.db")
+        repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
+        pr_url = "https://example.invalid/pull/stale"
+        parent = _seed_task(
+            ledger,
+            repo_id,
+            spec_id="SY-9000",
+            state="READY_FOR_REVIEW",
+            branch="saffron/SY-9000",
+            pr_url=pr_url,
+        )
+        ledger.record_push(parent, head)
+        ledger.set_task_state(parent, "REBUTTAL_UNJUDGED")
+        before = _task_count(ledger)
+
+        monkeypatch.setattr("saffron.task.run_one_cell", _no_cell)
+        if reachable:
+            monkeypatch.setattr("saffron.cli.run_gh", _gh_open)
+        else:
+            monkeypatch.setattr(
+                "saffron.cli.run_gh", _fake_gh_unreachable_for({pr_url})
+            )
+
+        result = cli._run_cell(args, ledger, tmp_path / "out")
+        printed = capsys.readouterr().out
+
+        assert result == 1
+        assert "SY-9000 is REBUTTAL_UNJUDGED" in printed
+        assert "its latest run pushed nothing" in printed
+        assert "push was refused" not in printed
+        assert "unstacked" not in printed
+        assert _task_count(ledger) == before
+        ledger.close()
+
+    # Case 2b: the same stale push, but a review fix has since moved the
+    # branch further. Still refused in both `gh` modes.
+    for reachable in (True, False):
+        repo, main_branch = _pushed_saffron_repo(
+            tmp_path,
+            f"repo-stalemoved-{reachable}",
+            [("p9000.md", _chain_spec_text("SY-9000"))],
+        )
+        recorded_head = _push_stacked_branch(repo, "saffron/SY-9000", main_branch)
+        _git(repo, "checkout", "-q", "saffron/SY-9000")
+        (repo / "review-fix.txt").write_text("a later review fix\n")
+        _git(repo, "add", "-A")
+        _git(repo, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "fix")
+        _git(repo, "push", "-q", "origin", "saffron/SY-9000")
+        _git(repo, "checkout", "-q", main_branch)
+        args = _namespace(repo, tmp_path)
+        args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
+
+        ledger = Ledger(tmp_path / f"stalemoved-{reachable}.db")
+        repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
+        pr_url = "https://example.invalid/pull/stalemoved"
+        parent = _seed_task(
+            ledger,
+            repo_id,
+            spec_id="SY-9000",
+            state="READY_FOR_REVIEW",
+            branch="saffron/SY-9000",
+            pr_url=pr_url,
+        )
+        ledger.record_push(parent, recorded_head)
+        ledger.set_task_state(parent, "REBUTTAL_UNJUDGED")
+
+        monkeypatch.setattr("saffron.task.run_one_cell", _no_cell)
+        if reachable:
+            monkeypatch.setattr("saffron.cli.run_gh", _gh_open)
+        else:
+            monkeypatch.setattr(
+                "saffron.cli.run_gh", _fake_gh_unreachable_for({pr_url})
+            )
+
+        result = cli._run_cell(args, ledger, tmp_path / "out")
+        printed = capsys.readouterr().out
+
+        assert result == 1
+        assert "SY-9000 is REBUTTAL_UNJUDGED" in printed
+        assert "its latest run pushed nothing" in printed
+        ledger.close()
+
+    # Case 2c: an older row fully qualifies, but a newer waiting row with
+    # no push hides it. The newest waiting row must decide.
+    repo, main_branch = _pushed_saffron_repo(
+        tmp_path, "repo-newestnopush", [("p9000.md", _chain_spec_text("SY-9000"))]
+    )
+    older_head = _push_stacked_branch(repo, "saffron/SY-9000", main_branch)
+    _git(repo, "checkout", "-q", main_branch)
+    args = _namespace(repo, tmp_path)
+    args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
+
+    ledger = Ledger(tmp_path / "newestnopush.db")
+    repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
+    older = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-9000",
+        spec_sha="older",
+        state="READY_FOR_REVIEW",
+        branch="saffron/SY-9000",
+        pr_url="https://example.invalid/pull/older",
+    )
+    ledger.record_push(older, older_head)
+    _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-9000",
+        spec_sha="newer",
+        state="REBUTTAL_UNJUDGED",
+        pr_url="https://example.invalid/pull/newer",
+    )
+    monkeypatch.setattr("saffron.task.run_one_cell", _no_cell)
+    monkeypatch.setattr("saffron.cli.run_gh", _gh_open)
+
+    result = cli._run_cell(args, ledger, tmp_path / "out")
+    printed = capsys.readouterr().out
+    assert result == 1
+    assert "SY-9000 is REBUTTAL_UNJUDGED" in printed
+    assert "its latest run pushed nothing" in printed
+    ledger.close()
+
+    # Case 2d: a stale push with no `base_sha` at all, so landedness
+    # cannot be checked. Still refused, never treated as landed by default.
+    repo, main_branch = _pushed_saffron_repo(
+        tmp_path, "repo-nobase", [("p9000.md", _chain_spec_text("SY-9000"))]
+    )
+    head = _push_stacked_branch(repo, "saffron/SY-9000", main_branch)
+    _git(repo, "checkout", "-q", main_branch)
+    mirror, url = _mirror_of(tmp_path, repo, name="nobase-mirror.git")
+
+    ledger = Ledger(tmp_path / "nobase.db")
+    repo_id = _seed_repo(tmp_path, ledger, "/o")
+    parent = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-9000",
+        state="READY_FOR_REVIEW",
+        branch="saffron/SY-9000",
+    )
+    ledger.record_push(parent, head)
+    ledger.set_task_state(parent, "REBUTTAL_UNJUDGED")
+
+    with pytest.raises(task._StackingRefused) as excinfo:
+        task._resolve_stacked_on(
+            ledger,
+            repo_id,
+            ["SY-9000"],
+            mirror=mirror,
+            url=url,
+            spec_id="SY-2",
+            emit=lambda _: None,
+            gh=None,
+        )
+    assert "SY-9000 is REBUTTAL_UNJUDGED" in excinfo.value.reason
+    assert "its latest run pushed nothing" in excinfo.value.reason
+    ledger.close()
+
+    # Case 3: a landed parent, another row for the same spec merged, keeps
+    # the path it takes, even though the chosen row's push is stale.
+    repo, main_branch = _pushed_saffron_repo(
+        tmp_path, "repo-landed", [("p9000.md", _chain_spec_text("SY-9000"))]
+    )
+    head = _push_stacked_branch(repo, "saffron/SY-9000", main_branch)
+    _git(repo, "checkout", "-q", main_branch)
+    args = _namespace(repo, tmp_path)
+    args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
+
+    ledger = Ledger(tmp_path / "landed.db")
+    repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
+    _seed_task(ledger, repo_id, spec_id="SY-9000", state="MERGED")
+    stale = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-9000",
+        state="READY_FOR_REVIEW",
+        branch="saffron/SY-9000",
+        pr_url="https://example.invalid/pull/landed",
+    )
+    ledger.record_push(stale, head)
+    ledger.set_task_state(stale, "REBUTTAL_UNJUDGED")
+    monkeypatch.setattr("saffron.cli.run_gh", _gh_open)
+
+    cell_spec, printed = _capture_cell_spec(
+        monkeypatch, repo, tmp_path, args, capsys, ledger=ledger
+    )
+    assert cell_spec.stacked_on == head
+    assert "refused" not in printed
+    ledger.close()
+
+    # Case 3b: the same landed-by-another-row parent, read with no `gh` at
+    # all, through `_resolve_stacked_on` directly.
+    repo, main_branch = _pushed_saffron_repo(
+        tmp_path, "repo-landed-nogh", [("p9000.md", _chain_spec_text("SY-9000"))]
+    )
+    head = _push_stacked_branch(repo, "saffron/SY-9000", main_branch)
+    _git(repo, "checkout", "-q", main_branch)
+    base_sha = _rev_parse(repo, main_branch)
+    mirror, url = _mirror_of(tmp_path, repo, name="landed-nogh-mirror.git")
+
+    ledger = Ledger(tmp_path / "landed-nogh.db")
+    repo_id = _seed_repo(tmp_path, ledger, "/o")
+    _seed_task(ledger, repo_id, spec_id="SY-9000", state="MERGED")
+    stale = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-9000",
+        state="READY_FOR_REVIEW",
+        branch="saffron/SY-9000",
+    )
+    ledger.record_push(stale, head)
+    ledger.set_task_state(stale, "REBUTTAL_UNJUDGED")
+
+    stacked_on, branch = task._resolve_stacked_on(
+        ledger,
+        repo_id,
+        ["SY-9000"],
+        mirror=mirror,
+        url=url,
+        base_sha=base_sha,
+        spec_id="SY-2",
+        emit=lambda _: None,
+        gh=None,
+    )
+    assert (stacked_on, branch) == (head, "saffron/SY-9000")
+    ledger.close()
+
+    # Case 3c: landed by a retirement marker at `base_sha`, instead of a
+    # `MERGED` row.
+    repo, main_branch = _pushed_saffron_repo(
+        tmp_path,
+        "repo-retired",
+        [],
+        retired_specs=[("p9000.md", _chain_spec_text("SY-9000"))],
+    )
+    head = _push_stacked_branch(repo, "saffron/SY-9000", main_branch)
+    _git(repo, "checkout", "-q", main_branch)
+    base_sha = _rev_parse(repo, main_branch)
+    mirror, url = _mirror_of(tmp_path, repo, name="retired-mirror.git")
+
+    ledger = Ledger(tmp_path / "retired.db")
+    repo_id = _seed_repo(tmp_path, ledger, "/o")
+    stale = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-9000",
+        state="READY_FOR_REVIEW",
+        branch="saffron/SY-9000",
+    )
+    ledger.record_push(stale, head)
+    ledger.set_task_state(stale, "REBUTTAL_UNJUDGED")
+
+    stacked_on, branch = task._resolve_stacked_on(
+        ledger,
+        repo_id,
+        ["SY-9000"],
+        mirror=mirror,
+        url=url,
+        base_sha=base_sha,
+        spec_id="SY-2",
+        emit=lambda _: None,
+        gh=None,
+    )
+    assert (stacked_on, branch) == (head, "saffron/SY-9000")
+    ledger.close()
+
+    # Case 3d: landed by a push already an ancestor of `base_sha`, merged
+    # by hand, outside any cell.
+    repo = _repo_with_commit(tmp_path / "repo-handmerged")
+    remote = tmp_path / "repo-handmerged-remote.git"
+    subprocess.run(["git", "clone", "-q", "--bare", str(repo), str(remote)], check=True)
+    _git(repo, "remote", "add", "origin", str(remote))
+    landed_sha = _push_parent_branch(
+        repo, "saffron/SY-9000", content="shipped by hand\n"
+    )
+    _git(repo, "merge", "-q", "--ff-only", "saffron/SY-9000")
+    (repo / ".saffron" / "specs").mkdir(parents=True)
+    (repo / ".saffron" / "specs" / "README.md").write_text("specs live here\n")
+    (repo / ".saffron" / "specs" / "p9000.md").write_text(_chain_spec_text("SY-9000"))
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "saffron")
+    main_branch = _git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    _git(repo, "push", "-q", "origin", main_branch)
+    base_sha = _rev_parse(repo, main_branch)
+    mirror, url = _mirror_of(tmp_path, repo, name="handmerged-mirror.git")
+
+    ledger = Ledger(tmp_path / "handmerged.db")
+    repo_id = _seed_repo(tmp_path, ledger, "/o")
+    stale = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-9000",
+        state="READY_FOR_REVIEW",
+        branch="saffron/SY-9000",
+    )
+    ledger.record_push(stale, landed_sha)
+    ledger.set_task_state(stale, "REBUTTAL_UNJUDGED")
+
+    stacked_on, branch = task._resolve_stacked_on(
+        ledger,
+        repo_id,
+        ["SY-9000"],
+        mirror=mirror,
+        url=url,
+        base_sha=base_sha,
+        spec_id="SY-2",
+        emit=lambda _: None,
+        gh=None,
+    )
+    assert (stacked_on, branch) == (landed_sha, "saffron/SY-9000")
+    ledger.close()
+
+    # Case 3e: every other waiting state still stacks on an older push,
+    # since the new rule reads only `REBUTTAL_UNJUDGED`.
+    repo, main_branch = _pushed_saffron_repo(
+        tmp_path, "repo-otherstates", [("p9000.md", _chain_spec_text("SY-9000"))]
+    )
+    head = _push_stacked_branch(repo, "saffron/SY-9000", main_branch)
+    _git(repo, "checkout", "-q", main_branch)
+    base_sha = _rev_parse(repo, main_branch)
+    mirror, url = _mirror_of(tmp_path, repo, name="otherstates-mirror.git")
+
+    for state in ("READY_FOR_REVIEW", "APPROVED", "MERGE_TRAIN", "REVIEW_INCOMPLETE"):
+        ledger = Ledger(tmp_path / f"otherstates-{state}.db")
+        repo_id = _seed_repo(tmp_path, ledger, "/o")
+        row = _seed_task(
+            ledger,
+            repo_id,
+            spec_id="SY-9000",
+            state="READY_FOR_REVIEW",
+            branch="saffron/SY-9000",
+        )
+        ledger.record_push(row, head)
+        ledger.set_task_state(row, state)
+
+        stacked_on, branch = task._resolve_stacked_on(
+            ledger,
+            repo_id,
+            ["SY-9000"],
+            mirror=mirror,
+            url=url,
+            base_sha=base_sha,
+            spec_id="SY-2",
+            emit=lambda _: None,
+            gh=None,
+        )
+        assert (stacked_on, branch) == (head, "saffron/SY-9000"), state
+        ledger.close()
+
+    # Case 4: resumed and pushed again. The second push lands in the row's
+    # later state, so it qualifies and stacks on that push.
+    repo, main_branch = _pushed_saffron_repo(
+        tmp_path, "repo-resumed", [("p9000.md", _chain_spec_text("SY-9000"))]
+    )
+    stale_head = _push_stacked_branch(repo, "saffron/SY-9000", main_branch)
+    _git(repo, "checkout", "-q", "saffron/SY-9000")
+    (repo / "again.txt").write_text("pushed again\n")
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "again")
+    fresh_head = _rev_parse(repo, "HEAD")
+    _git(repo, "push", "-q", "origin", "saffron/SY-9000")
+    _git(repo, "checkout", "-q", main_branch)
+    args = _namespace(repo, tmp_path)
+    args.spec = _ceiling_spec(tmp_path, depends_on="[SY-9000]")
+
+    ledger = Ledger(tmp_path / "resumed.db")
+    repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
+    resumed = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-9000",
+        state="READY_FOR_REVIEW",
+        branch="saffron/SY-9000",
+        pr_url="https://example.invalid/pull/resumed",
+    )
+    ledger.record_push(resumed, stale_head)
+    ledger.set_task_state(resumed, "REBUTTING")
+    ledger.set_task_state(resumed, "REBUTTAL_UNJUDGED")
+    ledger.record_push(resumed, fresh_head)
+    monkeypatch.setattr("saffron.cli.run_gh", _gh_open)
+
+    cell_spec, printed = _capture_cell_spec(
+        monkeypatch, repo, tmp_path, args, capsys, ledger=ledger
+    )
+    assert cell_spec.stacked_on == fresh_head
+    assert "refused" not in printed
+    ledger.close()
+
+
+def test_a_multi_parent_child_is_refused_for_any_open_parent_whose_latest_run_pushed_nothing(
+    tmp_path, monkeypatch, capsys
+):
+    """`SA-0332`: with two or more `depends_on` entries, `_resolve_multi_parent`
+    refuses for any open parent whose chosen row is `REBUTTAL_UNJUDGED`
+    with no push after that state. This holds whatever its place among
+    the open parents, and runs ahead of the off-chain check. Driven
+    through `cli._run_cell` with a `gh`, and through `cli._batch_runner`
+    with none.
+    """
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
+
+    def _no_cell(*_a, **_k):
+        raise AssertionError("run_one_cell must not run for a refused task")
+
+    # The deepest parent, TE-B, is REBUTTAL_UNJUDGED with no push. Refused
+    # through `cli._run_cell` with a `gh`, and through `cli._batch_runner` with none.
+    for use_gh in (False, True):
+        repo, main_branch = _pushed_saffron_repo(
+            tmp_path,
+            f"repo-deepest-{use_gh}",
+            [
+                ("pa.md", _chain_spec_text("TE-A")),
+                ("pb.md", _chain_spec_text("TE-B", depends_on=["TE-A"])),
+            ],
+        )
+        head_a = _push_stacked_branch(repo, "saffron/TE-A", main_branch)
+        _git(repo, "checkout", "-q", main_branch)
+
+        ledger = Ledger(tmp_path / f"deepest-{use_gh}.db")
+        repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
+        parent_a = _seed_task(
+            ledger,
+            repo_id,
+            spec_id="TE-A",
+            state="READY_FOR_REVIEW",
+            branch="saffron/TE-A",
+        )
+        ledger.record_push(parent_a, head_a)
+        _seed_task(
+            ledger,
+            repo_id,
+            spec_id="TE-B",
+            state="REBUTTAL_UNJUDGED",
+            pr_url="https://example.invalid/pull/b",
+        )
+
+        monkeypatch.setattr("saffron.task.run_one_cell", _no_cell)
+        if use_gh:
+            args = _namespace(repo, tmp_path)
+            args.spec = _ceiling_spec(tmp_path, depends_on="[TE-A, TE-B]")
+            monkeypatch.setattr("saffron.cli.run_gh", _gh_open)
+            result = cli._run_cell(args, ledger, tmp_path / "out")
+            printed = capsys.readouterr().out
+            assert result == 1
+        else:
+            mirror, url = _mirror_of(tmp_path, repo, name="deepest-mirror.git")
+            base_sha = _rev_parse(repo, main_branch)
+            candidate = Candidate(
+                path=Path("SY-2.md"),
+                spec=intake.Spec(
+                    id="SY-2",
+                    title="t",
+                    type="feature",
+                    touches=["src/**"],
+                    depends_on=["TE-A", "TE-B"],
+                ),
+                spec_sha="s" * 64,
+                task_id=None,
+            )
+            runner = cli._batch_runner(
+                pinned=task.PinnedBase(mirror=mirror, url=url, base_sha=base_sha),
+                repo_id=lambda rid=repo_id: rid,
+                repo=repo,
+                ledger=ledger,
+                out_dir=tmp_path / "out",
+            )
+            returned = runner(candidate)
+            assert isinstance(returned, task.Refused)
+            printed = returned.reason
+
+        assert "depends_on TE-B is REBUTTAL_UNJUDGED" in printed
+        assert "its latest run pushed nothing" in printed
+        assert "TE-A" not in printed.replace("depends_on TE-B", "", 1)
+        ledger.close()
+
+    # A real stack, and the deepest-parent resolution read directly:
+    # TE-72 depends on TE-73, on TE-71.
+    repo, main_branch = _pushed_saffron_repo(
+        tmp_path,
+        "repo-chain",
+        [
+            ("p71.md", _chain_spec_text("TE-71")),
+            ("p73.md", _chain_spec_text("TE-73", depends_on=["TE-71"])),
+        ],
+    )
+    head71 = _push_stacked_branch(repo, "saffron/TE-71", main_branch)
+    head73 = _push_stacked_branch(repo, "saffron/TE-73", "saffron/TE-71")
+    _git(repo, "checkout", "-q", main_branch)
+    base_sha = _rev_parse(repo, main_branch)
+    mirror, url = _mirror_of(tmp_path, repo, name="chain-mirror.git")
+
+    def _seed_chain(ledger, repo_id):
+        t71 = _seed_task(
+            ledger,
+            repo_id,
+            spec_id="TE-71",
+            state="READY_FOR_REVIEW",
+            branch="saffron/TE-71",
+        )
+        ledger.record_push(t71, head71)
+        t73 = _seed_task(
+            ledger,
+            repo_id,
+            spec_id="TE-73",
+            state="READY_FOR_REVIEW",
+            branch="saffron/TE-73",
+        )
+        ledger.record_push(t73, head73)
+        return t71, t73
+
+    # A shallower parent (TE-71) is stale, while the deepest (TE-73) is
+    # fine. Only TE-71 is named.
+    ledger = Ledger(tmp_path / "shallow.db")
+    repo_id = _seed_repo(tmp_path, ledger, "/o")
+    t71, _t73 = _seed_chain(ledger, repo_id)
+    ledger.set_task_state(t71, "REBUTTAL_UNJUDGED")
+    with pytest.raises(task._StackingRefused) as excinfo:
+        task._resolve_stacked_on(
+            ledger,
+            repo_id,
+            ["TE-71", "TE-73"],
+            mirror=mirror,
+            url=url,
+            base_sha=base_sha,
+            spec_id="SY-1",
+            emit=lambda _: None,
+            gh=None,
+        )
+    assert "TE-71 is REBUTTAL_UNJUDGED" in excinfo.value.reason
+    assert "TE-73" not in excinfo.value.reason
+    ledger.close()
+
+    # TE-73 and TE-71 are both fine, but a third, off-chain parent, TE-90,
+    # is stale. Its own reason is named, never the chain conflict.
+    repo2, main2 = _pushed_saffron_repo(
+        tmp_path,
+        "repo-offchain",
+        [
+            ("p71.md", _chain_spec_text("TE-71")),
+            ("p73.md", _chain_spec_text("TE-73", depends_on=["TE-71"])),
+            ("p90.md", _chain_spec_text("TE-90")),
+        ],
+    )
+    o_head71 = _push_stacked_branch(repo2, "saffron/TE-71", main2)
+    o_head73 = _push_stacked_branch(repo2, "saffron/TE-73", "saffron/TE-71")
+    _git(repo2, "checkout", "-q", main2)
+    o_base_sha = _rev_parse(repo2, main2)
+    o_mirror, o_url = _mirror_of(tmp_path, repo2, name="offchain-mirror.git")
+
+    ledger = Ledger(tmp_path / "offchain.db")
+    repo_id = _seed_repo(tmp_path, ledger, "/o")
+    t71 = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="TE-71",
+        state="READY_FOR_REVIEW",
+        branch="saffron/TE-71",
+    )
+    ledger.record_push(t71, o_head71)
+    t73 = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="TE-73",
+        state="READY_FOR_REVIEW",
+        branch="saffron/TE-73",
+    )
+    ledger.record_push(t73, o_head73)
+    _seed_task(
+        ledger,
+        repo_id,
+        spec_id="TE-90",
+        state="REBUTTAL_UNJUDGED",
+        pr_url="https://example.invalid/pull/90",
+    )
+    with pytest.raises(task._StackingRefused) as excinfo:
+        task._resolve_stacked_on(
+            ledger,
+            repo_id,
+            ["TE-73", "TE-90"],
+            mirror=o_mirror,
+            url=o_url,
+            base_sha=o_base_sha,
+            spec_id="SY-1",
+            emit=lambda _: None,
+            gh=None,
+        )
+    assert "TE-90 is REBUTTAL_UNJUDGED" in excinfo.value.reason
+    assert "outside" not in excinfo.value.reason
+    assert "chain" not in excinfo.value.reason
+    ledger.close()
+
+    # Two parents at once, TE-73 and TE-90, are both stale. Both are named.
+    ledger = Ledger(tmp_path / "both.db")
+    repo_id = _seed_repo(tmp_path, ledger, "/o")
+    t71 = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="TE-71",
+        state="READY_FOR_REVIEW",
+        branch="saffron/TE-71",
+    )
+    ledger.record_push(t71, o_head71)
+    t73 = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="TE-73",
+        state="READY_FOR_REVIEW",
+        branch="saffron/TE-73",
+    )
+    ledger.record_push(t73, o_head73)
+    ledger.set_task_state(t73, "REBUTTAL_UNJUDGED")
+    _seed_task(
+        ledger,
+        repo_id,
+        spec_id="TE-90",
+        state="REBUTTAL_UNJUDGED",
+        pr_url="https://example.invalid/pull/90",
+    )
+    with pytest.raises(task._StackingRefused) as excinfo:
+        task._resolve_stacked_on(
+            ledger,
+            repo_id,
+            ["TE-73", "TE-90"],
+            mirror=o_mirror,
+            url=o_url,
+            base_sha=o_base_sha,
+            spec_id="SY-1",
+            emit=lambda _: None,
+            gh=None,
+        )
+    assert "TE-73" in excinfo.value.reason
+    assert "TE-90" in excinfo.value.reason
+    assert "its latest run pushed nothing" not in excinfo.value.reason
+    assert "their latest run pushed nothing" in excinfo.value.reason
+    ledger.close()
+
+    # TE-73 pushed again while REBUTTAL_UNJUDGED still stacks on its new
+    # head, and so does a resumed TE-73 pushed a second time.
+    for second_push in ("in_state", "resumed"):
+        ledger = Ledger(tmp_path / f"qualifies-{second_push}.db")
+        repo_id = _seed_repo(tmp_path, ledger, "/o")
+        t71 = _seed_task(
+            ledger,
+            repo_id,
+            spec_id="TE-71",
+            state="READY_FOR_REVIEW",
+            branch="saffron/TE-71",
+        )
+        ledger.record_push(t71, head71)
+        t73 = _seed_task(
+            ledger,
+            repo_id,
+            spec_id="TE-73",
+            state="READY_FOR_REVIEW",
+            branch="saffron/TE-73",
+        )
+        ledger.record_push(t73, head73)
+        if second_push == "resumed":
+            ledger.set_task_state(t73, "REBUTTING")
+        ledger.set_task_state(t73, "REBUTTAL_UNJUDGED")
+        ledger.record_push(t73, head73)
+
+        stacked_on, branch = task._resolve_stacked_on(
+            ledger,
+            repo_id,
+            ["TE-71", "TE-73"],
+            mirror=mirror,
+            url=url,
+            base_sha=base_sha,
+            spec_id="SY-1",
+            emit=lambda _: None,
+            gh=None,
+        )
+        assert (stacked_on, branch) == (head73, "saffron/TE-73"), second_push
+        ledger.close()
+
+    # An older row for TE-73 is REBUTTAL_UNJUDGED and stale, but a newer
+    # row fully qualifies. The newest row decides, so TE-73 is not refused.
+    ledger = Ledger(tmp_path / "newest-decides.db")
+    repo_id = _seed_repo(tmp_path, ledger, "/o")
+    t71 = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="TE-71",
+        state="READY_FOR_REVIEW",
+        branch="saffron/TE-71",
+    )
+    ledger.record_push(t71, head71)
+    older73 = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="TE-73",
+        spec_sha="older",
+        state="READY_FOR_REVIEW",
+        branch="saffron/TE-73",
+    )
+    ledger.record_push(older73, head73)
+    ledger.set_task_state(older73, "REBUTTAL_UNJUDGED")
+    newer73 = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="TE-73",
+        spec_sha="newer",
+        state="READY_FOR_REVIEW",
+        branch="saffron/TE-73",
+    )
+    ledger.record_push(newer73, head73)
+
+    stacked_on, branch = task._resolve_stacked_on(
+        ledger,
+        repo_id,
+        ["TE-71", "TE-73"],
+        mirror=mirror,
+        url=url,
+        base_sha=base_sha,
+        spec_id="SY-1",
+        emit=lambda _: None,
+        gh=None,
+    )
+    assert (stacked_on, branch) == (head73, "saffron/TE-73")
+    ledger.close()
+
+    # TE-73 has a MERGED row, and also a stale REBUTTAL_UNJUDGED one. The
+    # merged row still lands it, whatever its other rows look like.
+    ledger = Ledger(tmp_path / "landed-with-stale-sibling.db")
+    repo_id = _seed_repo(tmp_path, ledger, "/o")
+    t71 = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="TE-71",
+        state="READY_FOR_REVIEW",
+        branch="saffron/TE-71",
+    )
+    ledger.record_push(t71, head71)
+    merged73 = _seed_task(
+        ledger, repo_id, spec_id="TE-73", spec_sha="m", state="MERGED"
+    )
+    ledger.record_push(merged73, head73)
+    stale73 = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="TE-73",
+        spec_sha="s",
+        state="READY_FOR_REVIEW",
+        branch="saffron/TE-73",
+    )
+    ledger.record_push(stale73, head73)
+    ledger.set_task_state(stale73, "REBUTTAL_UNJUDGED")
+
+    stacked_on, branch = task._resolve_stacked_on(
+        ledger,
+        repo_id,
+        ["TE-71", "TE-73"],
+        mirror=mirror,
+        url=url,
+        base_sha=base_sha,
+        spec_id="SY-1",
+        emit=lambda _: None,
+        gh=None,
+    )
+    assert (stacked_on, branch) == (head71, "saffron/TE-71")
+    ledger.close()
+
+    # A deepest REVIEW_INCOMPLETE parent with no push still starts
+    # unstacked, as it does today: the new rule reads only REBUTTAL_UNJUDGED.
+    ledger = Ledger(tmp_path / "review-incomplete.db")
+    repo_id = _seed_repo(tmp_path, ledger, "/o")
+    t71 = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="TE-71",
+        state="READY_FOR_REVIEW",
+        branch="saffron/TE-71",
+    )
+    ledger.record_push(t71, head71)
+    _seed_task(ledger, repo_id, spec_id="TE-73", state="REVIEW_INCOMPLETE")
+    seen = []
+    stacked_on, branch = task._resolve_stacked_on(
+        ledger,
+        repo_id,
+        ["TE-71", "TE-73"],
+        mirror=mirror,
+        url=url,
+        base_sha=base_sha,
+        spec_id="SY-1",
+        emit=seen.append,
+        gh=None,
+    )
+    assert (stacked_on, branch) == (None, None)
+    assert [e for e in seen if e.step == "unstacked"]
+    ledger.close()
+
+    # A parent with a MERGED row is not open, so it is never named by the
+    # new rule, whatever its other rows look like.
+    ledger = Ledger(tmp_path / "landed-not-open.db")
+    repo_id = _seed_repo(tmp_path, ledger, "/o")
+    t71 = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="TE-71",
+        state="READY_FOR_REVIEW",
+        branch="saffron/TE-71",
+    )
+    ledger.record_push(t71, head71)
+    _seed_task(ledger, repo_id, spec_id="TE-73", state="MERGED")
+    stacked_on, branch = task._resolve_stacked_on(
+        ledger,
+        repo_id,
+        ["TE-71", "TE-73"],
+        mirror=mirror,
+        url=url,
+        base_sha=base_sha,
+        spec_id="SY-1",
+        emit=lambda _: None,
+        gh=None,
+    )
+    assert (stacked_on, branch) == (head71, "saffron/TE-71")
+    ledger.close()
+
+
 def test_no_repo_id_or_no_depends_on_resolves_unstacked(tmp_path):
     """A repo the ledger has never seen and a spec naming no parent are both
     the ordinary case, not an edge one — neither should need a task row to

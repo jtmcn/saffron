@@ -338,6 +338,98 @@ def test_folding_into_a_ledger_with_a_record_appends_nothing(tmp_path, record):
     source.close()
 
 
+def test_a_push_records_the_state_its_row_held_and_a_fold_rebuilds_it(tmp_path, record):
+    """`tasks.pushed_in_state`: a `task_push` fact sets it to the state its
+    row holds at that fact. A `task_package` fact sets it to the state
+    that fact carries. A later state write leaves it, so a push from
+    before that write reads as stale (`SA-0332`)."""
+    source_path, fold_path = tmp_path / "source.db", tmp_path / "fold.db"
+    source = Ledger(source_path, record=record)
+    into = Ledger(fold_path)
+
+    # A push landing while the row already sits in the state it names.
+    pushed_in_state = _minimal(source, "SA-50")
+    source.set_task_state(pushed_in_state, "REBUTTAL_UNJUDGED")
+    source.record_push(pushed_in_state, "1" * 40)
+
+    # A stale push: pushed while REVIEWING, then moved on with no push.
+    stale = _minimal(source, "SA-51")
+    source.set_task_state(stale, "REVIEWING")
+    source.record_push(stale, "2" * 40)
+    source.set_task_state(stale, "REBUTTAL_UNJUDGED")
+
+    # Resumed and pushed again: the first push goes stale, and the second
+    # one lands in the row's later state.
+    resumed = _minimal(source, "SA-52")
+    source.set_task_state(resumed, "REVIEWING")
+    source.record_push(resumed, "3" * 40)
+    source.set_task_state(resumed, "REBUTTING")
+    source.set_task_state(resumed, "REBUTTAL_UNJUDGED")
+    source.record_push(resumed, "4" * 40)
+
+    # Packaged, then sent back later with no further push.
+    packaged = _minimal(source, "SA-53")
+    source.set_task_package(packaged, "READY_FOR_REVIEW", "b", "5" * 40, "https://x/1")
+    source.set_task_state(packaged, "REBUTTAL_UNJUDGED")
+
+    # Never pushed.
+    unpushed = _minimal(source, "SA-54")
+
+    expected = {
+        pushed_in_state: "REBUTTAL_UNJUDGED",
+        stale: "REVIEWING",
+        resumed: "REBUTTAL_UNJUDGED",
+        packaged: "READY_FOR_REVIEW",
+        unpushed: None,
+    }
+    for task_id, want in expected.items():
+        key = _key(source, task_id)
+        row = _raw_rows(source_path, _TASK_SQL, key)[0]
+        assert row["pushed_in_state"] == want, task_id
+        into.fold_task(key, record.read(key))
+        folded = _raw_rows(fold_path, _TASK_SQL, key)[0]
+        assert folded["pushed_in_state"] == want, task_id
+
+    source.close()
+    into.close()
+
+
+def test_a_ledger_that_predates_pushed_in_state_keeps_its_rows_and_reads_none(
+    tmp_path,
+):
+    """`CREATE TABLE IF NOT EXISTS` does not alter, so an existing ledger has
+    no such column. The migration is additive: the row that was already
+    there must still be there, reading `None` for the column it predates."""
+    path = tmp_path / "old.db"
+    before = SCHEMA.replace(
+        "    merged_head_sha TEXT,\n"
+        "    pushed_in_state TEXT\n"
+        "    -- Below the column, not above it: a comment above the *last* column\n"
+        "    -- broke `DROP COLUMN` on SQLite 3.51.0, measured 2026-09-19. 3.53.1 is fine.\n"
+        ");",
+        "    merged_head_sha TEXT\n);",
+    )
+    assert "pushed_in_state" not in before  # otherwise this proves nothing
+    old = sqlite3.connect(path)
+    old.executescript(before)
+    old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r', 'o', '/m')")
+    old.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
+    old.execute(
+        """INSERT INTO tasks (run_id, spec_id, spec_sha, state, branch)
+           VALUES (1, 'SA-0099', 's', 'REBUTTAL_UNJUDGED', 'saffron/SA-0099')"""
+    )
+    old.commit()
+    old.close()
+
+    ledger = Ledger(path)
+    row = ledger._db.execute(
+        "SELECT spec_id, pushed_in_state FROM tasks WHERE spec_id = 'SA-0099'"
+    ).fetchone()
+    assert row["spec_id"] == "SA-0099"
+    assert row["pushed_in_state"] is None
+    ledger.close()
+
+
 def test_a_fact_the_ledger_cannot_place_leaves_the_ledger_as_it_was(tmp_path, record):
     writer = Ledger(tmp_path / "writer.db", record=record)
     key = _key(writer, _minimal(writer, "SA-2"))
