@@ -2023,6 +2023,44 @@ def test_a_child_of_a_rebuttal_unjudged_parent_stacks_only_on_its_latest_runs_pu
     assert "its latest run pushed nothing" in printed
     ledger.close()
 
+    # Case 2e: Case 2c with no `gh`, where the waiting rows alone choose. The
+    # newest waiting row must decide on that path too.
+    repo, main_branch = _pushed_saffron_repo(
+        tmp_path, "repo-newestnopush-nogh", [("p9000.md", _chain_spec_text("SY-9000"))]
+    )
+    older_head = _push_stacked_branch(repo, "saffron/SY-9000", main_branch)
+    _git(repo, "checkout", "-q", main_branch)
+    base_sha = _rev_parse(repo, main_branch)
+    mirror, url = _mirror_of(tmp_path, repo, name="newestnopush-nogh-mirror.git")
+
+    ledger = Ledger(tmp_path / "newestnopush-nogh.db")
+    repo_id = _seed_repo(tmp_path, ledger, "/o")
+    older = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-9000",
+        spec_sha="older",
+        state="READY_FOR_REVIEW",
+        branch="saffron/SY-9000",
+    )
+    ledger.record_push(older, older_head)
+    _seed_task(
+        ledger, repo_id, spec_id="SY-9000", spec_sha="newer", state="REBUTTAL_UNJUDGED"
+    )
+    with pytest.raises(task._StackingRefused, match="its latest run pushed nothing"):
+        task._resolve_stacked_on(
+            ledger,
+            repo_id,
+            ["SY-9000"],
+            mirror=mirror,
+            url=url,
+            base_sha=base_sha,
+            spec_id="SY-2",
+            emit=lambda _: None,
+            gh=None,
+        )
+    ledger.close()
+
     # Case 2d: a stale push with no `base_sha` at all, so landedness
     # cannot be checked. Still refused, never treated as landed by default.
     repo, main_branch = _pushed_saffron_repo(
@@ -2706,6 +2744,44 @@ def test_a_multi_parent_child_is_refused_for_any_open_parent_whose_latest_run_pu
     )
     ledger.record_push(t71, head71)
     _seed_task(ledger, repo_id, spec_id="TE-73", state="MERGED")
+    stacked_on, branch = task._resolve_stacked_on(
+        ledger,
+        repo_id,
+        ["TE-71", "TE-73"],
+        mirror=mirror,
+        url=url,
+        base_sha=base_sha,
+        spec_id="SY-1",
+        emit=lambda _: None,
+        gh=None,
+    )
+    assert (stacked_on, branch) == (head71, "saffron/TE-71")
+    ledger.close()
+
+    # TE-73 is retired at `base_sha`, so it is not open, and its stale row
+    # with no push refuses nothing.
+    repo, main_branch = _pushed_saffron_repo(
+        tmp_path,
+        "repo-multi-retired",
+        [("p71.md", _chain_spec_text("TE-71"))],
+        retired_specs=[("p73.md", _chain_spec_text("TE-73"))],
+    )
+    head71 = _push_stacked_branch(repo, "saffron/TE-71", main_branch)
+    _git(repo, "checkout", "-q", main_branch)
+    base_sha = _rev_parse(repo, main_branch)
+    mirror, url = _mirror_of(tmp_path, repo, name="multi-retired-mirror.git")
+
+    ledger = Ledger(tmp_path / "multi-retired.db")
+    repo_id = _seed_repo(tmp_path, ledger, "/o")
+    t71 = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="TE-71",
+        state="READY_FOR_REVIEW",
+        branch="saffron/TE-71",
+    )
+    ledger.record_push(t71, head71)
+    _seed_task(ledger, repo_id, spec_id="TE-73", state="REBUTTAL_UNJUDGED")
     stacked_on, branch = task._resolve_stacked_on(
         ledger,
         repo_id,
