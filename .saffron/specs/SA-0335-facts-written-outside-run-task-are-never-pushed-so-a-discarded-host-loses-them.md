@@ -3,7 +3,7 @@ id: SA-0335
 title: "Facts written outside `run_task` reach the mirror and are never pushed, so a discarded host loses them"
 type: bug
 priority: 1
-estimated_lines: 33
+estimated_lines: 34
 estimate_measured: true
 depends_on: [SA-0334]
 touches:
@@ -61,7 +61,7 @@ forbidden:
   - saffron/phases/**
   - tests/test_task_record.py
   - tests/test_record_refs.py
-budget_usd: 64
+budget_usd: 69
 max_attempts: 3
 max_turns: 320
 risk: standard
@@ -73,10 +73,14 @@ acceptance:
       tasks in two repos with two origins, a key appended three times, a key
       `push` carried after its last append, a key `push` carried and then
       appended again, and a key whose ref an earlier record started and pushed.
-      A second call pushes nothing.
+      A second call pushes nothing. The witness counts pushes by the argv of
+      every `git` call `saffron.record.refs` makes. It first sees one push for
+      the key appended three times, with the origin lacking that key's head
+      until the exit push. Only then does it assert no push for the key `push`
+      carried, and none on the second call.
     witness: tests/test_record_routed.py::test_the_exit_push_carries_each_appended_key_once_to_its_own_origin
     wrong_versions:
-      - Every append pushes at once, so a key appended three times is pushed three times.
+      - Every append pushes at once, so a key appended three times is pushed three times. One form calls `RoutedRecord.push` from `append`. The other builds each `RefsRecord` with the origin as its `remote`, so `RefsRecord.append` pushes and `RoutedRecord.push` is never called.
       - The exit pushes every key ever appended, so a key `push` already carried with no later fact is pushed again.
       - A key is kept only from its `task_created` fact, so a key an earlier record started is never pushed.
       - A key is kept only from `task_created` and `task_state` facts, so a later `decision` or `finding` stays on the mirror.
@@ -102,13 +106,16 @@ acceptance:
       - "`push` drops its key only when the push lands, so a key `run_task` failed to push is pushed again at exit."
   - claim: >-
       `saffron`'s entry point pushes every key the command appended before it
-      returns. The witness drives each of the twelve commands it dispatches
-      over its shared `Ledger`: `cell`, `batch`, `draft`, `queue`, `reconcile`,
-      `regate`, `review`, `adopt`, `package`, `finish`, `chains` and `replay`.
-      It drives five ways out: a return of 0, a return of 1, a raise read as
-      exit 2, a SIGTERM read as exit 143, and a `KeyboardInterrupt` that
-      leaves `main`. In each the origin holds the command's fact, and the exit
-      code is the command's own.
+      returns or raises. The witness drives each of the twelve commands it
+      dispatches over its shared `Ledger` on a return: `cell`, `batch`,
+      `draft`, `queue`, `reconcile`, `regate`, `review`, `adopt`, `package`,
+      `finish`, `chains` and `replay`. `adopt` returns 1 and the rest 0. It
+      drives a SIGTERM read as exit 143 on `batch`, which `_guarding_sigterm`
+      wraps. It drives a raise read as exit 2 on `finish`, which it wraps, and
+      on `reconcile`, which it does not. It drives a `KeyboardInterrupt` that
+      leaves `main` on `regate`, which it wraps, and on `queue`, which it does
+      not. In each the origin holds the command's fact, and the exit code is
+      the command's own.
     witness: tests/test_cli.py::test_every_command_pushes_the_facts_it_appended_before_it_exits
     wrong_versions:
       - The exit push sits after the `try` rather than in its `finally`, so a command that returns from inside it pushes nothing.
@@ -121,8 +128,10 @@ acceptance:
       key, naming the key and the refusal's type, and exits with its own code.
       The witness drives a `StaleWriter` and a plain `RecordError` in one
       command that returns 0, and a `StaleWriter` in one that raises and exits
-      2. A refusal's text spans several lines, and no line of it is printed on
-      its own. A key the same command pushed is named on no line.
+      2. Through one capture of stdout, the witness first sees each refused
+      key's line carry its refusal's first line. Then no captured line begins
+      `hint:`, `error:`, `fatal:` or ` ! [rejected]`, and no line names a key
+      the same command pushed.
     witness: tests/test_cli.py::test_a_refused_record_push_is_printed_with_its_key_and_leaves_the_exit_code
     wrong_versions:
       - A refusal raises out of `main`.
@@ -130,7 +139,7 @@ acceptance:
       - The refused key is printed with no type, so a stale writer reads like a dead origin.
       - Every kept key is printed, the pushed one included.
       - Nothing is printed.
-      - The refusal's text is printed as git wrote it, so its `hint:` lines stand alone.
+      - The refusal's text is printed as git wrote it, so its ` ! [rejected]` line stands alone.
   - claim: >-
       Each fact `run_stack_batch` writes reaches the origin at the exit push.
       The witness drives the `stack_layer` fact on each layer the batch
@@ -249,17 +258,18 @@ records its pull request (`saffron/cli.py:2954`, `:2961`). `replay` writes a
 whole task (`saffron/replay.py:53-109`). `package_ready_task` runs PACKAGE
 with no `run_task` (`saffron/task.py:1391`). A raising cell stamps `ORPHANED`
 (`saffron/cell/session.py:3839-3846`), and `run_task` re-raises before its
-push (`saffron/task.py:897-923`).
+push (`saffron/task.py:897-923`). The item's list leaves out two more.
+`saffron regate` records its result (`saffron/regate.py:181`), and
+`saffron review` charges its attempt (`saffron/commit_review.py:174`).
 
 ADR 10 says the record on `refs/saffron/*` lets a host VM be discarded
 (`docs/adr/0010-saffron-ships-as-an-engine-each-operator-deploys.md:126-127`).
 That holds only once these facts leave the host.
 
 **The protected text, as amended by hand.** No cell edits it. The record
-design's §3 says `run_task` pushes the task's ref once as the task ends, and
-that a refused push is an event. It now says each command also pushes, as it
-exits, every ref it appended to since that ref's last push. A refused exit push
-is a printed line.
+design's §3 now says that before a command returns or raises, it pushes each
+ref it appended to since that ref's last push. A refused push at a command's
+exit is a printed line.
 
 ## Problem
 
@@ -273,10 +283,11 @@ is a printed line.
    for a push.
 3. **Push at exit.** In `saffron/cli.py`'s `main`, bind the `RoutedRecord` to a
    name before the `Ledger` is built. In the `finally` that closes the ledger,
-   call `push_unpushed` before `close`. Print one line for each refusal,
-   naming the key and the exception's type. Fold the exception's text onto
-   that line, since git's refusal spans several. Leave the command's exit
-   code as it was.
+   call `push_unpushed` before `close`. Put `close` in a nested `finally`, so
+   a second Ctrl-C during a slow exit push still closes the ledger. Print one
+   line for each refusal, naming the key and the exception's type. Fold the
+   exception's text onto that line, since git's refusal spans several. Leave
+   the command's exit code as it was.
 4. **Keep the tests off the network.** Several `tests/test_cli.py` tests name
    an `https://github.com/` origin, and their exit push now reaches it. Add an
    autouse fixture to `tests/conftest.py` that sets `GIT_ALLOW_PROTOCOL` to
@@ -296,6 +307,13 @@ is a printed line.
 - A SIGKILL, or a SIGTERM that lands during the exit push itself.
   `_guarding_sigterm` restores the old handler in its own `finally`, before
   `main`'s runs (`saffron/cli.py:590-595`).
+- A SIGTERM to a command `_guarding_sigterm` does not wrap. That is `draft`,
+  `queue`, `reconcile`, `package`, `chains` and `replay`
+  (`saffron/cli.py:362-394`). The default handler ends the process with no
+  `finally` run, so nothing is pushed.
+- A prompt for a credential. The exit push inherits the environment with no
+  `GIT_TERMINAL_PROMPT=0`, as `run_task`'s push already does. `refs.py` is
+  `SA-0334`'s to change.
 - The protected sentences above.
 
 ## Notes for the agent
@@ -308,11 +326,13 @@ so `witness` reports `skip` for each. Do not run the wrong versions yourself.
 command: once by `run_task`, and again at exit when a later fact landed on it.
 That is one push per run of facts, never one per append.
 
-**git, measured on the host's git 2.54.0 on 2026-11-04.** With
-`GIT_ALLOW_PROTOCOL=file`, a push to an `https` URL exits 128 at once with
-`transport 'https' not allowed`. A local path and a `file://` URL still clone
-and push. A `url.<path>.pushInsteadOf` entry rewrites a push to that URL onto a
-local path, and leaves `git remote get-url` reading the URL.
+**git, measured on 2026-11-04.** On the host's git 2.54.0, and on git 2.47.3
+in the `saffron/cell:saffron` image, `GIT_ALLOW_PROTOCOL=file` and
+`pushInsteadOf` behave as follows together. A push to an `https` URL exits 128
+at once with `transport 'https' not allowed`. A push to a local path lands.
+A `url.<path>.pushInsteadOf` entry rewrites a push to that URL onto the local
+path, and the push lands under `GIT_ALLOW_PROTOCOL=file`. `git remote get-url`
+still reads the URL. A `file://` URL also clones on the host.
 
 **Each writer witness runs in one order.** Build a `Ledger` the way `main`
 builds it: a `RoutedRecord` whose lookup is `ledger.record_home`, over a repo
@@ -357,6 +377,12 @@ optional argument that hands it the routed one instead.
   repo on disk. Copy `test_adopt_of_a_ready_task_records_the_url_and_runs_no_regate`
   and `test_package_probes_the_host_then_runs_package_on_the_rebuilt_task`.
   The fake `package` writes `record_push` through the ledger it is handed.
+  Seed each through a `Ledger` built with a `RoutedRecord`, then call
+  `push_unpushed`. Never seed with a record-less `Ledger(home / "ledger.db")`,
+  as `tests/test_cli.py:4493` does. Under `SA-0334` the command's first later
+  fact would then fetch from the https origin, and the fixture refuses it.
+  Never replace `cli.Ledger` either, as `tests/test_cli.py:4060` and `:4754`
+  do, since `main`'s own `RoutedRecord` then holds nothing.
 - `replay`: `tests/test_replay.py`'s `target` fixture. `replay` upserts its
   own repo row with the target as origin (`saffron/replay.py:53`).
 
@@ -364,6 +390,14 @@ Criterion 3 replaces each command's handler on `saffron.cli` with a stub that
 appends through the `Ledger` it is handed. For `replay` that is
 `saffron.cli.replay`, and for `cell` it is `_run_cell`. A stub under
 `_guarding_sigterm` reaches exit 143 with `signal.raise_signal`.
+
+**Criterion 1's spy.** Monkeypatch `subprocess.run` as `saffron.record.refs`
+reaches it, and record each argv. Every push goes through `_git_bytes`
+(`saffron/record/refs.py:38-42`), whether `RoutedRecord.push` or
+`RefsRecord.append` starts it, so the spy sees both. A push to an up-to-date
+ref exits 0 and leaves the origin as it was, so only the spy can see a second
+push. Match a push by `"push" in argv` and a key as a substring of an item,
+never by position. Assert each positive count before any zero.
 
 **Building the two refusals.** A second writer diverges the origin. It is a
 `RefsRecord` with that origin as its `remote`, so its append to the ref pushes
@@ -385,7 +419,12 @@ union holds because no command builds a second `Ledger` with a record.
 one path. A revision's own raise, wait or error writes the same three states
 again (`saffron/batch.py:857`, `:875`, `:880`), and no witness drives that
 path. Criterion 6 drives the `record_end_review` calls its script reaches.
-Criterion 10 drives five of `_build_cases`'s twenty-three cases.
+Criterion 10 drives five of `_build_cases`'s twenty-three cases. Criterion 3
+drives `regate` and `review` through stubs, so no witness drives
+`record_regate` (`saffron/regate.py:181`) or `saffron review`'s
+`open_attempt` (`saffron/commit_review.py:174`) to the origin. No witness
+drives a second Ctrl-C during the exit push, so the nested `finally` that
+closes the ledger has none.
 
 **Every new test must fail with the source reverted.** Each calls
 `push_unpushed`, or reads an origin only the exit push fills. The prototype's

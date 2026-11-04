@@ -164,8 +164,8 @@ git push origin refs/saffron/tasks/<task_key>:refs/saffron/tasks/<task_key>
 
 A non-fast-forward refusal therefore means a stale writer. The wiring
 appends into each task's mirror with no remote. `run_task` pushes the task's
-own ref as the task ends. Before any command exits, it pushes each ref it
-appended to since that ref's last push (`SA-0335`). A later fact for a ref the
+own ref as the task ends. Before a command returns or raises, it pushes each
+ref it appended to since that ref's last push (`SA-0335`). A later fact for a ref the
 mirror lacks first fetches that one ref from the origin. Where neither holds
 it, the append raises rather than start a ref with no `task_created`
 (`SA-0334`). A refused push in `run_task` is an event, and one at a command's
