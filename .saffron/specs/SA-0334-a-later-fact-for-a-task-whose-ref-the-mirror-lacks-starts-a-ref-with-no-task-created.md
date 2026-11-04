@@ -71,10 +71,11 @@ acceptance:
       Where the origin lacks the ref too, an append through the `RoutedRecord`
       raises `RecordError`, and neither the mirror nor the origin gains a ref.
       The witness drives a task that a ledger with no record created, whose
-      next state write goes through a `RoutedRecord`. In the same mirror, a
-      routed `create_task` and a later fact on the ref it starts each run no
-      `git fetch`. The witness records the argv of every `git` call
-      `saffron.record.refs` makes, and asserts that none of them is a fetch.
+      next state write goes through a `RoutedRecord`. The witness records the
+      argv of every `git` call `saffron.record.refs` makes. Over that refused
+      append it records exactly one fetch, whose argv names the origin and the
+      task's ref. Then a routed `create_task` and a later fact on the ref it
+      starts record no fetch, and no argv that names the origin.
     witness: tests/test_record_routed.py::test_a_later_fact_neither_the_mirror_nor_the_origin_holds_writes_no_ref
     wrong_versions:
       - The fetch's failure is caught and the append writes the lone ref as it does today.
@@ -83,6 +84,8 @@ acceptance:
       - The lone ref is written to the mirror and then refused, so the mirror keeps it.
       - Every append but `task_created` tries the one-ref fetch and ignores its failure, then raises only if the ref is still absent, so a ref the mirror holds costs a fetch on each fact.
       - A `task_created` fact tries the fetch too and ignores its failure, so every new task costs a fetch.
+      - Every append probes the origin with `git ls-remote` first, so each fact costs a round trip to the forge with no fetch.
+      - The fetch runs through `subprocess.Popen` rather than `_git_bytes`, so the spy sees no fetch at all.
   - claim: >-
       `RefsRecord.append` raises `RecordError` for every kind in `KINDS` but
       `task_created` on a ref its repo lacks. For each kind the witness uses a
@@ -229,14 +232,22 @@ with a `RoutedRecord`. Criterion 3's witness loops over `KINDS` from
 For each kind, the first loop inits a fresh bare repo. It refuses that kind there
 with a no-remote record and with a record whose remote lacks the ref. The second
 loop appends each kind into its own fresh bare repo, built with a remote that
-holds the ref. So each append finds its ref absent. Criterion 2's witness spies
-by monkeypatching `subprocess.run` as `saffron.record.refs` reaches it, and
-records each argv.
+holds the ref. So each append finds its ref absent.
+
+**Criterion 2's spy.** It monkeypatches `subprocess.run` as
+`saffron.record.refs` reaches it, and records each argv. The fetch goes through
+`_git_bytes` like every other call there, so the spy sees it. Match a fetch by
+`"fetch" in argv`, never by position. `_IDENT` puts four `-c` items before the
+subcommand (`saffron/record/refs.py:21`). The ref sits inside one argv item as
+`<ref>:<ref>`, so match it as a substring of an item. Turn the spy on before the
+refused append, and assert its one fetch first. That proves the spy can see a
+fetch before the witness trusts its silence.
 
 **What the witnesses leave undriven.** Criterion 1 writes `task_state` alone
 through the routed path. The routed code does not branch on kind, and
-criterion 3 drives every kind one layer down. Criterion 2's spy watches one
-routed `task_created` and one `task_state` on a present ref. No witness drives a
+criterion 3 drives every kind one layer down. Criterion 2's spy sees one fetch
+on the refused append, then watches one routed `task_created` and one
+`task_state` on a present ref. No witness drives a
 routed `task_created` past an origin that holds its key, since a minted key is
 on no origin.
 
