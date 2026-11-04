@@ -386,6 +386,13 @@ def test_a_push_records_the_state_its_row_held_and_a_fold_rebuilds_it(tmp_path, 
         key = _key(source, task_id)
         row = _raw_rows(source_path, _TASK_SQL, key)[0]
         assert row["pushed_in_state"] == want, task_id
+        repo_id, spec_id = source._db.execute(
+            "SELECT r.repo_id, t.spec_id FROM tasks t JOIN runs r ON r.run_id = t.run_id"
+            " WHERE t.task_id = ?",
+            (task_id,),
+        ).fetchone()
+        [read] = source.tasks_by_spec_id(repo_id, spec_id)
+        assert read["pushed_in_state"] == want, task_id
         into.fold_task(key, record.read(key))
         folded = _raw_rows(fold_path, _TASK_SQL, key)[0]
         assert folded["pushed_in_state"] == want, task_id
@@ -393,14 +400,15 @@ def test_a_push_records_the_state_its_row_held_and_a_fold_rebuilds_it(tmp_path, 
     source.close()
     into.close()
 
+    # A ledger that predates the column gains it on open, and reads `None`.
+    old = _ledger_that_predates_pushed_in_state(tmp_path / "old.db")
+    [read] = old.tasks_by_spec_id(1, "SA-0099")
+    assert read["pushed_in_state"] is None
+    old.close()
 
-def test_a_ledger_that_predates_pushed_in_state_keeps_its_rows_and_reads_none(
-    tmp_path,
-):
-    """`CREATE TABLE IF NOT EXISTS` does not alter, so an existing ledger has
-    no such column. The migration is additive: the row that was already
-    there must still be there, reading `None` for the column it predates."""
-    path = tmp_path / "old.db"
+
+def _ledger_that_predates_pushed_in_state(path: Path) -> Ledger:
+    """A ledger written before `tasks.pushed_in_state`, opened as today's."""
     before = SCHEMA.replace(
         "    merged_head_sha TEXT,\n"
         "    pushed_in_state TEXT\n"
@@ -420,8 +428,16 @@ def test_a_ledger_that_predates_pushed_in_state_keeps_its_rows_and_reads_none(
     )
     old.commit()
     old.close()
+    return Ledger(path)
 
-    ledger = Ledger(path)
+
+def test_a_ledger_that_predates_pushed_in_state_keeps_its_rows_and_reads_none(
+    tmp_path,
+):
+    """`CREATE TABLE IF NOT EXISTS` does not alter, so an existing ledger has
+    no such column. The migration is additive: the row that was already
+    there must still be there, reading `None` for the column it predates."""
+    ledger = _ledger_that_predates_pushed_in_state(tmp_path / "old.db")
     row = ledger._db.execute(
         "SELECT spec_id, pushed_in_state FROM tasks WHERE spec_id = 'SA-0099'"
     ).fetchone()

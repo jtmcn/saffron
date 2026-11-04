@@ -1710,9 +1710,10 @@ class Ledger:
         `task_package` fact `set_task_package` builds, so a fold rebuilds
         it unchanged (b-a7e5f3). Carries the row's own `state`, `branch`,
         `pushed_sha`, `added` and `removed` rather than a caller's: this
-        write changes only the `pr_url`, and a `NOT_IMPLEMENTED` row has no
-        pushed branch to pass as `str`. `_adopt` records the head and any
-        state move as their own facts."""
+        write changes the `pr_url`, and sets `pushed_in_state` to the row's
+        `state` (`SA-0330`). A `NOT_IMPLEMENTED` row has no pushed branch to
+        pass as `str`. `_adopt` records the head and any state move as their
+        own facts."""
         row = self._db.execute(
             "SELECT state, branch, pushed_sha, added, removed FROM tasks WHERE task_id = ?",
             (task_id,),

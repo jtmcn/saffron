@@ -1814,6 +1814,35 @@ def test_a_child_of_a_rebuttal_unjudged_parent_stacks_only_on_its_latest_runs_pu
     def _task_count(ledger):
         return ledger._db.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
 
+    def _resolve_one_row(db, pushed, state, *, base_sha, mirror, url, gh):
+        """One SY-9000 row that pushed, if at all, while `READY_FOR_REVIEW`."""
+        ledger = Ledger(tmp_path / db)
+        repo_id = _seed_repo(tmp_path, ledger, "/o")
+        row = _seed_task(
+            ledger,
+            repo_id,
+            spec_id="SY-9000",
+            state="READY_FOR_REVIEW",
+            branch="saffron/SY-9000",
+        )
+        if pushed is not None:
+            ledger.record_push(row, pushed)
+        ledger.set_task_state(row, state)
+        try:
+            return task._resolve_stacked_on(
+                ledger,
+                repo_id,
+                ["SY-9000"],
+                mirror=mirror,
+                url=url,
+                base_sha=base_sha,
+                spec_id="SY-2",
+                emit=lambda _: None,
+                gh=gh,
+            )
+        finally:
+            ledger.close()
+
     # Case 1: no push at all, carrying a pull request. Refused in both `gh`
     # modes, and no queue row is written on the unattended path.
     for use_gh in (False, True):
@@ -2204,6 +2233,17 @@ def test_a_child_of_a_rebuttal_unjudged_parent_stacks_only_on_its_latest_runs_pu
     )
     assert (stacked_on, branch) == (head, "saffron/SY-9000")
     ledger.close()
+    # The same retirement read with a `gh`.
+    landed = _resolve_one_row(
+        "retired-gh.db",
+        head,
+        "REBUTTAL_UNJUDGED",
+        base_sha=base_sha,
+        mirror=mirror,
+        url=url,
+        gh=_gh_open,
+    )
+    assert landed == (head, "saffron/SY-9000")
 
     # Case 3d: landed by a push already an ancestor of `base_sha`, merged
     # by hand, outside any cell.
@@ -2250,6 +2290,17 @@ def test_a_child_of_a_rebuttal_unjudged_parent_stacks_only_on_its_latest_runs_pu
     )
     assert (stacked_on, branch) == (landed_sha, "saffron/SY-9000")
     ledger.close()
+    # The same push in `base_sha` read with a `gh`.
+    landed = _resolve_one_row(
+        "handmerged-gh.db",
+        landed_sha,
+        "REBUTTAL_UNJUDGED",
+        base_sha=base_sha,
+        mirror=mirror,
+        url=url,
+        gh=_gh_open,
+    )
+    assert landed == (landed_sha, "saffron/SY-9000")
 
     # Case 3e: every other waiting state still stacks on an older push,
     # since the new rule reads only `REBUTTAL_UNJUDGED`.
@@ -2261,32 +2312,67 @@ def test_a_child_of_a_rebuttal_unjudged_parent_stacks_only_on_its_latest_runs_pu
     base_sha = _rev_parse(repo, main_branch)
     mirror, url = _mirror_of(tmp_path, repo, name="otherstates-mirror.git")
 
-    for state in ("READY_FOR_REVIEW", "APPROVED", "MERGE_TRAIN", "REVIEW_INCOMPLETE"):
-        ledger = Ledger(tmp_path / f"otherstates-{state}.db")
-        repo_id = _seed_repo(tmp_path, ledger, "/o")
-        row = _seed_task(
-            ledger,
-            repo_id,
-            spec_id="SY-9000",
-            state="READY_FOR_REVIEW",
-            branch="saffron/SY-9000",
-        )
-        ledger.record_push(row, head)
-        ledger.set_task_state(row, state)
+    # In both `gh` modes, with a stale push and with none. With a `gh`, so
+    # does a stale `CHANGES_REQUESTED` row.
+    others = ("READY_FOR_REVIEW", "APPROVED", "MERGE_TRAIN", "REVIEW_INCOMPLETE")
+    for gh in (None, _gh_open):
+        states = others + ("CHANGES_REQUESTED",) if gh else others
+        for state in states:
+            for pushed, want in (
+                (head, (head, "saffron/SY-9000")),
+                (None, (None, None)),
+            ):
+                db = f"otherstates-{state}-{gh is None}-{pushed is None}.db"
+                resolved = _resolve_one_row(
+                    db, pushed, state, base_sha=base_sha, mirror=mirror, url=url, gh=gh
+                )
+                assert resolved == want, (state, gh, pushed)
 
-        stacked_on, branch = task._resolve_stacked_on(
-            ledger,
-            repo_id,
-            ["SY-9000"],
-            mirror=mirror,
-            url=url,
-            base_sha=base_sha,
-            spec_id="SY-2",
-            emit=lambda _: None,
-            gh=None,
-        )
-        assert (stacked_on, branch) == (head, "saffron/SY-9000"), state
-        ledger.close()
+    # Case 3f: a reconcile moves the older row to `MERGED`, so the rule reads
+    # the rows after it and the stale newest row refuses nothing.
+    repo, main_branch = _pushed_saffron_repo(
+        tmp_path, "repo-reconciled", [("p9000.md", _chain_spec_text("SY-9000"))]
+    )
+    head = _push_stacked_branch(repo, "saffron/SY-9000", main_branch)
+    _git(repo, "checkout", "-q", main_branch)
+    base_sha = _rev_parse(repo, main_branch)
+    mirror, url = _mirror_of(tmp_path, repo, name="reconciled-mirror.git")
+
+    ledger = Ledger(tmp_path / "reconciled.db")
+    repo_id = _seed_repo(tmp_path, ledger, "/o")
+    _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-9000",
+        spec_sha="older",
+        state="READY_FOR_REVIEW",
+        branch="saffron/SY-9000",
+        pr_url="https://example.invalid/pull/reconciled",
+    )
+    stale = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-9000",
+        spec_sha="newer",
+        state="READY_FOR_REVIEW",
+        branch="saffron/SY-9000",
+    )
+    ledger.record_push(stale, head)
+    ledger.set_task_state(stale, "REBUTTAL_UNJUDGED")
+
+    stacked_on, branch = task._resolve_stacked_on(
+        ledger,
+        repo_id,
+        ["SY-9000"],
+        mirror=mirror,
+        url=url,
+        base_sha=base_sha,
+        spec_id="SY-2",
+        emit=lambda _: None,
+        gh=_fake_gh_says_merged,
+    )
+    assert (stacked_on, branch) == (head, "saffron/SY-9000")
+    ledger.close()
 
     # Case 4: resumed and pushed again. The second push lands in the row's
     # later state, so it qualifies and stacks on that push.
@@ -2411,6 +2497,7 @@ def test_a_multi_parent_child_is_refused_for_any_open_parent_whose_latest_run_pu
 
         assert "depends_on TE-B is REBUTTAL_UNJUDGED" in printed
         assert "its latest run pushed nothing" in printed
+        assert "push was refused" not in printed
         assert "TE-A" not in printed.replace("depends_on TE-B", "", 1)
         ledger.close()
 
@@ -2782,6 +2869,53 @@ def test_a_multi_parent_child_is_refused_for_any_open_parent_whose_latest_run_pu
     )
     ledger.record_push(t71, head71)
     _seed_task(ledger, repo_id, spec_id="TE-73", state="REBUTTAL_UNJUDGED")
+    stacked_on, branch = task._resolve_stacked_on(
+        ledger,
+        repo_id,
+        ["TE-71", "TE-73"],
+        mirror=mirror,
+        url=url,
+        base_sha=base_sha,
+        spec_id="SY-1",
+        emit=lambda _: None,
+        gh=None,
+    )
+    assert (stacked_on, branch) == (head71, "saffron/TE-71")
+    ledger.close()
+
+    # TE-73's stale push is already in `base_sha`, merged by hand, so it is
+    # not open and refuses nothing.
+    repo, main_branch = _pushed_saffron_repo(
+        tmp_path, "repo-multi-handmerged", [("p71.md", _chain_spec_text("TE-71"))]
+    )
+    landed73 = _push_parent_branch(repo, "saffron/TE-73", content="shipped by hand\n")
+    _git(repo, "checkout", "-q", main_branch)
+    _git(repo, "merge", "-q", "--ff-only", "saffron/TE-73")
+    _git(repo, "push", "-q", "origin", main_branch)
+    head71 = _push_stacked_branch(repo, "saffron/TE-71", main_branch)
+    _git(repo, "checkout", "-q", main_branch)
+    base_sha = _rev_parse(repo, main_branch)
+    mirror, url = _mirror_of(tmp_path, repo, name="multi-handmerged-mirror.git")
+
+    ledger = Ledger(tmp_path / "multi-handmerged.db")
+    repo_id = _seed_repo(tmp_path, ledger, "/o")
+    t71 = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="TE-71",
+        state="READY_FOR_REVIEW",
+        branch="saffron/TE-71",
+    )
+    ledger.record_push(t71, head71)
+    stale73 = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="TE-73",
+        state="READY_FOR_REVIEW",
+        branch="saffron/TE-73",
+    )
+    ledger.record_push(stale73, landed73)
+    ledger.set_task_state(stale73, "REBUTTAL_UNJUDGED")
     stacked_on, branch = task._resolve_stacked_on(
         ledger,
         repo_id,
