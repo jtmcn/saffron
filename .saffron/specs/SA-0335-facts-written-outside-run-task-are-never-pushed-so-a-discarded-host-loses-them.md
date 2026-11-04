@@ -63,7 +63,7 @@ forbidden:
   - tests/test_record_refs.py
 budget_usd: 69
 max_attempts: 3
-max_turns: 320
+max_turns: 360
 risk: standard
 acceptance:
   - claim: >-
@@ -74,10 +74,12 @@ acceptance:
       `push` carried after its last append, a key `push` carried and then
       appended again, and a key whose ref an earlier record started and pushed.
       A second call pushes nothing. The witness counts pushes by the argv of
-      every `git` call `saffron.record.refs` makes. It first sees one push for
-      the key appended three times, with the origin lacking that key's head
-      until the exit push. Only then does it assert no push for the key `push`
-      carried, and none on the second call.
+      every `git` call `saffron.record.refs` makes, counted from the start of
+      each `push_unpushed` call. It first sees one push for the key appended
+      three times. The same reader that sees the origin lacking that key's
+      head before the exit push sees the head there after it. Only then does
+      it assert no push for the key `push` carried, and none on the second
+      call.
     witness: tests/test_record_routed.py::test_the_exit_push_carries_each_appended_key_once_to_its_own_origin
     wrong_versions:
       - Every append pushes at once, so a key appended three times is pushed three times. One form calls `RoutedRecord.push` from `append`. The other builds each `RefsRecord` with the origin as its `remote`, so `RefsRecord.append` pushes and `RoutedRecord.push` is never called.
@@ -114,8 +116,10 @@ acceptance:
       wraps. It drives a raise read as exit 2 on `finish`, which it wraps, and
       on `reconcile`, which it does not. It drives a `KeyboardInterrupt` that
       leaves `main` on `regate`, which it wraps, and on `queue`, which it does
-      not. In each the origin holds the command's fact, and the exit code is
-      the command's own.
+      not. In each the origin holds the command's fact. Each return, raise and
+      SIGTERM exits with the command's own code. In the two `KeyboardInterrupt`
+      cases the witness asserts the interrupt propagates out of `main`, as
+      `_guarding_sigterm` re-raises it (`saffron/cli.py:590-593`).
     witness: tests/test_cli.py::test_every_command_pushes_the_facts_it_appended_before_it_exits
     wrong_versions:
       - The exit push sits after the `try` rather than in its `finally`, so a command that returns from inside it pushes nothing.
@@ -130,8 +134,9 @@ acceptance:
       command that returns 0, and a `StaleWriter` in one that raises and exits
       2. Through one capture of stdout, the witness first sees each refused
       key's line carry its refusal's first line. Then no captured line begins
-      `hint:`, `error:`, `fatal:` or ` ! [rejected]`, and no line names a key
-      the same command pushed.
+      `hint:`, `error:`, `fatal:` or ` ! [rejected]`. The same command appends
+      to a third key whose exit push lands. The witness first sees that key's
+      head on its origin, then asserts no captured line names it.
     witness: tests/test_cli.py::test_a_refused_record_push_is_printed_with_its_key_and_leaves_the_exit_code
     wrong_versions:
       - A refusal raises out of `main`.
@@ -397,12 +402,21 @@ reaches it, and record each argv. Every push goes through `_git_bytes`
 `RefsRecord.append` starts it, so the spy sees both. A push to an up-to-date
 ref exits 0 and leaves the origin as it was, so only the spy can see a second
 push. Match a push by `"push" in argv` and a key as a substring of an item,
-never by position. Assert each positive count before any zero.
+never by position. Count from the start of each `push_unpushed` call, since
+`push` and the earlier record's own push also go through `subprocess.run`.
+Assert each positive count before any zero.
 
 **Building the two refusals.** A second writer diverges the origin. It is a
 `RefsRecord` with that origin as its `remote`, so its append to the ref pushes
 first. An origin that is not a repository is a path the test
 removes after seeding.
+
+**A host flake, not this spec's.** A push into a test's bare origin failed
+with `unable to write file` about once in 30 runs on the host. One of four
+failures overlapped another pytest session, and one overlapped none. For the
+other two, the timing was not recorded. It was not
+measured in the image, and no criterion's arrangement causes it, since each
+pushes in sequence in one process.
 
 **Tests this changes.** A prototype of this change on `SA-0334`'s source,
 with the fixture in step 4, failed no existing test that `SA-0334` leaves
