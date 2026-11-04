@@ -29,3 +29,7 @@ its finish reads it. Or `adopt` says the task will get no end review.
 ## Record
 
 - 2026-10-29: filed from the spec loop's run 50.
+- 2026-11-04: recurred in the spec loop's run 53. `SA-0330`'s cell ended
+  `EXHAUSTED`, and `adopt` moved it to `READY_FOR_REVIEW` on #1016. Then
+  `saffron finish 66` refused with "batch 66 holds no layer", and its $47.50
+  reserve went unspent.

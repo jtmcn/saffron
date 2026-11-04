@@ -2721,3 +2721,36 @@ seat finding the in-cell critic and the end review both passed.
   **Bucket 3**, adequacy. **Landed:** a review commit on #1010.
 - `SA-0331` (#1010): two comments dropped a state's backticks and a true
   clause. **Bucket 3**, conventions. **Landed:** a review commit on #1010.
+
+## 2026-11-04, spec loop run 53 (#1014, #1016)
+
+No in-cell critic read either pull request. `SA-0333` was built by hand, and
+`SA-0330`'s cell ended `EXHAUSTED` at the gates. So every finding below is one
+the critic did not raise.
+
+- `SA-0333` (#1014): every witness that declared test paths used the literal
+  `tests/**`, so a checkpoint keyed on that string passed. **Bucket 3**,
+  adequacy. **Landed:** a review commit on #1014.
+- `SA-0333` (#1014): a message and a prompt phrase named the test lines
+  loosely. **Bucket 3**, conventions. **Landed:** a review commit on #1014.
+- `SA-0333` (#1014): the spec's `touches` missed two fixtures that pin the
+  plan's sha. **Bucket 1, and the check does not exist.** Kept as b-8c6696.
+- `SA-0330` (#1016): two witnesses lacked the case their declared mutant
+  breaks. The `witness` gate caught both, and three repair turns did not find
+  them. **Bucket 1**, and REPAIR could not act on it. **Landed:** a review
+  commit on #1016. Kept as b-fa4a83.
+- `SA-0330` (#1016): the cell cited `SA-0332` at 20 sites, a different spec.
+  **Bucket 1, and the gate does not exist.** **Landed:** a review commit on
+  #1016. Kept as b-249808.
+- `SA-0330` (#1016): the module docstring listed a `run_task` refusal among the
+  scan-time ones. **Bucket 3**, conventions. **Landed:** a review commit on #1016.
+- `SA-0330` (#1016): five named claims had no case in their witness: reconcile
+  order, `CHANGES_REQUESTED`, landedness with a `gh`, a reason, and a push in
+  `base_sha`. **Bucket 3**, adequacy. **Landed:** a review commit on #1016.
+- `SA-0330` (#1016): the column witness read raw SQL, so two of its own wrong
+  versions passed it. **Bucket 3**, adequacy. **Landed:** a review commit on #1016.
+- `SA-0330` (#1016): four comments or docstrings said something false or
+  dropped a why, and 16 test comments named states without backticks. **Bucket
+  3**, conventions. **Landed:** a review commit on #1016.
+- `SA-0330` (#1016): `_parent_landed` copies `_resolve_multi_parent`'s landed
+  rule. **Bucket 3**, conventions. Kept as b-9bb8b7.
