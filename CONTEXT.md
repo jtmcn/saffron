@@ -880,7 +880,7 @@ _Avoid_: "artifact store", "the logs", "the run tree".
 **Event kind**: What tags one line of a task's event log: `PreflightEvent`,
 `CeilingsEvent`, `BaselineEvent`, `PhaseStartEvent`, `AttemptEvent`,
 `GateResultEvent`, `BudgetEvent`, `AgentEvent`, `TerminalEvent`,
-`TaskOutcomeEvent`, `TeardownEvent`.
+`TaskOutcomeEvent`, `TeardownEvent`, `RecordAppendEvent`.
 Each name is the `kind` written to `events.jsonl` with `Event` appended, because
 `Attempt` and `GateResult` already name other terms here.
 

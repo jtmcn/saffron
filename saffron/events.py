@@ -382,6 +382,18 @@ class Teardown:
     detail: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class RecordAppend:
+    """One fact the ledger appended to the task's record (record design §8).
+    It names the fact's kind and task key. It never carries the payload, so
+    a record entry and a log line stay two things."""
+
+    timestamp: float
+    spec_id: str
+    fact_kind: str
+    task_key: str
+
+
 Event = (
     Preflight
     | Ceilings
@@ -394,6 +406,7 @@ Event = (
     | Terminal
     | TaskOutcome
     | Teardown
+    | RecordAppend
 )
 
 _KINDS: dict[str, type[Event]] = {
@@ -410,6 +423,7 @@ _KINDS: dict[str, type[Event]] = {
         Terminal,
         TaskOutcome,
         Teardown,
+        RecordAppend,
     )
 }
 
@@ -974,6 +988,12 @@ def describe(event: Event) -> str:
         if event.step == "start":
             return "teardown"
         return f"teardown: {_clean(event.detail, _DETAIL_BOUND)}"
+
+    if isinstance(event, RecordAppend):
+        return (
+            f"record: appended {_clean(event.fact_kind, 160)} "
+            f"under {_clean(event.task_key, 160)}"
+        )
 
     raise TypeError(f"describe() has no branch for {type(event).__name__}")
 

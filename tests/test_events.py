@@ -36,6 +36,7 @@ from saffron.events import (
     Phase,
     PhaseStart,
     Preflight,
+    RecordAppend,
     TaskOutcome,
     Teardown,
     Terminal,
@@ -120,6 +121,9 @@ _ONE_OF_EACH = [
         session_id="sess-9",
     ),
     Teardown(timestamp=9.0, spec_id="SA-0029", step="container", ok=True),
+    RecordAppend(
+        timestamp=9.5, spec_id="SA-0029", fact_kind="task_state", task_key="k" * 32
+    ),
 ]
 
 
@@ -605,7 +609,7 @@ def test_the_wire_keys_are_pinned_for_every_kind(tmp_path, event):
 def test_the_union_and_the_wire_table_cannot_drift(tmp_path):
     """Both are hand-maintained lists of the same kinds."""
     assert set(typing.get_args(Event)) == set(_KINDS.values())
-    assert len(_KINDS) == 11
+    assert len(_KINDS) == 12
     for cls in _KINDS.values():
         assert "kind" not in {f.name for f in dc_fields(cls)}, "would clobber the tag"
 
@@ -1311,6 +1315,12 @@ _CASES: list[tuple[Event, str]] = [
             detail="exported 42 bytes to /x/patch.diff",
         ),
         "teardown: exported 42 bytes to /x/patch.diff",
+    ),
+    (
+        RecordAppend(
+            timestamp=1.0, spec_id="x", fact_kind="task_state", task_key="ab12"
+        ),
+        "record: appended task_state under ab12",
     ),
 ]
 

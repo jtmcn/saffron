@@ -370,9 +370,10 @@ the exact defect this design exists to close. One rule prevents it:
 > **Every record append also emits an event. No event implies an append.**
 
 The rule binds from the point a production caller constructs a `Ledger` with a
-record. A production caller now constructs one. That wiring does not build the
-rule, and the ledger's append still emits no event. Backlog item b-6677b6
-holds the rule.
+record. A production caller now constructs one, and each append its ledger
+makes emits a `RecordAppendEvent` on the task's own event log, naming the
+fact's kind and task key and never its payload (`SA-0336`). `saffron migrate`
+writes facts through no ledger, so its appends emit nothing.
 
 One direction only. The two can differ in prose, and can never differ on whether
 something happened. An append that failed to emit is a missing line in a log; an
