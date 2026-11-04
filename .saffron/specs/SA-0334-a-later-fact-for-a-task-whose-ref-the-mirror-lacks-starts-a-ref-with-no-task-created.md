@@ -3,9 +3,8 @@ id: SA-0334
 title: "A later fact for a task whose ref the mirror lacks starts a ref with no `task_created`, which the fold refuses"
 type: bug
 priority: 1
-estimated_lines: 39
+estimated_lines: 48
 estimate_measured: true
-depends_on: [SA-0330]
 touches:
   - saffron/record/refs.py
   - saffron/record/routed.py
@@ -48,7 +47,7 @@ forbidden:
   - tests/test_record_migrate.py
 budget_usd: 46
 max_attempts: 3
-max_turns: 210
+max_turns: 235
 risk: standard
 acceptance:
   - claim: >-
@@ -73,19 +72,22 @@ acceptance:
       raises `RecordError`, and neither the mirror nor the origin gains a ref.
       The witness drives a task that a ledger with no record created, whose
       next state write goes through a `RoutedRecord`. In the same mirror, a
-      ref the mirror holds and the origin lacks still takes its next fact,
-      with no fetch.
+      routed `create_task` and a later fact on the ref it starts each run no
+      `git fetch`. The witness records the argv of every `git` call
+      `saffron.record.refs` makes, and asserts that none of them is a fetch.
     witness: tests/test_record_routed.py::test_a_later_fact_neither_the_mirror_nor_the_origin_holds_writes_no_ref
     wrong_versions:
       - The fetch's failure is caught and the append writes the lone ref as it does today.
       - The refusal is a `ValueError` rather than a `RecordError`.
       - Every append fetches first, so a ref the mirror alone holds raises on its next fact.
       - The lone ref is written to the mirror and then refused, so the mirror keeps it.
+      - Every append but `task_created` tries the one-ref fetch and ignores its failure, then raises only if the ref is still absent, so a ref the mirror holds costs a fetch on each fact.
+      - A `task_created` fact tries the fetch too and ignores its failure, so every new task costs a fetch.
   - claim: >-
       `RefsRecord.append` raises `RecordError` for every kind in `KINDS` but
-      `task_created` on a ref its repo lacks. It does so with no origin to
-      fetch from, and with a `remote` that lacks the ref too, and neither repo
-      gains a ref. A `RefsRecord` built with a `remote` that holds the ref
+      `task_created` on a ref its repo lacks. For each kind the witness uses a
+      fresh bare repo, and refuses with a record that has no origin and with
+      one whose `remote` lacks the ref. Neither repo gains a ref. A `RefsRecord` built with a `remote` that holds the ref
       fetches it before it appends, for every one of those kinds, so each push
       is a fast-forward.
     witness: tests/test_record_refs.py::test_a_ref_is_never_started_by_a_fact_other_than_task_created
@@ -98,6 +100,7 @@ acceptance:
       - A record with no origin appends the lone ref as it does today, and only a record with one refuses.
       - A record built with a `remote` never fetches from it, so a later fact in a new repo raises.
       - Only a `task_state` fact fetches, so another kind raises where its remote holds the ref.
+      - A record with a `remote` ignores the fetch's failure and writes the lone ref, then pushes it.
   - claim: >-
       A `task_created` fact on a ref the repo lacks still starts that ref with
       no fetch from a `RefsRecord`'s `remote`. So a second writer's diverged
@@ -183,15 +186,18 @@ ref fetches that one ref from the origin first.
 - Pushing the keys a command appended before it exits (b-4eaaa4), and the
   event each append emits (b-6677b6). Both stack on this spec. Keep the fetch
   inside `RefsRecord` and `RoutedRecord.append`, so neither has to move it.
+- A strict append can stop a whole `reconcile` run from another checkout's mirror.
+  One task with no ref anywhere raises, and no row catches it. The
+  operator settled on strictness, with `saffron migrate` run before this spec's
+  pull request merges. b-4eaaa4's push at command exit narrows the gap.
 - `saffron migrate`'s up-front fetch (`saffron/record/migrate.py:614-616`). Its
   first fact for a task it holds no ref for is `task_created`.
 
 ## Notes for the agent
 
 **Mutants and new code.** The refusal and the fetch are new code inside two
-existing methods. Criterion 3 mutates the kind literal the refusal compares
-against. Write that literal once in `saffron/record/refs.py`, and no second
-time. Criteria 1 and 2 declare no mutant, so `witness` reports `skip` for
+existing methods. Write the kind literal the refusal compares against once in
+`saffron/record/refs.py`, and no second time. Criteria 1 and 2 declare no mutant, so `witness` reports `skip` for
 them. Criterion 4 names a test that exists. Do not run the wrong versions
 yourself.
 
@@ -204,6 +210,12 @@ raised message that the fact needs a ref that opens on `task_created`.
 The same probe found that the fetch left the mirror's other task refs as they
 were, and took none of the remote's others.
 
+**No credential prompt.** Run the fetch with `GIT_TERMINAL_PROMPT=0` in its
+environment. An https origin that wants a credential then fails at once rather
+than waiting on a terminal. `_git_bytes` passes the parent's environment today
+(`saffron/record/refs.py:39-43`). A failed fetch and a missing ref then both read
+as no ref, and nothing is written either way. No witness drives the prompt.
+
 **The witnesses.** Each runs against a real bare origin under `tmp_path`.
 `tests/test_record_routed.py` isolates git config with its autouse fixture,
 and a new test there inherits it. Simulate the pruned mirror with
@@ -214,14 +226,19 @@ holds, and one only the origin holds. Criterion 2's witness creates its task
 through a `Ledger` built with no record, closes it, and reopens the same file
 with a `RoutedRecord`. Criterion 3's witness loops over `KINDS` from
 `saffron.record.contract`, so a kind added later is driven too. It loops twice.
-The first loop refuses each kind. The second appends each kind into a new
-bare repo built with the remote, so each append finds its ref absent.
+For each kind, the first loop inits a fresh bare repo. It refuses that kind there
+with a no-remote record and with a record whose remote lacks the ref. The second
+loop appends each kind into its own fresh bare repo, built with a remote that
+holds the ref. So each append finds its ref absent. Criterion 2's witness spies
+by monkeypatching `subprocess.run` as `saffron.record.refs` reaches it, and
+records each argv.
 
 **What the witnesses leave undriven.** Criterion 1 writes `task_state` alone
 through the routed path. The routed code does not branch on kind, and
-criterion 3 drives every kind one layer down. Criterion 4 drives a record with
-a `remote`. No witness drives a routed `task_created` past an origin that holds
-its key, since a minted key is on no origin.
+criterion 3 drives every kind one layer down. Criterion 2's spy watches one
+routed `task_created` and one `task_state` on a present ref. No witness drives a
+routed `task_created` past an origin that holds its key, since a minted key is
+on no origin.
 
 **Every new test must fail with the source reverted.** Each new witness above
 does. At base the lone ref is written, the push is refused as stale, or no
@@ -244,6 +261,33 @@ existing tests, measured with `uv run pytest`. Each seeds its task through a
 test then writes a later fact through its own `RoutedRecord`, which now raises.
 Seed each as a night does, through a `Ledger` built with a `RoutedRecord`. Change
 no assertion.
+
+These 22 node ids failed on the prototype, and each passed once reseeded:
+
+- `tests/test_cli.py::test_reconcile_writes_what_gh_says_or_withholds_when_it_cannot_answer[gh-answers]`
+- `tests/test_cli.py::test_a_command_files_each_fact_it_writes_in_the_tasks_own_mirror`
+- `tests/test_cli.py::test_adopt_writes_the_url_gh_names_onto_the_specs_newest_task`
+- `tests/test_cli.py::test_a_merged_adopted_pull_request_admits_the_child_of_a_not_implemented_parent`
+- `tests/test_cli.py::test_adopt_moves_a_task_whose_regate_is_green_on_the_adopted_head_to_ready_for_review`
+- `tests/test_cli.py::test_adopt_keeps_the_state_of_a_task_whose_regate_is_red_declined_or_on_another_head`
+- `tests/test_cli.py::test_adopt_of_a_ready_task_records_the_url_and_runs_no_regate`
+- `tests/test_cli.py::test_adopt_whose_regate_raises_exits_two_with_the_pull_request_recorded`
+- `tests/test_cli.py::test_queue_reconciles_before_it_scans_so_the_refusal_gate_sees_current_state`
+- `tests/test_cli.py::test_queue_schedules_a_task_reconcile_moved_into_a_requeue_state`
+- `tests/test_cli.py::test_the_batch_scan_orphans_the_queue_row_of_each_task_it_stamps`
+- `tests/test_commit_review.py::test_review_reads_the_review_commits_with_both_end_review_lenses_and_charges_the_task`
+- `tests/test_commit_review.py::test_review_starts_a_restacked_branchs_range_at_the_packaged_commits_rebased_copy`
+- `tests/test_commit_review.py::test_review_reads_a_task_against_its_newest_recorded_spec_text`
+- `tests/test_commit_review.py::test_review_exits_one_when_either_lens_files_a_blocker`
+- `tests/test_commit_review.py::test_review_exits_two_when_a_lens_or_its_cell_breaks_and_charges_the_failed_turn`
+- `tests/test_commit_review.py::test_review_frames_the_spec_body_as_review_commits_over_a_packaged_head`
+- `tests/test_commit_review.py::test_review_stopped_by_sigterm_tears_its_cell_down_and_exits_143`
+- `tests/test_regate.py::test_regate_runs_the_tasks_gates_over_the_pull_requests_head_and_records_green`
+- `tests/test_regate.py::test_regate_prints_each_new_failure_records_the_count_and_exits_one`
+- `tests/test_regate.py::test_regate_prints_the_singular_for_exactly_one_new_failure`
+- `tests/test_regate.py::test_regate_passes_reverify_the_exemption_its_task_directory_holds`
+
+How each file is reseeded:
 
 - `tests/test_cli.py`: eleven tests that drive `reconcile`, `queue`, `adopt` and
   the batch scan. `_seed_repo` makes a bare mirror before any task exists
