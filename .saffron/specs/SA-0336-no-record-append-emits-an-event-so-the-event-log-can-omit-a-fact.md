@@ -72,6 +72,7 @@ acceptance:
       - The event is emitted before the record's append, so a refused append still emits.
       - "`record_findings` emits for all its facts after its loop, so a refusal of the second fact leaves the first with no event."
       - Only `_commit_and_append` emits, so a taken finding emits nothing.
+      - "`_append` catches `RecordError` and returns, so a refused write raises nothing."
   - claim: >-
       A `Ledger` built with an `events` sink and no record emits no event. The
       witness first drives every write method through a ledger built with a
@@ -200,14 +201,19 @@ alike, and runs once per fact.
   `RecordError`. The sink records each event beside the count of facts the
   record held when it ran. Assert that event *n* saw exactly *n* facts, so
   each event follows its own fact and precedes the next.
+- For each event *i*, assert `events[i].task_key == facts[i].task_key`. Assert
+  that `events[i].spec_id` equals the spec id the test passed when it created
+  that key's task. Compare each event, never a set or a membership check.
 - One helper drives each write method once, over two tasks under two spec
   ids in one batch. Create both tasks first, then write at least one fact on
   the first task. A spec id read from the newest task then names the wrong
-  task. `tests/test_ledger_fold_task.py::_drive_every_kind`
+  task. Assert that the recording record's order holds a first-task fact
+  after the second task's `task_created`. `tests/test_ledger_fold_task.py::_drive_every_kind`
   (`tests/test_ledger_fold_task.py:164`) drives twelve of the kinds.
   `tests/test_record_migrate.py::test_a_migrated_stack_folds_back_to_its_key_filed_rows`
   (`tests/test_record_migrate.py:1437`) drives the stack and review kinds.
   Assert that the record took exactly the twenty kinds above.
+- Criterion 2 runs each refused write inside `pytest.raises(RecordError)`.
 - Criterion 4 builds a bare mirror and a bare origin under `tmp_path`, and a
   repo row naming both. It replaces `saffron.cli._run_cell` and
   `saffron.cli.replay` with stubs that write through the `Ledger` they are
