@@ -245,7 +245,7 @@ that names it ends `EXHAUSTED`.
 rebuilt outcome for PACKAGE run alone drops the `revert` exemption, so a sound
 diff ends `MERGE_FAILED`.
 
-**Placed 2026-10-11**, from `SA-0276`'s spec review: **b-f603c9**. A
+**Placed 2026-10-11**, from `SA-0276`'s spec review: ~~**b-f603c9**~~. A
 `REBUTTAL_UNJUDGED` parent whose push was refused still admits its child, and
 the child is cut from `base_sha` without the parent's code. Then
 ~~**b-af24d1**~~: a rerun that ends `REBUTTAL_UNJUDGED` is pushed onto another row's
@@ -297,9 +297,13 @@ criterion probe names one edit against a claim of up to twelve sentences, so
 the seats still find the sentences it left.
 
 **Placed 2026-11-02**, from the spec loop's run 52: ~~**b-15db6e**~~, moved up
-from tier 2. Its spec comes before **b-f603c9**'s `SA-0330` runs again. The
+from tier 2. Its spec comes before ~~**b-f603c9**~~'s `SA-0330` runs again. The
 plan checkpoint priced that spec's tests, which `size` never counts, and
 refused it before any code.
+
+**Placed 2026-11-04**, from the spec loop's run 53: **b-fa4a83**. A survived
+mutant reaches REPAIR as its whole claim, so `SA-0330`'s repair turns never
+found the two cases it lacked, and the cell ended `EXHAUSTED`.
 
 ### Tier 2 — the morning after
 
@@ -625,6 +629,12 @@ batch's open layer.
 passes until a parent moves them, then stops the batch. A finish drafts a
 follow-up its own batch refuses, so nothing pushes.
 
+**Placed 2026-11-04**, from the spec loop's run 53: **b-bece8b**, **b-0ac661**,
+**b-f011f3** and **b-249808**. A by-hand merge of a `PLAN_REJECTED` parent left
+its child refused. A fix to the plan checkpoint could not pass it. A lost
+connection after a completed turn ended `NOT_IMPLEMENTED`. A cell cited the
+wrong spec at 20 sites.
+
 ### Tier 3 — real, not urgent
 
 **Placed 2026-10-31**, from `SA-0331`'s third read: **b-8693ef**. A refused PACKAGE
@@ -883,5 +893,9 @@ from writing #290's specs and reading their reviews, both to tier 2.
 loop's run 5 (stack #308): **154** to tier 1, **157**–**159** to tier 2, and
 **155** and **156** to tier 3. The 16 items with no `tier` field were
 placed 2026-09-20: **170** to tier 1, six to tier 2, and nine to tier 3.)
+
+**Placed 2026-11-04**, from the spec loop's run 53: **b-8c6696**, **b-a19ffd**
+and **b-9bb8b7**. A spec missed the fixtures that pin the plan's sha. §5.3's
+`plan.json` lacks the estimate fields. Two resolvers copy one landedness rule.
 
 ---

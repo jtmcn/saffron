@@ -149,12 +149,12 @@ CREATE TABLE IF NOT EXISTS tasks (
     removed     INTEGER,
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     record_key TEXT,
-    merged_head_sha TEXT
     -- The commit GitHub reported a merge at, written once by `reconcile`
     -- (backlog item 97). NULL until a merge for this row is observed.
-    -- Below the column, not above it like `tool`. Measured 2026-09-19: on
-    -- SQLite 3.51.0 a comment above the *last* column makes `DROP COLUMN`
-    -- rebuild an unterminated table ("incomplete input"); 3.53.1 tolerates it.
+    merged_head_sha TEXT,
+    pushed_in_state TEXT
+    -- Below the column, not above it: a comment above the *last* column
+    -- broke `DROP COLUMN` on SQLite 3.51.0, measured 2026-09-19. 3.53.1 is fine.
 );
 
 -- `phase` is the state the task was in when the turn started, and `n` numbers
@@ -421,6 +421,7 @@ class Ledger:
             "engine_commit",
             "merged_head_sha",
             "record_key",
+            "pushed_in_state",
         ):
             if column not in existing:
                 self._db.execute(f"ALTER TABLE tasks ADD COLUMN {column} TEXT")
@@ -703,7 +704,7 @@ class Ledger:
         self, task_id: int | None, column: str, value: Any, at: str
     ) -> None:
         """One task column, plus `updated_at`, set by a single-column fact.
-        `column` is never a caller's string, only one of four literals."""
+        `column` is never a caller's string, only one of three literals."""
         self._db.execute(
             f"UPDATE tasks SET {column} = ?, updated_at = ? WHERE task_id = ?",
             (value, at, task_id),
@@ -880,7 +881,7 @@ class Ledger:
             # own write is now the only one a returning task gets (b-dce9a4).
             self._db.execute(
                 "UPDATE tasks SET state = ?, branch = ?, pushed_sha = ?, pr_url = ?, "
-                "added = ?, removed = ?, updated_at = ?, "
+                "added = ?, removed = ?, pushed_in_state = ?, updated_at = ?, "
                 "spent_usd_est = (SELECT COALESCE(SUM(cost_usd_est), 0.0) "
                 "FROM attempts WHERE task_id = ?) WHERE task_id = ?",
                 (
@@ -890,6 +891,7 @@ class Ledger:
                     payload["pr_url"],
                     payload.get("added"),
                     payload.get("removed"),
+                    payload["state"],
                     at,
                     task_id,
                     task_id,
@@ -897,7 +899,13 @@ class Ledger:
             )
             return None
         if fact.kind == "task_push":
-            self._touch_task(task_id, "pushed_sha", payload["pushed_sha"], at)
+            # `pushed_in_state` reads the row's own `state` as it stood before this write, not `_touch_task`'s one-column shape.
+            # SQLite evaluates every `SET` expression against the pre-update row, so this is the state the push landed in (SA-0330).
+            self._db.execute(
+                "UPDATE tasks SET pushed_sha = ?, pushed_in_state = state, "
+                "updated_at = ? WHERE task_id = ?",
+                (payload["pushed_sha"], at, task_id),
+            )
             return None
         if fact.kind == "task_merged_head":
             self._touch_task(task_id, "merged_head_sha", payload["head"], at)
@@ -1155,9 +1163,9 @@ class Ledger:
         )
 
     def tasks_by_spec_id(self, repo_id: int, spec_id: str) -> list[sqlite3.Row]:
-        """Every task this repo has ever run for one `spec_id`, across every
-        `spec_sha` it has carried, oldest first — `branch` and `pushed_sha`
-        beside the columns `tasks_by_spec` already carries (`SA-0026`).
+        """Every task this repo ran for one `spec_id`, across every `spec_sha`,
+        oldest first, carrying `branch`, `pushed_sha` and `pushed_in_state`
+        beside what `tasks_by_spec` already carries (`SA-0026`, `SA-0330`).
 
         Spans every `spec_sha`, not just the one the spec has on disk today:
         the caller this serves (`task._resolve_stacked_on`) never reads the
@@ -1181,7 +1189,7 @@ class Ledger:
         return list(
             self._db.execute(
                 """SELECT t.task_id, t.spec_id, t.spec_sha, t.state,
-                          t.branch, t.pushed_sha
+                          t.branch, t.pushed_sha, t.pushed_in_state
                      FROM tasks t
                      JOIN runs r ON r.run_id = t.run_id
                     WHERE r.repo_id = ? AND t.spec_id = ?
@@ -1702,9 +1710,10 @@ class Ledger:
         `task_package` fact `set_task_package` builds, so a fold rebuilds
         it unchanged (b-a7e5f3). Carries the row's own `state`, `branch`,
         `pushed_sha`, `added` and `removed` rather than a caller's: this
-        write changes only the `pr_url`, and a `NOT_IMPLEMENTED` row has no
-        pushed branch to pass as `str`. `_adopt` records the head and any
-        state move as their own facts."""
+        write changes the `pr_url`, and sets `pushed_in_state` to the row's
+        `state` (`SA-0330`). A `NOT_IMPLEMENTED` row has no pushed branch to
+        pass as `str`. `_adopt` records the head and any state move as their
+        own facts."""
         row = self._db.execute(
             "SELECT state, branch, pushed_sha, added, removed FROM tasks WHERE task_id = ?",
             (task_id,),

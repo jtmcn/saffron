@@ -1,7 +1,8 @@
 """Record <- ledger. Reads a stored `Ledger`'s rows directly, read-only.
 Appends the facts a live run would have written. A fold then gives back §4's
 tasks, attempts, gate results, findings and six key-filed tables (backlog item
-170, §7).
+170, §7), except `pushed_in_state`. `task_push` precedes the last `task_state`,
+so a row that pushed in `REBUTTAL_UNJUDGED` reads as refused (`SA-0330`).
 
 § numbers here are `docs/superpowers/specs/2026-09-20-the-record-on-git-refs-design.md`'s,
 not `DESIGN.md`'s.

@@ -1,11 +1,12 @@
 ---
 id: b-f603c9
 title: A `REBUTTAL_UNJUDGED` parent whose push was refused still admits its child, which is then cut from `base_sha` without the parent's code
-status: open
-tier: 1
+status: done
+tier: null
+closed: 2026-11-04
 filed: 2026-10-11
 specs: [SA-0330]
-prs: []
+prs: [1016]
 commits: []
 cites: [§4.2, §5.6]
 related: [120]
@@ -57,3 +58,5 @@ latest run pushed. Otherwise its refusal names the parent's refused push.
 - 2026-11-02: `SA-0330` ran in the spec loop's run 52 and ended
   `PLAN_REJECTED` at $7.50. Its plan priced the tests that `size` leaves out
   (b-15db6e). The spec stays queued.
+- 2026-11-04: closed by #1016, `SA-0330`'s cell with three review commits.
+  The cell ended `EXHAUSTED` on two surviving mutants, and the operator chose to adopt it.

@@ -3009,6 +3009,195 @@ def test_a_stack_order_refuses_a_parent_it_cannot_stack_on_and_names_the_remedy(
             assert remedy not in reasons[name]
 
 
+def test_a_stack_order_refuses_a_child_whose_stack_base_pushed_nothing_in_its_latest_run(
+    tmp_path, ledger
+):
+    """`_stack_base_candidate` refuses a newest waiting row that is
+    `REBUTTAL_UNJUDGED` with no push after that state (`SA-0330`). This
+    runs ahead of its pushed-sha check, so a row with no push names its
+    latest run. A row resumed and pushed in the state qualifies. So does
+    every other waiting state carrying an older push, since the new rule
+    reads only `REBUTTAL_UNJUDGED`.
+    """
+    from saffron.scheduler import (
+        _MERGE_OR_RERUN,
+        StackBase,
+        _stack_base_candidate,
+    )
+
+    directory = _spec_dir(tmp_path)
+    repo_id = _repo(ledger)
+
+    _write_spec(
+        directory,
+        "dep-rebutstale.md",
+        id="TB-30",
+        touches=["tbs1.py"],
+        depends_on=["TB-REBUTSTALE"],
+    )
+    _write_spec(
+        directory,
+        "dep-rebutnopush.md",
+        id="TB-31",
+        touches=["tbs2.py"],
+        depends_on=["TB-REBUTNOPUSH"],
+    )
+    _write_spec(
+        directory,
+        "dep-rebutnewest.md",
+        id="TB-32",
+        touches=["tbs3.py"],
+        depends_on=["TB-REBUTNEWEST"],
+    )
+    _write_spec(
+        directory,
+        "dep-rebutresumed.md",
+        id="TB-33",
+        touches=["tbs4.py"],
+        depends_on=["TB-REBUTRESUMED"],
+    )
+
+    # TB-REBUTSTALE: carries a pull request, pushed while `READY_FOR_REVIEW`
+    # and never pushed again after moving to `REBUTTAL_UNJUDGED`.
+    stale = _task_at(
+        ledger, repo_id, spec_id="TB-REBUTSTALE", spec_sha="s", state="READY_FOR_REVIEW"
+    )
+    set_task_package(
+        ledger,
+        stale,
+        "READY_FOR_REVIEW",
+        branch="saffron/TB-REBUTSTALE",
+        pushed_sha="1" * 40,
+        pr_url="https://example.invalid/stale",
+    )
+    ledger.set_task_state(stale, "REBUTTAL_UNJUDGED")
+
+    # TB-REBUTNOPUSH: `REBUTTAL_UNJUDGED`, never pushed at all.
+    _task_at(
+        ledger,
+        repo_id,
+        spec_id="TB-REBUTNOPUSH",
+        spec_sha="s",
+        state="REBUTTAL_UNJUDGED",
+    )
+
+    # TB-REBUTNEWEST: an older, fully-qualifying row is hidden by a newer
+    # `REBUTTAL_UNJUDGED` row with a stale push. The newest row decides.
+    older = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TB-REBUTNEWEST",
+        spec_sha="older",
+        state="READY_FOR_REVIEW",
+    )
+    set_task_package(
+        ledger,
+        older,
+        "READY_FOR_REVIEW",
+        branch="saffron/TB-REBUTNEWEST",
+        pushed_sha="2" * 40,
+        pr_url="https://example.invalid/newest-older",
+    )
+    newer = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TB-REBUTNEWEST",
+        spec_sha="newer",
+        state="READY_FOR_REVIEW",
+    )
+    set_task_package(
+        ledger,
+        newer,
+        "READY_FOR_REVIEW",
+        branch="saffron/TB-REBUTNEWEST",
+        pushed_sha="3" * 40,
+        pr_url="https://example.invalid/newest-newer",
+    )
+    ledger.set_task_state(newer, "REBUTTAL_UNJUDGED")
+
+    # TB-REBUTRESUMED: pushed stale, resumed, and pushed again while
+    # `REBUTTAL_UNJUDGED`. The second push is current, so it qualifies.
+    resumed = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TB-REBUTRESUMED",
+        spec_sha="s",
+        state="READY_FOR_REVIEW",
+    )
+    set_task_package(
+        ledger,
+        resumed,
+        "READY_FOR_REVIEW",
+        branch="saffron/TB-REBUTRESUMED",
+        pushed_sha="4" * 40,
+        pr_url="https://example.invalid/resumed",
+    )
+    ledger.set_task_state(resumed, "REBUTTING")
+    ledger.set_task_state(resumed, "REBUTTAL_UNJUDGED")
+    ledger.record_push(resumed, "5" * 40)
+
+    candidates, refusals = build_queue(directory, repo_id, ledger, stack=True)
+    reasons = {r.path.name: r.reason for r in refusals}
+
+    assert set(reasons) == {
+        "dep-rebutstale.md",
+        "dep-rebutnopush.md",
+        "dep-rebutnewest.md",
+    }
+
+    assert "TB-REBUTSTALE" in reasons["dep-rebutstale.md"]
+    assert (
+        "TB-REBUTSTALE's newest waiting task is REBUTTAL_UNJUDGED and its "
+        "latest run pushed nothing" in reasons["dep-rebutstale.md"]
+    )
+    assert reasons["dep-rebutstale.md"].endswith(_MERGE_OR_RERUN)
+    assert "refused" not in reasons["dep-rebutstale.md"].lower()
+
+    assert "TB-REBUTNOPUSH" in reasons["dep-rebutnopush.md"]
+    assert (
+        "TB-REBUTNOPUSH's newest waiting task is REBUTTAL_UNJUDGED and its "
+        "latest run pushed nothing" in reasons["dep-rebutnopush.md"]
+    )
+    assert reasons["dep-rebutnopush.md"].endswith(_MERGE_OR_RERUN)
+    assert "records no pushed sha" not in reasons["dep-rebutnopush.md"]
+
+    assert "TB-REBUTNEWEST" in reasons["dep-rebutnewest.md"]
+    assert (
+        "TB-REBUTNEWEST's newest waiting task is REBUTTAL_UNJUDGED and its "
+        "latest run pushed nothing" in reasons["dep-rebutnewest.md"]
+    )
+    assert reasons["dep-rebutnewest.md"].endswith(_MERGE_OR_RERUN)
+
+    by_id = {c.spec.id: c for c in candidates}
+    assert set(by_id) == {"TB-33"}
+    assert by_id["TB-33"].stack_base == StackBase(
+        spec_id="TB-REBUTRESUMED", task_id=resumed, branch="saffron/TB-REBUTRESUMED"
+    )
+
+    # Every other waiting state still qualifies with a push recorded in an
+    # earlier state: the new rule reads only `REBUTTAL_UNJUDGED`.
+    for state in ("READY_FOR_REVIEW", "APPROVED", "MERGE_TRAIN", "REVIEW_INCOMPLETE"):
+        spec_id = f"TB-OLD-{state}"
+        other = _task_at(
+            ledger, repo_id, spec_id=spec_id, spec_sha="s", state="READY_FOR_REVIEW"
+        )
+        set_task_package(
+            ledger,
+            other,
+            "READY_FOR_REVIEW",
+            branch=f"saffron/{spec_id}",
+            pushed_sha="6" * 40,
+            pr_url=f"https://example.invalid/{spec_id}",
+        )
+        ledger.set_task_state(other, state)
+        result = _stack_base_candidate(
+            ledger, repo_id, spec_id, {other: f"https://example.invalid/{spec_id}"}
+        )
+        assert result == StackBase(
+            spec_id=spec_id, task_id=other, branch=f"saffron/{spec_id}"
+        ), state
+
+
 def test_a_stack_order_stacks_on_one_earlier_pull_request_and_refuses_a_spec_naming_another(
     tmp_path, ledger
 ):
