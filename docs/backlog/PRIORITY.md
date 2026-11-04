@@ -296,7 +296,7 @@ that added a refusal refused the specs queued below it, and its cell ended
 criterion probe names one edit against a claim of up to twelve sentences, so
 the seats still find the sentences it left.
 
-**Placed 2026-11-02**, from the spec loop's run 52: **b-15db6e**, moved up
+**Placed 2026-11-02**, from the spec loop's run 52: ~~**b-15db6e**~~, moved up
 from tier 2. Its spec comes before **b-f603c9**'s `SA-0330` runs again. The
 plan checkpoint priced that spec's tests, which `size` never counts, and
 refused it before any code.
@@ -328,7 +328,7 @@ name the old halts.
 **Placed 2026-10-13**, from writing `SA-0291`: **b-cd1566**, by hand after
 `SA-0291` merges. `CONTEXT.md` has no entry for a criterion's subject.
 
-**Placed 2026-10-11**, from the spec review of `SA-0274`: **b-15db6e**, moved
+**Placed 2026-10-11**, from the spec review of `SA-0274`: ~~**b-15db6e**~~, moved
 to tier 1 on 2026-11-02. The
 plan checkpoint still prices the tests that `size` leaves out, so an
 elevated plan can be refused when the gate would pass.
