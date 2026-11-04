@@ -10,6 +10,7 @@ touches:
   - saffron/ledger.py
   - saffron/cli.py
   - tests/test_ledger_events.py
+  - tests/test_regate.py
 forbidden:
   - DESIGN.md
   - CONTEXT.md
@@ -47,8 +48,10 @@ acceptance:
       kind, its task key and that task's spec id. It is emitted after the
       record took its fact and before the next fact is appended. The witness
       drives every write method that appends, and so all twenty fact kinds
-      the notes list. It writes two tasks under two spec ids, two findings in
-      one `record_findings` call, and a `spec_review` with one `spec_finding`.
+      the notes list. It writes two tasks under two spec ids, and a fact on
+      the first task after the second task's `task_created`. It writes two
+      findings in one `record_findings` call, and a `spec_review` with one
+      `spec_finding`.
     witness: tests/test_ledger_events.py::test_each_fact_the_ledger_appends_emits_one_event_naming_its_kind_and_key
     wrong_versions:
       - The event is emitted before the record's append, so the sink runs while the record lacks its fact.
@@ -83,7 +86,8 @@ acceptance:
       `RecordAppend` to the `events.jsonl` of that fact's own task, under the
       command's batch tree. The witness drives both places a batch tree comes
       from: the default under `--home`, through `cell`, and `--out`, through
-      `replay`. `cell` writes two tasks under two spec ids. Each task's log
+      `replay`. `cell` writes two tasks under two spec ids, and a fact on the
+      first task after the second task's `task_created`. Each task's log
       holds one event for each fact its ref on the mirror holds, in order, and
       no other task's events.
     witness: tests/test_ledger_events.py::test_main_writes_each_append_event_to_its_own_tasks_log
@@ -92,14 +96,15 @@ acceptance:
       - The sink writes every event to one log at the batch tree's root.
       - The sink writes under `--home`'s batch tree and ignores `--out`.
       - The event's spec id is read from the first task in the ledger, so the second task's events land in the first task's log.
+      - The event's spec id is read from the newest task, so the first task's later fact lands in the second task's log.
 ---
 
 ## Context
 
 Backlog item **b-6677b6**, under item 170 and §8 of
 `docs/superpowers/specs/2026-09-20-the-record-on-git-refs-design.md` (the
-record design below). Every line here was read at `5d1bf104`, with the
-changes of `SA-0334` and `SA-0335` applied. Lines in `saffron/cli.py`, which
+record design below). Every line here was read at `5d843e32`, with the
+changes of `SA-0334` and `SA-0335` applied, their tests included. Lines in `saffron/cli.py`, which
 `SA-0335` edits, are named by construct.
 
 **The rule.** The record design's §8 reads: "Every record append also emits
@@ -169,9 +174,15 @@ twenty-one call sites, and they append twenty kinds: `task_created`,
 - `saffron fold`, which builds its `Ledger` with no record.
 - A sink that raises. `EventLog.append` never does.
 - Printing each event to the terminal. The sink only writes the log.
-- The record design's own sentences, which the operator amends by hand.
+- The record design's own §8 paragraph, which this spec's own commit amends.
+- `saffron/watch.py`'s docstrings, which say `run_task` writes `Ceilings`
+  first in a task's log (`saffron/watch.py:26-28`, `:120-121`). A stack
+  batch's minted task now logs `RecordAppend` lines before its `Ceilings`.
 
 ## Notes for the agent
+
+**One stale word.** The module docstring says nineteen kinds fold back
+(`saffron/ledger.py:7`). The count above is twenty, so make it read twenty.
 
 **Mutants and new code.** Every criterion is new code: a new parameter, a new
 emit in `_append`, a new argument in `main`, and a new test module. No
@@ -187,10 +198,12 @@ alike, and runs once per fact.
 - A record for criteria 1 to 3: a class around `MemoryRecord` that keeps
   each fact it took, in order, and refuses a fact a predicate picks with a
   `RecordError`. The sink records each event beside the count of facts the
-  record held when it ran. Event *n* then pairs with fact *n*, and the count
-  shows the fact was taken first.
+  record held when it ran. Assert that event *n* saw exactly *n* facts, so
+  each event follows its own fact and precedes the next.
 - One helper drives each write method once, over two tasks under two spec
-  ids in one batch. `tests/test_ledger_fold_task.py::_drive_every_kind`
+  ids in one batch. Create both tasks first, then write at least one fact on
+  the first task. A spec id read from the newest task then names the wrong
+  task. `tests/test_ledger_fold_task.py::_drive_every_kind`
   (`tests/test_ledger_fold_task.py:164`) drives twelve of the kinds.
   `tests/test_record_migrate.py::test_a_migrated_stack_folds_back_to_its_key_filed_rows`
   (`tests/test_record_migrate.py:1437`) drives the stack and review kinds.
@@ -198,7 +211,9 @@ alike, and runs once per fact.
 - Criterion 4 builds a bare mirror and a bare origin under `tmp_path`, and a
   repo row naming both. It replaces `saffron.cli._run_cell` and
   `saffron.cli.replay` with stubs that write through the `Ledger` they are
-  handed. Read each task's ref with `RefsRecord(mirror).read(key)`, and its
+  handed. The `cell` stub creates both tasks before it writes a fact on
+  either, so the first task's fact follows the second's `task_created`.
+  Read each task's ref with `RefsRecord(mirror).read(key)`, and its
   log with `read_log`.
 
 **What the witnesses leave undriven.** Criterion 4 drives `cell` and
@@ -206,8 +221,16 @@ alike, and runs once per fact.
 tree, so no witness drives them one by one. Criterion 2 refuses a fact on
 each append path, not each write method.
 
+**The one existing test this changes.**
+`tests/test_regate.py::test_regate_passes_reverify_the_exemption_its_task_directory_holds`
+runs a re-gate, then creates its task directory (`tests/test_regate.py:496`).
+The re-gate's `task_regate` fact now writes `events.jsonl` into that same
+directory, so the second `task_dir.mkdir` raises `FileExistsError`. Give that
+`mkdir` `exist_ok=True`, and change no assertion.
+
 **Every new test must fail with the source reverted.** Each builds a `Ledger`
 with `events=`, or reads a log only the entry point's sink fills. A prototype
 of this change failed all four witnesses with `saffron/ledger.py` and
-`saffron/cli.py` reverted. Over the source diffs of `SA-0334` and `SA-0335`,
-it failed no existing test that those two leave passing.
+`saffron/cli.py` reverted. It ran the full suite stacked on both parents'
+prototypes, their tests included. The regate test above was the one test that
+failed with this change and passed without it.
