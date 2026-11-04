@@ -1,11 +1,13 @@
 ---
 id: b-15db6e
 title: The plan checkpoint prices the tests that `size` no longer counts
-status: open
-tier: 1
+status: done
+tier: null
+closed: 2026-11-03
+by_hand: true
 filed: 2026-10-11
 specs: [SA-0333]
-prs: []
+prs: [1014]
 commits: []
 cites: [§5.3, §5.4]
 related: [40]
@@ -44,3 +46,5 @@ its test lines apart and the checkpoint leaves them out.
   priced at 1920 tokens. Touching `saffron/ledger.py` made it `elevated`, where
   `size` blocks at 1300. Its spec's measured estimate outside tests was 120
   lines. Six named witnesses made up most of the rest.
+- 2026-11-03: closed by #1014, built by hand in the spec loop's run 53.
+  The unfixed checkpoint refused `SA-0333`'s own plan, so no cell could land it.
