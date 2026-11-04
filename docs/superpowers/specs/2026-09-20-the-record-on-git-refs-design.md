@@ -164,7 +164,9 @@ git push origin refs/saffron/tasks/<task_key>:refs/saffron/tasks/<task_key>
 
 A non-fast-forward refusal therefore means a stale writer. The wiring
 appends into each task's mirror with no remote, and `run_task` pushes the
-task's own ref once, as the task ends. A refused push is an event, and
+task's own ref once, as the task ends. A later fact for a ref the mirror lacks
+first fetches that one ref from the origin. Where neither holds it, the append
+raises rather than start a ref with no `task_created` (`SA-0334`). A refused push is an event, and
 nothing here re-reads or retries. The spike measured that refusal directly,
 and it is the primitive the cross-host budget needs later — the thing
 `batch.py:194` cannot provide across hosts, because a SQLite file is local to

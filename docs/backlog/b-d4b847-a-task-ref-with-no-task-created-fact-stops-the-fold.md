@@ -4,7 +4,7 @@ title: "A task ref that holds no `task_created` fact stops the fold, and the wir
 status: open
 tier: 1
 filed: 2026-10-12
-specs: []
+specs: [SA-0334]
 prs: []
 commits: []
 cites: []
