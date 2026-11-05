@@ -94,3 +94,36 @@ tests. Two checks would have caught all six before any review:
   positive case through it first.
 - Prototype a stacked spec on its parents' whole diffs, tests included, and run
   the full suite there.
+
+## `SA-0337`, from b-9c7001
+
+The operator ran `saffron migrate` for `SA-0334`'s cutover, and it refused 35
+of 371 tasks. Each was a ref a live cell started. The delegate filed
+b-9c7001, and the operator chose the arm: migrate tops up by kind. The writer
+drafted at no split, 80 source lines measured on a prototype. It added one
+member to the settled set aside, a null `batch_key` on a held fact. Without
+it `SA-0323`'s ref stays refused.
+
+| Round | Blockers | Concerns | Notes |
+|---|---|---|---|
+| First review | 1 | 5 | 3 |
+| Second review | 0 | 2 | 3 |
+
+- **Round 1's blocker** was the chain's known class again. The final state is
+  read from held or appended facts, and no ref reached the appended half.
+  Pre-flight check 1 as written did not catch it, though the brief named the
+  class.
+- **Round 1's concerns** were three arrangements the spec left open, and one
+  compare the witnesses let pass. A held fact that matched any ledger fact of
+  its kind survived every witness until the writer probed it.
+- **Round 2** found a refusal with no accepted twin at full count, and a ref
+  whose meaning turned on a `task_created` the claim did not name. A final pass
+  pinned both, with no third review.
+- **A probe runner fault.** Two mutants of one length written in one second
+  made pytest load stale bytecode. The writer's first kill lists were off.
+  `driver.py probe` already sets `PYTHONDONTWRITEBYTECODE`, and the writer's
+  own runner did not. The writer brief should name `driver.py probe`.
+
+**The check this spec asks for.** A refusal witness first shows the same ref
+shape accepted when correct, at the same count of facts. That is the negative
+clause rule, applied to shape as well as instrument.
