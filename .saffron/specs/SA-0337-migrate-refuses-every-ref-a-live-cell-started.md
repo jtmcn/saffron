@@ -81,8 +81,10 @@ acceptance:
       same ref holding every fact of that kind, the last one's payload
       carrying one extra key, is refused with today's reason and gains no
       fact. So is the ref holding every fact of that kind and one more. For
-      each kind with two facts, a ref holding only the second is refused. So
-      is a ref holding both, the first carrying one extra key. A ref holding
+      each kind with two facts, a ref holding both true facts is migrated and
+      gains the rest of every other compared kind, then the ledger's state.
+      A ref holding only the second is refused. So is a ref holding both, the
+      first carrying one extra key. A ref holding
       no `task_created` is refused the same way.
     witness: tests/test_record_migrate.py::test_each_compared_kind_that_disagrees_or_runs_past_the_ledger_is_refused
     wrong_versions:
@@ -92,6 +94,7 @@ acceptance:
       - A held fact agrees when it equals any ledger fact of its kind and the count fits.
       - A held payload agrees when it holds every key the ledger's does, extra keys and all.
       - A kind the record holds more of than the ledger is let through, with nothing appended for it.
+      - The compare is correct, but any ref holding two or more facts of one compared kind is refused.
       - A ref with no `task_created` is topped up, which leaves a ref the fold refuses.
       - The refusal reason is reworded.
   - claim: >-
@@ -103,7 +106,7 @@ acceptance:
       alone, on a ref that otherwise holds every fact the ledger owes, leaves
       the task migrated with nothing appended. A differing `summary` on a
       `gate_result`, a `schema_version` key on an `attempt_closed`, and a set
-      `batch_key` that differs each refuse the ref.
+      `batch_key` that differs on an `attempt_closed` each refuse the ref.
     witness: tests/test_record_migrate.py::test_the_top_up_sets_aside_only_its_named_differences
     wrong_versions:
       - The three gate result keys are set aside on every kind.
@@ -118,7 +121,7 @@ acceptance:
       refs. One
       ends on an `EXHAUSTED` `task_state` and then a package carrying the
       ledger's `READY_FOR_REVIEW`. One holds the ledger's `PLAN_REJECTED`. One
-      holds `task_created` alone for a `QUEUED` task. Each of those gains
+      holds a live `task_created` alone for a `QUEUED` task. Each of those gains
       nothing. The fourth ends on `READY_FOR_REVIEW` then a `task_push`, for
       an `EXHAUSTED` task whose ledger facts hold a `task_push`. It gains the
       `EXHAUSTED` `task_state` alone. The fifth ends on a `REVIEWING`
@@ -276,7 +279,11 @@ microseconds. A live `task_created` has a null `batch_key` and `policy_sha`,
 batch with `attach_run_to_batch` (`saffron/ledger.py:1302`). Every ledger
 fact then carries a set `batch_key`, so a null one on a held fact is a real
 difference. Criterion 1 puts it on the first held `attempt_opened`, and
-criterion 3 on the first `attempt_closed`. One source helper can serve all
+criterion 3 on the first `attempt_closed`. Criterion 3's differing set
+`batch_key` sits on that `attempt_closed` too. The helper's two gate results
+per attempt name different gates. For every kind with two facts, the
+second differs from the first in payload once normalised. So a ref holding
+only the second is a real disagreement. One source helper can serve all
 four new witnesses. Its merged task needs two facts of each compared kind
 where the ledger allows it. `task_merged_head`, `task_package`,
 `stack_layer` and `stack_finish` carry one each. A single-layer stack files
