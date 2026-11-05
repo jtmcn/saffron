@@ -1,0 +1,1 @@
+{"at": "2026-10-15T02:50:53+00:00", "batch_key": "31", "kind": "rebuttal", "payload": {"position": 3, "rebuttal": "fixed: Same gap and same fix as finding 1: the missing assertion on the history mount's readonly flag covers both the readonly=False edit and the no-readonly-kwarg edit.", "verdict": null}, "repo": "saffron", "task_key": "9837a4960eba96740203ba49c7911b69"}
