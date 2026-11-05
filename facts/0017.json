@@ -1,0 +1,1 @@
+{"at": "2026-09-18T02:03:56+00:00", "batch_key": null, "kind": "gate_result", "payload": {"duration_ms": 216, "earned_risk": null, "failures": [], "failures_at_head": 0, "gate": "terms", "n": 2, "phase": "IMPLEMENTING", "status": "pass", "summary": "0 failures in 205 files.", "tool": "saffron-prose 5bf44abf8822"}, "repo": "saffron", "task_key": "cfc4a51ac262b9aedd7083d755289b3b"}
