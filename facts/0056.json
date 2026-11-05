@@ -1,0 +1,1 @@
+{"at": "2026-10-01T00:00:16+00:00", "batch_key": null, "kind": "gate_result", "payload": {"duration_ms": null, "earned_risk": null, "failures": [], "failures_at_head": 0, "gate": "witness", "n": 2, "phase": "REBUTTING", "status": "skip", "summary": "the spec declares no mutants", "tool": null}, "repo": "saffron", "task_key": "1fe650eda6a3d34bd06eb27366cbd25b"}
