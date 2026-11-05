@@ -1,0 +1,1 @@
+{"at": "2026-09-27T05:52:12+00:00", "batch_key": null, "kind": "gate_result", "payload": {"duration_ms": null, "earned_risk": null, "failures": [], "failures_at_head": 0, "gate": "scope", "n": 1, "phase": "REPAIRING", "status": "pass", "summary": "9 changed files within touches", "tool": null}, "repo": "saffron", "task_key": "83cfec6f26960c15d6e2639c985b0adf"}
