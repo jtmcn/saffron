@@ -1,0 +1,1 @@
+{"at": "2026-09-27T21:51:57+00:00", "batch_key": null, "kind": "gate_result", "payload": {"duration_ms": 509, "earned_risk": null, "failures": [], "failures_at_head": 0, "gate": "structure", "n": 2, "phase": "REPAIRING", "status": "pass", "summary": "0 violations", "tool": "ast-grep 0.45.3"}, "repo": "saffron", "task_key": "1919557a246bc46138801a2fdac9b1be"}
