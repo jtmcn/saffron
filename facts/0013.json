@@ -1,0 +1,1 @@
+{"at": "2026-08-31T20:06:05+00:00", "batch_key": null, "kind": "gate_result", "payload": {"duration_ms": 320, "earned_risk": null, "failures": [], "failures_at_head": 0, "gate": "shacl", "n": 2, "phase": "IMPLEMENTING", "status": "pass", "summary": "0 violations across 2 graphs", "tool": null}, "repo": "saffron", "task_key": "188b4c025f4ff16aaf04944407baad90"}
