@@ -1,0 +1,1 @@
+{"at": "2026-09-22T21:36:50+00:00", "batch_key": null, "kind": "attempt_closed", "payload": {"cost_floor_usd_est": null, "cost_usd_est": 2.0849949000000003, "model": null, "n": 1, "num_turns": 0, "phase": "REPAIRING", "session_id": null, "subtype": "error", "terminal_reason": null}, "repo": "saffron", "task_key": "e918079d01373721bde66882e017e962"}
