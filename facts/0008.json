@@ -1,0 +1,1 @@
+{"at": "2026-09-17T17:33:49+00:00", "batch_key": null, "kind": "gate_result", "payload": {"duration_ms": null, "earned_risk": null, "failures": [], "failures_at_head": 0, "gate": "size", "n": 2, "phase": "IMPLEMENTING", "status": "pass", "summary": "123 changed lines within the bug ceiling of 300", "tool": null}, "repo": "saffron", "task_key": "25d0af86da5b098f1aa9ff3d052a76f0"}
