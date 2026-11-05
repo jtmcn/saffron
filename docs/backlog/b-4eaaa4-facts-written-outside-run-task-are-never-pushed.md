@@ -4,7 +4,7 @@ title: "Facts written outside `run_task` reach the mirror and are never pushed, 
 status: open
 tier: 1
 filed: 2026-10-12
-specs: []
+specs: [SA-0335]
 prs: []
 commits: []
 cites: []

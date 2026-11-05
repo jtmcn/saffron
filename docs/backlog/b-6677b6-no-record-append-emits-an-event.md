@@ -4,7 +4,7 @@ title: "No record append emits an event, though the record design binds that rul
 status: open
 tier: 1
 filed: 2026-10-12
-specs: []
+specs: [SA-0336]
 prs: []
 commits: []
 cites: []

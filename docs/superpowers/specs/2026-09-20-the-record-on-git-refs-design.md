@@ -163,9 +163,13 @@ git push origin refs/saffron/tasks/<task_key>:refs/saffron/tasks/<task_key>
 ```
 
 A non-fast-forward refusal therefore means a stale writer. The wiring
-appends into each task's mirror with no remote, and `run_task` pushes the
-task's own ref once, as the task ends. A refused push is an event, and
-nothing here re-reads or retries. The spike measured that refusal directly,
+appends into each task's mirror with no remote. `run_task` pushes the task's
+own ref as the task ends. Before a command returns or raises, it pushes each
+ref it appended to since that ref's last push (`SA-0335`). A later fact for a ref the
+mirror lacks first fetches that one ref from the origin. Where neither holds
+it, the append raises rather than start a ref with no `task_created`
+(`SA-0334`). A refused push in `run_task` is an event, and one at a command's
+exit is a printed line. Nothing here re-reads or retries. The spike measured that refusal directly,
 and it is the primitive the cross-host budget needs later — the thing
 `batch.py:194` cannot provide across hosts, because a SQLite file is local to
 one.
@@ -366,9 +370,10 @@ the exact defect this design exists to close. One rule prevents it:
 > **Every record append also emits an event. No event implies an append.**
 
 The rule binds from the point a production caller constructs a `Ledger` with a
-record. A production caller now constructs one. That wiring does not build the
-rule, and the ledger's append still emits no event. Backlog item b-6677b6
-holds the rule.
+record. A production caller now constructs one, and each append its ledger
+makes emits a `RecordAppendEvent` on the task's own event log, naming the
+fact's kind and task key and never its payload (`SA-0336`). `saffron migrate`
+writes facts through no ledger, so its appends emit nothing.
 
 One direction only. The two can differ in prose, and can never differ on whether
 something happened. An append that failed to emit is a missing line in a log; an

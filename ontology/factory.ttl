@@ -196,7 +196,7 @@ factory:BaselineEvent a factory:EventKind . factory:PhaseStartEvent a factory:Ev
 factory:AttemptEvent a factory:EventKind . factory:GateResultEvent a factory:EventKind .
 factory:BudgetEvent a factory:EventKind . factory:AgentEvent a factory:EventKind .
 factory:TerminalEvent a factory:EventKind . factory:TaskOutcomeEvent a factory:EventKind .
-factory:TeardownEvent a factory:EventKind .
+factory:TeardownEvent a factory:EventKind . factory:RecordAppendEvent a factory:EventKind .
 
 ## The record's whole alphabet (`saffron/record/contract.py`), including kinds nothing appends yet.
 factory:FactKind a owl:Class ; rdfs:label "fact kind" .
