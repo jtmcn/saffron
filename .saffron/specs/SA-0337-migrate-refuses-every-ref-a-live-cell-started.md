@@ -52,15 +52,18 @@ acceptance:
       a merged task with every one of the thirteen compared kinds. Its ref
       holds a live cell's `task_created`, which differs from the ledger's in
       `at`, `batch_key`, `policy_sha`, `risk` and one extra key. The ref also
-      holds `task_engine`, `task_policy` and `spec_finding`, two `task_state`
-      facts and a `task_push`, then the first facts of each compared kind. The
+      holds `task_engine`, `task_policy` and `spec_finding`, each with a
+      payload the fold can place. It holds two `task_state` facts and a
+      `task_push`. It holds the first fact of each compared kind it holds, and
+      both gate results of the first attempt. The
       task counts as migrated and keeps every held fact. The rest of each
       compared kind follows in `_facts_for_task`'s order, then the ledger's
       `MERGED` `task_state`, and nothing else. A fold of that ref gives
       `MERGED`, the merged head, `READY_FOR_REVIEW` as the pushed state, and
       every attempt, finding, end review, qualification, stack layer and stack
-      finish row. A second ref, an exact prefix cut short before its
-      `task_push`, is completed as today, `task_push` included.
+      finish row. A second ref, the pushed `EXHAUSTED` task's exact prefix
+      cut short before its `task_push`, is completed as today, `task_push`
+      included.
     witness: tests/test_record_migrate.py::test_a_ref_a_live_cell_started_is_topped_up_and_folds_to_the_ledgers_rows
     wrong_versions:
       - Every ref with facts takes the top-up, so a ref cut short before its `task_push` never gains it.
@@ -77,12 +80,16 @@ acceptance:
       gains the rest of every compared kind, then the ledger's state. The
       same ref holding every fact of that kind, the last one's payload
       carrying one extra key, is refused with today's reason and gains no
-      fact. So is the ref holding every fact of that kind and one more. A
-      ref holding no `task_created` is refused the same way.
+      fact. So is the ref holding every fact of that kind and one more. For
+      each kind with two facts, a ref holding only the second is refused. So
+      is a ref holding both, the first carrying one extra key. A ref holding
+      no `task_created` is refused the same way.
     witness: tests/test_record_migrate.py::test_each_compared_kind_that_disagrees_or_runs_past_the_ledger_is_refused
     wrong_versions:
       - Facts are compared by count alone, so a held fact with a different payload agrees.
       - Only the first held fact of each kind is compared.
+      - Only the last held fact of each kind is compared.
+      - A held fact agrees when it equals any ledger fact of its kind and the count fits.
       - A held payload agrees when it holds every key the ledger's does, extra keys and all.
       - A kind the record holds more of than the ledger is let through, with nothing appended for it.
       - A ref with no `task_created` is topped up, which leaves a ref the fold refuses.
@@ -106,20 +113,24 @@ acceptance:
   - claim: >-
       A topped-up ref gains the ledger's `task_state` last, and only where
       the record's own state differs from the ledger's. The record's state
-      is the `state` of its last `task_state` or `task_package` fact, and
-      `QUEUED` where it holds neither. The witness drives four refs. One
+      is the `state` of its last `task_state` or `task_package` fact, held or
+      appended, and `QUEUED` where it holds neither. The witness drives five
+      refs. One
       ends on an `EXHAUSTED` `task_state` and then a package carrying the
       ledger's `READY_FOR_REVIEW`. One holds the ledger's `PLAN_REJECTED`. One
       holds `task_created` alone for a `QUEUED` task. Each of those gains
       nothing. The fourth ends on `READY_FOR_REVIEW` then a `task_push`, for
       an `EXHAUSTED` task whose ledger facts hold a `task_push`. It gains the
-      `EXHAUSTED` `task_state` alone.
+      `EXHAUSTED` `task_state` alone. The fifth ends on a `REVIEWING`
+      `task_state` with no package, for a `READY_FOR_REVIEW` task. It gains
+      the ledger's package alone, and no `task_state`.
     witness: tests/test_record_migrate.py::test_a_topped_up_ref_ends_on_the_ledgers_state_only_where_its_own_differs
     wrong_versions:
       - Only the last `task_state` fact is read, so the packaged ref gains a second `READY_FOR_REVIEW`.
       - The ledger's state is always appended.
       - A ref holding no state fact reads as no state rather than `QUEUED`, so it gains a `QUEUED` `task_state`.
       - The ledger's `task_push` is appended with its `task_state`.
+      - The state is read from held facts only, so the ref that gains a package gains a `READY_FOR_REVIEW` `task_state` too.
   - claim: >-
       A ref holding no facts is migrated exactly as today, every fact
       `_facts_for_task` writes included, and folds back to the rows its task
@@ -232,6 +243,14 @@ fold holds the record's pushed state.
   of the 35 live refs is owed one, measured.
 - `pushed_in_state`. The fold of a topped-up ref keeps the record's own,
   where the ledger often holds null.
+- A stale spend. A ref that gains `attempt_closed` facts but no
+  `task_state` or `task_package` folds to the old `spent_usd_est`. The fold
+  rolls spend up on those two kinds alone (`saffron/ledger.py:871-899`).
+  Measured on the 35 live refs, no ref gains `attempt_closed` without one.
+- A top-up the fold rejects. A held `gate_result`, `attempt_closed` or
+  `rebuttal` whose `attempt_opened` or `finding` is appended after it counts
+  as migrated. The fold cannot place it. Measured on the 35 live refs, no
+  held fact has its owner appended.
 - `saffron/cli.py`, `saffron fold` and the record backends.
 
 ## Notes for the agent
@@ -253,18 +272,30 @@ then runs `migrate` into a fresh `MemoryRecord` for the list it owes. Build
 each live ref from that list, with `dataclasses.replace`. A live `at` keeps
 microseconds. A live `task_created` has a null `batch_key` and `policy_sha`,
 `risk` set to `standard`, and an extra key. Set the ledger row's
-`policy_sha`, so the live null differs from it. One source helper can serve all
+`policy_sha`, so the live null differs from it. Attach the helper's run to a
+batch with `attach_run_to_batch` (`saffron/ledger.py:1302`). Every ledger
+fact then carries a set `batch_key`, so a null one on a held fact is a real
+difference. Criterion 1 puts it on the first held `attempt_opened`, and
+criterion 3 on the first `attempt_closed`. One source helper can serve all
 four new witnesses. Its merged task needs two facts of each compared kind
 where the ledger allows it. `task_merged_head`, `task_package`,
 `stack_layer` and `stack_finish` carry one each. A single-layer stack files
 its `stack_finish` under that layer's task (`saffron/ledger.py:1807-1825`).
 Criterion 1's live ref holds no `task_merged_head`, `stack_layer` or
 `stack_finish`, and the first of every other compared kind. It also holds
-the first two gate results and the package. Criterion 3 reads the sixteen
+the first two gate results, which both belong to the first attempt, and
+the package. Its `task_engine`, `task_policy` and `spec_finding` carry
+payloads the fold can place. A `spec_finding` needs `n`, `position`,
+`severity`, `fixes`, `claim`, `criterion`, `file` and `line`
+(`saffron/ledger.py:1004-1020`). Criterion 1's second ref is the helper's
+pushed `EXHAUSTED` task. A task with a `pr_url` writes a package and no
+`task_push` (`saffron/record/migrate.py:452-471`). Criterion 3 reads the sixteen
 as the kinds `migrate` wrote for the helper's two tasks, and loops over
 `KINDS` from `saffron.record.contract` minus those. Its extra fact carries
 an empty payload. Criterion 4's `EXHAUSTED` task gets `record_push` before
 its state, so the ledger's list holds a `task_push` the witness can see.
+Its fifth task gets `set_task_package` with `READY_FOR_REVIEW`. Assert the
+ledger's list holds that package before asserting the ref gains it.
 
 **Every new test must fail with the source reverted.** Each new witness
 does. At base the whole-list compare refuses every live ref.
@@ -274,10 +305,14 @@ does. At base the whole-list compare refuses every live ref.
 
 - `test_a_rerun_completes_a_migration_cut_short_and_refuses_a_record_that_disagrees`.
   Key 4 corrupts `task_created`'s `spec_sha`, which the top-up never
-  compares. Corrupt key 4's second fact instead, the `attempt_opened`. Key 6
+  compares. Corrupt key 4's second fact instead, the `attempt_opened`, and
+  follow it with the true third. The suite then still pins an earlier fact
+  that disagrees before a later one that agrees. Key 6
   differs in `at` alone. It is now migrated and gains nothing, so move it
   to the migrated list. The `batch_key` check at its end sets `batch_key` on
   `task_created`. Set it on the second fact instead, behind the true first.
+  Its comment says facts compare whole, which is no longer true. Say that a
+  set `batch_key` that differs disagrees.
 - `test_migrate_writes_each_repos_tasks_to_its_own_origin_and_refuses_a_disagreeing_one`.
   The bad task's ref holds a lone `task_created`, which now agrees. Have the
   other writer and the seeded record also hold an `attempt_opened` for it.
@@ -286,5 +321,7 @@ does. At base the whole-list compare refuses every live ref.
 Change no other assertion in either test.
 
 **The docstrings.** The module docstring describes the whole-list compare
-(`saffron/record/migrate.py:1-24`). Add a sentence for the top-up. A new
-docstring stays within ten lines.
+(`saffron/record/migrate.py:1-24`). Add a sentence for the top-up. The
+`Migration` docstring says a migrated key holds the full fact list
+(`saffron/record/migrate.py:47-51`). A topped-up key does not, so correct it.
+A new docstring stays within ten lines.
