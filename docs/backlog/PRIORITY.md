@@ -305,6 +305,11 @@ refused it before any code.
 mutant reaches REPAIR as its whole claim, so `SA-0330`'s repair turns never
 found the two cases it lacked, and the cell ended `EXHAUSTED`.
 
+**Placed 2026-11-04**, from `saffron migrate`'s live run: **b-9c7001**, beside
+**b-4eaaa4**. `migrate` refuses every ref a live cell started, so the facts
+written after each task's push live only in the ledger. A fold reads 31
+merged tasks as unmerged.
+
 ### Tier 2 — the morning after
 
 **Placed 2026-10-15**, from the spec loop's run 40: ~~**b-d31930**~~, then

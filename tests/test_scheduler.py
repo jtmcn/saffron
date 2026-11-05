@@ -3337,7 +3337,7 @@ def test_a_stack_order_stacks_on_one_earlier_pull_request_and_refuses_a_spec_nam
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-11-04 for SA-0336, refused on its parent SA-0335.
+    """Re-measured 2026-11-04 for SA-0337, a candidate with no parent.
     Re-measured 2026-10-14 for SA-0293, refused on its parents. The candidates and
     the refusals are the two lists below, in scan order.
 
@@ -4041,6 +4041,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0334",
         "SA-0335",
         "SA-0336",
+        "SA-0337",
     }
     directory = tmp_path / "specs"
     _arrange_measured_queue(REAL_SPECS, directory, measured)
@@ -4064,6 +4065,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0329",
         "SA-0333",
         "SA-0334",
+        "SA-0337",
         "SA-0200",
         "SA-0201",
         "SA-0208",
