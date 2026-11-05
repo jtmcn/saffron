@@ -1,0 +1,1 @@
+{"at": "2026-10-01T21:00:16+00:00", "batch_key": null, "kind": "gate_result", "payload": {"duration_ms": 103, "earned_risk": null, "failures": [], "failures_at_head": 0, "gate": "lint", "n": 2, "phase": "REBUTTING", "status": "pass", "summary": "0 violations", "tool": "ruff 0.16.3"}, "repo": "saffron", "task_key": "3c507b9597a5d9138ea7a55e97d3610c"}
