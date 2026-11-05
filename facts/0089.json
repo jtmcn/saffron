@@ -1,0 +1,1 @@
+{"at": "2026-10-19T21:43:37+00:00", "batch_key": "38", "kind": "spec_review", "payload": {"block": "{\n  \"findings\": []\n}", "block_sha256": "0c54b7e283b24ef7991b013aeebef8a4d81bb93b6f4be6115a601c74ba708123", "error": null, "n": 1, "route": "run"}, "repo": "saffron", "task_key": "05be669a4f2217b9e56b5e9efe152eea"}
