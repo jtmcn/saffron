@@ -1,0 +1,1 @@
+{"at": "2026-09-27T21:43:09+00:00", "batch_key": null, "kind": "gate_result", "payload": {"duration_ms": null, "earned_risk": null, "failures": [], "failures_at_head": 0, "gate": "census", "n": 1, "phase": "REPAIRING", "status": "pass", "summary": "2933 tests collected, none of 2929 removed", "tool": null}, "repo": "saffron", "task_key": "1919557a246bc46138801a2fdac9b1be"}
