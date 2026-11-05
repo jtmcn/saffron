@@ -19,18 +19,18 @@ from saffron.record.refs import RefsRecord
 class RoutedRecord:
     def __init__(self, locate: Callable[[str], tuple[Path, str]]) -> None:
         self._locate = locate
-        # Keyed on the mirror path, never on the repo name: two repo rows
-        # sharing a name must never share a `RefsRecord`.
-        self._records: dict[Path, RefsRecord] = {}
+        # Keyed on mirror and origin, never on the repo name. Two repo rows
+        # can share a name or a mirror, and each fetches from its own origin.
+        self._records: dict[tuple[Path, str], RefsRecord] = {}
 
     def _record_for(self, task_key: str) -> tuple[RefsRecord, str]:
         mirror, origin = self._locate(task_key)
-        record = self._records.get(mirror)
+        record = self._records.get((mirror, origin))
         if record is None:
-            # `push()` below is still the only write to `origin`. A later
-            # fact on a ref this mirror lacks now reads `origin` first.
+            # `push()` below is the only write to `origin`. A later fact on a
+            # ref this mirror lacks reads `origin` first.
             record = RefsRecord(mirror, origin=origin)
-            self._records[mirror] = record
+            self._records[(mirror, origin)] = record
         return record, origin
 
     def append(self, task_key: str, fact: Fact) -> None:

@@ -330,7 +330,7 @@ def test_a_diverged_push_is_refused_not_forced(tmp_path, repo):
 
 def test_a_ref_is_never_started_by_a_fact_other_than_task_created(tmp_path):
     # Every kind but `task_created` must refuse to start a ref this repo
-    # lacks, with no origin and with an origin that lacks the ref too.
+    # lacks, with no remote and with a remote that lacks the ref too.
     for kind in KINDS:
         if kind == "task_created":
             continue

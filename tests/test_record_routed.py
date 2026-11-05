@@ -251,10 +251,56 @@ def test_a_later_fact_neither_the_mirror_nor_the_origin_holds_writes_no_ref(
         run_id, spec_id="SY-2", spec_sha="s" * 40, branch="y"
     )
     assert not any("fetch" in call for call in calls)
+    assert not any(str(origin) in item for call in calls for item in call)
 
     calls.clear()
     routed.set_task_state(new_task_id, "DIAGNOSING")
     assert not any("fetch" in call for call in calls)
+    assert not any(str(origin) in item for call in calls for item in call)
+
+
+def test_two_origins_sharing_a_mirror_each_fetch_from_their_own(tmp_path):
+    """Two repo rows share one mirror and differ in origin. The second row's
+    later fact recovers its ref from its own origin. This holds after the
+    same command touched the first row's task."""
+    from saffron.record.routed import RoutedRecord
+
+    a = _bare(tmp_path / "a.git")
+    b = _bare(tmp_path / "b.git")
+    mirror = _bare(tmp_path / "mirror.git")
+    seed = Ledger(tmp_path / "l.db", record=RoutedRecord(lambda k: seed.record_home(k)))
+    repo_a = seed.upsert_repo("repo", str(a), str(mirror), None)
+    repo_b = seed.upsert_repo("repo", str(b), str(mirror), None)
+    task_a = seed.create_task(
+        seed.create_run(repo_a, base_sha="a" * 40),
+        spec_id="SY-1",
+        spec_sha="s" * 40,
+        branch="x",
+    )
+    task_b = seed.create_task(
+        seed.create_run(repo_b, base_sha="a" * 40),
+        spec_id="SY-2",
+        spec_sha="s" * 40,
+        branch="y",
+    )
+    seed.push_record(task_a)
+    seed.push_record(task_b)
+    key_b = seed.record_key(task_b)
+    assert key_b is not None
+    subprocess.run(
+        ["git", "-C", str(mirror), "update-ref", "-d", f"{TASKS}/{key_b}"],
+        check=True,
+    )
+    assert f"{TASKS}/{key_b}" in _refs(b)
+
+    command = Ledger(
+        tmp_path / "l.db", record=RoutedRecord(lambda k: command.record_home(k))
+    )
+    command.set_task_state(task_a, "DIAGNOSING")
+    command.set_task_state(task_b, "DIAGNOSING")
+
+    kinds = [fact.kind for fact in RefsRecord(mirror).read(key_b)]
+    assert kinds == ["task_created", "task_state"]
 
 
 def test_a_ledger_without_a_routed_record_pushes_nothing(tmp_path):

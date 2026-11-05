@@ -33,7 +33,7 @@ class RefsRecord:
     ) -> None:
         self._repo = repo
         self._remote = remote
-        # Only `_adopt` reads this. The auto-push in `append` stays keyed
+        # Only `_recover` reads this. The auto-push in `append` stays keyed
         # on `remote` alone, so a `RoutedRecord`'s appends stay local.
         self._origin = origin
 
@@ -69,14 +69,14 @@ class RefsRecord:
         """Append one fact onto `task_key`'s own ref.
 
         Only `task_created` starts a ref this repo lacks. Any other kind
-        first calls `_adopt`, recovering the ref from `remote` or `origin`
+        first calls `_recover`, recovering the ref from `remote` or `origin`
         before the append proceeds.
         """
         check_filed_under(task_key, fact)
         ref = f"{TASKS}/{task_key}"
         parent = self._resolve(ref)
         if parent is None and fact.kind != "task_created":
-            parent = self._adopt(ref)
+            parent = self._recover(ref)
         blobs = self._blobs(task_key)
         seq = len(blobs) + 1
         blob = self._git("hash-object", "-w", "--stdin", stdin=fact.to_json()).strip()
@@ -94,7 +94,7 @@ class RefsRecord:
         if remote:
             self._push(remote, ref)
 
-    def _adopt(self, ref: str) -> str:
+    def _recover(self, ref: str) -> str:
         """The parent a later fact needs when this repo lacks `ref`.
 
         Fetches `ref` once, from `remote` or `origin`, whichever is set.
