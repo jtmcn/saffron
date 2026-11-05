@@ -1,0 +1,1 @@
+{"at": "2026-10-07T07:20:36+00:00", "batch_key": "14", "kind": "stack_layer", "payload": {"generation": 0, "position": 2, "predecessor_head": "fedd4b94d352a3b4acfd6f6a19e688afa3adc861", "predecessor_key": "4d950c0760e8601ef091ea597d274932", "spec_id": "SA-0207"}, "repo": "saffron", "task_key": "cc701951ce0c92b3daeb493783be105a"}
