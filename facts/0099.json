@@ -1,0 +1,1 @@
+{"at": "2026-10-18T08:05:31+00:00", "batch_key": "37", "kind": "task_package", "payload": {"added": null, "branch": "saffron/SA-0277", "pr_url": "", "pushed_sha": "", "removed": null, "state": "MERGE_FAILED"}, "repo": "saffron", "task_key": "4440cd6c1fe36b3c76a7111387f7d8c9"}
