@@ -4,7 +4,7 @@ title: "`saffron migrate` refuses every ref a live cell started, so 31 merged ta
 status: open
 tier: 1
 filed: 2026-11-04
-specs: []
+specs: [SA-0337]
 prs: []
 commits: []
 cites: []
