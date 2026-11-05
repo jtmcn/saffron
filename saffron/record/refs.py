@@ -6,6 +6,8 @@ Standard library only, git by `subprocess`, as `saffron/cell/worktree.py` does.
 
 from __future__ import annotations
 
+import contextlib
+import os
 import subprocess
 from pathlib import Path
 
@@ -26,20 +28,31 @@ _FACTS = "facts"
 
 
 class RefsRecord:
-    def __init__(self, repo: Path, remote: str | None = None) -> None:
+    def __init__(
+        self, repo: Path, remote: str | None = None, origin: str | None = None
+    ) -> None:
         self._repo = repo
         self._remote = remote
+        # Only `_adopt` reads this. The auto-push in `append` stays keyed
+        # on `remote` alone, so a `RoutedRecord`'s appends stay local.
+        self._origin = origin
 
     def _git(self, *args: str, stdin: str | None = None) -> str:
         return self._git_bytes(
             *args, stdin=stdin.encode() if stdin is not None else None
         ).decode()
 
-    def _git_bytes(self, *args: str, stdin: bytes | None = None) -> bytes:
+    def _git_bytes(
+        self,
+        *args: str,
+        stdin: bytes | None = None,
+        env: dict[str, str] | None = None,
+    ) -> bytes:
         done = subprocess.run(
             ["git", "-C", str(self._repo), *_IDENT, *args],
             input=stdin,
             capture_output=True,
+            env=env,
         )
         if done.returncode != 0:
             # `check=True` would raise a `CalledProcessError` that names the
@@ -53,9 +66,17 @@ class RefsRecord:
         return done.stdout
 
     def append(self, task_key: str, fact: Fact) -> None:
+        """Append one fact onto `task_key`'s own ref.
+
+        Only `task_created` starts a ref this repo lacks. Any other kind
+        first calls `_adopt`, recovering the ref from `remote` or `origin`
+        before the append proceeds.
+        """
         check_filed_under(task_key, fact)
         ref = f"{TASKS}/{task_key}"
         parent = self._resolve(ref)
+        if parent is None and fact.kind != "task_created":
+            parent = self._adopt(ref)
         blobs = self._blobs(task_key)
         seq = len(blobs) + 1
         blob = self._git("hash-object", "-w", "--stdin", stdin=fact.to_json()).strip()
@@ -72,6 +93,33 @@ class RefsRecord:
         remote = self._remote
         if remote:
             self._push(remote, ref)
+
+    def _adopt(self, ref: str) -> str:
+        """The parent a later fact needs when this repo lacks `ref`.
+
+        Fetches `ref` once, from `remote` or `origin`, whichever is set.
+        Raises `RecordError` where neither is set, or where the one tried
+        lacks `ref` too: a later fact needs a ref that already opens on
+        `task_created`.
+        """
+        source = self._remote or self._origin
+        if source:
+            with contextlib.suppress(RecordError):
+                self._fetch_one(source, ref)
+            parent = self._resolve(ref)
+            if parent is not None:
+                return parent
+        raise RecordError(
+            f"{ref} is absent here, and the fact is not task_created: "
+            "a later fact needs a ref that already opens on task_created"
+        )
+
+    def _fetch_one(self, remote: str, ref: str) -> None:
+        """Fetch exactly `ref` from `remote` into the same name. No
+        terminal credential prompt: a remote that wants one fails at once,
+        reading the same as a remote that lacks `ref`."""
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+        self._git_bytes("fetch", remote, f"{ref}:{ref}", env=env)
 
     def _tree_with(self, blobs: list[tuple[int, str]]) -> str:
         # `git mktree` refuses a slash in an entry's name, so the "facts/NNNN.json"

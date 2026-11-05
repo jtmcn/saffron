@@ -27,6 +27,7 @@ from saffron.gates.contract import Failure
 from saffron.gates.suite import SuiteComparison, SuiteRun
 from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
+from saffron.record.routed import RoutedRecord
 from saffron.repos import image as repo_image
 
 SPEC_ID = "SA-0005"
@@ -200,6 +201,16 @@ def _seed_task(
     return task_id
 
 
+def _seeding_ledger(path: Path, origin_url: str) -> Ledger:
+    """A `Ledger` that routes its own writes straight onto the fixture's
+    bare origin, standing in for the mirror `regate` has not cloned yet
+    (item 170): the production `RoutedRecord` the command builds over its
+    own fresh mirror then finds the task's ref already there to recover."""
+    return Ledger(
+        path, record=RoutedRecord(lambda _key: (Path(origin_url), origin_url))
+    )
+
+
 def _gh_pr_view(expected_pr_url: str, state: str, base_ref: str, calls: list):
     def _gh(argv: list[str]):
         calls.append(argv)
@@ -255,7 +266,7 @@ def _assert_green_case(monkeypatch, case_root, capsys, base_ref):
     mirror_path = cli._mirror_path(work, home)
     pr_url = "https://github.com/o/r/pull/9"
 
-    ledger = Ledger(home / "ledger.db")
+    ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
     task_id = _seed_task(
         ledger,
         origin_url=fixture.origin_url,
@@ -357,7 +368,7 @@ def test_regate_prints_each_new_failure_records_the_count_and_exits_one(
     mirror_path = cli._mirror_path(work, home)
     pr_url = "https://github.com/o/r/pull/9"
 
-    ledger = Ledger(home / "ledger.db")
+    ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
     task_id = _seed_task(
         ledger,
         origin_url=fixture.origin_url,
@@ -407,7 +418,7 @@ def test_regate_prints_the_singular_for_exactly_one_new_failure(
     mirror_path = cli._mirror_path(work, home)
     pr_url = "https://github.com/o/r/pull/9"
 
-    ledger = Ledger(home / "ledger.db")
+    ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
     task_id = _seed_task(
         ledger,
         origin_url=fixture.origin_url,
@@ -446,7 +457,7 @@ def _seed_green_regate(tmp_path):
     mirror_path = cli._mirror_path(work, home)
     pr_url = "https://github.com/o/r/pull/9"
 
-    ledger = Ledger(home / "ledger.db")
+    ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
     task_id = _seed_task(
         ledger,
         origin_url=fixture.origin_url,

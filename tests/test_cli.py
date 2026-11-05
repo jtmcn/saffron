@@ -50,6 +50,7 @@ from saffron.phases import implement, package, review
 from saffron.reconcile import HeadMoved, ReconcileResult
 from saffron.record.fold import fold
 from saffron.record.memory import MemoryRecord
+from saffron.record.routed import RoutedRecord
 from saffron.repos.mirror import GitError
 from saffron.repos.policy import Policy, load_policy
 from saffron.scheduler import RETIRED_DIRNAME, Candidate, Refusal
@@ -3585,6 +3586,15 @@ def _bare(path: Path) -> Path:
     return path
 
 
+def _routed_ledger(path: Path) -> Ledger:
+    """A `Ledger` built with a `RoutedRecord`, the way every `saffron`
+    command's own shared `Ledger` is (item 170): a task seeded through it
+    writes its facts to its own mirror, where a later command's fresh
+    `RoutedRecord` over the same mirror then finds them."""
+    ledger = Ledger(path, record=RoutedRecord(lambda key: ledger.record_home(key)))
+    return ledger
+
+
 def _seed_repo(tmp_path, ledger, origin, *, name="repo"):
     mirror = _bare(Path(tempfile.mkdtemp(dir=tmp_path)) / "mirror.git")
     return ledger.upsert_repo(name, origin, str(mirror), policy_sha="p" * 64)
@@ -3678,7 +3688,7 @@ def test_reconcile_writes_what_gh_says_or_withholds_when_it_cannot_answer(
     repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-reconcile")
     home = tmp_path / "home"
     home.mkdir()
-    ledger = Ledger(home / "ledger.db")
+    ledger = _routed_ledger(home / "ledger.db")
     repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     task_id = _seed_task(
         ledger,
@@ -3713,7 +3723,7 @@ def test_a_command_files_each_fact_it_writes_in_the_tasks_own_mirror(
     repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-routed-cli")
     home = tmp_path / "home"
     home.mkdir()
-    ledger = Ledger(home / "ledger.db")
+    ledger = _routed_ledger(home / "ledger.db")
     repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     mirror_path = Path(
         dict(
@@ -3814,7 +3824,7 @@ def test_adopt_writes_the_url_gh_names_onto_the_specs_newest_task(
     adopted_url = "https://github.com/OWNER/REPO/pull/123"
     adopted_head = "c" * 40
 
-    ledger = Ledger(home / "ledger.db")
+    ledger = _routed_ledger(home / "ledger.db")
     repo_id = _seed_repo(tmp_path, ledger, "https://github.com/owner/repo.git")
 
     older = _seed_task(
@@ -4152,7 +4162,7 @@ def test_a_merged_adopted_pull_request_admits_the_child_of_a_not_implemented_par
     home.mkdir()
 
     def open_ledger():
-        return Ledger(home / "ledger.db")
+        return _routed_ledger(home / "ledger.db")
 
     seed = open_ledger()
     repo_id = _seed_repo(tmp_path, seed, "https://github.com/owner/repo.git")
@@ -4263,7 +4273,7 @@ def test_adopt_moves_a_task_whose_regate_is_green_on_the_adopted_head_to_ready_f
         home.mkdir()
         ledger_path = home / "ledger.db"
 
-        seed = Ledger(ledger_path)
+        seed = _routed_ledger(ledger_path)
         repo_id = _seed_repo(tmp_path, seed, "https://github.com/owner/repo.git")
         # A rejected, no-url older sibling at the same spec_sha, so both
         # scans still refuse the child before the adopt (`SA-0026`).
@@ -4352,7 +4362,7 @@ def test_adopt_keeps_the_state_of_a_task_whose_regate_is_red_declined_or_on_anot
     repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
     home = tmp_path / "home"
     home.mkdir()
-    ledger = Ledger(home / "ledger.db")
+    ledger = _routed_ledger(home / "ledger.db")
     repo_id = _seed_repo(tmp_path, ledger, "https://github.com/owner/repo.git")
 
     def _seed(spec_id, state):
@@ -4490,7 +4500,7 @@ def test_adopt_of_a_ready_task_records_the_url_and_runs_no_regate(
     repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
     home = tmp_path / "home"
     home.mkdir()
-    ledger = Ledger(home / "ledger.db")
+    ledger = _routed_ledger(home / "ledger.db")
     repo_id = _seed_repo(tmp_path, ledger, "https://github.com/owner/repo.git")
 
     unresolved = _seed_task(ledger, repo_id, spec_id="SY-7001", state="DIAGNOSING")
@@ -4689,7 +4699,7 @@ def test_adopt_whose_regate_raises_exits_two_with_the_pull_request_recorded(
     repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
     home = tmp_path / "home"
     home.mkdir()
-    ledger = Ledger(home / "ledger.db")
+    ledger = _routed_ledger(home / "ledger.db")
     repo_id = _seed_repo(tmp_path, ledger, "https://github.com/owner/repo.git")
 
     tasks = {}
@@ -5650,7 +5660,7 @@ def test_queue_reconciles_before_it_scans_so_the_refusal_gate_sees_current_state
     repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-queue-reconciles")
     home = tmp_path / "home"
     home.mkdir()
-    ledger = Ledger(home / "ledger.db")
+    ledger = _routed_ledger(home / "ledger.db")
     repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     _seed_task(
         ledger,
@@ -5835,7 +5845,7 @@ def test_queue_schedules_a_task_reconcile_moved_into_a_requeue_state(
     repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-queue-requeues")
     home = tmp_path / "home"
     home.mkdir()
-    ledger = Ledger(home / "ledger.db")
+    ledger = _routed_ledger(home / "ledger.db")
     repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     _seed_task(
         ledger,
@@ -7127,7 +7137,7 @@ def test_the_batch_scan_orphans_the_queue_row_of_each_task_it_stamps(
     _readiness_passes(monkeypatch, tmp_path)
 
     def _seed_night(home: Path):
-        ledger = Ledger(home / "ledger.db")
+        ledger = _routed_ledger(home / "ledger.db")
         repo_id = _seed_repo(tmp_path, ledger, "https://github.com/o/r.git")
         first = _seed_task(ledger, repo_id, spec_id="SY-1", state="REVIEWING")
         _seed_task(ledger, repo_id, spec_id="SY-2", state="REVIEWING")

@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from saffron.record.contract import Fact, RecordError, StaleWriter
+from saffron.record.contract import KINDS, Fact, RecordError, StaleWriter
 from saffron.record.refs import _IDENT as IDENT
 from saffron.record.refs import TASKS, RefsRecord
 
@@ -326,6 +326,77 @@ def test_a_diverged_push_is_refused_not_forced(tmp_path, repo):
         check=True,
     ).stdout.strip()
     assert unchanged == on_remote
+
+
+def test_a_ref_is_never_started_by_a_fact_other_than_task_created(tmp_path):
+    # Every kind but `task_created` must refuse to start a ref this repo
+    # lacks, with no origin and with an origin that lacks the ref too.
+    for kind in KINDS:
+        if kind == "task_created":
+            continue
+        fact = a_fact(kind=kind, task_key="b" * 32)
+
+        no_origin = tmp_path / f"no-origin-{kind}.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(no_origin)], check=True)
+        with pytest.raises(RecordError):
+            RefsRecord(no_origin).append(fact.task_key, fact)
+        assert RefsRecord(no_origin).task_keys() == []
+
+        lacking = tmp_path / f"lacking-{kind}.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(lacking)], check=True)
+        empty_remote = tmp_path / f"empty-remote-{kind}.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(empty_remote)], check=True)
+        with pytest.raises(RecordError):
+            RefsRecord(lacking, remote=str(empty_remote)).append(fact.task_key, fact)
+        assert RefsRecord(lacking).task_keys() == []
+        assert RefsRecord(empty_remote).task_keys() == []
+
+    # A `remote` that holds the ref is fetched before the append, for
+    # every one of those kinds, so each push is a fast-forward.
+    for kind in KINDS:
+        if kind == "task_created":
+            continue
+        fact = a_fact(kind=kind, task_key="c" * 32)
+
+        origin = tmp_path / f"origin-{kind}.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+        created = a_fact(kind="task_created", task_key=fact.task_key)
+        RefsRecord(origin).append(created.task_key, created)
+        before = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(origin),
+                "rev-list",
+                "--count",
+                f"{TASKS}/{fact.task_key}",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+        empty = tmp_path / f"empty-{kind}.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(empty)], check=True)
+        RefsRecord(empty, remote=str(origin)).append(fact.task_key, fact)
+
+        after = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(origin),
+                "rev-list",
+                "--count",
+                f"{TASKS}/{fact.task_key}",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        assert int(after) == int(before) + 1
+        assert RefsRecord(origin).read(fact.task_key) == RefsRecord(empty).read(
+            fact.task_key
+        )
 
 
 def test_a_fact_cannot_be_filed_under_another_task(repo):

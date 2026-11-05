@@ -27,9 +27,9 @@ class RoutedRecord:
         mirror, origin = self._locate(task_key)
         record = self._records.get(mirror)
         if record is None:
-            # No remote: every append is local, and the push below is the
-            # only thing that ever reaches `origin`.
-            record = RefsRecord(mirror)
+            # `push()` below is still the only write to `origin`. A later
+            # fact on a ref this mirror lacks now reads `origin` first.
+            record = RefsRecord(mirror, origin=origin)
             self._records[mirror] = record
         return record, origin
 

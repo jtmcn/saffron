@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from saffron.ledger import Ledger
+from saffron.record.contract import Fact, RecordError
 from saffron.record.memory import MemoryRecord
 from saffron.record.refs import TASKS, RefsRecord
 
@@ -106,6 +107,154 @@ def test_a_push_carries_the_whole_ref_to_the_tasks_origin_and_an_append_pushes_n
     on_origin = RefsRecord(origin).read(key)
     assert [f.kind for f in on_origin] == [f.kind for f in local_head]
     assert _refs(other_origin) == []
+
+
+def test_a_later_fact_for_a_ref_the_mirror_lacks_lands_on_the_origins_history(
+    tmp_path,
+):
+    """A `task_state` fact for a task whose ref its mirror lacks first fetches
+    that one ref from the task's own origin, then appends on it. Driven over
+    a pruned mirror that lost the ref, and a fresh one `upsert_repo` points
+    the repo row at."""
+    from saffron.record.routed import RoutedRecord
+
+    origin = _bare(tmp_path / "origin.git")
+    mirror = _bare(tmp_path / "mirror.git")
+
+    ledger = Ledger(
+        tmp_path / "l.db", record=RoutedRecord(lambda key: ledger.record_home(key))
+    )
+    repo_id = ledger.upsert_repo("repo", str(origin), str(mirror), None)
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+    task_id = ledger.create_task(run_id, spec_id="SY-1", spec_sha="s" * 40, branch="x")
+    ledger.set_task_state(task_id, "DIAGNOSING")
+    key = ledger.record_key(task_id)
+    assert key is not None
+    ledger.push_record(task_id)
+    origin_head_before = _refs(origin, f"{TASKS}/{key}")
+
+    # A ref only the mirror holds, and one only the origin holds: neither
+    # is this task's, and neither must move.
+    mirror_only = "d" * 32
+    origin_only = "e" * 32
+    stray = Fact(
+        kind="task_created",
+        task_key=mirror_only,
+        at="2026-01-01T00:00:00Z",
+        repo="repo",
+        batch_key=None,
+        payload={},
+    )
+    RefsRecord(mirror).append(mirror_only, stray)
+    RefsRecord(origin).append(
+        origin_only,
+        Fact(
+            kind="task_created",
+            task_key=origin_only,
+            at="2026-01-01T00:00:00Z",
+            repo="repo",
+            batch_key=None,
+            payload={},
+        ),
+    )
+
+    # Prune the task's own ref from the mirror, simulating a mirror that
+    # lost it.
+    subprocess.run(
+        ["git", "-C", str(mirror), "update-ref", "-d", f"{TASKS}/{key}"], check=True
+    )
+    assert _refs(mirror, f"{TASKS}/{key}") == []
+
+    ledger.set_task_state(task_id, "IMPLEMENTING")
+    assert len(_refs(mirror, f"{TASKS}/{key}")) == 1
+    parent = subprocess.run(
+        ["git", "-C", str(mirror), "rev-parse", f"{TASKS}/{key}^"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert (
+        parent
+        == subprocess.run(
+            ["git", "-C", str(origin), "rev-parse", f"{TASKS}/{key}"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    )
+    assert origin_head_before  # a ref existed on origin to recover from
+
+    ledger.push_record(task_id)
+    assert RefsRecord(mirror).read(key) == RefsRecord(origin).read(key)
+
+    # The fetch took no other ref, and pruned none.
+    assert RefsRecord(mirror).read(mirror_only) == [stray]
+    assert RefsRecord(mirror).read(origin_only) == []
+
+    # A fresh mirror `upsert_repo` points the repo row at: the production
+    # path for a repeated run from another checkout (item 170).
+    fresh_mirror = _bare(tmp_path / "fresh-mirror.git")
+    ledger.upsert_repo("repo", str(origin), str(fresh_mirror), None)
+    ledger.set_task_state(task_id, "GATING")
+    ledger.push_record(task_id)
+    assert RefsRecord(fresh_mirror).read(key) == RefsRecord(origin).read(key)
+
+
+def test_a_later_fact_neither_the_mirror_nor_the_origin_holds_writes_no_ref(
+    tmp_path, monkeypatch
+):
+    """Where the origin lacks the ref too, an append through the
+    `RoutedRecord` raises `RecordError`, and neither the mirror nor the
+    origin gains a ref."""
+    from saffron.record.routed import RoutedRecord
+
+    origin = _bare(tmp_path / "origin.git")
+    mirror = _bare(tmp_path / "mirror.git")
+
+    plain = Ledger(tmp_path / "l.db")
+    repo_id = plain.upsert_repo("repo", str(origin), str(mirror), None)
+    run_id = plain.create_run(repo_id, base_sha="a" * 40)
+    task_id = plain.create_task(run_id, spec_id="SY-1", spec_sha="s" * 40, branch="x")
+    key = plain.record_key(task_id)
+    assert key is not None
+    plain.close()
+
+    calls: list[list[str]] = []
+    real_run = subprocess.run
+
+    def _spy(argv, *args, **kwargs):
+        if isinstance(argv, list) and argv and argv[0] == "git":
+            calls.append(list(argv))
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", _spy)
+
+    routed = Ledger(
+        tmp_path / "l.db", record=RoutedRecord(lambda k: routed.record_home(k))
+    )
+
+    with pytest.raises(RecordError):
+        routed.set_task_state(task_id, "DIAGNOSING")
+
+    fetches = [call for call in calls if "fetch" in call]
+    assert len(fetches) == 1
+    assert str(origin) in fetches[0]
+    assert any(f"{TASKS}/{key}:{TASKS}/{key}" in item for item in fetches[0])
+
+    assert _refs(mirror) == []
+    assert _refs(origin) == []
+
+    # A routed `task_created`, and a later fact on the ref it starts,
+    # record no fetch at all.
+    calls.clear()
+    new_task_id = routed.create_task(
+        run_id, spec_id="SY-2", spec_sha="s" * 40, branch="y"
+    )
+    assert not any("fetch" in call for call in calls)
+
+    calls.clear()
+    routed.set_task_state(new_task_id, "DIAGNOSING")
+    assert not any("fetch" in call for call in calls)
 
 
 def test_a_ledger_without_a_routed_record_pushes_nothing(tmp_path):
