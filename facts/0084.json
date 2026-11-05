@@ -1,0 +1,1 @@
+{"at": "2026-10-07T08:41:32+00:00", "batch_key": null, "kind": "gate_result", "payload": {"duration_ms": 318, "earned_risk": null, "failures": [], "failures_at_head": 0, "gate": "shacl", "n": 2, "phase": "REBUTTING", "status": "pass", "summary": "0 violations across 2 graphs", "tool": "PySHACL Version: 0.40.1"}, "repo": "saffron", "task_key": "93636a048bfdc508f1b2145eeded9a03"}
