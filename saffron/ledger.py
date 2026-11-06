@@ -410,7 +410,7 @@ class Ledger:
     ) -> None:
         self._record = record
         # Record design §8: every append also emits a `RecordAppend`. `None`
-        # is every caller that predates the rule (`fold`, `migrate`).
+        # is every `Ledger` with no record (`fold`, `next-id`).
         self._events = events
         path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(path)
@@ -665,7 +665,7 @@ class Ledger:
         Once the record's own `append` returns, without raising, emit one
         `RecordAppend` through the sink (record design §8). An append the
         record refuses raises out of `append` and reaches no emit. Nothing
-        is emitted with no record, or with no sink: `fold` and `migrate`
+        is emitted with no record, or with no sink: `fold` and `next-id`
         build a `Ledger` with neither."""
         if self._record is not None:
             self._record.append(fact.task_key, fact)

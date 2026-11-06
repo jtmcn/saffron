@@ -22,7 +22,7 @@ from saffron.report.index import QueueLine
 from saffron.spec_review import SpecReviewFinding
 
 # One entry per kind `saffron/record/contract.py`'s `KINDS` names that a
-# write method appends (`CLAUDE.md`'s notes for this spec).
+# write method appends (SA-0336's notes).
 _ALL_KINDS = (
     "task_created",
     "task_state",
