@@ -504,7 +504,8 @@ def test_regate_passes_reverify_the_exemption_its_task_directory_holds(
     assert _regate()["exempt"] == []
 
     # A current file with no `baseline.json` at all: current regardless.
-    task_dir.mkdir(parents=True)
+    # `exist_ok=True`: the `RecordAppend` sink wrote this directory already.
+    task_dir.mkdir(parents=True, exist_ok=True)
     assert _regate()["exempt"] == []
     exempt_path = task_dir / "revert-exempt.json"
     exempt_path.write_text(json.dumps(["t/test_a.py::test_one"]))
