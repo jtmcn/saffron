@@ -31,3 +31,4 @@ edit, not to the writer as a follow-up spec.
 
 - 2026-10-25: filed from the spec loop's run 48.
 - 2026-10-27: in `saffron finish 58` the writer declined to draft a spec for a one-line docstring finding, and the finish pooled it as type `test`. The review commit on #979 had already fixed the line.
+- 2026-11-06: recurred in the spec loop's run 54, on finish 67's one-line docstring finding. See b-4a9207.

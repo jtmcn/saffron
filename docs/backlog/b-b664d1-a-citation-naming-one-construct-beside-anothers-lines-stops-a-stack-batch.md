@@ -39,3 +39,4 @@ changes is flagged or moved before the spec review reads it.
 ## Record
 
 - 2026-11-02: filed from the spec loop's run 52.
+- 2026-11-06: recurred in the spec loop's run 54. `SA-0336` added 34 lines to `saffron/ledger.py`, and batch 68 refused `SA-0337` with `1 citation(s) do not resolve`. `driver.py check` ran `cite` at `origin/main` only, where every citation resolved. The operator ran `SA-0337` as a single cell from `main`.

@@ -2754,3 +2754,46 @@ the critic did not raise.
   3**, conventions. **Landed:** a review commit on #1016.
 - `SA-0330` (#1016): `_parent_landed` copies `_resolve_multi_parent`'s landed
   rule. **Bucket 3**, conventions. Kept as b-9bb8b7.
+
+## 2026-11-06, spec loop run 54 (#1024, #1025, #1026, #1027)
+
+Every pull request had an in-cell critic. Each line below is a finding the
+critic did not raise. The cache keyed on mirror alone on #1024, `migrate`
+named as a `Ledger` builder on #1026, and "head-count keys" on #1027 were the
+critic's own, so they have no line.
+
+- `SA-0334` (#1024): criterion 2's witness asserted no fetch but never that no
+  argv named the origin, so `git ls-remote <origin>` on every append passed.
+  **Bucket 3**, adequacy. **Landed:** a review commit on #1024.
+- `SA-0334` (#1024): `RefsRecord._adopt` reused `CONTEXT.md`'s term Adopt for
+  fetching a missing ref. The `terms` gate reads comments, not identifiers.
+  **Bucket 1**, a `terms` rule over identifiers. **Landed:** renamed
+  `_recover` in a review commit on #1024.
+- `SA-0334` (#1024): `routed.py`'s first docstring line still said one
+  `RefsRecord` per mirror after the key changed. Finish 67 found it.
+  **Bucket 3**, conventions. **Landed:** a review commit on #1024.
+- `SA-0334` (#1024): `fetch` and `_push` set no `GIT_TERMINAL_PROMPT=0`, and a
+  refused write drops the fetch's stderr. **Bucket 3**, correctness. Kept as
+  b-0add4c.
+- `SA-0335` (#1025): criterion 4's witness checked only a refusal's first
+  line, so printing only that line passed and lost git's reason. **Bucket
+  3**, adequacy. **Landed:** a review commit on #1025.
+- `SA-0335` (#1025): the spec asked for one routed-ledger fixture, and nine
+  helpers built their own. **Bucket 3**, conventions. Kept as b-25c0f5.
+- `SA-0335` (#1025): a bare `§3` cited the record design but read as
+  `DESIGN.md` §3. **Bucket 3**, conventions. **Landed:** a review commit on
+  #1025.
+- `SA-0336` (#1026): a test comment credited `CLAUDE.md` for a list taken
+  from the spec. **Bucket 3**, conventions. **Landed:** a review commit on
+  #1026.
+- `SA-0336` (#1026): the event sink skips redaction, and `watch` names the
+  wrong first line. **Bucket 3**, conventions. Kept as b-980fbd.
+- `SA-0337` (#1027): criterion 1's live ref held no `task_state` and no
+  `task_push`, so a top-up refusing every multi-state ref passed all four
+  witnesses. **Bucket 3**, adequacy. **Landed:** a review commit on #1027.
+- `SA-0337` (#1027): criterion 3 listed the sixteen written kinds rather than
+  reading them off `migrate`'s output, as the spec's notes asked. **Bucket
+  3**, adequacy. **Landed:** a review commit on #1027.
+- `SA-0337` (#1027): docstrings cited "(problem 3)", a pointer into the spec
+  that no reader of the module can resolve. **Bucket 2**, a `CLAUDE.md` line.
+  **Landed:** a review commit on #1027.

@@ -1,11 +1,12 @@
 ---
 id: b-9c7001
 title: "`saffron migrate` refuses every ref a live cell started, so 31 merged tasks fold as unmerged"
-status: open
+status: done
+closed: 2026-11-06
 tier: 1
 filed: 2026-11-04
 specs: [SA-0337]
-prs: []
+prs: [1027]
 commits: []
 cites: []
 related: [170, b-4eaaa4, b-d4b847]
@@ -67,3 +68,4 @@ back the ledger's 31 `MERGED` rows.
 
 - 2026-11-04: filed from `saffron migrate`'s live run before `SA-0334`'s
   cutover. The operator chose the arm: migrate tops up by kind.
+- 2026-11-06: done in #1027 (`SA-0337`), from the spec loop's run 54.

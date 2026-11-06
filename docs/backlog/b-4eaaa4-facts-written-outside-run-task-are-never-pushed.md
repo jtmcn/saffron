@@ -1,11 +1,12 @@
 ---
 id: b-4eaaa4
 title: "Facts written outside `run_task` reach the mirror and are never pushed, so a discarded host loses them"
-status: open
+status: done
+closed: 2026-11-06
 tier: 1
 filed: 2026-10-12
 specs: [SA-0335]
-prs: []
+prs: [1025]
 commits: []
 cites: []
 related: [170]
@@ -51,3 +52,4 @@ each writer above.
 ## Record
 
 - 2026-10-12: filed from `SA-0278`'s spec review, round 1.
+- 2026-11-06: done in #1025 (`SA-0335`), from the spec loop's run 54.

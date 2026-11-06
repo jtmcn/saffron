@@ -35,3 +35,4 @@ gate that failed.
 ## Record
 
 - 2026-11-02: filed from the spec loop's run 52.
+- 2026-11-06: recurred in the spec loop's run 54. Finish 67's one real finding was a one-line docstring in `saffron/record/routed.py`. Its follow-up `SA-0338` failed to parse, then failed `prose`, and was pooled. The delegate fixed the line by hand on #1024. b-ffb930 holds the parse failure.
