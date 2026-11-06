@@ -14388,6 +14388,9 @@ def test_a_refused_record_push_is_printed_with_its_key_and_leaves_the_exit_code(
         raise AssertionError("expected the diverged origin to refuse this push")
     except Exception as exc:
         stale_message = str(exc).splitlines()[0]
+        # git's reason sits on a later line, so the fold must carry it.
+        stale_folded = " ".join(str(exc).split())
+        assert "[rejected]" in stale_folded
 
     def _stub_queue(args, ledger):
         ledger.set_task_state(task_stale, "IMPLEMENTING")
@@ -14413,6 +14416,7 @@ def test_a_refused_record_push_is_printed_with_its_key_and_leaves_the_exit_code(
     assert len(stale_lines) == 1
     assert "StaleWriter" in stale_lines[0]
     assert stale_message in stale_lines[0]
+    assert stale_folded in stale_lines[0]
     assert len(dead_lines) == 1
     assert "RecordError" in dead_lines[0]
     assert "StaleWriter" not in dead_lines[0]

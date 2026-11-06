@@ -110,7 +110,8 @@ def no_network_git_push(request, monkeypatch):
     monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "file")
 
 
-def _bare(path: Path) -> Path:
+def bare_repo(path: Path) -> Path:
+    """An empty bare repo at `path`, for a mirror or an origin."""
     path.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-q", "--bare", str(path)], check=True)
     return path
@@ -127,8 +128,8 @@ def routed_ledger(tmp_path):
     earlier command's exit would. It runs the writer, then reads `origin`'s
     own ref to check the exit push that follows.
     """
-    mirror = _bare(tmp_path / "record-mirror.git")
-    origin = _bare(tmp_path / "record-origin.git")
+    mirror = bare_repo(tmp_path / "record-mirror.git")
+    origin = bare_repo(tmp_path / "record-origin.git")
     ledger = Ledger(
         tmp_path / "record-ledger.db",
         record=RoutedRecord(lambda key: ledger.record_home(key)),

@@ -687,9 +687,9 @@ def test_a_qualification_fact_reaches_the_origin_at_exit(tmp_path, monkeypatch):
     from saffron.qualify import qualify
     from saffron.record.refs import RefsRecord
     from saffron.record.routed import RoutedRecord
+    from tests.conftest import bare_repo
 
-    origin = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+    origin = bare_repo(tmp_path / "origin.git")
 
     built = _build(tmp_path, monkeypatch, routed=True, origin=str(origin))
     assert isinstance(built.ledger._record, RoutedRecord)

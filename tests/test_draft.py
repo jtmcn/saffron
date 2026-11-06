@@ -8,7 +8,6 @@ fails each test and not collection.
 from __future__ import annotations
 
 import json
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -632,14 +631,13 @@ def test_a_drafts_facts_reach_the_origin_at_exit(tmp_path):
     one that errors, and one whose review raises."""
     from saffron.record.refs import RefsRecord
     from saffron.record.routed import RoutedRecord
+    from tests.conftest import bare_repo
 
     cases = {case.name: case for case in _build_cases()}
     for name in ("run", "escalate", "wait1", "err1", "raise_r1"):
         case = cases[name]
-        origin = tmp_path / f"{name}-origin.git"
-        subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
-        mirror = tmp_path / f"{name}-mirror.git"
-        subprocess.run(["git", "init", "-q", "--bare", str(mirror)], check=True)
+        origin = bare_repo(tmp_path / f"{name}-origin.git")
+        mirror = bare_repo(tmp_path / f"{name}-mirror.git")
 
         _expected, ledger, task_id, _rd, _vd, _drafted = _run(
             tmp_path, case, routed=True, origin=str(origin), mirror_path=str(mirror)

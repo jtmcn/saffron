@@ -22,8 +22,8 @@ class RoutedRecord:
         # Keyed on mirror and origin, never on the repo name. Two repo rows
         # can share a name or a mirror, and each fetches from its own origin.
         self._records: dict[tuple[Path, str], RefsRecord] = {}
-        # Kept in append order. `setdefault` leaves an already-kept key
-        # in place, so a key appended three times is pushed once (§3).
+        # Kept in append order. `setdefault` leaves a kept key in place, so
+        # a key appended three times is pushed once (§3 of the record design).
         self._kept: dict[str, None] = {}
 
     def _record_for(self, task_key: str) -> tuple[RefsRecord, str]:

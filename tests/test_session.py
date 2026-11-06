@@ -2055,6 +2055,7 @@ def test_an_orphaned_stamp_from_a_raising_cell_reaches_the_origin_at_exit(
     otherwise push first in its own `finally`."""
     from saffron.record.refs import RefsRecord
     from saffron.record.routed import RoutedRecord
+    from tests.conftest import bare_repo
 
     cell = _stub_the_runtime(monkeypatch)
 
@@ -2064,11 +2065,8 @@ def test_an_orphaned_stamp_from_a_raising_cell_reaches_the_origin_at_exit(
     monkeypatch.setattr("saffron.repos.image.build_cell_image", _dead)
 
     subdir = tmp_path / "orphaned-exit"
-    mirror = subdir / "m.git"
-    mirror.mkdir(parents=True)
-    subprocess.run(["git", "init", "-q", "--bare", str(mirror)], check=True)
-    origin = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+    bare_repo(subdir / "m.git")
+    origin = bare_repo(tmp_path / "origin.git")
     monkeypatch.setattr("saffron.phases.package.real_remote", lambda repo: str(origin))
 
     def _locate(key: str) -> tuple[Path, str]:

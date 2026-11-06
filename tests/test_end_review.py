@@ -990,10 +990,10 @@ def test_an_end_reviews_facts_reach_the_origin_at_exit(tmp_path, monkeypatch):
     import saffron.end_review as end_review
     from saffron.record.refs import RefsRecord
     from saffron.record.routed import RoutedRecord
+    from tests.conftest import bare_repo
 
     mirror, sha_a, shas = _stack_mirror(tmp_path, monkeypatch)
-    origin = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+    origin = bare_repo(tmp_path / "origin.git")
 
     ledger, record, batch1, batch2, task_ids = _stack_ledger(
         tmp_path, sha_a, shas, routed=True, origin=str(origin), mirror_path=str(mirror)

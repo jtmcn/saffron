@@ -955,11 +955,11 @@ def test_a_follow_up_writers_facts_reach_the_origin_at_exit(tmp_path, monkeypatc
     from saffron import follow_up, spec_review
     from saffron.record.refs import RefsRecord
     from saffron.record.routed import RoutedRecord
+    from tests.conftest import bare_repo
 
     monkeypatch.setattr(spec_review, "SPEC_WRITER_SESSION_USD", 1.0)
 
-    origin = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+    origin = bare_repo(tmp_path / "origin.git")
 
     built = _build(tmp_path, routed=True, origin=str(origin))
     assert isinstance(built.ledger._record, RoutedRecord)
