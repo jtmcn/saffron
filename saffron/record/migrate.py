@@ -19,8 +19,8 @@ Never a `Ledger`. Its open adds missing columns, so it would write the source.
 
 A ref that is neither empty nor an exact prefix is topped up instead of
 refused outright. The comparison runs kind by kind, under a normalisation
-that sets aside a fact's `at`, a `gate_result`'s three head-count keys, and
-a null `batch_key`. An agreeing ref gains every later fact of a compared
+that sets aside a fact's `at`, a `gate_result`'s `schema_version`,
+`collected` and `uncollected`, and a null `batch_key`. An agreeing ref gains every later fact of a compared
 kind, then the ledger's own `task_state` where its derived state still
 disagrees.
 
@@ -116,7 +116,7 @@ def _by_compared_kind(facts: Iterable[Fact]) -> dict[str, list[Fact]]:
 def _record_state(facts: Iterable[Fact]) -> str:
     """The state a record's own facts add up to: the `state` of the last
     `task_state` or `task_package` fact among `facts`, in the order given,
-    or `QUEUED` where there is neither (problem 3)."""
+    or `QUEUED` where there is neither."""
     state = "QUEUED"
     for fact in facts:
         if fact.kind in ("task_state", "task_package"):

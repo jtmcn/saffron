@@ -1982,10 +1982,6 @@ _COMPARED_KINDS = (
     "stack_finish",
 )
 
-_MIGRATE_WRITTEN_KINDS = frozenset(
-    {"task_created", "task_push", "task_state", *_COMPARED_KINDS}
-)
-
 # Every compared kind the helper task below writes twice. The ledger
 # allows only one of the other four, per task.
 _TWO_FACT_KINDS = frozenset(
@@ -2173,7 +2169,7 @@ def _rich_task(ledger: Ledger, repo_id: int, batch_id: int, spec_id: str) -> int
 
 def _rest_after(full: list[Fact], held_counts: dict[str, int]) -> list[Fact]:
     """Every compared-kind fact of `full` past the count already held, per
-    kind, in `full`'s own order: what the top-up still owes (problem 1)."""
+    kind, in `full`'s own order: what the top-up still owes."""
     counted: Counter[str] = Counter()
     rest = []
     for fact in full:
@@ -2187,7 +2183,7 @@ def _rest_after(full: list[Fact], held_counts: dict[str, int]) -> list[Fact]:
 
 def _derived_state(facts: list[Fact]) -> str:
     """The state `facts` add up to: the last `task_state` or `task_package`
-    fact's own `state`, or `QUEUED` where there is neither (problem 3)."""
+    fact's own `state`, or `QUEUED` where there is neither."""
     state = "QUEUED"
     for fact in facts:
         if fact.kind in ("task_state", "task_package"):
@@ -2197,8 +2193,7 @@ def _derived_state(facts: list[Fact]) -> str:
 
 def _with_state_tail(full: list[Fact], seeded_so_far: list[Fact]) -> list[Fact]:
     """The topped-up ref's own ending: `seeded_so_far` unchanged, then the
-    ledger's own `task_state` fact where its derived state still disagrees
-    (problem 3)."""
+    ledger's own `task_state` fact where its derived state still disagrees."""
     ledger_state = next(f for f in full if f.kind == "task_state")
     if _derived_state(seeded_so_far) == ledger_state.payload["state"]:
         return seeded_so_far
@@ -2230,7 +2225,7 @@ def _assert_disagrees(source_path: Path, key: str, held: list[Fact]) -> None:
     result = migrate(source_path, seeded)
     reasons = dict(result.refused)
     assert list(reasons) == [key]
-    # "with today's reason" (problem 5): the top-up's own refusal reads
+    # "with today's reason" (SA-0337): the top-up's own refusal reads
     # exactly as the whole-list compare's always has.
     assert reasons[key] == f"the record holds {len(before)} fact(s) that disagree"
     assert seeded.read(key) == before
@@ -2308,14 +2303,40 @@ def test_a_ref_a_live_cell_started_is_topped_up_and_folds_to_the_ledgers_rows(
         batch_key=None,
     )
 
+    # A live cell's own `task_state` per transition and its `task_push`,
+    # none of them compared, all kept where the cell wrote them.
     seeded1 = [
         created1,
+        Fact(
+            kind="task_state",
+            task_key=key1,
+            at="2026-01-01T08:00:01.000001+00:00",
+            repo="saffron",
+            batch_key=None,
+            payload={"state": "IMPLEMENTING"},
+        ),
         attempt_opened_1,
         _first("attempt_closed"),
         *attempt1_gate_results,
+        Fact(
+            kind="task_state",
+            task_key=key1,
+            at="2026-01-01T08:00:01.000002+00:00",
+            repo="saffron",
+            batch_key=None,
+            payload={"state": "REVIEWING"},
+        ),
         _first("finding"),
         _first("rebuttal"),
         _first("task_package"),
+        Fact(
+            kind="task_push",
+            task_key=key1,
+            at="2026-01-01T08:00:01.000003+00:00",
+            repo="saffron",
+            batch_key=None,
+            payload={"pushed_sha": "d" * 40},
+        ),
         _first("end_review"),
         _first("qualification"),
         _first("spec_review"),
@@ -2391,10 +2412,15 @@ def test_a_ref_a_live_cell_started_is_topped_up_and_folds_to_the_ledgers_rows(
     fold(seeded, rebuilt)
 
     row1 = rebuilt._db.execute(
-        "SELECT state, pushed_in_state FROM tasks WHERE record_key = ?", (key1,)
+        "SELECT state, pushed_in_state, merged_head_sha FROM tasks WHERE record_key = ?",
+        (key1,),
     ).fetchone()
     assert row1["state"] == "MERGED"
     assert row1["pushed_in_state"] == "READY_FOR_REVIEW"
+    assert (
+        row1["merged_head_sha"]
+        == next(f for f in full1 if f.kind == "task_merged_head").payload["head"]
+    )
 
     row2 = rebuilt._db.execute(
         "SELECT state, pushed_sha FROM tasks WHERE record_key = ?", (key2,)
@@ -2521,6 +2547,27 @@ def test_the_top_up_sets_aside_only_its_named_differences(tmp_path: Path) -> Non
     migrate(source_path, truth)
     full = truth.read(key)
 
+    # The sixteen kinds `migrate` writes, read off its own output for a
+    # second ledger whose pushed task adds the `task_push` this one lacks.
+    kinds_ledger = Ledger(tmp_path / "kinds.db")
+    kinds_repo = kinds_ledger.upsert_repo("saffron", "/o", "/m.git", None)
+    kinds_batch = kinds_ledger.create_batch(budget_usd=50.0)
+    _rich_task(kinds_ledger, kinds_repo, kinds_batch, "SA-9102")
+    run2 = kinds_ledger.create_run(kinds_repo, base_sha="a" * 40)
+    kinds_ledger.attach_run_to_batch(run2, kinds_batch)
+    task2 = kinds_ledger.create_task(
+        run2, spec_id="SA-9103", spec_sha="s" * 64, branch="saffron/SA-9103"
+    )
+    kinds_ledger.record_push(task2, "f" * 40)
+    kinds_ledger.set_task_state(task2, "EXHAUSTED")
+    kinds_ledger.close()
+    kinds_record = MemoryRecord()
+    migrate(tmp_path / "kinds.db", kinds_record)
+    written = frozenset(
+        f.kind for k in kinds_record.task_keys() for f in kinds_record.read(k)
+    )
+    assert len(written) == 16
+
     gate_result_index = next(i for i, f in enumerate(full) if f.kind == "gate_result")
     attempt_opened_index = next(
         i for i, f in enumerate(full) if f.kind == "attempt_opened"
@@ -2567,7 +2614,7 @@ def test_the_top_up_sets_aside_only_its_named_differences(tmp_path: Path) -> Non
     )
 
     for foreign_kind in KINDS:
-        if foreign_kind in _MIGRATE_WRITTEN_KINDS:
+        if foreign_kind in written:
             continue
         foreign_fact = Fact(
             kind=foreign_kind,
