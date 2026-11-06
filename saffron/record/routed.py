@@ -1,4 +1,4 @@
-"""`RoutedRecord`: one `RefsRecord` per repo mirror, chosen per task.
+"""`RoutedRecord`: one `RefsRecord` per mirror and origin, chosen per task.
 
 `repos.name` is not unique, so a fact cannot find its mirror by name alone.
 Two rows can share one name and differ in origin and mirror. The caller
