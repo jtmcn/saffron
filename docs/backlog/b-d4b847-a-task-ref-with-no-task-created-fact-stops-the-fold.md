@@ -1,11 +1,12 @@
 ---
 id: b-d4b847
 title: "A task ref that holds no `task_created` fact stops the fold, and the wiring can write one"
-status: open
+status: done
+closed: 2026-11-06
 tier: 1
 filed: 2026-10-12
 specs: [SA-0334]
-prs: []
+prs: [1024]
 commits: []
 cites: []
 related: [170]
@@ -44,3 +45,4 @@ origin holds. A test drives both a pruned mirror and a fresh one.
 
 - 2026-10-12: filed from `SA-0278`'s spec review, round 1.
 - 2026-10-19: #907 wires the record in, from the spec loop's run 44. On 2026-10-19 this repo's mirror held 0 refs under `refs/saffron/`, so the `saffron migrate` cutover is still owed before the first wired night. PACKAGE's module docstring names the same prune for a branch it creates (`saffron/phases/package.py:8-11`). No item owned that.
+- 2026-11-06: done in #1024 (`SA-0334`), from the spec loop's run 54.

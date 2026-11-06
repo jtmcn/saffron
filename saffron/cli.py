@@ -48,7 +48,7 @@ from saffron.cell.session import (
     stop_on_rejected,
 )
 from saffron.cell.session import _SHA as _RESOLVED_SHA
-from saffron.events import Event, EventLog
+from saffron.events import Event, EventLog, RecordAppend
 from saffron.gates.baseline import NewFailure
 from saffron.intake import Spec, load_spec
 from saffron.ledger import Ledger
@@ -109,6 +109,18 @@ CELL_EXIT = {
     # infrastructure failure, not the task's (b-031ac2).
     "PROVIDER_UNREACHABLE": 2,
 }
+
+
+def _record_events(out_dir: Path) -> Callable[[RecordAppend], None]:
+    """The shared `Ledger`'s `events` sink (record design §8). Each
+    `RecordAppend` lands in the `events.jsonl` of its own fact's task, the
+    same per-task directory `run_task` and `EventLog` write every other
+    event to."""
+
+    def sink(event: RecordAppend) -> None:
+        EventLog(out_dir / event.spec_id).append(event)
+
+    return sink
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -352,11 +364,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"saffron: {type(broke).__name__}: {broke}")
             return 2
 
-    # The lambda reads `ledger` only once a write appends, by which point
-    # the name below is bound.
+    # Named here, not inline, so the `finally` below can push what it
+    # kept. The lambda reads `ledger` only once a write appends.
+    record = RoutedRecord(lambda key: ledger.record_home(key))
     ledger = Ledger(
-        args.home / "ledger.db",
-        record=RoutedRecord(lambda key: ledger.record_home(key)),
+        args.home / "ledger.db", record=record, events=_record_events(out_dir)
     )
     try:
         if args.command == "cell":
@@ -413,7 +425,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"saffron: {type(broke).__name__}: {broke}")
         return 2
     finally:
-        ledger.close()
+        # Nested, so a second Ctrl-C while this loop is still pushing still
+        # closes the ledger rather than leaving it open.
+        try:
+            for key, refused in record.push_unpushed():
+                text = " ".join(str(refused).split())
+                print(
+                    f"saffron: push refused for {key}: {type(refused).__name__}: {text}"
+                )
+        finally:
+            ledger.close()
 
     print(
         f"{line.repo:<14} {line.spec_id:<10} {line.state:<18} "

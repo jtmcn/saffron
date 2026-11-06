@@ -20,8 +20,9 @@ import pytest
 from saffron.agents.findings import Finding
 from saffron.gates.contract import Failure, GateResult
 from saffron.ledger import Ledger
-from saffron.record.contract import Fact
+from saffron.record.contract import KINDS, Fact
 from saffron.record.memory import MemoryRecord
+from saffron.spec_review import SpecReviewFinding
 
 
 def _set(ledger: Ledger, sql: str, params: tuple) -> None:
@@ -519,13 +520,15 @@ def test_a_rerun_completes_a_migration_cut_short_and_refuses_a_record_that_disag
     # key 3: holds every true fact.
     for fact in expected[keys[2]]:
         seeded.append(keys[2], fact)
-    # key 4: a corrupted first fact, then the true second.
-    bad_first = replace(
-        expected[keys[3]][0],
-        payload={**expected[keys[3]][0].payload, "spec_sha": "x" * 64},
+    # key 4: the true first fact, a corrupted second (attempt_opened), then
+    # the true third: task_created disagreeing alone no longer refuses.
+    seeded.append(keys[3], expected[keys[3]][0])
+    bad_second = replace(
+        expected[keys[3]][1],
+        payload={**expected[keys[3]][1].payload, "n": 999},
     )
-    seeded.append(keys[3], bad_first)
-    seeded.append(keys[3], expected[keys[3]][1])
+    seeded.append(keys[3], bad_second)
+    seeded.append(keys[3], expected[keys[3]][2])
     # key 5: the true first two facts, then a corrupted third.
     seeded.append(keys[4], expected[keys[4]][0])
     seeded.append(keys[4], expected[keys[4]][1])
@@ -534,7 +537,8 @@ def test_a_rerun_completes_a_migration_cut_short_and_refuses_a_record_that_disag
         payload={**expected[keys[4]][2].payload, "cost_usd_est": 999.0},
     )
     seeded.append(keys[4], bad_third)
-    # key 6: the true first two facts, then a third that differs in `at` alone.
+    # key 6: the true first two facts, then a third that differs only in
+    # `at`. The top-up sets that aside, so the ref migrates, gaining nothing.
     seeded.append(keys[5], expected[keys[5]][0])
     seeded.append(keys[5], expected[keys[5]][1])
     bad_at = replace(expected[keys[5]][2], at="2099-01-01T00:00:00+00:00")
@@ -544,17 +548,20 @@ def test_a_rerun_completes_a_migration_cut_short_and_refuses_a_record_that_disag
 
     result = migrate(source_path, seeded)
 
-    assert result.migrated == [keys[0], keys[1], keys[2]]
-    assert [key for key, _ in result.refused] == [keys[3], keys[4], keys[5]]
+    assert result.migrated == [keys[0], keys[1], keys[2], keys[5]]
+    assert [key for key, _ in result.refused] == [keys[3], keys[4]]
 
     for key in (keys[0], keys[1], keys[2]):
         assert seeded.read(key) == expected[key]
-    for key in (keys[3], keys[4], keys[5]):
+    assert seeded.read(keys[5]) == held_before[keys[5]]
+    for key in (keys[3], keys[4]):
         assert seeded.read(key) == held_before[key]
 
-    # A held fact differing in `batch_key` alone disagrees too: facts compare whole.
+    # A held fact's set `batch_key` that differs still disagrees: only a
+    # null `batch_key` is set aside.
     other = MemoryRecord()
-    other.append(keys[0], replace(expected[keys[0]][0], batch_key="9"))
+    other.append(keys[0], expected[keys[0]][0])
+    other.append(keys[0], replace(expected[keys[0]][1], batch_key="9"))
     assert [key for key, _ in migrate(source_path, other).refused] == [keys[0]]
 
 
@@ -1672,8 +1679,8 @@ def test_migrate_writes_each_repos_tasks_to_its_own_origin_and_refuses_a_disagre
     expected = {key: truth.read(key) for key in (good_key, other_key)}
     assert len(expected[good_key]) > 2
 
-    # The other writer pushes the good task's first two true facts and the
-    # bad task's disagreeing first fact to origin1, under its own date.
+    # The other writer also pushes an `attempt_opened` for the bad task:
+    # `task_created` alone would now agree, and the ledger owns no attempt.
     writer_repo = _bare(tmp_path / "writer.git")
     writer_record = RefsRecord(writer_repo, remote=str(origin1))
     bad_fact = Fact(
@@ -1684,11 +1691,20 @@ def test_migrate_writes_each_repos_tasks_to_its_own_origin_and_refuses_a_disagre
         batch_key=None,
         payload={"spec_id": "SA-2002", "spec_sha": "x" * 64},
     )
+    bad_attempt_fact = Fact(
+        kind="attempt_opened",
+        task_key=bad_key,
+        at="2020-01-01T00:00:01+00:00",
+        repo="repo-a",
+        batch_key=None,
+        payload={"phase": "IMPLEMENTING", "n": 1},
+    )
     with monkeypatch.context() as patched:
         patched.setenv("GIT_COMMITTER_DATE", "2020-01-01T00:00:00Z")
         writer_record.append(good_key, expected[good_key][0])
         writer_record.append(good_key, expected[good_key][1])
         writer_record.append(bad_key, bad_fact)
+        writer_record.append(bad_key, bad_attempt_fact)
     writer_commits = _git(
         origin1, "rev-list", f"refs/saffron/tasks/{good_key}"
     ).stdout.split()
@@ -1710,6 +1726,7 @@ def test_migrate_writes_each_repos_tasks_to_its_own_origin_and_refuses_a_disagre
 
     seeded = MemoryRecord()
     seeded.append(bad_key, bad_fact)
+    seeded.append(bad_key, bad_attempt_fact)
     reason = dict(migrate(source_path, seeded).refused)[bad_key]
     assert reason != ""
 
@@ -1945,3 +1962,795 @@ def test_migrate_exits_two_when_infrastructure_fails_and_keeps_what_it_printed(
     assert out_lines_c[1].startswith("saffron: RecordError: ")
     assert rc_c == 2
     assert RefsRecord(moved_origin_c).read(key_c1)
+
+
+# The compared kinds, spelled again rather than imported, so a typo in
+# the module under test cannot also hide in its own expectations.
+_COMPARED_KINDS = (
+    "attempt_opened",
+    "attempt_closed",
+    "gate_result",
+    "finding",
+    "rebuttal",
+    "task_merged_head",
+    "task_package",
+    "stack_layer",
+    "end_review",
+    "qualification",
+    "spec_review",
+    "spec_text",
+    "stack_finish",
+)
+
+# Every compared kind the helper task below writes twice. The ledger
+# allows only one of the other four, per task.
+_TWO_FACT_KINDS = frozenset(
+    {
+        "attempt_opened",
+        "attempt_closed",
+        "gate_result",
+        "finding",
+        "rebuttal",
+        "end_review",
+        "qualification",
+        "spec_review",
+        "spec_text",
+    }
+)
+
+
+def _rich_task(ledger: Ledger, repo_id: int, batch_id: int, spec_id: str) -> int:
+    """A task holding two facts of every compared kind the ledger allows
+    more than one of, and one each of the four it does not. Ends `MERGED`,
+    with a pull request opened along the way, so its `task_package` fact's
+    own `state` (`READY_FOR_REVIEW`) outlives the row's own state column.
+    Shared by every witness below that needs a rich ref to compare against
+    or top up."""
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+    ledger.attach_run_to_batch(run_id, batch_id)
+    task_id = ledger.create_task(
+        run_id,
+        spec_id=spec_id,
+        spec_sha="s" * 64,
+        branch=f"saffron/{spec_id}",
+        policy_sha="p" * 64,
+    )
+
+    a1 = ledger.open_attempt(task_id, phase="IMPLEMENTING")
+    ledger.close_attempt(
+        a1,
+        session_id="s1",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=1.0,
+    )
+    ledger.record_gate_result(
+        GateResult(gate="lint", status="pass", tool="ruff 1.0", failures=[]),
+        attempt_id=a1,
+        baseline=[],
+    )
+    ledger.record_gate_result(
+        GateResult(gate="tests", status="pass", tool="pytest 8.0", failures=[]),
+        attempt_id=a1,
+        baseline=[],
+    )
+
+    a2 = ledger.open_attempt(task_id, phase="REPAIRING")
+    ledger.close_attempt(
+        a2,
+        session_id="s2",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=2,
+        cost_usd_est=2.0,
+    )
+
+    finding_ids = ledger.record_findings(
+        task_id,
+        [
+            Finding(
+                lens="l1",
+                severity="blocker",
+                file="a.py",
+                line=1,
+                claim="c1",
+                anchored=True,
+            ),
+            Finding(
+                lens="l1",
+                severity="concern",
+                file="b.py",
+                line=2,
+                claim="c2",
+                anchored=True,
+            ),
+        ],
+    )
+    ledger.record_rebuttal(finding_ids[0], verdict="confirmed", rebuttal="fixed")
+    ledger.record_rebuttal(finding_ids[1], verdict="withdrawn", rebuttal=None)
+
+    ledger.record_stack_layer(
+        task_id, position=1, predecessor_task_id=None, generation=1
+    )
+    ledger.record_end_review(
+        task_id, lens="l1", status="reviewed", cost_usd=1.0, error=None
+    )
+    ledger.record_end_review(
+        task_id, lens="l2", status="error", cost_usd=0.0, error="boom"
+    )
+
+    f1 = Finding(
+        lens="l1", severity="blocker", file="a.py", line=1, claim="q1", anchored=True
+    )
+    f2 = Finding(
+        lens="l2",
+        severity="concern",
+        file="b.py",
+        line=2,
+        claim="q2",
+        anchored=False,
+        probe_verdict="survived",
+    )
+    ledger.record_qualification(
+        task_id, finding=f1, filed="blocker", outcome="kept", reason="r1"
+    )
+    ledger.record_qualification(
+        task_id, finding=f2, filed="concern", outcome="dropped", reason="r2"
+    )
+
+    ledger.record_spec_review(
+        task_id,
+        route="revise",
+        block=None,
+        block_sha256=None,
+        error=None,
+        findings=[
+            SpecReviewFinding(
+                severity="blocker",
+                claim="k1",
+                fixes=None,
+                criterion=1,
+                file=None,
+                line=None,
+            )
+        ],
+    )
+    ledger.record_spec_review(
+        task_id,
+        route="run",
+        block="b" * 10,
+        block_sha256="c" * 64,
+        error=None,
+        findings=[
+            SpecReviewFinding(
+                severity="concern",
+                claim="k2",
+                fixes="x",
+                criterion=None,
+                file="z.py",
+                line=3,
+            )
+        ],
+    )
+
+    ledger.record_spec_text(
+        task_id,
+        origin="revision",
+        spec_id=spec_id,
+        path=f".saffron/specs/{spec_id}-foo.md",
+        text="hello",
+    )
+    ledger.record_spec_text(
+        task_id,
+        origin="follow_up",
+        spec_id=spec_id,
+        path=f".saffron/specs/{spec_id}-bar.md",
+        text="world",
+    )
+
+    ledger.set_task_package(
+        task_id,
+        "READY_FOR_REVIEW",
+        f"saffron/{spec_id}",
+        "b" * 40,
+        f"https://github.com/o/r/pull/{spec_id}",
+        added=5,
+        removed=2,
+    )
+    ledger.record_merged_head(task_id, "c" * 40)
+    ledger.set_task_state(task_id, "MERGED")
+
+    ledger.record_stack_finish(
+        batch_id, branch=f"saffron/{spec_id}", head_sha="d" * 40, pr_url=None
+    )
+    return task_id
+
+
+def _rest_after(full: list[Fact], held_counts: dict[str, int]) -> list[Fact]:
+    """Every compared-kind fact of `full` past the count already held, per
+    kind, in `full`'s own order: what the top-up still owes."""
+    counted: Counter[str] = Counter()
+    rest = []
+    for fact in full:
+        if fact.kind not in _COMPARED_KINDS:
+            continue
+        counted[fact.kind] += 1
+        if counted[fact.kind] > held_counts.get(fact.kind, 0):
+            rest.append(fact)
+    return rest
+
+
+def _derived_state(facts: list[Fact]) -> str:
+    """The state `facts` add up to: the last `task_state` or `task_package`
+    fact's own `state`, or `QUEUED` where there is neither."""
+    state = "QUEUED"
+    for fact in facts:
+        if fact.kind in ("task_state", "task_package"):
+            state = fact.payload["state"]
+    return state
+
+
+def _with_state_tail(full: list[Fact], seeded_so_far: list[Fact]) -> list[Fact]:
+    """The topped-up ref's own ending: `seeded_so_far` unchanged, then the
+    ledger's own `task_state` fact where its derived state still disagrees."""
+    ledger_state = next(f for f in full if f.kind == "task_state")
+    if _derived_state(seeded_so_far) == ledger_state.payload["state"]:
+        return seeded_so_far
+    return [*seeded_so_far, ledger_state]
+
+
+def _assert_agrees_and_gains_nothing(
+    source_path: Path, key: str, held: list[Fact]
+) -> None:
+    from saffron.record.migrate import migrate
+
+    seeded = MemoryRecord()
+    for fact in held:
+        seeded.append(key, fact)
+    before = list(seeded.read(key))
+    result = migrate(source_path, seeded)
+    assert result.migrated == [key]
+    assert result.refused == []
+    assert seeded.read(key) == before
+
+
+def _assert_disagrees(source_path: Path, key: str, held: list[Fact]) -> None:
+    from saffron.record.migrate import migrate
+
+    seeded = MemoryRecord()
+    for fact in held:
+        seeded.append(key, fact)
+    before = list(seeded.read(key))
+    result = migrate(source_path, seeded)
+    reasons = dict(result.refused)
+    assert list(reasons) == [key]
+    # "with today's reason" (SA-0337): the top-up's own refusal reads
+    # exactly as the whole-list compare's always has.
+    assert reasons[key] == f"the record holds {len(before)} fact(s) that disagree"
+    assert seeded.read(key) == before
+
+
+def test_a_ref_a_live_cell_started_is_topped_up_and_folds_to_the_ledgers_rows(
+    tmp_path: Path,
+) -> None:
+    from saffron.record.fold import fold
+    from saffron.record.migrate import migrate
+
+    ledger = Ledger(tmp_path / "source.db")
+    repo_id = ledger.upsert_repo("saffron", "/o", "/m.git", None)
+    batch_id = ledger.create_batch(budget_usd=100.0)
+
+    task1 = _rich_task(ledger, repo_id, batch_id, "SA-8001")
+    # A third attempt, wholly unheld, pairs its own open with its own close:
+    # a tail that grouped every kind together instead would split them.
+    a3 = ledger.open_attempt(task1, phase="GATING")
+    ledger.close_attempt(
+        a3,
+        session_id="s3",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=0.5,
+    )
+
+    # A second task, pushed with no pull request, ending EXHAUSTED: its ref
+    # is cut short before its own `task_push` and completed as today.
+    run2 = ledger.create_run(repo_id, base_sha="a" * 40)
+    ledger.attach_run_to_batch(run2, batch_id)
+    task2 = ledger.create_task(
+        run2, spec_id="SA-8002", spec_sha="s" * 64, branch="saffron/SA-8002"
+    )
+    ledger.record_push(task2, "f" * 40)
+    ledger.set_task_state(task2, "EXHAUSTED")
+
+    key1 = _key(ledger, task1)
+    key2 = _key(ledger, task2)
+    source_path = tmp_path / "source.db"
+    ledger.close()
+
+    truth = MemoryRecord()
+    migrate(source_path, truth)
+    full1 = truth.read(key1)
+    full2 = truth.read(key2)
+
+    attempt1_gate_results = [
+        f
+        for f in full1
+        if f.kind == "gate_result" and f.payload["phase"] == "IMPLEMENTING"
+    ]
+    assert len(attempt1_gate_results) == 2
+
+    def _first(kind: str) -> Fact:
+        return next(f for f in full1 if f.kind == kind)
+
+    created1 = replace(
+        _first("task_created"),
+        at="2026-01-01T08:00:00.123456+00:00",
+        batch_key=None,
+        payload={
+            **_first("task_created").payload,
+            "policy_sha": None,
+            "risk": "standard",
+            "idempotency_key": "x",
+        },
+    )
+    # A differing `at` on a compared kind too, not only on `task_created`:
+    # the normalisation sets it aside everywhere.
+    attempt_opened_1 = replace(
+        _first("attempt_opened"),
+        at="2026-01-01T08:00:00.999999+00:00",
+        batch_key=None,
+    )
+
+    # A live cell's own `task_state` per transition and its `task_push`,
+    # none of them compared, all kept where the cell wrote them.
+    seeded1 = [
+        created1,
+        Fact(
+            kind="task_state",
+            task_key=key1,
+            at="2026-01-01T08:00:01.000001+00:00",
+            repo="saffron",
+            batch_key=None,
+            payload={"state": "IMPLEMENTING"},
+        ),
+        attempt_opened_1,
+        _first("attempt_closed"),
+        *attempt1_gate_results,
+        Fact(
+            kind="task_state",
+            task_key=key1,
+            at="2026-01-01T08:00:01.000002+00:00",
+            repo="saffron",
+            batch_key=None,
+            payload={"state": "REVIEWING"},
+        ),
+        _first("finding"),
+        _first("rebuttal"),
+        _first("task_package"),
+        Fact(
+            kind="task_push",
+            task_key=key1,
+            at="2026-01-01T08:00:01.000003+00:00",
+            repo="saffron",
+            batch_key=None,
+            payload={"pushed_sha": "d" * 40},
+        ),
+        _first("end_review"),
+        _first("qualification"),
+        _first("spec_review"),
+        _first("spec_text"),
+        # A live cell's own noise: not a compared kind, kept in place.
+        Fact(
+            kind="task_engine",
+            task_key=key1,
+            at="2026-01-01T08:00:00.000001+00:00",
+            repo="saffron",
+            batch_key=None,
+            payload={"engine_commit": "e" * 40},
+        ),
+        Fact(
+            kind="task_policy",
+            task_key=key1,
+            at="2026-01-01T08:00:00.000002+00:00",
+            repo="saffron",
+            batch_key=None,
+            payload={"policy_sha": "q" * 64},
+        ),
+        Fact(
+            kind="spec_finding",
+            task_key=key1,
+            at="2026-01-01T08:00:00.000003+00:00",
+            repo="saffron",
+            batch_key=None,
+            payload={
+                "n": 1,
+                "position": 1,
+                "severity": "blocker",
+                "fixes": None,
+                "claim": "k1",
+                "criterion": 1,
+                "file": None,
+                "line": None,
+            },
+        ),
+    ]
+
+    held_counts1 = {
+        "attempt_opened": 1,
+        "attempt_closed": 1,
+        "gate_result": 2,
+        "finding": 1,
+        "rebuttal": 1,
+        "task_merged_head": 0,
+        "task_package": 1,
+        "stack_layer": 0,
+        "end_review": 1,
+        "qualification": 1,
+        "spec_review": 1,
+        "spec_text": 1,
+        "stack_finish": 0,
+    }
+    expected_tail1 = _rest_after(full1, held_counts1)
+    expected1 = _with_state_tail(full1, [*seeded1, *expected_tail1])
+
+    seeded = MemoryRecord()
+    for fact in seeded1:
+        seeded.append(key1, fact)
+    for fact in full2[:1]:
+        seeded.append(key2, fact)
+
+    result = migrate(source_path, seeded)
+    assert result.migrated == [key1, key2]
+    assert result.refused == []
+
+    assert seeded.read(key1) == expected1
+    assert seeded.read(key2) == full2
+
+    rebuilt = Ledger(tmp_path / "rebuilt.db")
+    fold(seeded, rebuilt)
+
+    row1 = rebuilt._db.execute(
+        "SELECT state, pushed_in_state, merged_head_sha FROM tasks WHERE record_key = ?",
+        (key1,),
+    ).fetchone()
+    assert row1["state"] == "MERGED"
+    assert row1["pushed_in_state"] == "READY_FOR_REVIEW"
+    assert (
+        row1["merged_head_sha"]
+        == next(f for f in full1 if f.kind == "task_merged_head").payload["head"]
+    )
+
+    row2 = rebuilt._db.execute(
+        "SELECT state, pushed_sha FROM tasks WHERE record_key = ?", (key2,)
+    ).fetchone()
+    assert row2["state"] == "EXHAUSTED"
+    assert row2["pushed_sha"] == "f" * 40
+
+    assert (
+        rebuilt._db.execute(
+            "SELECT COUNT(*) AS n FROM attempts WHERE task_id = "
+            "(SELECT task_id FROM tasks WHERE record_key = ?)",
+            (key1,),
+        ).fetchone()["n"]
+        == 3
+    )
+    assert (
+        rebuilt._db.execute(
+            "SELECT COUNT(*) AS n FROM findings WHERE task_id = "
+            "(SELECT task_id FROM tasks WHERE record_key = ?)",
+            (key1,),
+        ).fetchone()["n"]
+        == 2
+    )
+    for table in ("end_reviews", "qualifications", "stack_layers", "stack_finishes"):
+        n = rebuilt._db.execute(
+            f"SELECT COUNT(*) AS n FROM {table} WHERE task_key = ?", (key1,)
+        ).fetchone()["n"]
+        want = 1 if table in ("stack_layers", "stack_finishes") else 2
+        assert n == want, table
+    rebuilt.close()
+
+
+def test_each_compared_kind_that_disagrees_or_runs_past_the_ledger_is_refused(
+    tmp_path: Path,
+) -> None:
+    from saffron.record.migrate import migrate
+
+    ledger = Ledger(tmp_path / "source.db")
+    repo_id = ledger.upsert_repo("saffron", "/o", "/m.git", None)
+    batch_id = ledger.create_batch(budget_usd=50.0)
+    task_id = _rich_task(ledger, repo_id, batch_id, "SA-9001")
+    key = _key(ledger, task_id)
+    source_path = tmp_path / "source.db"
+    ledger.close()
+
+    truth = MemoryRecord()
+    migrate(source_path, truth)
+    full = truth.read(key)
+    # A `task_created` whose `at` guarantees every held ref below misses
+    # today's exact-prefix fast path, forcing the top-up every time.
+    created = replace(full[0], at="2020-01-01T00:00:00.000001+00:00")
+
+    for kind in _COMPARED_KINDS:
+        of_kind = [f for f in full if f.kind == kind]
+        assert len(of_kind) == (2 if kind in _TWO_FACT_KINDS else 1), kind
+
+        # (a) the ledger's first fact of this kind alone: migrated, gains
+        # the rest of every compared kind, then the ledger's state.
+        held_a = [created, of_kind[0]]
+        rest_a = _rest_after(full, {kind: 1})
+        _assert_tops_up_to(
+            source_path, key, held_a, _with_state_tail(full, [*held_a, *rest_a])
+        )
+
+        # (b) every fact of this kind, the last one's payload carrying one
+        # extra key: refused, gains no fact.
+        bad_last = replace(of_kind[-1], payload={**of_kind[-1].payload, "extra": "x"})
+        held_b = [created, *of_kind[:-1], bad_last]
+        _assert_disagrees(source_path, key, held_b)
+
+        # (c) every fact of this kind and one more: refused, gains no fact.
+        held_c = [created, *of_kind, replace(of_kind[-1])]
+        _assert_disagrees(source_path, key, held_c)
+
+    for kind in _TWO_FACT_KINDS:
+        of_kind = [f for f in full if f.kind == kind]
+
+        # (d) both true facts: migrated, gains the rest of every other
+        # compared kind, then the ledger's state.
+        held_d = [created, *of_kind]
+        rest_d = _rest_after(full, {kind: 2})
+        _assert_tops_up_to(
+            source_path, key, held_d, _with_state_tail(full, [*held_d, *rest_d])
+        )
+
+        # (e) only the second: refused.
+        _assert_disagrees(source_path, key, [created, of_kind[1]])
+
+        # (f) both, the first carrying one extra key: refused.
+        bad_first = replace(of_kind[0], payload={**of_kind[0].payload, "extra": "x"})
+        _assert_disagrees(source_path, key, [created, bad_first, of_kind[1]])
+
+    # A ref holding no `task_created` is refused the same way.
+    attempt_opened_fact = next(f for f in full if f.kind == "attempt_opened")
+    _assert_disagrees(source_path, key, [attempt_opened_fact])
+
+
+def _assert_tops_up_to(
+    source_path: Path, key: str, held: list[Fact], expected: list[Fact]
+) -> None:
+    from saffron.record.migrate import migrate
+
+    seeded = MemoryRecord()
+    for fact in held:
+        seeded.append(key, fact)
+    result = migrate(source_path, seeded)
+    assert result.migrated == [key]
+    assert result.refused == []
+    assert seeded.read(key) == expected
+
+
+def test_the_top_up_sets_aside_only_its_named_differences(tmp_path: Path) -> None:
+    from saffron.record.migrate import migrate
+
+    ledger = Ledger(tmp_path / "source.db")
+    repo_id = ledger.upsert_repo("saffron", "/o", "/m.git", None)
+    batch_id = ledger.create_batch(budget_usd=50.0)
+    task_id = _rich_task(ledger, repo_id, batch_id, "SA-9101")
+    key = _key(ledger, task_id)
+    source_path = tmp_path / "source.db"
+    ledger.close()
+
+    truth = MemoryRecord()
+    migrate(source_path, truth)
+    full = truth.read(key)
+
+    # The sixteen kinds `migrate` writes, read off its own output for a
+    # second ledger whose pushed task adds the `task_push` this one lacks.
+    kinds_ledger = Ledger(tmp_path / "kinds.db")
+    kinds_repo = kinds_ledger.upsert_repo("saffron", "/o", "/m.git", None)
+    kinds_batch = kinds_ledger.create_batch(budget_usd=50.0)
+    _rich_task(kinds_ledger, kinds_repo, kinds_batch, "SA-9102")
+    run2 = kinds_ledger.create_run(kinds_repo, base_sha="a" * 40)
+    kinds_ledger.attach_run_to_batch(run2, kinds_batch)
+    task2 = kinds_ledger.create_task(
+        run2, spec_id="SA-9103", spec_sha="s" * 64, branch="saffron/SA-9103"
+    )
+    kinds_ledger.record_push(task2, "f" * 40)
+    kinds_ledger.set_task_state(task2, "EXHAUSTED")
+    kinds_ledger.close()
+    kinds_record = MemoryRecord()
+    migrate(tmp_path / "kinds.db", kinds_record)
+    written = frozenset(
+        f.kind for k in kinds_record.task_keys() for f in kinds_record.read(k)
+    )
+    assert len(written) == 16
+
+    gate_result_index = next(i for i, f in enumerate(full) if f.kind == "gate_result")
+    attempt_opened_index = next(
+        i for i, f in enumerate(full) if f.kind == "attempt_opened"
+    )
+    attempt_closed_index = next(
+        i for i, f in enumerate(full) if f.kind == "attempt_closed"
+    )
+    task_created_index = next(i for i, f in enumerate(full) if f.kind == "task_created")
+    assert full[attempt_closed_index].batch_key is not None
+
+    def _tweaked(index: int, **changes: Any) -> list[Fact]:
+        copy = list(full)
+        copy[index] = replace(copy[index], **changes)
+        return copy
+
+    def _tweaked_payload(index: int, **payload_changes: Any) -> list[Fact]:
+        copy = list(full)
+        copy[index] = replace(
+            copy[index], payload={**copy[index].payload, **payload_changes}
+        )
+        return copy
+
+    # Each named difference agrees alone: `at`, a `gate_result`'s own
+    # ignored keys, a null `batch_key`, and anything in `task_created`.
+    _assert_agrees_and_gains_nothing(
+        source_path,
+        key,
+        _tweaked(attempt_opened_index, at="2099-01-01T00:00:00+00:00"),
+    )
+    _assert_agrees_and_gains_nothing(
+        source_path, key, _tweaked_payload(gate_result_index, schema_version=3)
+    )
+    _assert_agrees_and_gains_nothing(
+        source_path, key, _tweaked_payload(gate_result_index, collected=["t"])
+    )
+    _assert_agrees_and_gains_nothing(
+        source_path, key, _tweaked_payload(gate_result_index, uncollected=["t"])
+    )
+    _assert_agrees_and_gains_nothing(
+        source_path, key, _tweaked(attempt_closed_index, batch_key=None)
+    )
+    _assert_agrees_and_gains_nothing(
+        source_path, key, _tweaked_payload(task_created_index, spec_sha="z" * 64)
+    )
+
+    for foreign_kind in KINDS:
+        if foreign_kind in written:
+            continue
+        foreign_fact = Fact(
+            kind=foreign_kind,
+            task_key=key,
+            at="2020-01-01T00:00:00+00:00",
+            repo="saffron",
+            batch_key=None,
+            payload={},
+        )
+        _assert_agrees_and_gains_nothing(source_path, key, [*full, foreign_fact])
+
+    # Each of these disagrees alone: a differing `summary`, the wrong kind's
+    # own key, and a set `batch_key` that disagrees.
+    _assert_disagrees(
+        source_path, key, _tweaked_payload(gate_result_index, summary="unexpected-text")
+    )
+    _assert_disagrees(
+        source_path, key, _tweaked_payload(attempt_closed_index, schema_version=3)
+    )
+    _assert_disagrees(
+        source_path,
+        key,
+        _tweaked(
+            attempt_closed_index,
+            batch_key=str(full[attempt_closed_index].batch_key) + "9",
+        ),
+    )
+    # `repo` is not a named difference either: it still disagrees.
+    _assert_disagrees(
+        source_path, key, _tweaked(attempt_opened_index, repo="other-repo")
+    )
+
+
+def test_a_topped_up_ref_ends_on_the_ledgers_state_only_where_its_own_differs(
+    tmp_path: Path,
+) -> None:
+    from saffron.record.migrate import migrate
+
+    ledger = Ledger(tmp_path / "source.db")
+    repo_id = ledger.upsert_repo("saffron", "/o", "/m.git", None)
+
+    # Task A: packaged READY_FOR_REVIEW, the row's last word.
+    _, task_a = _task(ledger, repo_id, "SA-9201")
+    ledger.set_task_package(
+        task_a, "READY_FOR_REVIEW", "saffron/SA-9201", "a" * 40, "https://x/pull/1"
+    )
+
+    # Task B: rejected at the plan checkpoint, no package at all.
+    _, task_b = _task(ledger, repo_id, "SA-9202")
+    ledger.set_task_state(task_b, "PLAN_REJECTED")
+
+    # Task C: freshly created, never touched again.
+    _, task_c = _task(ledger, repo_id, "SA-9203")
+
+    # Task D: pushed, never packaged, ending EXHAUSTED.
+    _, task_d = _task(ledger, repo_id, "SA-9204")
+    ledger.record_push(task_d, "d" * 40)
+    ledger.set_task_state(task_d, "EXHAUSTED")
+
+    # Task E: packaged READY_FOR_REVIEW, the row's last word too.
+    _, task_e = _task(ledger, repo_id, "SA-9205")
+    ledger.set_task_package(
+        task_e, "READY_FOR_REVIEW", "saffron/SA-9205", "e" * 40, "https://x/pull/5"
+    )
+
+    keys = {
+        name: _key(ledger, tid)
+        for name, tid in [
+            ("a", task_a),
+            ("b", task_b),
+            ("c", task_c),
+            ("d", task_d),
+            ("e", task_e),
+        ]
+    }
+    source_path = tmp_path / "source.db"
+    ledger.close()
+
+    truth = MemoryRecord()
+    migrate(source_path, truth)
+    full = {name: truth.read(key) for name, key in keys.items()}
+
+    def _created(name: str) -> Fact:
+        return replace(
+            next(f for f in full[name] if f.kind == "task_created"),
+            at=f"2026-02-0{list(keys).index(name) + 1}T00:00:00.000001+00:00",
+        )
+
+    def _fake_state(name: str, state: str) -> Fact:
+        return Fact(
+            kind="task_state",
+            task_key=keys[name],
+            at="2026-02-01T00:00:00.000002+00:00",
+            repo="saffron",
+            batch_key=None,
+            payload={"state": state},
+        )
+
+    held = {
+        "a": [
+            _created("a"),
+            _fake_state("a", "EXHAUSTED"),
+            next(f for f in full["a"] if f.kind == "task_package"),
+        ],
+        "b": [
+            _created("b"),
+            next(f for f in full["b"] if f.kind == "task_state"),
+        ],
+        "c": [_created("c")],
+        "d": [
+            _created("d"),
+            _fake_state("d", "READY_FOR_REVIEW"),
+            next(f for f in full["d"] if f.kind == "task_push"),
+        ],
+        "e": [
+            _created("e"),
+            _fake_state("e", "REVIEWING"),
+        ],
+    }
+
+    seeded = MemoryRecord()
+    for name, facts in held.items():
+        for fact in facts:
+            seeded.append(keys[name], fact)
+
+    result = migrate(source_path, seeded)
+    assert sorted(result.migrated) == sorted(keys.values())
+    assert result.refused == []
+
+    assert seeded.read(keys["a"]) == held["a"]
+    assert seeded.read(keys["b"]) == held["b"]
+    assert seeded.read(keys["c"]) == held["c"]
+
+    task_state_d = next(f for f in full["d"] if f.kind == "task_state")
+    assert task_state_d.payload["state"] == "EXHAUSTED"
+    assert seeded.read(keys["d"]) == [*held["d"], task_state_d]
+
+    task_package_e = next(f for f in full["e"] if f.kind == "task_package")
+    assert seeded.read(keys["e"]) == [*held["e"], task_package_e]

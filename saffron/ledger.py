@@ -4,7 +4,7 @@ Now true of what runs: every command's shared `Ledger` is constructed with a
 `RoutedRecord` (backlog item 170 step 3). No row here is derived from one,
 and §4.6 rule 1 holds as written. The record design reverses that: the
 ledger becomes a store folded out of `refs/saffron/*` by
-`saffron/record/fold.py`, deletable at any time. Only the nineteen kinds
+`saffron/record/fold.py`, deletable at any time. Only the twenty kinds
 `_append` writes fold back, so even then it stays authoritative for the
 rest. That reversal waits on the batch and run folds. §4.6 and `CONTEXT.md`
 §8 are amended with it rather than ahead of it.
@@ -25,12 +25,14 @@ import hashlib
 import json
 import re
 import sqlite3
-from collections.abc import Collection, Sequence
+import time
+from collections.abc import Callable, Collection, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from saffron.agents.findings import Finding, Severity
+from saffron.events import RecordAppend
 from saffron.gates.baseline import subtract_baseline
 from saffron.gates.contract import Failure, GateResult
 from saffron.record.contract import Fact, Record, RecordError, new_task_key
@@ -399,8 +401,17 @@ def _spec_finding_field(value: Any) -> Any:
 
 
 class Ledger:
-    def __init__(self, path: Path, record: Record | None = None) -> None:
+    def __init__(
+        self,
+        path: Path,
+        record: Record | None = None,
+        *,
+        events: Callable[[RecordAppend], None] | None = None,
+    ) -> None:
         self._record = record
+        # Record design §8: every append also emits a `RecordAppend`. `None`
+        # is every `Ledger` with no record (`fold`, `next-id`).
+        self._events = events
         path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(path)
         self._db.row_factory = sqlite3.Row
@@ -649,9 +660,28 @@ class Ledger:
 
     def _append(self, fact: Fact) -> None:
         """After the commit that wrote the row, never before. `None` is
-        every caller that predates the record, unaffected."""
+        every caller that predates the record, unaffected.
+
+        Once the record's own `append` returns, without raising, emit one
+        `RecordAppend` through the sink (record design §8). An append the
+        record refuses raises out of `append` and reaches no emit. Nothing
+        is emitted with no record, or with no sink: `fold` and `next-id`
+        build a `Ledger` with neither."""
         if self._record is not None:
             self._record.append(fact.task_key, fact)
+            if self._events is not None:
+                row = self._db.execute(
+                    "SELECT spec_id FROM tasks WHERE record_key = ?",
+                    (fact.task_key,),
+                ).fetchone()
+                self._events(
+                    RecordAppend(
+                        timestamp=time.time(),
+                        spec_id=row["spec_id"],
+                        fact_kind=fact.kind,
+                        task_key=fact.task_key,
+                    )
+                )
 
     def _commit_and_append(self, fact: Fact, **apply_kwargs: int | None) -> int | None:
         """Every write method's own tail: apply, commit, then append."""

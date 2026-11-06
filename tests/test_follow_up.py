@@ -135,17 +135,26 @@ def _revision(spec_id: str, *, budget: float, body: str) -> str:
     )
 
 
-def _build(tmp_path: Path) -> SimpleNamespace:
+def _build(
+    tmp_path: Path, *, routed: bool = False, origin: str = "https://example/o"
+) -> SimpleNamespace:
     """The arrangement every test in this module shares: the mirror's three
     commits, the four spec files, and the five tasks the spec's notes
-    describe, in the order given."""
+    describe, in the order given.
+
+    `routed`, `False` by default, builds a real `RoutedRecord` over
+    `mirror` and `origin` instead of the usual `MemoryRecord` pair.
+    """
     mirror, shas = _mirror(tmp_path)
     specs_dir = _specs_dir(tmp_path)
-    record = MemoryRecord()
+    if routed:
+        from saffron.record.routed import RoutedRecord
+
+        record = RoutedRecord(lambda key: ledger.record_home(key))
+    else:
+        record = MemoryRecord()
     ledger = Ledger(tmp_path / "ledger.db", record=record)
-    repo_id = ledger.upsert_repo(
-        "acme", "https://example/o", str(mirror), policy_sha=None
-    )
+    repo_id = ledger.upsert_repo("acme", origin, str(mirror), policy_sha=None)
     batch_id = ledger.create_batch(100.0)
 
     run_before = ledger.create_run(repo_id, shas["base"])
@@ -935,6 +944,141 @@ def test_a_follow_up_writers_attempt_records_the_model_its_session_names(
         "wm-wrongid",
         "wm-rate",
     ]
+
+
+def test_a_follow_up_writers_facts_reach_the_origin_at_exit(tmp_path, monkeypatch):
+    """The facts `write_follow_ups` writes reach the origin once
+    `push_unpushed` runs, the way a command's own exit runs it: the
+    accepted follow-up's attempt and `spec_text` facts on its minted
+    task, and the attempts it charges to a pooled layer an earlier
+    command already pushed."""
+    from saffron import follow_up, spec_review
+    from saffron.record.refs import RefsRecord
+    from saffron.record.routed import RoutedRecord
+    from tests.conftest import bare_repo
+
+    monkeypatch.setattr(spec_review, "SPEC_WRITER_SESSION_USD", 1.0)
+
+    origin = bare_repo(tmp_path / "origin.git")
+
+    built = _build(tmp_path, routed=True, origin=str(origin))
+    assert isinstance(built.ledger._record, RoutedRecord)
+    refused = built.ledger._record.push_unpushed()
+    assert refused == []
+
+    stack = _stack(built)
+    key_102 = built.ledger.record_key(built.task_102)
+    assert key_102 is not None
+    findings = _shared_findings()
+
+    def g() -> FollowUpGroup:
+        return FollowUpGroup(
+            task_key=key_102,
+            file="src/b.py",
+            findings=(_q(key_102, findings["concern_b"]),),
+        )
+
+    groups = [g() for _ in range(5)]
+
+    accepted_text = _candidate("SA-0108", mutant=("src/b.py", "not_here", "y"))
+    wrong_id_text = _candidate("SA-0999", claims=("claim-concern-b",))
+    turns = [
+        spec_review.SpecWriterSession(
+            text=accepted_text,
+            cost_usd=0.25,
+            error=None,
+            resets_at=None,
+            session_id="s-accepted",
+            num_turns=3,
+            spec_sha=hash_artifact(accepted_text),
+            model="wm-accepted",
+        ),
+        spec_review.SpecWriterSession(
+            text="",
+            cost_usd=0.25,
+            error="idle bound",
+            resets_at=None,
+            session_id="s-error",
+            num_turns=3,
+            spec_sha=None,
+            model="wm-error",
+        ),
+        spec_review.SpecWriterSession(
+            text="not a spec at all\n",
+            cost_usd=0.25,
+            error=None,
+            resets_at=None,
+            session_id="s-parse",
+            num_turns=3,
+            spec_sha=hash_artifact("not a spec at all\n"),
+            model="wm-parse",
+        ),
+        # The parse group's second (sent-back) draft, which fails to parse
+        # too and so pools on its second refusal rather than being resent.
+        spec_review.SpecWriterSession(
+            text="---\n- `broken\n---\nbody\n",
+            cost_usd=0.25,
+            error=None,
+            resets_at=None,
+            session_id="s-parse2",
+            num_turns=3,
+            spec_sha=hash_artifact("---\n- `broken\n---\nbody\n"),
+            model="wm-parse2",
+        ),
+        spec_review.SpecWriterSession(
+            text=wrong_id_text,
+            cost_usd=0.25,
+            error=None,
+            resets_at=None,
+            session_id="s-wrongid",
+            num_turns=3,
+            spec_sha=hash_artifact(wrong_id_text),
+            model="wm-wrongid",
+        ),
+        # Last, since a rate-limited writer session pools every later group.
+        spec_review.SpecWriterSession(
+            text="",
+            cost_usd=0.25,
+            error=None,
+            resets_at=1893456000,
+            session_id="s-rate",
+            num_turns=0,
+            spec_sha=None,
+            model="wm-rate",
+        ),
+    ]
+
+    candidates = follow_up.write_follow_ups(
+        built.ledger,
+        stack,
+        batch_key=str(built.batch_id),
+        qualify=_qualify_stub([], groups, []),
+        write=_write_stub([], turns),
+        judge=_green_judge,
+        mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], []),
+        mirror=built.mirror,
+        specs_dir=built.specs_dir,
+        repo_id=built.repo_id,
+        test_paths=["tests/**"],
+        cap_usd=10.0,
+        emit=lambda line: None,
+        pooled=[],
+    )
+    assert [c.spec.id for c in candidates] == ["SA-0108"]
+
+    refused = built.ledger._record.push_unpushed()
+    assert refused == []
+
+    accepted_key = built.ledger.record_key(candidates[0].task_id)
+    assert accepted_key is not None
+    accepted_kinds = [fact.kind for fact in RefsRecord(origin).read(accepted_key)]
+    assert "attempt_opened" in accepted_kinds
+    assert "attempt_closed" in accepted_kinds
+    assert "spec_text" in accepted_kinds
+
+    pooled_kinds = [fact.kind for fact in RefsRecord(origin).read(key_102)]
+    assert pooled_kinds.count("attempt_opened") == 5
+    assert pooled_kinds.count("attempt_closed") == 5
 
 
 _NO_FRONTMATTER = "not a spec at all\n"

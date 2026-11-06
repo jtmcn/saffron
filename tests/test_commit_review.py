@@ -25,6 +25,7 @@ from saffron import cli
 from saffron.agents.findings import Finding
 from saffron.ledger import Ledger
 from saffron.phases import implement
+from saffron.record.routed import RoutedRecord
 
 SPEC_ID = "SA-0900"
 SPEC_FILENAME = f"{SPEC_ID}-commit-review-test.md"
@@ -199,6 +200,16 @@ def _seed_task(
     return task_id
 
 
+def _seeding_ledger(path: Path, origin_url: str) -> Ledger:
+    """A `Ledger` that routes its own writes straight onto the fixture's
+    bare origin, standing in for the mirror `review` has not cloned yet
+    (item 170): the production `RoutedRecord` the command builds over its
+    own fresh mirror then finds the task's ref already there to recover."""
+    return Ledger(
+        path, record=RoutedRecord(lambda _key: (Path(origin_url), origin_url))
+    )
+
+
 def _gh_state(state: str, calls: list):
     def _gh(argv: list[str]):
         calls.append(argv)
@@ -279,7 +290,7 @@ def test_review_reads_the_review_commits_with_both_end_review_lenses_and_charges
     mirror_path = cli._mirror_path(work, home)
     pr_url = _pr_view()
 
-    ledger = Ledger(home / "ledger.db")
+    ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
     task_id = _seed_task(
         ledger,
         origin_url=fixture.origin_url,
@@ -497,7 +508,7 @@ def test_review_starts_a_restacked_branchs_range_at_the_packaged_commits_rebased
     mirror_path = cli._mirror_path(work.resolve(), home)
     pr_url = _pr_view()
 
-    ledger = Ledger(home / "ledger.db")
+    ledger = _seeding_ledger(home / "ledger.db", origin_url)
     task_id = _seed_task(
         ledger,
         origin_url=origin_url,
@@ -546,7 +557,7 @@ def test_review_reads_a_task_against_its_newest_recorded_spec_text(
     mirror_path = cli._mirror_path(work, home)
     pr_url = _pr_view()
 
-    ledger = Ledger(home / "ledger.db")
+    ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
     task_id = _seed_task(
         ledger,
         origin_url=fixture.origin_url,
@@ -608,7 +619,7 @@ def test_review_exits_one_when_either_lens_files_a_blocker(monkeypatch, tmp_path
         mirror_path = cli._mirror_path(work, home)
         pr_url = _pr_view()
 
-        ledger = Ledger(home / "ledger.db")
+        ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
         task_id = _seed_task(
             ledger,
             origin_url=fixture.origin_url,
@@ -667,7 +678,7 @@ def test_review_exits_two_when_a_lens_or_its_cell_breaks_and_charges_the_failed_
         work = fixture.work.resolve()
         mirror_path = cli._mirror_path(work, home)
         pr_url = _pr_view()
-        ledger = Ledger(home / "ledger.db")
+        ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
         task_id = _seed_task(
             ledger,
             origin_url=fixture.origin_url,
@@ -1054,7 +1065,7 @@ def test_review_frames_the_spec_body_as_review_commits_over_a_packaged_head(
     mirror_path = cli._mirror_path(work, home)
     pr_url = _pr_view()
 
-    ledger = Ledger(home / "ledger.db")
+    ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
     task_id = _seed_task(
         ledger,
         origin_url=fixture.origin_url,
@@ -1117,7 +1128,7 @@ def test_review_stopped_by_sigterm_tears_its_cell_down_and_exits_143(
     mirror_path = cli._mirror_path(work, home)
     pr_url = _pr_view()
 
-    ledger = Ledger(home / "ledger.db")
+    ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
     task_id = _seed_task(
         ledger,
         origin_url=fixture.origin_url,

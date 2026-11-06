@@ -251,8 +251,8 @@ the child is cut from `base_sha` without the parent's code. Then
 ~~**b-af24d1**~~: a rerun that ends `REBUTTAL_UNJUDGED` is pushed onto another row's
 open pull request branch. No merge moves a row at that state to `MERGED`.
 
-**Placed 2026-10-12**, from `SA-0278`'s spec review: **b-d4b847**, then
-**b-4eaaa4** and **b-6677b6**. A mirror that lacks a task's ref starts one
+**Placed 2026-10-12**, from `SA-0278`'s spec review: ~~**b-d4b847**~~, then
+~~**b-4eaaa4**~~ and ~~**b-6677b6**~~. A mirror that lacks a task's ref starts one
 with no `task_created` fact, and the fold refuses it. Facts written outside
 `run_task` never leave the host. No record append emits an event.
 
@@ -305,12 +305,22 @@ refused it before any code.
 mutant reaches REPAIR as its whole claim, so `SA-0330`'s repair turns never
 found the two cases it lacked, and the cell ended `EXHAUSTED`.
 
-**Placed 2026-11-04**, from `saffron migrate`'s live run: **b-9c7001**, beside
-**b-4eaaa4**. `migrate` refuses every ref a live cell started, so the facts
+**Placed 2026-11-04**, from `saffron migrate`'s live run: ~~**b-9c7001**~~, beside
+~~**b-4eaaa4**~~. `migrate` refuses every ref a live cell started, so the facts
 written after each task's push live only in the ledger. A fold reads 31
 merged tasks as unmerged.
 
+**Placed 2026-11-06**, from the spec loop's run 54: **b-d39d9a**. `SA-0335`
+spent $76.77 against its $69 budget during REVIEW and REBUT, and nothing
+stopped it. The overrun stopped its batch after two of four specs.
+
 ### Tier 2 — the morning after
+
+**Placed 2026-11-06**, from the spec loop's run 54: **b-fe3488**, **b-ffb930**,
+**b-0add4c**, then **b-71f95f**. A stack batch starts an order its budget
+cannot run. The follow-up writer's first draft never parses. The record's
+git calls can prompt and drop git's reason. A cell makes CONNECTs no git
+call explains.
 
 **Placed 2026-10-15**, from the spec loop's run 40: ~~**b-d31930**~~, then
 **b-bba47a**. A queued spec's citations drift and nothing checks them before
@@ -641,6 +651,11 @@ connection after a completed turn ended `NOT_IMPLEMENTED`. A cell cited the
 wrong spec at 20 sites.
 
 ### Tier 3 — real, not urgent
+
+**Placed 2026-11-06**, from the spec loop's run 54: **b-25c0f5**, then
+**b-980fbd**. Test setup for the routed ledger is restated across a dozen
+files. The record append event's sink skips redaction, and `watch` names the
+wrong first line.
 
 **Placed 2026-10-31**, from `SA-0331`'s third read: **b-8693ef**. A refused PACKAGE
 blanks a carried pull request link, so no merge moves that row. Only a by-hand

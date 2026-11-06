@@ -1,11 +1,12 @@
 ---
 id: b-6677b6
 title: "No record append emits an event, though the record design binds that rule at the wiring"
-status: open
+status: done
+closed: 2026-11-06
 tier: 1
 filed: 2026-10-12
 specs: [SA-0336]
-prs: []
+prs: [1026]
 commits: []
 cites: []
 related: [170]
@@ -35,3 +36,4 @@ event.
 ## Record
 
 - 2026-10-12: filed from `SA-0278`'s spec review, round 1.
+- 2026-11-06: done in #1026 (`SA-0336`), from the spec loop's run 54.

@@ -114,6 +114,42 @@ def test_replay_produces_a_queue_line(target, ledger, tmp_path):
     assert line.added == 30
 
 
+def test_a_replayed_tasks_facts_reach_the_origin_at_exit(target, tmp_path):
+    """Every fact `replay` writes for its task reaches the origin once
+    `push_unpushed` runs, the way a command's own exit runs it. The
+    origin's ref then reads what the mirror's reads."""
+    from saffron.record.refs import RefsRecord
+    from saffron.record.routed import RoutedRecord
+
+    record = RoutedRecord(lambda key: ledger.record_home(key))
+    ledger = Ledger(tmp_path / "ledger.db", record=record)
+
+    line = replay(
+        target,
+        7,
+        ledger=ledger,
+        out_dir=tmp_path / "out",
+        mirrors_dir=tmp_path / "mirrors",
+    )
+    assert line.spec_id == "SY-9001"
+
+    refused = record.push_unpushed()
+    assert refused == []
+
+    row = ledger._db.execute(
+        "SELECT task_id FROM tasks WHERE spec_id = ?", (line.spec_id,)
+    ).fetchone()
+    key = ledger.record_key(row["task_id"])
+    assert key is not None
+
+    mirror_path, origin_url = ledger.record_home(key)
+    origin_facts = RefsRecord(Path(origin_url)).read(key)
+    mirror_facts = RefsRecord(mirror_path).read(key)
+    assert origin_facts == mirror_facts
+    assert origin_facts[0].kind == "task_created"
+    ledger.close()
+
+
 def test_a_replayed_task_records_the_declared_tier_and_null_where_none(
     target, tmp_path
 ):

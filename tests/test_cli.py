@@ -50,6 +50,7 @@ from saffron.phases import implement, package, review
 from saffron.reconcile import HeadMoved, ReconcileResult
 from saffron.record.fold import fold
 from saffron.record.memory import MemoryRecord
+from saffron.record.routed import RoutedRecord
 from saffron.repos.mirror import GitError
 from saffron.repos.policy import Policy, load_policy
 from saffron.scheduler import RETIRED_DIRNAME, Candidate, Refusal
@@ -3585,6 +3586,15 @@ def _bare(path: Path) -> Path:
     return path
 
 
+def _routed_ledger(path: Path) -> Ledger:
+    """A `Ledger` built with a `RoutedRecord`, the way every `saffron`
+    command's own shared `Ledger` is (item 170): a task seeded through it
+    writes its facts to its own mirror, where a later command's fresh
+    `RoutedRecord` over the same mirror then finds them."""
+    ledger = Ledger(path, record=RoutedRecord(lambda key: ledger.record_home(key)))
+    return ledger
+
+
 def _seed_repo(tmp_path, ledger, origin, *, name="repo"):
     mirror = _bare(Path(tempfile.mkdtemp(dir=tmp_path)) / "mirror.git")
     return ledger.upsert_repo(name, origin, str(mirror), policy_sha="p" * 64)
@@ -3628,6 +3638,17 @@ def _checkout_with_origin(tmp_path, url, *, dirname="checkout"):
     _git(repo, "init", "-q")
     _git(repo, "remote", "add", "origin", url)
     return repo
+
+
+def _redirect_push(tmp_path: Path, url: str, destination: Path) -> Path:
+    """A `GIT_CONFIG_GLOBAL` file whose `pushInsteadOf` sends a push to
+    `url` onto `destination` instead. `git remote get-url` still reads
+    `url`, so `real_remote` and `github_slug` see it unchanged. The push
+    itself lands on a real bare repo under `GIT_ALLOW_PROTOCOL=file`,
+    measured on git 2.54.0 and git 2.47.3."""
+    config = tmp_path / "push-redirect-gitconfig"
+    config.write_text(f'[url "{destination}"]\n\tpushInsteadOf = {url}\n')
+    return config
 
 
 def _task_row(ledger, task_id):
@@ -3678,7 +3699,7 @@ def test_reconcile_writes_what_gh_says_or_withholds_when_it_cannot_answer(
     repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-reconcile")
     home = tmp_path / "home"
     home.mkdir()
-    ledger = Ledger(home / "ledger.db")
+    ledger = _routed_ledger(home / "ledger.db")
     repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     task_id = _seed_task(
         ledger,
@@ -3713,7 +3734,7 @@ def test_a_command_files_each_fact_it_writes_in_the_tasks_own_mirror(
     repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-routed-cli")
     home = tmp_path / "home"
     home.mkdir()
-    ledger = Ledger(home / "ledger.db")
+    ledger = _routed_ledger(home / "ledger.db")
     repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     mirror_path = Path(
         dict(
@@ -3814,7 +3835,7 @@ def test_adopt_writes_the_url_gh_names_onto_the_specs_newest_task(
     adopted_url = "https://github.com/OWNER/REPO/pull/123"
     adopted_head = "c" * 40
 
-    ledger = Ledger(home / "ledger.db")
+    ledger = _routed_ledger(home / "ledger.db")
     repo_id = _seed_repo(tmp_path, ledger, "https://github.com/owner/repo.git")
 
     older = _seed_task(
@@ -4152,7 +4173,7 @@ def test_a_merged_adopted_pull_request_admits_the_child_of_a_not_implemented_par
     home.mkdir()
 
     def open_ledger():
-        return Ledger(home / "ledger.db")
+        return _routed_ledger(home / "ledger.db")
 
     seed = open_ledger()
     repo_id = _seed_repo(tmp_path, seed, "https://github.com/owner/repo.git")
@@ -4263,7 +4284,7 @@ def test_adopt_moves_a_task_whose_regate_is_green_on_the_adopted_head_to_ready_f
         home.mkdir()
         ledger_path = home / "ledger.db"
 
-        seed = Ledger(ledger_path)
+        seed = _routed_ledger(ledger_path)
         repo_id = _seed_repo(tmp_path, seed, "https://github.com/owner/repo.git")
         # A rejected, no-url older sibling at the same spec_sha, so both
         # scans still refuse the child before the adopt (`SA-0026`).
@@ -4352,7 +4373,7 @@ def test_adopt_keeps_the_state_of_a_task_whose_regate_is_red_declined_or_on_anot
     repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
     home = tmp_path / "home"
     home.mkdir()
-    ledger = Ledger(home / "ledger.db")
+    ledger = _routed_ledger(home / "ledger.db")
     repo_id = _seed_repo(tmp_path, ledger, "https://github.com/owner/repo.git")
 
     def _seed(spec_id, state):
@@ -4490,7 +4511,7 @@ def test_adopt_of_a_ready_task_records_the_url_and_runs_no_regate(
     repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
     home = tmp_path / "home"
     home.mkdir()
-    ledger = Ledger(home / "ledger.db")
+    ledger = _routed_ledger(home / "ledger.db")
     repo_id = _seed_repo(tmp_path, ledger, "https://github.com/owner/repo.git")
 
     unresolved = _seed_task(ledger, repo_id, spec_id="SY-7001", state="DIAGNOSING")
@@ -4689,7 +4710,7 @@ def test_adopt_whose_regate_raises_exits_two_with_the_pull_request_recorded(
     repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
     home = tmp_path / "home"
     home.mkdir()
-    ledger = Ledger(home / "ledger.db")
+    ledger = _routed_ledger(home / "ledger.db")
     repo_id = _seed_repo(tmp_path, ledger, "https://github.com/owner/repo.git")
 
     tasks = {}
@@ -5650,7 +5671,7 @@ def test_queue_reconciles_before_it_scans_so_the_refusal_gate_sees_current_state
     repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-queue-reconciles")
     home = tmp_path / "home"
     home.mkdir()
-    ledger = Ledger(home / "ledger.db")
+    ledger = _routed_ledger(home / "ledger.db")
     repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     _seed_task(
         ledger,
@@ -5835,7 +5856,7 @@ def test_queue_schedules_a_task_reconcile_moved_into_a_requeue_state(
     repo = _repo_with_spec(tmp_path, spec_text=_A_SPEC, dirname="repo-queue-requeues")
     home = tmp_path / "home"
     home.mkdir()
-    ledger = Ledger(home / "ledger.db")
+    ledger = _routed_ledger(home / "ledger.db")
     repo_id = _seed_repo(tmp_path, ledger, package.real_remote(repo))
     _seed_task(
         ledger,
@@ -7127,7 +7148,7 @@ def test_the_batch_scan_orphans_the_queue_row_of_each_task_it_stamps(
     _readiness_passes(monkeypatch, tmp_path)
 
     def _seed_night(home: Path):
-        ledger = Ledger(home / "ledger.db")
+        ledger = _routed_ledger(home / "ledger.db")
         repo_id = _seed_repo(tmp_path, ledger, "https://github.com/o/r.git")
         first = _seed_task(ledger, repo_id, spec_id="SY-1", state="REVIEWING")
         _seed_task(ledger, repo_id, spec_id="SY-2", state="REVIEWING")
@@ -14187,3 +14208,483 @@ def test_saffron_finish_refuses_a_batch_it_cannot_finish_before_any_cell(
     line = _refused(fixture.home, fixture.batch_id, fixture.repo)
     assert "mirror" in line
     assert "could not be fetched" in line
+
+
+def test_an_adopted_pull_request_reaches_the_origin_before_adopt_exits(
+    tmp_path, monkeypatch
+):
+    """`saffron adopt` leaves its `task_push` and `task_package` facts on
+    the origin when it exits 0, on a task an earlier command already
+    pushed."""
+    from saffron.record.refs import RefsRecord
+
+    origin_url = "https://github.com/owner/repo.git"
+    repo = _checkout_with_origin(tmp_path, origin_url)
+    home = tmp_path / "home"
+    home.mkdir()
+
+    real_origin = _bare(tmp_path / "real-origin.git")
+    monkeypatch.setenv(
+        "GIT_CONFIG_GLOBAL", str(_redirect_push(tmp_path, origin_url, real_origin))
+    )
+
+    ledger = _routed_ledger(home / "ledger.db")
+    repo_id = _seed_repo(tmp_path, ledger, origin_url)
+    task_id = _seed_task(ledger, repo_id, spec_id="SY-7010", state="DIAGNOSING")
+    ledger.set_task_state(task_id, "READY_FOR_REVIEW")
+    key = ledger.record_key(task_id)
+    assert key is not None
+    mirror, _ = ledger.record_home(key)
+    assert isinstance(ledger._record, RoutedRecord)
+    refused = ledger._record.push_unpushed()
+    assert refused == []
+    ledger.close()
+
+    calls = []
+    monkeypatch.setattr(cli.regate, "run_regate", lambda *a, **k: calls.append(a) or 0)
+    adopted_url = "https://github.com/owner/repo/pull/91"
+    adopted_head = "7" * 40
+    monkeypatch.setattr(
+        cli,
+        "run_gh",
+        _fake_gh_names_a_pull_request(
+            adopted_url,
+            head_branch="saffron/SY-7010",
+            number="91",
+            head_sha=adopted_head,
+        ),
+    )
+
+    code = cli.main(
+        ["--home", str(home), "adopt", "SY-7010", "91", "--repo", str(repo)]
+    )
+    assert code == 0
+    assert calls == []
+
+    origin_facts = RefsRecord(real_origin).read(key)
+    mirror_facts = RefsRecord(mirror).read(key)
+    assert origin_facts == mirror_facts
+    assert "task_push" in [f.kind for f in origin_facts]
+    assert "task_package" in [f.kind for f in origin_facts]
+
+
+def test_a_package_commands_facts_reach_the_origin_before_it_exits(
+    tmp_path, monkeypatch
+):
+    """`saffron package` leaves the facts PACKAGE writes through
+    `package_ready_task` on the origin when it exits 0, on a task an
+    earlier command already pushed."""
+    from saffron.record.refs import RefsRecord
+
+    origin_url = "https://github.com/owner/repo.git"
+    checkout = _checkout_with_origin(tmp_path, origin_url)
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "a-token")
+
+    real_origin = _bare(tmp_path / "real-origin.git")
+    monkeypatch.setenv(
+        "GIT_CONFIG_GLOBAL", str(_redirect_push(tmp_path, origin_url, real_origin))
+    )
+
+    ledger = _routed_ledger(home / "ledger.db")
+    repo_id = _seed_repo(tmp_path, ledger, origin_url)
+    task_id = _seed_task(ledger, repo_id, spec_id="SY-PKG2", state="READY_FOR_REVIEW")
+    key = ledger.record_key(task_id)
+    assert key is not None
+    mirror, _ = ledger.record_home(key)
+    assert isinstance(ledger._record, RoutedRecord)
+    refused = ledger._record.push_unpushed()
+    assert refused == []
+    ledger.close()
+
+    def fake_package_ready_task(
+        spec_id, *, repo, repo_id, ledger, out_dir, mirror_path, token
+    ):
+        ledger.record_push(task_id, "f" * 40)
+        return package.PackageResult(
+            state="READY_FOR_REVIEW",
+            pr_url="https://github.com/owner/repo/pull/51",
+            branch="saffron/SY-PKG2",
+        )
+
+    monkeypatch.setattr(cli, "package_ready_task", fake_package_ready_task)
+
+    code = cli.main(
+        ["--home", str(home), "package", "SY-PKG2", "--repo", str(checkout)]
+    )
+    assert code == 0
+
+    origin_facts = RefsRecord(real_origin).read(key)
+    mirror_facts = RefsRecord(mirror).read(key)
+    assert origin_facts == mirror_facts
+    assert "task_push" in [f.kind for f in origin_facts]
+
+
+def test_a_refused_record_push_is_printed_with_its_key_and_leaves_the_exit_code(
+    tmp_path, monkeypatch, capsys
+):
+    """A command whose exit push is refused prints one line per refused
+    key, naming the key, the refusal's type and its first line of text.
+    It exits with its own code, whether it returns or raises, and a key
+    whose push lands prints no line of its own."""
+    from saffron.record.contract import Fact
+    from saffron.record.refs import RefsRecord
+
+    home = tmp_path / "home"
+    home.mkdir()
+
+    origin_stale = _bare(tmp_path / "origin-stale.git")
+    mirror_stale = _bare(tmp_path / "mirror-stale.git")
+    seed = _bare(tmp_path / "seed.git")
+
+    origin_dead = _bare(tmp_path / "origin-dead.git")
+    mirror_dead = _bare(tmp_path / "mirror-dead.git")
+
+    origin_ok = _bare(tmp_path / "origin-ok.git")
+    mirror_ok = _bare(tmp_path / "mirror-ok.git")
+
+    ledger = _routed_ledger(home / "ledger.db")
+    repo_stale = ledger.upsert_repo("stale", str(origin_stale), str(mirror_stale), None)
+    repo_dead = ledger.upsert_repo("dead", str(origin_dead), str(mirror_dead), None)
+    repo_ok = ledger.upsert_repo("ok", str(origin_ok), str(mirror_ok), None)
+
+    task_stale = _seed_task(ledger, repo_stale, spec_id="SY-S", state="DIAGNOSING")
+    key_stale = ledger.record_key(task_stale)
+    assert key_stale is not None
+    task_dead = _seed_task(ledger, repo_dead, spec_id="SY-D", state="DIAGNOSING")
+    key_dead = ledger.record_key(task_dead)
+    assert key_dead is not None
+    task_ok = _seed_task(ledger, repo_ok, spec_id="SY-O", state="DIAGNOSING")
+    key_ok = ledger.record_key(task_ok)
+    assert key_ok is not None
+    assert isinstance(ledger._record, RoutedRecord)
+    # Each key's own ref lands on its origin first, so a later push is a
+    # fast-forward unless something diverges or deletes it below.
+    assert ledger._record.push_unpushed() == []
+    ledger.close()
+
+    # A second writer, sharing no history with `mirror_stale`, pushes its
+    # own commit for this key to `origin_stale` first.
+    RefsRecord(seed, remote=str(origin_stale)).append(
+        key_stale,
+        Fact(
+            kind="task_state",
+            task_key=key_stale,
+            at="2026-01-01T00:00:00Z",
+            repo="stale",
+            batch_key=None,
+            payload={"state": "x"},
+        ),
+    )
+    shutil.rmtree(origin_dead)
+
+    # A direct push read, before `cli.main` runs, so the assertion below
+    # checks the refusal's own words rather than this test's guess.
+    try:
+        RefsRecord(mirror_stale, origin=str(origin_stale)).push(
+            key_stale, str(origin_stale)
+        )
+        raise AssertionError("expected the diverged origin to refuse this push")
+    except Exception as exc:
+        stale_message = str(exc).splitlines()[0]
+        # git's reason sits on a later line, so the fold must carry it.
+        stale_folded = " ".join(str(exc).split())
+        assert "[rejected]" in stale_folded
+
+    def _stub_queue(args, ledger):
+        ledger.set_task_state(task_stale, "IMPLEMENTING")
+        ledger.set_task_state(task_dead, "IMPLEMENTING")
+        ledger.set_task_state(task_ok, "IMPLEMENTING")
+        return 0
+
+    monkeypatch.setattr(cli, "_queue", _stub_queue)
+
+    code = cli.main(["--home", str(home), "queue"])
+
+    assert code == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert not any(
+        line.startswith(("hint:", "error:", "fatal:", " ! [rejected]"))
+        for line in lines
+    )
+
+    stale_lines = [line for line in lines if key_stale in line]
+    dead_lines = [line for line in lines if key_dead in line]
+    ok_lines = [line for line in lines if key_ok in line]
+
+    assert len(stale_lines) == 1
+    assert "StaleWriter" in stale_lines[0]
+    assert stale_message in stale_lines[0]
+    assert stale_folded in stale_lines[0]
+    assert len(dead_lines) == 1
+    assert "RecordError" in dead_lines[0]
+    assert "StaleWriter" not in dead_lines[0]
+    assert ok_lines == []
+
+    # A second, separately seeded command whose handler raises: the
+    # refusal still prints, and the raise's own exit code 2 survives.
+    home2 = tmp_path / "home2"
+    home2.mkdir()
+    origin_raising = _bare(tmp_path / "origin-raising.git")
+    mirror_raising = _bare(tmp_path / "mirror-raising.git")
+    seed2 = _bare(tmp_path / "seed2.git")
+
+    ledger2 = _routed_ledger(home2 / "ledger.db")
+    repo_raising = ledger2.upsert_repo(
+        "raising", str(origin_raising), str(mirror_raising), None
+    )
+    task_raising = _seed_task(
+        ledger2, repo_raising, spec_id="SY-RA", state="DIAGNOSING"
+    )
+    key_raising = ledger2.record_key(task_raising)
+    assert key_raising is not None
+    assert isinstance(ledger2._record, RoutedRecord)
+    assert ledger2._record.push_unpushed() == []
+    ledger2.close()
+
+    RefsRecord(seed2, remote=str(origin_raising)).append(
+        key_raising,
+        Fact(
+            kind="task_state",
+            task_key=key_raising,
+            at="2026-01-01T00:00:00Z",
+            repo="raising",
+            batch_key=None,
+            payload={"state": "x"},
+        ),
+    )
+
+    try:
+        RefsRecord(mirror_raising, origin=str(origin_raising)).push(
+            key_raising, str(origin_raising)
+        )
+        raise AssertionError("expected the diverged origin to refuse this push")
+    except Exception as exc:
+        raising_message = str(exc).splitlines()[0]
+
+    def _stub_reconcile(args, ledger):
+        ledger.set_task_state(task_raising, "IMPLEMENTING")
+        raise RuntimeError("reconcile boom")
+
+    monkeypatch.setattr(cli, "_reconcile", _stub_reconcile)
+
+    code2 = cli.main(["--home", str(home2), "reconcile"])
+    assert code2 == 2
+
+    raising_lines = [
+        line for line in capsys.readouterr().out.splitlines() if key_raising in line
+    ]
+    assert len(raising_lines) == 1
+    assert "StaleWriter" in raising_lines[0]
+    assert raising_message in raising_lines[0]
+
+
+def test_every_command_pushes_the_facts_it_appended_before_it_exits(
+    tmp_path, monkeypatch
+):
+    """Every command `main` dispatches over its shared `Ledger` pushes
+    what it appended before it returns, raises, or is read as a SIGTERM.
+    Driven for all twelve: `cell`, `batch`, `draft`, `queue`, `reconcile`,
+    `regate`, `review`, `adopt`, `package`, `finish`, `chains`, `replay`.
+    """
+    import signal
+
+    from saffron.record.refs import RefsRecord
+    from saffron.report.index import QueueLine
+
+    def _seed(name):
+        home = tmp_path / name / "home"
+        home.mkdir(parents=True)
+        mirror = _bare(tmp_path / name / "mirror.git")
+        origin = _bare(tmp_path / name / "origin.git")
+        ledger = _routed_ledger(home / "ledger.db")
+        repo_id = ledger.upsert_repo(name, str(origin), str(mirror), None)
+        task_id = _seed_task(ledger, repo_id, spec_id="SY-1", state="DIAGNOSING")
+        key = ledger.record_key(task_id)
+        assert key is not None
+        assert isinstance(ledger._record, RoutedRecord)
+        assert ledger._record.push_unpushed() == []
+        ledger.close()
+        return home, task_id, key, origin
+
+    def _pushed_kinds(origin, key):
+        return [fact.kind for fact in RefsRecord(origin).read(key)]
+
+    # `cell`: a stubbed `_run_cell`, returning its own exit code.
+    home, task_id, key, origin = _seed("cell")
+
+    def _stub_cell(args, ledger, out_dir):
+        ledger.set_task_state(task_id, "IMPLEMENTING")
+        return 0
+
+    monkeypatch.setattr(cli, "_run_cell", _stub_cell)
+    code = cli.main(
+        [
+            "--home",
+            str(home),
+            "cell",
+            str(tmp_path / "spec.md"),
+            "--repo",
+            str(tmp_path),
+        ]
+    )
+    assert code == 0
+    assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]
+
+    # `batch`: a SIGTERM mid-command, read as exit 143.
+    home, task_id, key, origin = _seed("batch")
+
+    def _stub_batch(args, ledger, out_dir):
+        ledger.set_task_state(task_id, "IMPLEMENTING")
+        signal.raise_signal(signal.SIGTERM)
+        return 0
+
+    monkeypatch.setattr(cli, "_batch", _stub_batch)
+    code = cli.main(["--home", str(home), "batch", "--repo", str(tmp_path)])
+    assert code == 143
+    assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]
+
+    # `draft`
+    home, task_id, key, origin = _seed("draft")
+
+    def _stub_draft(args, ledger, out_dir):
+        ledger.set_task_state(task_id, "IMPLEMENTING")
+        return 0
+
+    monkeypatch.setattr(cli, "_draft", _stub_draft)
+    code = cli.main(
+        [
+            "--home",
+            str(home),
+            "draft",
+            str(tmp_path / "item.md"),
+            "--repo",
+            str(tmp_path),
+        ]
+    )
+    assert code == 0
+    assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]
+
+    # `queue`: a bare `KeyboardInterrupt`, left to propagate out of `main`.
+    home, task_id, key, origin = _seed("queue")
+
+    def _stub_queue(args, ledger):
+        ledger.set_task_state(task_id, "IMPLEMENTING")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "_queue", _stub_queue)
+    with pytest.raises(KeyboardInterrupt):
+        cli.main(["--home", str(home), "queue", "--repo", str(tmp_path)])
+    assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]
+
+    # `reconcile`: a raise, read as exit 2, though nothing wraps it.
+    home, task_id, key, origin = _seed("reconcile")
+
+    def _stub_reconcile(args, ledger):
+        ledger.set_task_state(task_id, "IMPLEMENTING")
+        raise RuntimeError("reconcile boom")
+
+    monkeypatch.setattr(cli, "_reconcile", _stub_reconcile)
+    code = cli.main(["--home", str(home), "reconcile", "--repo", str(tmp_path)])
+    assert code == 2
+    assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]
+
+    # `regate`: a bare `KeyboardInterrupt`, re-raised by `_guarding_sigterm`
+    # rather than read as a SIGTERM, and left to propagate out of `main`.
+    home, task_id, key, origin = _seed("regate")
+
+    def _stub_regate(args, ledger, out_dir):
+        ledger.set_task_state(task_id, "IMPLEMENTING")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "_regate", _stub_regate)
+    with pytest.raises(KeyboardInterrupt):
+        cli.main(["--home", str(home), "regate", "1", "--repo", str(tmp_path)])
+    assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]
+
+    # `review`
+    home, task_id, key, origin = _seed("review")
+
+    def _stub_review(args, ledger, out_dir):
+        ledger.set_task_state(task_id, "IMPLEMENTING")
+        return 0
+
+    monkeypatch.setattr(cli, "_review", _stub_review)
+    code = cli.main(["--home", str(home), "review", "1", "--repo", str(tmp_path)])
+    assert code == 0
+    assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]
+
+    # `adopt`, whose own exit code is 1.
+    home, task_id, key, origin = _seed("adopt")
+
+    def _stub_adopt(args, ledger, out_dir):
+        ledger.set_task_state(task_id, "IMPLEMENTING")
+        return 1
+
+    monkeypatch.setattr(cli, "_adopt", _stub_adopt)
+    code = cli.main(
+        ["--home", str(home), "adopt", "SY-1", "9", "--repo", str(tmp_path)]
+    )
+    assert code == 1
+    assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]
+
+    # `package`
+    home, task_id, key, origin = _seed("package")
+
+    def _stub_package(args, ledger, out_dir):
+        ledger.set_task_state(task_id, "IMPLEMENTING")
+        return 0
+
+    monkeypatch.setattr(cli, "_package", _stub_package)
+    code = cli.main(["--home", str(home), "package", "SY-1", "--repo", str(tmp_path)])
+    assert code == 0
+    assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]
+
+    # `finish`: a raise, read as exit 2.
+    home, task_id, key, origin = _seed("finish")
+
+    def _stub_finish(args, ledger, out_dir):
+        ledger.set_task_state(task_id, "IMPLEMENTING")
+        raise RuntimeError("finish boom")
+
+    monkeypatch.setattr(cli, "_finish", _stub_finish)
+    code = cli.main(["--home", str(home), "finish", "1", "--repo", str(tmp_path)])
+    assert code == 2
+    assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]
+
+    # `chains`
+    home, task_id, key, origin = _seed("chains")
+
+    def _stub_chains(args, ledger, out_dir):
+        ledger.set_task_state(task_id, "IMPLEMENTING")
+        return 0
+
+    monkeypatch.setattr(cli, "_chains", _stub_chains)
+    code = cli.main(["--home", str(home), "chains"])
+    assert code == 0
+    assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]
+
+    # `replay`
+    home, task_id, key, origin = _seed("replay")
+
+    def _stub_replay(
+        repo_dir, pr_number, *, ledger, out_dir, mirrors_dir, spec_path, timeout_s
+    ):
+        ledger.set_task_state(task_id, "IMPLEMENTING")
+        return QueueLine(
+            repo="r",
+            spec_id="SY-1",
+            state="MERGED",
+            attempts=1,
+            cost_usd_est=None,
+            concerns=0,
+            added=0,
+            removed=0,
+            link="",
+        )
+
+    monkeypatch.setattr(cli, "replay", _stub_replay)
+    code = cli.main(["--home", str(home), "replay", str(tmp_path), "9"])
+    assert code == 0
+    assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]

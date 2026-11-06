@@ -34,3 +34,4 @@ printed block say a layer can spend into them.
 ## Record
 
 - 2026-10-11: filed from the spec loop's run 34 (#822).
+- 2026-11-06: recurred in the spec loop's run 54. `SA-0335` spent $80.11 against $69, and batch 67 stopped with `batch: BUDGET` after two of four specs. The cell-level ceiling is b-d39d9a, and the missing admission line is b-fe3488.

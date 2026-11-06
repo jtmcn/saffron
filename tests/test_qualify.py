@@ -397,11 +397,23 @@ def _build(
     te0: bool = False,
     raise_on: frozenset[str] = frozenset(),
     unreadable: bool = False,
+    routed: bool = False,
+    origin: str = "https://example/o",
 ) -> _Built:
     mirror, shas = _stack_mirror(tmp_path, monkeypatch, unreadable=unreadable)
-    ledger = Ledger(tmp_path / "ledger.db", record=MemoryRecord())
+    # `routed`, `False` by default, builds a real `RoutedRecord` over
+    # `mirror` and `origin` instead of the usual `MemoryRecord` pair.
+    if routed:
+        from saffron.record.routed import RoutedRecord
+
+        ledger = Ledger(
+            tmp_path / "ledger.db",
+            record=RoutedRecord(lambda key: ledger.record_home(key)),
+        )
+    else:
+        ledger = Ledger(tmp_path / "ledger.db", record=MemoryRecord())
     repo_id = ledger.upsert_repo(
-        "acme", "https://example/o", "/m.git", policy_sha="p" * 64
+        "acme", origin, str(mirror) if routed else "/m.git", policy_sha="p" * 64
     )
 
     ledger.create_run(repo_id, base_sha=shas["A"])  # a spare run naming no task
@@ -666,6 +678,32 @@ def test_each_layers_qualifications_are_facts_numbered_within_its_task(
 
     f5 = te2[5]
     assert (f5["probe_verdict"], f5["outcome"]) == (None, "unanchored")
+
+
+def test_a_qualification_fact_reaches_the_origin_at_exit(tmp_path, monkeypatch):
+    """The `qualification` facts `qualify` writes reach the origin once
+    `push_unpushed` runs, the way a command's own exit runs it. Driven
+    on both layers an earlier call already pushed."""
+    from saffron.qualify import qualify
+    from saffron.record.refs import RefsRecord
+    from saffron.record.routed import RoutedRecord
+    from tests.conftest import bare_repo
+
+    origin = bare_repo(tmp_path / "origin.git")
+
+    built = _build(tmp_path, monkeypatch, routed=True, origin=str(origin))
+    assert isinstance(built.ledger._record, RoutedRecord)
+    refused = built.ledger._record.push_unpushed()
+    assert refused == []
+
+    built.run(qualify)
+
+    refused = built.ledger._record.push_unpushed()
+    assert refused == []
+
+    for layer in built.layers:
+        kinds = [fact.kind for fact in RefsRecord(origin).read(layer.task_key)]
+        assert "qualification" in kinds
 
 
 def test_a_layers_own_review_concerns_follow_its_end_review_findings(
