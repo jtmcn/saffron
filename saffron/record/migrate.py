@@ -17,6 +17,13 @@ written, since `policy_sha` rides on `task_created` as stored. The six key-filed
 
 Never a `Ledger`. Its open adds missing columns, so it would write the source.
 
+A ref that is neither empty nor an exact prefix is topped up instead of
+refused outright. The comparison runs kind by kind, under a normalisation
+that sets aside a fact's `at`, a `gate_result`'s three head-count keys, and
+a null `batch_key`. An agreeing ref gains every later fact of a compared
+kind, then the ledger's own `task_state` where its derived state still
+disagrees.
+
 `migrate_and_push` is the orchestration the `saffron migrate` command runs.
 One `RefsRecord` per repo row is fetched from its own `origin` before
 anything is written. Then each repo's tasks are migrated and pushed one ref
@@ -44,14 +51,110 @@ _Maker = Callable[[str, str, dict[str, Any]], Fact]
 
 @dataclass
 class Migration:
-    """What one migration did. `migrated` lists task keys in source order.
-    A key the record now holds the full fact list for is one, a key with
-    nothing left to add included. `refused` pairs a key that disagreed with
-    what the record already held against the reason, and costs the other
-    keys nothing."""
+    """What one migration did. `migrated` lists task keys in source order,
+    a key with nothing left to add included. A topped-up key holds only
+    the tail it was owed, not the full fact list. `refused` pairs a key
+    that disagreed with what the record already held against the reason,
+    and costs the other keys nothing."""
 
     migrated: list[str] = field(default_factory=list)
     refused: list[tuple[str, str]] = field(default_factory=list)
+
+
+# The thirteen compared kinds, in `_facts_for_task`'s own order. Never
+# `task_created`, `task_push` or `task_state`: those three are a live cell's own.
+_COMPARED_KINDS = (
+    "attempt_opened",
+    "attempt_closed",
+    "gate_result",
+    "finding",
+    "rebuttal",
+    "task_merged_head",
+    "task_package",
+    "stack_layer",
+    "end_review",
+    "qualification",
+    "spec_review",
+    "spec_text",
+    "stack_finish",
+)
+
+# The three `gate_result` keys the ledger's own fact never carries, set
+# aside here rather than compared.
+_GATE_RESULT_SET_ASIDE = frozenset({"schema_version", "collected", "uncollected"})
+
+
+def _normalized(fact: Fact) -> Fact:
+    """`fact` with every difference the top-up sets aside already gone: its
+    `at`, and, on a `gate_result`, the three keys above."""
+    payload = fact.payload
+    if fact.kind == "gate_result":
+        payload = {k: v for k, v in payload.items() if k not in _GATE_RESULT_SET_ASIDE}
+    return replace(fact, at="", payload=payload)
+
+
+def _agrees(held: Fact, truth: Fact) -> bool:
+    """Whether `held`, under the top-up's normalisation, is `truth`. A null
+    `batch_key` on `held` is set aside. A set one that differs from
+    `truth`'s is a real disagreement, never erased."""
+    held_n = _normalized(held)
+    truth_n = _normalized(truth)
+    if held.batch_key is None:
+        held_n = replace(held_n, batch_key=None)
+        truth_n = replace(truth_n, batch_key=None)
+    return held_n == truth_n
+
+
+def _by_compared_kind(facts: Iterable[Fact]) -> dict[str, list[Fact]]:
+    grouped: dict[str, list[Fact]] = {}
+    for fact in facts:
+        if fact.kind in _COMPARED_KINDS:
+            grouped.setdefault(fact.kind, []).append(fact)
+    return grouped
+
+
+def _record_state(facts: Iterable[Fact]) -> str:
+    """The state a record's own facts add up to: the `state` of the last
+    `task_state` or `task_package` fact among `facts`, in the order given,
+    or `QUEUED` where there is neither (problem 3)."""
+    state = "QUEUED"
+    for fact in facts:
+        if fact.kind in ("task_state", "task_package"):
+            state = fact.payload["state"]
+    return state
+
+
+def _top_up(held: list[Fact], facts: list[Fact]) -> list[Fact] | None:
+    """The facts a ref that is no prefix of `facts` is owed, or `None` where
+    it disagrees. `held` is never reordered or rewritten. This names only
+    what `migrate` appends next."""
+    if not any(fact.kind == "task_created" for fact in held):
+        return None
+    held_by_kind = _by_compared_kind(held)
+    truth_by_kind = _by_compared_kind(facts)
+    for kind in _COMPARED_KINDS:
+        held_k = held_by_kind.get(kind, [])
+        truth_k = truth_by_kind.get(kind, [])
+        if len(held_k) > len(truth_k):
+            return None
+        for one_held, one_truth in zip(held_k, truth_k, strict=False):
+            if not _agrees(one_held, one_truth):
+                return None
+    seen: Counter[str] = Counter(
+        {kind: len(facts_) for kind, facts_ in held_by_kind.items()}
+    )
+    counted: Counter[str] = Counter()
+    tail: list[Fact] = []
+    for fact in facts:
+        if fact.kind not in _COMPARED_KINDS:
+            continue
+        counted[fact.kind] += 1
+        if counted[fact.kind] > seen[fact.kind]:
+            tail.append(fact)
+    ledger_state = next(fact for fact in facts if fact.kind == "task_state")
+    if _record_state([*held, *tail]) != ledger_state.payload["state"]:
+        tail.append(ledger_state)
+    return tail
 
 
 _TASKS = """
@@ -102,12 +205,18 @@ def migrate(source: Path, record: Record, *, repo_id: int | None = None) -> Migr
                 continue
             facts = _facts_for_task(conn, task, has_head_count, has_earned_risk)
             held = record.read(key)
-            if held != facts[: len(held)]:
+            if held == facts[: len(held)]:
+                for fact in facts[len(held) :]:
+                    record.append(key, fact)
+                result.migrated.append(key)
+                continue
+            tail = _top_up(held, facts)
+            if tail is None:
                 result.refused.append(
                     (key, f"the record holds {len(held)} fact(s) that disagree")
                 )
                 continue
-            for fact in facts[len(held) :]:
+            for fact in tail:
                 record.append(key, fact)
             result.migrated.append(key)
         return result
