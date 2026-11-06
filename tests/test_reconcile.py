@@ -1210,3 +1210,71 @@ def test_stamp_orphaned_only_fires_when_the_caller_asserts_the_premise(ledger):
     assert sorted(asserted.orphaned) == sorted(in_flight_ids)
     for task_id in in_flight_ids:
         assert _state(ledger, task_id) == "ORPHANED"
+
+
+def test_each_state_reconcile_writes_reaches_the_origin_at_exit(routed_ledger):
+    """Each state `reconcile` writes reaches the origin once
+    `push_unpushed` runs, the way a command's own exit runs it. Driven
+    for five: `MERGED` with its `task_merged_head`, `REJECTED`,
+    `CHANGES_REQUESTED`, `APPROVED`, and the `ORPHANED` stamp
+    `stamp_orphaned` writes."""
+    from saffron.record.refs import RefsRecord
+    from saffron.record.routed import RoutedRecord
+
+    ledger, repo_id, origin = routed_ledger
+    merged_url = "https://github.com/o/r/pull/501"
+    rejected_url = "https://github.com/o/r/pull/502"
+    changes_url = "https://github.com/o/r/pull/503"
+    approved_url = "https://github.com/o/r/pull/504"
+
+    merged = _task(
+        ledger, repo_id, spec_id="SY-M", state="READY_FOR_REVIEW", pr_url=merged_url
+    )
+    rejected = _task(
+        ledger, repo_id, spec_id="SY-J", state="READY_FOR_REVIEW", pr_url=rejected_url
+    )
+    changes = _task(
+        ledger, repo_id, spec_id="SY-C", state="READY_FOR_REVIEW", pr_url=changes_url
+    )
+    approved = _task(
+        ledger, repo_id, spec_id="SY-A", state="READY_FOR_REVIEW", pr_url=approved_url
+    )
+    orphan = _task(ledger, repo_id, spec_id="SY-O", state="IMPLEMENTING")
+
+    assert isinstance(ledger._record, RoutedRecord)
+    refused = ledger._record.push_unpushed()
+    assert refused == []
+
+    gh = _FakeGh(
+        {
+            merged_url: {
+                "state": "MERGED",
+                "reviewDecision": None,
+                "headRefOid": "f" * 40,
+            },
+            rejected_url: {"state": "CLOSED", "reviewDecision": None},
+            changes_url: {"state": "OPEN", "reviewDecision": "CHANGES_REQUESTED"},
+            approved_url: {"state": "OPEN", "reviewDecision": None, "isDraft": False},
+        }
+    )
+
+    reconcile(ledger, repo_id, gh=gh, stamp_orphaned=True)
+
+    refused = ledger._record.push_unpushed()
+    assert refused == []
+
+    def kinds(task_id: int) -> list[str]:
+        key = ledger.record_key(task_id)
+        assert key is not None
+        return [fact.kind for fact in RefsRecord(origin).read(key)]
+
+    assert "task_merged_head" in kinds(merged)
+    assert "task_state" in kinds(rejected)
+    assert "task_state" in kinds(changes)
+    assert "task_state" in kinds(approved)
+    assert "task_state" in kinds(orphan)
+    assert _state(ledger, merged) == "MERGED"
+    assert _state(ledger, rejected) == "REJECTED"
+    assert _state(ledger, changes) == "CHANGES_REQUESTED"
+    assert _state(ledger, approved) == "APPROVED"
+    assert _state(ledger, orphan) == "ORPHANED"

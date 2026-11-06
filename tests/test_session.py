@@ -10,6 +10,7 @@ import subprocess
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
@@ -2043,6 +2044,59 @@ def test_a_refused_start_ends_preflight_failed_and_a_runtime_failure_orphaned(
         (task_row,) = reopened._db.execute("SELECT state FROM tasks").fetchall()
         assert task_row["state"] == "ORPHANED"
         reopened.close()
+
+
+def test_an_orphaned_stamp_from_a_raising_cell_reaches_the_origin_at_exit(
+    monkeypatch, tmp_path
+):
+    """`_drive_cell` stamps `ORPHANED` when the cell raises, and that
+    fact reaches the origin once `push_unpushed` runs, the way a
+    command's own exit runs it. Driven directly, since `run_task` would
+    otherwise push first in its own `finally`."""
+    from saffron.record.refs import RefsRecord
+    from saffron.record.routed import RoutedRecord
+
+    cell = _stub_the_runtime(monkeypatch)
+
+    def _dead(*a, **k):
+        raise runtime.CellRuntimeError("the runtime is dead")
+
+    monkeypatch.setattr("saffron.repos.image.build_cell_image", _dead)
+
+    subdir = tmp_path / "orphaned-exit"
+    mirror = subdir / "m.git"
+    mirror.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", "--bare", str(mirror)], check=True)
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda repo: str(origin))
+
+    def _locate(key: str) -> tuple[Path, str]:
+        # A fresh connection each call, never `_drive`'s own: its `ledger`
+        # is local to that function, and is still open while this fires.
+        probe = Ledger(subdir / "ledger.db")
+        try:
+            return probe.record_home(key)
+        finally:
+            probe.close()
+
+    record = RoutedRecord(_locate)
+
+    with pytest.raises(runtime.CellRuntimeError):
+        _drive(monkeypatch, subdir, cell=cell, turns=[], record=record)
+
+    reopened = Ledger(subdir / "ledger.db")
+    (task_row,) = reopened._db.execute("SELECT task_id, state FROM tasks").fetchall()
+    assert task_row["state"] == "ORPHANED"
+
+    refused = record.push_unpushed()
+    assert refused == []
+
+    key = reopened.record_key(task_row["task_id"])
+    assert key is not None
+    origin_kinds = [fact.kind for fact in RefsRecord(origin).read(key)]
+    assert "task_state" in origin_kinds
+    reopened.close()
 
 
 def test_teardown_removes_both_volumes_not_the_loops_result(monkeypatch, tmp_path):

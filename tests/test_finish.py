@@ -48,11 +48,15 @@ def _refs(repo: Path) -> dict[str, str]:
     return refs
 
 
-def _stack(root: Path, count: int) -> SimpleNamespace:
+def _stack(root: Path, count: int, *, routed: bool = False) -> SimpleNamespace:
     """A linear stack of `count` layers (criterion 1 and 2's own fixture,
     reused by `SA-0170`). A work repository on `trunk`, its bare remote and
     its mirror. A `Ledger` whose tasks and layers are recorded top first,
     out of both task id and position order.
+
+    `routed` is `False` by every caller's own default. Set, it builds
+    the `Ledger` with a `RoutedRecord` instead. `remote` then names the
+    repo row's own origin, so a witness can push its own exit there.
     """
     origin = root / "origin"
     origin.mkdir(parents=True)
@@ -87,10 +91,20 @@ def _stack(root: Path, count: int) -> SimpleNamespace:
     _git(root, "clone", "-q", "--mirror", str(remote), str(mirror))
 
     ledger_path = root / "ledger.db"
-    ledger = Ledger(ledger_path)
+    if routed:
+        from saffron.record.routed import RoutedRecord
+
+        ledger = Ledger(
+            ledger_path, record=RoutedRecord(lambda key: ledger.record_home(key))
+        )
+    else:
+        ledger = Ledger(ledger_path)
     base_sha = _git(origin, "rev-parse", "trunk")
     repo_id = ledger.upsert_repo(
-        "r", "https://example.invalid/o/r.git", str(mirror), policy_sha=None
+        "r",
+        str(remote) if routed else "https://example.invalid/o/r.git",
+        str(mirror),
+        policy_sha=None,
     )
     batch_id = ledger.create_batch(100.0)
 
@@ -1973,6 +1987,51 @@ def test_a_green_finish_pushes_its_own_branch_and_opens_its_draft_pull_request(
     assert row["head_sha"] == sha
     assert row["pr_url"] is None
     assert len(_git(s.mirror, "worktree", "list").splitlines()) == 1
+
+
+def test_a_finishing_layers_fact_reaches_the_origin_at_exit(tmp_path, monkeypatch):
+    """The `stack_finish` fact `publish_finish` writes reaches the
+    origin once `push_unpushed` runs, the way a command's own exit runs
+    it. Driven on a top layer an earlier call already pushed."""
+    from saffron.finish import publish_finish
+    from saffron.record.refs import RefsRecord
+    from saffron.record.routed import RoutedRecord
+    from saffron.repos import mirror as git_mirror
+
+    _isolate_git(tmp_path, monkeypatch)
+    s = _stack(tmp_path / "stack-routed", 2, routed=True)
+    assert isinstance(s.ledger._record, RoutedRecord)
+    refused = s.ledger._record.push_unpushed()
+    assert refused == []
+
+    top = s.layers[-1]
+    sha = _finishing_commit(s.mirror, top["head"])
+    ref = f"refs/heads/saffron-finish/{s.batch_id}"
+    gh = _FakeGh(_bases(s.layers))
+
+    def verify(sha_arg: str, base_arg: str) -> int:
+        assert git_mirror._git(s.mirror, "rev-parse", ref) == sha_arg
+        return 0
+
+    publish_finish(
+        s.ledger,
+        s.batch_id,
+        sha,
+        mirror=s.mirror,
+        url=s.url,
+        slug=s.slug,
+        verify=verify,
+        gh=gh,
+        workdir=tmp_path / "push",
+    )
+
+    refused = s.ledger._record.push_unpushed()
+    assert refused == []
+
+    top_key = s.ledger.record_key(top["task_id"])
+    assert top_key is not None
+    kinds = [fact.kind for fact in RefsRecord(s.remote).read(top_key)]
+    assert "stack_finish" in kinds
 
 
 def test_a_pushed_stack_is_linked_bottom_to_top_with_its_finishing_layer_last(

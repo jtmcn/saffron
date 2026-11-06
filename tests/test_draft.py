@@ -8,6 +8,7 @@ fails each test and not collection.
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -50,8 +51,16 @@ _SPEC_ID = "SA-0001"
 _DRAFT_PATH = f".saffron/specs/{_SPEC_ID}-draft.md"
 
 
-def _task(ledger: Ledger, spec_id: str = _SPEC_ID) -> int:
-    repo_id = ledger.upsert_repo("t", f"https://{spec_id}", "/m", policy_sha="p")
+def _task(
+    ledger: Ledger,
+    spec_id: str = _SPEC_ID,
+    *,
+    origin: str | None = None,
+    mirror_path: str = "/m",
+) -> int:
+    repo_id = ledger.upsert_repo(
+        "t", origin or f"https://{spec_id}", mirror_path, policy_sha="p"
+    )
     run_id = ledger.create_run(repo_id, base_sha="a" * 40)
     return ledger.create_task(run_id, spec_id=spec_id, spec_sha="s" * 64, branch="b")
 
@@ -359,10 +368,22 @@ def _build_cases() -> list[Case]:
     return cases
 
 
-def _run(tmp_path: Path, case: Case):
+def _run(
+    tmp_path: Path,
+    case: Case,
+    *,
+    routed: bool = False,
+    origin: str | None = None,
+    mirror_path: str = "/m",
+):
     """Run one `Case`. Returns its `Expected`, the ledger and task,
     the review and revise doubles, and the `Drafted` (or `None` for a
-    raise, already checked here)."""
+    raise, already checked here).
+
+    `routed`, `False` by default, builds the `Ledger` with a real
+    `RoutedRecord` instead of the usual `MemoryRecord`. `origin` and
+    `mirror_path` then name real bare repos for a witness to push to.
+    """
     from saffron.draft import draft_spec
 
     expected = _expect(
@@ -373,8 +394,16 @@ def _run(tmp_path: Path, case: Case):
         slug_for_text=_slug_of,
         declares_other_id=_declares_other,
     )
-    ledger = Ledger(tmp_path / f"{case.name}.db", record=MemoryRecord())
-    task_id = _task(ledger)
+    db_path = tmp_path / f"{case.name}.db"
+    if routed:
+        from saffron.record.routed import RoutedRecord
+
+        ledger = Ledger(
+            db_path, record=RoutedRecord(lambda key: ledger.record_home(key))
+        )
+    else:
+        ledger = Ledger(db_path, record=MemoryRecord())
+    task_id = _task(ledger, origin=origin, mirror_path=mirror_path)
     review_d = _Double(case.review)
     revise_d = _Double(case.revise)
     write_d = _Double([case.write])
@@ -594,3 +623,35 @@ def test_the_seed_id_is_the_highest_file_id_of_the_one_prefix(tmp_path):
 
     with pytest.raises(ValueError):
         seed_spec_id(tmp_path / "missing")
+
+
+def test_a_drafts_facts_reach_the_origin_at_exit(tmp_path):
+    """Every fact a `draft_spec` task carries reaches the origin once
+    `push_unpushed` runs, the way a command's own exit runs it. Driven
+    for five endings: a draft that runs, one escalated, one that waits,
+    one that errors, and one whose review raises."""
+    from saffron.record.refs import RefsRecord
+    from saffron.record.routed import RoutedRecord
+
+    cases = {case.name: case for case in _build_cases()}
+    for name in ("run", "escalate", "wait1", "err1", "raise_r1"):
+        case = cases[name]
+        origin = tmp_path / f"{name}-origin.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+        mirror = tmp_path / f"{name}-mirror.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(mirror)], check=True)
+
+        _expected, ledger, task_id, _rd, _vd, _drafted = _run(
+            tmp_path, case, routed=True, origin=str(origin), mirror_path=str(mirror)
+        )
+        assert isinstance(ledger._record, RoutedRecord)
+        refused = ledger._record.push_unpushed()
+        assert refused == [], name
+
+        key = ledger.record_key(task_id)
+        assert key is not None, name
+        origin_facts = RefsRecord(origin).read(key)
+        mirror_facts = RefsRecord(mirror).read(key)
+        assert origin_facts == mirror_facts, name
+        assert any(f.kind == "spec_text" for f in origin_facts), name
+        ledger.close()

@@ -22,6 +22,7 @@ from saffron.agents.findings import Finding
 from saffron.intake import Criterion, Mutant, Spec
 from saffron.ledger import Ledger
 from saffron.phases import implement, review
+from saffron.record.contract import Record
 from saffron.record.fold import fold
 from saffron.record.memory import MemoryRecord
 
@@ -573,16 +574,34 @@ def _stack_specs() -> dict[str, Spec]:
     }
 
 
-def _stack_ledger(tmp_path: Path, sha_a: str, shas: dict[str, str]):
+def _stack_ledger(
+    tmp_path: Path,
+    sha_a: str,
+    shas: dict[str, str],
+    *,
+    routed: bool = False,
+    origin: str = "/o",
+    mirror_path: str = "/m.git",
+):
     """The `Ledger`, its two batches and eight `READY_FOR_REVIEW` tasks,
-    each packaged at its own commit and laid out as the two `stack_layers`
-    chains.
+    each packaged at its own commit, laid out as the two `stack_layers`
+    chains. `routed`, `origin` and `mirror_path` default to every
+    caller's own `MemoryRecord` and bogus paths, unchanged. Set `routed`
+    and pass both for a real `RoutedRecord` over a real bare pair.
 
     Returns the ledger, its record, both batch ids and `spec id -> task_id`.
     """
-    record = MemoryRecord()
+    record: Record
+    if routed:
+        from saffron.record.routed import RoutedRecord
+
+        record = RoutedRecord(lambda key: ledger.record_home(key))
+    else:
+        record = MemoryRecord()
     ledger = Ledger(tmp_path / "ledger.db", record=record)
-    repo_id = ledger.upsert_repo("thermal-edge", "/o", "/m.git", policy_sha="p" * 64)
+    repo_id = ledger.upsert_repo(
+        "thermal-edge", origin, mirror_path, policy_sha="p" * 64
+    )
     batch1 = ledger.create_batch(100.0)
     batch2 = ledger.create_batch(100.0)
     batch_of = dict.fromkeys(("TE-4", "TE-7", "TE-3", "TE-9", "TE-5"), batch1)
@@ -962,6 +981,51 @@ def test_each_layers_end_review_folds_back_from_the_record(tmp_path, monkeypatch
 
     ledger.close()
     fresh.close()
+
+
+def test_an_end_reviews_facts_reach_the_origin_at_exit(tmp_path, monkeypatch):
+    """The `end_review` and `finding` facts `review_stack` writes reach
+    the origin once `push_unpushed` runs, the way a command's own exit
+    runs it. Driven on a layer an earlier call already pushed."""
+    import saffron.end_review as end_review
+    from saffron.record.refs import RefsRecord
+    from saffron.record.routed import RoutedRecord
+
+    mirror, sha_a, shas = _stack_mirror(tmp_path, monkeypatch)
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+
+    ledger, record, batch1, batch2, task_ids = _stack_ledger(
+        tmp_path, sha_a, shas, routed=True, origin=str(origin), mirror_path=str(mirror)
+    )
+    specs = _stack_specs()
+    assert isinstance(record, RoutedRecord)
+
+    # Every layer an earlier command's own exit already carried.
+    refused = record.push_unpushed()
+    assert refused == []
+
+    kwargs = _end_review_kwargs(
+        mirror, _open_cell_double([]), _scripted([], _stack_script())
+    )
+    end_review.review_stack(ledger, str(batch1), 4.0, specs, **kwargs)
+    end_review.review_stack(ledger, str(batch2), 4.0, specs, **kwargs)
+
+    refused = record.push_unpushed()
+    assert refused == []
+
+    te5_key = ledger.record_key(task_ids["TE-5"])
+    assert te5_key is not None
+    te9_key = ledger.record_key(task_ids["TE-9"])
+    assert te9_key is not None
+
+    for key in (te5_key, te9_key):
+        kinds = [fact.kind for fact in RefsRecord(origin).read(key)]
+        assert "end_review" in kinds
+
+    assert "finding" in [fact.kind for fact in RefsRecord(origin).read(te5_key)]
+
+    assert record.push_unpushed() == []
 
 
 def test_a_batchs_spend_counts_its_own_end_review(tmp_path, monkeypatch):

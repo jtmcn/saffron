@@ -22,6 +22,9 @@ class RoutedRecord:
         # Keyed on mirror and origin, never on the repo name. Two repo rows
         # can share a name or a mirror, and each fetches from its own origin.
         self._records: dict[tuple[Path, str], RefsRecord] = {}
+        # Kept in append order. `setdefault` leaves an already-kept key
+        # in place, so a key appended three times is pushed once (§3).
+        self._kept: dict[str, None] = {}
 
     def _record_for(self, task_key: str) -> tuple[RefsRecord, str]:
         mirror, origin = self._locate(task_key)
@@ -36,15 +39,37 @@ class RoutedRecord:
     def append(self, task_key: str, fact: Fact) -> None:
         record, _ = self._record_for(task_key)
         record.append(task_key, fact)
+        self._kept.setdefault(task_key, None)
 
     def read(self, task_key: str) -> list[Fact]:
         record, _ = self._record_for(task_key)
         return record.read(task_key)
 
     def push(self, task_key: str) -> None:
-        """Push `task_key`'s own ref to its origin, nothing else."""
+        """Push `task_key`'s own ref to its origin, nothing else.
+
+        Drops `task_key` from the kept set first, whether the push below
+        lands or raises: a key whose push failed is kept again only once a
+        later fact lands on it.
+        """
+        self._kept.pop(task_key, None)
         record, origin = self._record_for(task_key)
         record.push(task_key, origin)
+
+    def push_unpushed(self) -> list[tuple[str, Exception]]:
+        """Push every kept key once, through `push`, in append order.
+
+        Never raises for a push: a refusal is caught and returned beside
+        its key instead, so a command's exit can report every refusal
+        rather than stopping at the first.
+        """
+        refused: list[tuple[str, Exception]] = []
+        for key in list(self._kept):
+            try:
+                self.push(key)
+            except Exception as exc:
+                refused.append((key, exc))
+        return refused
 
     def task_keys(self) -> list[str]:
         raise RecordError(

@@ -8354,3 +8354,81 @@ def test_a_resume_with_an_order_another_budget_or_no_top_task_raises_before_anyt
 
     assert _row_window(ledger, batch_id) == before
     assert _batch_count(ledger) == count_before
+
+
+def test_a_stack_batchs_layer_and_spec_review_facts_reach_the_origin_at_exit(
+    routed_ledger,
+):
+    """Each `stack_layer` fact a stack batch records reaches the origin
+    once `push_unpushed` runs, the way a command's own exit runs it. So
+    does each spec review's terminal state. Driven the way
+    `test_each_spec_review_is_a_fact_on_its_specs_minted_task` drives
+    `_mint_and_review_arrangement`: `TE-2` ends `SPEC_WITHHELD`, `TE-4`
+    and `TE-6` end `GATE_ERROR`, `TE-5` ends `RATE_LIMITED`, and the same
+    pass already lays three layers down."""
+    from saffron.batch import run_stack_batch
+    from saffron.record.refs import RefsRecord
+    from saffron.record.routed import RoutedRecord
+
+    ledger, repo_id, origin = routed_ledger
+    order, _older_task, _earlier_batch, mint, reviews, runner = (
+        _mint_and_review_arrangement(ledger, repo_id)
+    )
+
+    run_stack_batch(
+        order,
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        review=reviews,
+        mint=mint,
+        sleep=lambda seconds: None,
+    )
+
+    assert isinstance(ledger._record, RoutedRecord)
+    refused = ledger._record.push_unpushed()
+    assert refused == []
+
+    layer_keys = [
+        row["task_key"]
+        for row in ledger._db.execute(
+            "SELECT task_key FROM stack_layers ORDER BY position"
+        ).fetchall()
+    ]
+    assert len(layer_keys) == 3
+    for key in layer_keys:
+        kinds = [fact.kind for fact in RefsRecord(origin).read(key)]
+        assert "stack_layer" in kinds
+
+    for spec_id in ("TE-2", "TE-4", "TE-6", "TE-5"):
+        task_id = mint.tasks[spec_id]
+        key = ledger.record_key(task_id)
+        assert key is not None
+        kinds = [fact.kind for fact in RefsRecord(origin).read(key)]
+        assert "spec_review" in kinds
+
+    assert ledger._record.push_unpushed() == []
+
+    # A later fact of a kind neither `task_created` nor `task_state`
+    # names still re-kept this already-pushed layer, pushed again below.
+    from saffron.record.contract import Fact
+
+    layer_key = layer_keys[0]
+    ledger._record.append(
+        layer_key,
+        Fact(
+            kind="stack_layer",
+            task_key=layer_key,
+            at="2026-01-01T00:00:00Z",
+            repo="thermal-edge",
+            batch_key=None,
+            payload={"position": 1, "predecessor_key": None, "generation": 0},
+        ),
+    )
+    assert ledger._record.push_unpushed() == []
+    layer_count = sum(
+        1 for fact in RefsRecord(origin).read(layer_key) if fact.kind == "stack_layer"
+    )
+    assert layer_count == 2

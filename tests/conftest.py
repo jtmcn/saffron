@@ -8,6 +8,8 @@ from typing import Protocol
 import pytest
 
 from saffron.cell import runtime
+from saffron.ledger import Ledger
+from saffron.record.routed import RoutedRecord
 
 # Every runtime, not only the selected one, so the guard does not move with the
 # environment; `gh` because a real one depends on the network and who is logged in.
@@ -93,6 +95,47 @@ def no_host_tool_exec(request, monkeypatch):
         return real(argv, *args, **kwargs)
 
     monkeypatch.setattr(subprocess, "Popen", guarded)
+
+
+@pytest.fixture(autouse=True)
+def no_network_git_push(request, monkeypatch):
+    """Pushes at exit can now reach a repo row's real origin
+    (`push_unpushed`, SA-0335). A test naming an `https://github.com/...`
+    origin needs no network. `GIT_ALLOW_PROTOCOL=file` refuses that push
+    at once. A push to a local path still lands under the same setting,
+    measured on git 2.54.0 and git 2.47.3.
+    """
+    if request.node.get_closest_marker("cell"):
+        return
+    monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "file")
+
+
+def _bare(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q", "--bare", str(path)], check=True)
+    return path
+
+
+@pytest.fixture
+def routed_ledger(tmp_path):
+    """A `Ledger` routed the way `main` builds its own, with one
+    `RoutedRecord` whose lookup is `ledger.record_home`. The repo row it
+    upserts names a bare mirror and a bare origin under `tmp_path`.
+
+    Yields `(ledger, repo_id, origin)`. A writer witness seeds its task
+    through `ledger` and `repo_id`, then calls `push_unpushed()` the way an
+    earlier command's exit would. It runs the writer, then reads `origin`'s
+    own ref to check the exit push that follows.
+    """
+    mirror = _bare(tmp_path / "record-mirror.git")
+    origin = _bare(tmp_path / "record-origin.git")
+    ledger = Ledger(
+        tmp_path / "record-ledger.db",
+        record=RoutedRecord(lambda key: ledger.record_home(key)),
+    )
+    repo_id = ledger.upsert_repo("repo", str(origin), str(mirror), policy_sha=None)
+    yield ledger, repo_id, origin
+    ledger.close()
 
 
 @pytest.fixture
