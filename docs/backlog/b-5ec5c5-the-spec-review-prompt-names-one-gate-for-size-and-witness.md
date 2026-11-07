@@ -1,12 +1,12 @@
 ---
 id: b-5ec5c5
 title: The spec review prompt names one gate for size and witness, the wording #563 fixed in the writer prompt
-status: open
+status: partial
 tier: 3
 filed: 2026-09-28
 closed:
 specs: []
-prs: []
+prs: [917]
 commits: []
 cites: [§5.4]
 related: [b-792ab2]
@@ -35,3 +35,4 @@ raises the tier. It matches `spec-writer.md`'s wording.
 ## Record
 
 - 2026-09-28: filed from the spec loop's run 20.
+- 2026-11-07: groomed. `SA-0288` (#917) split the bullet in two. The witness gate and the size gate each have a question of their own in `spec-review.md`. The size bullet still says "one of the paths named below", and three lists follow. It does not yet name the risk tier list the way `spec-writer.md:28-29` does.

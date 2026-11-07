@@ -1,13 +1,13 @@
 ---
 id: b-1adb50
 title: Sentences in DESIGN.md and CLAUDE.md go false once a stack batch lands, and no cell may edit either
-status: partial
+status: done
 tier: 2
 by_hand: true
 filed: 2026-09-23
-closed:
+closed: 2026-11-07
 specs: [SA-0151, SA-0156, SA-0160, SA-0165, SA-0169]
-prs: []
+prs: [656, 932]
 commits: [d354c859]
 cites: [§4.2.1, §6]
 related: [b-792ab2, b-466005]
@@ -68,3 +68,4 @@ deadline plus one task plus its end review. Each cites ADR 7.
   describe code that does not exist.
 - 2026-09-30: `SA-0165` has a task now (#622), unmerged. No sentence changes until it merges.
 - 2026-10-01: `SA-0162` (#626) and `SA-0151` (#628) merged. A night now runs follow-ups and a finishing commit after its deadline, so the sentence on ending at the deadline plus one task is false.
+- 2026-11-07: closed in grooming. §6 now names `saffron/report/stack.py` as the stack view's source (#656). `DESIGN.md` §4.2.1, `CLAUDE.md` and `README.md` say a stack night runs its end review after any stop, and a deferred one skips that review, its follow-ups and its finishing layer (#932, `SA-0301`). Each cites ADR 7. `docs/HOST-HARDENING.md`'s bound stays true, since its plist runs a plain batch.

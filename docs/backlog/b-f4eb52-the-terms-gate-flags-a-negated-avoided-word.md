@@ -1,11 +1,12 @@
 ---
 id: b-f4eb52
 title: The `terms` gate flags an avoided word used to rule it out, so it fails at base on `Never a ticket`
-status: open
+status: done
 tier: 3
 filed: 2026-09-23
+closed: 2026-11-07
 specs: []
-prs: []
+prs: [720]
 commits: []
 cites: [§5.4]
 related: [b-440f17, b-8220e6]
@@ -38,3 +39,4 @@ words to rule them out or by rewording `intake.py:133`.
 - 2026-10-24: ADR 11 (#963) gives a banned phrase no correct use in the
   gate's scope. That rules out the exemption arm of Done, and the rewording
   arm stands (b-8220e6).
+- 2026-11-07: closed in grooming. The rewording arm landed on 2026-10-07 in `557c1ab8` (#720), which rewrote the `Spec` docstring in `saffron/intake.py`. No line in `saffron/` says `Never a ticket` now, and `.saffron/gates/terms` on HEAD reports `pass` with 0 failures in 959 files.

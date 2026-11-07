@@ -1,11 +1,11 @@
 ---
 id: b-615466
 title: A stack batch finds its own batch by the latest id, and nothing enforces one batch at a time
-status: open
+status: partial
 tier: 3
 filed: 2026-09-26
 specs: []
-prs: []
+prs: [934]
 commits: []
 cites: [§4.2.1]
 related: [b-792ab2]
@@ -31,3 +31,4 @@ sends the end review to the other batch's layers (`['2'] != ['1']`).
 
 - 2026-09-26: filed from the spec loop's run 18 (stack #531). Kept as written
   on #527.
+- 2026-11-07: groomed. `run_stack_batch` now holds the batch id it creates and hands it to its end review (`6a50eb23`, `SA-0304`, #934). The measured case is gone. Two parts stay open. `cli.py` renders the stack view after a stack batch with no id, so `write_stack_view` reads `latest_batch_id`. No lock holds one batch per ledger.

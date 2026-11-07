@@ -1,11 +1,11 @@
 ---
 id: b-bff670
 title: The spec loop's driver reads stale state, so `status` shows merged PRs as reviewable and `check` judges a branch's spec on main's ceilings
-status: open
+status: partial
 tier: 2
 filed: 2026-09-25
 specs: []
-prs: []
+prs: [616]
 commits: []
 cites: [§8]
 related: [b-e8027b, b-a4df62]
@@ -39,3 +39,4 @@ is item b-e8027b, and it is recorded there.
 - 2026-09-26: recurred in the spec loop's run 18. After run 17 merged,
   `status` said to run `snapshot --force`. That exited 1 with no candidates.
   The right command was `snapshot --new`, and neither output named it.
+- 2026-11-07: groomed. `history --spec` now reads the spec from a file or a ref (`5106d0a1`, #616). Two parts stay open. `status` still prints each row's state from the order file. It asks GitHub only for its stale list (`_stale_reasons`). `check` still reads the spec from the checkout and takes no ref.
