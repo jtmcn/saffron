@@ -1,14 +1,16 @@
 ---
 id: b-5e443c
 title: The cell image predates `agent_runner.py`'s token fields, so no event log carries a token count and nothing says why
-status: partial
+status: superseded
 tier: 2
 filed: 2026-09-19
+closed: 2026-11-07
 specs: []
 prs: [369]
 commits: []
 cites: [§4.1, §5.1.2]
 related: [146, 147, 10]
+superseded_by: b-0e20e9
 ---
 
 ## Problem
@@ -55,3 +57,8 @@ decision says the event log is their only home.
 - 2026-10-17: partial. #369 rebuilds the base at every cell, so the
   image's runner can no longer lag the checkout's. Token counts still reach
   only the event log, which items 146 and 147 hold.
+- 2026-11-07: superseded in grooming by b-0e20e9. #369 rebuilds the base at
+  every cell (`saffron/repos/image.py:78`), which replaced the preflight hash
+  check. Items 146 and 147 are done, and neither stores tokens in the ledger.
+  The part left, token counts per attempt in the ledger, is b-0e20e9's whole
+  Done.

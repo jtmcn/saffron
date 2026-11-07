@@ -1,11 +1,12 @@
 ---
 id: b-8d5e55
 title: The spec loop's step 1b fixes every verified blocker however many rounds it takes, and the operator ruled otherwise
-status: open
+status: wontfix
 tier: 2
 filed: 2026-09-21
+closed: 2026-11-07
 specs: []
-prs: []
+prs: [424, 748]
 commits: []
 cites: []
 related: [b-a4df62, b-250dc7]
@@ -44,3 +45,8 @@ from memory.
 ## Record
 
 - 2026-09-21: filed from the spec loop's run 11.
+- 2026-11-07: closed in grooming as wontfix. #748 removed the loop's step 1b
+  spec review on the operator's call in run 31, so its rounds no longer exist.
+  Spec review rounds now run in `create-saffron-spec`, whose stop rule is two
+  rounds (#424), and in the stack batch's bounded revision (ADR 7). The HTML
+  report stays with b-0de0b3.

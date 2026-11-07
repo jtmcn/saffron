@@ -1,15 +1,17 @@
 ---
 id: b-e8027b
 title: '`snapshot --force` releases every hold, including one whose spec edit is still an open pull request'
-status: open
+status: superseded
 tier: 2
 filed: 2026-09-21
+closed: 2026-11-07
 by_hand: true
 specs: []
-prs: []
+prs: [496, 748]
 commits: []
 cites: []
 related: [b-4589be, 137, b-792ab2]
+superseded_by: b-792ab2
 ---
 
 ## Problem
@@ -37,3 +39,7 @@ while that pull request is open. `status` names every hold it kept and why.
 - 2026-09-30: still live. `hold` stores a free-text reason and no pull
   request number. ADR 7 moves spec revision inside the batch, so no hold is
   needed once b-792ab2 completes.
+- 2026-11-07: superseded in grooming by b-792ab2, as the 2026-09-30 entry
+  foresaw. A stack batch revises a spec inside the batch (ADR 7, #496). #748
+  removed step 1b's spec review, the only source of a hold. `SKILL.md` no
+  longer names `hold`.

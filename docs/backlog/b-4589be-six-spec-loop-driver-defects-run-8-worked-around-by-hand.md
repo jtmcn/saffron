@@ -59,3 +59,7 @@ no commits and a bound in its terminal a halt. `hold` takes several ids or
   from a file or ref. `pattern` matches the CLI's error line (item 158).
   The `record` bullet closed with b-36b551 (#478). `next` and `hold` remain,
   and ADR 7's stack batch retires both.
+- 2026-11-07: b-792ab2 is done, and a stack batch became the loop's default in
+  run 30. Neither `next` nor `hold` was retired. `SKILL.md` no longer names
+  `hold`, and `next` survives in the attended fallback. So both bullets stand
+  for that path only.

@@ -1,10 +1,10 @@
 ---
 id: b-e1afbb
 title: Work larger than one cell has no unit in Saffron, and no review reads its parts together
-status: open
+status: partial
 tier: 3
 filed: 2026-09-21
-specs: []
+specs: [SA-0154]
 prs: []
 commits: []
 cites: [§3, §5.5]
@@ -46,3 +46,8 @@ Consequences list what the spec that builds it must settle.
 
 - 2026-09-21: filed. The ADR is `protected` and written by hand. The
   scheduler and review changes after it can go through cells.
+- 2026-11-07: partial in grooming. ADR 6 is accepted. b-792ab2 built ADR 7's
+  stack batch, whose end review runs one join lens over the whole stack
+  (`SA-0154`, `saffron/end_review.py:601`). Left: no spec declares members,
+  their order or shared constraints, because intake has no composite fields.
+  No review is scoped to one composite's members, as ADR 6's Consequences ask.

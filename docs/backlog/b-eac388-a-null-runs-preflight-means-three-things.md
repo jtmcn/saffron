@@ -1,11 +1,11 @@
 ---
 id: b-eac388
 title: A NULL `runs.preflight` means three things, and the batch header spec will inherit all three
-status: open
+status: partial
 tier: 2
 filed: 2026-09-18
 specs: []
-prs: []
+prs: [796]
 commits: []
 cites: [§4.1, §6]
 related: [164, b-7431a2]
@@ -42,3 +42,9 @@ closed set gains a third one. The header spec names which it reads.
 
 - 2026-09-18: filed from the spec loop's run 7 (stack #335 ← #338 ← #339 ←
   #342 ← #340). Surfaced by #338.
+- 2026-11-07: partial in grooming. `SA-0244` (#796) writes `FAILED` when
+  preflight refuses a start in `cell_up` (`saffron/cell/session.py:3828-3830`).
+  So the first case no longer reads NULL. A raise other than `PreflightFailed`
+  still ends `ABORTED` with NULL. NULL still covers a run in progress and a row
+  older than #338. No header spec names what it reads. `saffron/ledger.py:123`
+  and `CONTEXT.md` still call NULL open.
