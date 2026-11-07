@@ -1094,6 +1094,16 @@ explicit refspec and takes no tags (`SA-0237`). So a ref outside `refs/heads/*`,
 the record's, stays out of the cell under either config measured to widen a bare fetch.
 Anything kept on a branch still reaches the cell.
 
+**A mutant lives on `refs/saffron/mutants`, never in the spec** (item 80, decided
+2026-11-07). The ref's tree holds one `<spec id>.yaml` per spec, keyed by the id, so
+an edit to the spec leaves its mutants in place. `saffron mutant` writes that file and
+pushes the ref to the repo's origin. The mirror fetches the ref by name, because its
+general refspec leaves out `refs/saffron/*` (`SA-0278`). Intake reads each criterion's
+mutant from the mirror's copy and records the ref's commit beside `spec_sha`. A queued
+spec that still declares a `mutant:` inline is refused, since a cell would read it from
+`HEAD`. A spec in `done/` keeps its inline mutants as history and is never run. The cell
+never holds the ref, because the seed fetches `refs/heads/*` alone.
+
 **What the gate does.** A spec's `acceptance:` already pairs a claim with the
 witness that guards it. Each entry can also declare a **mutant**: the
 smallest edit that breaks the claim while leaving the code syntactically whole.
