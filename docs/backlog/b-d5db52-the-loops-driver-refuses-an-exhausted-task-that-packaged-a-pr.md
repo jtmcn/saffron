@@ -1,14 +1,16 @@
 ---
 id: b-d5db52
 title: The loop's driver refuses an EXHAUSTED task that PACKAGE published as a pull request
-status: open
+status: superseded
 tier: 3
 filed: 2026-10-14
+closed: 2026-11-07
 specs: [SA-0272]
 prs: [875, 881]
-commits: []
+commits: ["ae5bb327"]
 cites: [§5.7]
 related: [b-4901d2]
+superseded_by: b-2247dd
 ---
 
 ## Problem
@@ -31,3 +33,4 @@ operator chooses to review one, `size` and `stack` take it as a layer.
 - 2026-10-14: filed from the spec loop's run 39.
 - 2026-10-15: again in run 40. `SA-0273` ended `EXHAUSTED` with draft #881, and
   the delegate measured its size through `_size` by hand.
+- 2026-11-07: superseded in grooming by b-2247dd, filed in ae5bb327. That item names the same refusal, `reviewable` requiring `READY_FOR_REVIEW` (`driver.py:158`), across `stack`, `size` and `rebase`, and asks for a test. `record` already stores an `EXHAUSTED` task's state and pull request, since `EXHAUSTED` is in `DONE_STATES`. The run 39 and run 40 sightings here belong to b-2247dd.
