@@ -1,11 +1,11 @@
 ---
 id: b-490c9c
 title: A cell killed mid-flight leaves its task row open and its network behind, so its spend reads zero and the next cell cannot start
-status: open
+status: partial
 tier: 2
 filed: 2026-09-21
 specs: []
-prs: []
+prs: [855]
 commits: []
 cites: []
 related: []
@@ -43,3 +43,9 @@ stop the next cell from starting.
 ## Record
 
 - 2026-09-21: filed from the spec loop's run 11 (task 119, task 120).
+- 2026-11-07: partial in grooming. `SA-0269` (#855) names each cell's network
+  for its spec (`saffron/cell/session.py:2166`). A leftover network now blocks
+  only that spec's next cell. A batch start stamps an in-flight row `ORPHANED`
+  (`saffron/reconcile.py:222-226`). `set_task_state` then sums its spend from its
+  closed attempts. Left: `saffron cell` and `saffron reconcile` still leave the
+  row open. A leftover network still blocks a rerun of the same spec.

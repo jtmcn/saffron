@@ -36,7 +36,7 @@ from typing import Literal
 
 from saffron.gates.baseline import subtract_baseline
 from saffron.gates.contract import GateResult
-from saffron.gates.core.scope import matches
+from saffron.gates.core.scope import NO_TEST_PATHS, matches
 from saffron.intake import Mutant
 
 # Redeclared rather than imported from `witness`/`revert`: this module owes
@@ -161,7 +161,7 @@ def probe_refusal(file: str, test_paths: Sequence[str]) -> str | None:
     if target is None:
         return f"{file} is not a relative path inside the tree"
     if not test_paths:
-        return "the repo declares no test paths, so source cannot be told from test"
+        return NO_TEST_PATHS
     if any(matches(target, pattern) for pattern in test_paths):
         return f"{target} is a test; a probe must target source"
     return None

@@ -1,12 +1,13 @@
 ---
 id: b-830357
 title: The budget gate's witness cannot tell `>` from `>=`, so an off-by-one at the boundary passes
-status: open
+status: done
 tier: 3
 filed: 2026-09-26
+closed: 2026-11-07
 specs: []
-prs: []
-commits: []
+prs: [608]
+commits: ["72f6e95a"]
 cites: [§4.2.1]
 related: []
 ---
@@ -27,3 +28,4 @@ against a $5 budget. The mutant `>` to `>=` at the budget comparison in
 ## Record
 
 - 2026-09-26: filed from the spec loop's run 18 (stack #531).
+- 2026-11-07: closed in grooming. `72f6e95a`, a review commit on `SA-0173` that reached `main` in #608, added a $5 spec against a $5 budget to `tests/test_batch.py::test_the_budget_gate_is_one_comparison_before_each_task` and asserts `DRAINED`. The comparison is `candidate.spec.budget_usd > remaining` (`saffron/batch.py:277`), so `>=` stops that candidate and fails the witness.

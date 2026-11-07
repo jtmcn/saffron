@@ -1,14 +1,16 @@
 ---
 id: b-61993a
 title: The `cite` subcommand reports moved text at about one hit in four, and passes a line zero or a reversed range
-status: open
+status: superseded
 tier: 2
 filed: 2026-09-21
+closed: 2026-11-07
 specs: []
-prs: []
+prs: [956]
 commits: []
 cites: []
 related: [b-b69bb6, b-281f0a]
+superseded_by: b-2da959
 ---
 
 ## Problem
@@ -47,3 +49,9 @@ and a start past the end are each reported.
 ## Record
 
 - 2026-09-21: filed from the spec loop's run 11 (#404).
+- 2026-11-07: superseded in grooming by b-2da959, done by `SA-0314` (#956).
+  `cite` now calls core's checker (`saffron/spec_citations.py`). It judges a
+  range by the construct its clause names, and refuses a start below line 1
+  or a reversed range (`:370-390`). A sentence that turns false while its
+  citation resolves is still unchecked, as `references/preflight.md` check 5
+  says.

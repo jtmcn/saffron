@@ -40,3 +40,7 @@ is one query and a cache-read regression is visible across runs.
 ## Record
 
 - 2026-09-19: filed from the spec loop's run 9, at the operator's request.
+- 2026-11-07: b-5e443c closed in grooming into this item, and this item stays in tier 3.
+  b-5e443c ranked tier 2 for a cell image that predated the token fields. #369
+  rebuilds the image at every cell, so that reason is gone. What it left, token
+  counts per attempt in the ledger, was always this item's tier 3 work.

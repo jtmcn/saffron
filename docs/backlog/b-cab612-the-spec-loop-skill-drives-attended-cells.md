@@ -1,7 +1,7 @@
 ---
 id: b-cab612
 title: "The spec loop's skill drives one attended cell per spec, while the operator made `saffron batch` its default"
-status: open
+status: partial
 tier: 1
 filed: 2026-10-07
 by_hand: true
@@ -45,3 +45,8 @@ above with one command.
   driver live under `.claude/`, and `SA-0279` refuses any spec that touches
   it.
 - 2026-10-17: run 43 restacked `SA-0284` onto #898's review commits by hand, after the batch drained. b-3a79a0 records the push that reached a stack base mid-batch.
+- 2026-11-07: partial in grooming. Step 2 of the skill now starts one batch
+  over the order (e9e6c63b, `SKILL.md:104`). Two parts are left. The driver
+  takes one `record` call per task, by hand, and `record` names no batch.
+  Restacking the layers above a lower layer's review commits is still a hand
+  step, as step 2 says.

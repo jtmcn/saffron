@@ -49,3 +49,7 @@ checked out, saying which.
 - 2026-09-30: still live. `_stale_reasons`, `_edit_traps` and `_known_specs`
   read the working tree. ADR 7's stack batch reads every queued spec at
   `base_sha`, so this closes as superseded once b-792ab2 completes.
+- 2026-11-07: b-792ab2 closed on 2026-10-03, and a batch is now the loop's
+  default run path. The driver defect stays. `status` and `next` still call
+  `_stale`, and `_stale_reasons` and `_edit_traps` still read the working tree.
+  So the closure the entry above names did not follow, and the item stays open.

@@ -1,13 +1,14 @@
 ---
 id: b-07f694
 title: Whether a risk tier gates a lens has no open record, because item 6 closed without settling it
-status: open
+status: done
 tier: 3
 filed: 2026-09-22
+closed: 2026-11-07
 by_hand: true
 specs: []
 prs: []
-commits: [e370d835]
+commits: [e370d835, "4efb4a91", "d051dcb5"]
 cites: [§5.5.1, §5.6]
 related: [6]
 ---
@@ -36,3 +37,4 @@ The question is answered in §5.5.1 or §5.6, or a record holds it open, and
   the same day: 100 of 179 specs run `elevated` once `elevate_on` applies,
   so gating would skip the lens on 79 tasks, not six. The question stays
   with the operator.
+- 2026-11-07: closed in grooming on the operator's ruling of 2026-11-07. No risk tier gates a lens, and every lens runs at every tier. `DESIGN.md` §5.5.1 and §5.6 now say so (4efb4a91), and ADR 4's Consequences carry it as a dated amendment (d051dcb5).

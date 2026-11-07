@@ -1,11 +1,13 @@
 ---
 id: b-cd4de2
 title: The spec loop numbers its passes as runs, and run is a ledger term
-status: open
+status: done
+tier: 3
 filed: 2026-09-22
+closed: 2026-11-07
 specs: []
 prs: []
-commits: []
+commits: ["4efb4a91"]
 cites: []
 related: []
 ---
@@ -44,3 +46,4 @@ One of the two is made true, and `CONTEXT.md` says which:
 ## Record
 
 **Filed 2026-09-22** from the code review of PR #477.
+- 2026-11-07: closed in grooming on the operator's ruling of 2026-11-07, by the second exit. "Spec loop run" joins scoring run, scoring pass and review round as a qualified reuse in `CONTEXT.md`, and the note under **Review round** names all four. The skill, the agent files, `docs/agents/` and the driver qualify each bare "run N" (4efb4a91). Closed records and evidence file names keep the old wording as history.

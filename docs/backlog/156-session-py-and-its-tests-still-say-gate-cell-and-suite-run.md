@@ -1,12 +1,12 @@
 ---
 id: 156
 title: "`session.py`, its tests and `suite.py` still use words `CONTEXT.md` tells them to avoid"
-status: open
+status: partial
 tier: 3
 filed: 2026-09-16
 by_hand: false
 specs: []
-prs: []
+prs: [422]
 commits: []
 cites: []
 related: [142]
@@ -41,3 +41,11 @@ fixture and any witness ids renamed in the same change.
 ## Record
 
 **Filed 2026-09-16** from the spec loop's run 5 (stack #308).
+- 2026-11-07: the prose half is done. #422 (`21488e89`) made `session.py`'s
+  comments and its exit-2 message say "Gate-only cell". No prose in
+  `tests/test_session.py` says "gate cell" now.
+- Left: `SuiteRun` and its field `run` in `saffron/gates/suite.py`. Four test
+  names in `tests/test_session.py` still spell `gate_cell`, as does
+  `session._gate_cell_suite`. Three `session.py` comments still say "a
+  SIGKILLed run". `CONTEXT.md` now defines **Run** as one task's pin, so that
+  wording wants a fresh reading rather than a rename.

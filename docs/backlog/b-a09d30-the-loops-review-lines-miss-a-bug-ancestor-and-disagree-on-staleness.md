@@ -4,6 +4,7 @@ title: The loop's REVIEW lines read only declared `touches`, and `record` and `j
 status: open
 tier: 3
 filed: 2026-09-30
+by_hand: true
 specs: [SA-0196]
 prs: []
 commits: []
@@ -34,3 +35,5 @@ name that is not a string reads as none recorded.
 ## Record
 
 - 2026-09-30: filed from the spec loop's run 23.
+- 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
+  `.claude/`, and `SA-0279` refuses any spec that touches that path.

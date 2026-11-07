@@ -1,14 +1,16 @@
 ---
 id: b-01c53d
 title: "The end review's writer drafts a whole spec for a two-line comment fix, and withheld it after three revisions"
-status: open
+status: superseded
 tier: 3
 filed: 2026-10-25
+closed: 2026-11-07
 specs: []
-prs: []
+prs: [1012]
 commits: []
 cites: [§5.7]
 related: [b-781ea4]
+superseded_by: b-4a9207
 ---
 
 ## Problem
@@ -32,3 +34,4 @@ edit, not to the writer as a follow-up spec.
 - 2026-10-25: filed from the spec loop's run 48.
 - 2026-10-27: in `saffron finish 58` the writer declined to draft a spec for a one-line docstring finding, and the finish pooled it as type `test`. The review commit on #979 had already fixed the line.
 - 2026-11-06: recurred in the spec loop's run 54, on finish 67's one-line docstring finding. See b-4a9207.
+- 2026-11-07: closed in grooming as superseded by b-4a9207, filed in #1012. Its first done criterion, a one-line finding fixed in the finishing layer rather than drafted, is this item's whole exit, and it also asks for the citation check and the named gate. The 2026-11-06 recurrence above was already recorded there. Neither `saffron/finish.py`, `saffron/qualify.py` nor `saffron/follow_up.py` holds a path that turns a finding into a finishing-layer edit, so the defect stays open under b-4a9207.

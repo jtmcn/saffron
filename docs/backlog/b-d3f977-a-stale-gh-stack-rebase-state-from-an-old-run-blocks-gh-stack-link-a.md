@@ -4,6 +4,7 @@ title: "A stale gh-stack rebase state from an old run blocks gh stack link, and 
 status: open
 tier: 3
 filed: 2026-10-25
+by_hand: true
 specs: []
 prs: []
 commits: []
@@ -29,3 +30,5 @@ calls `gh stack link`.
 ## Record
 
 - 2026-10-25: filed from the spec loop's run 48.
+- 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
+  `.claude/`, and `SA-0279` refuses any spec that touches that path.

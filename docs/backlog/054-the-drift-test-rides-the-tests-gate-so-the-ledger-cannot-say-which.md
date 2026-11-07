@@ -1,11 +1,12 @@
 ---
 id: 54
 title: The drift test rides the `tests` gate, so the ledger cannot say which check failed
-status: open
+status: done
+closed: 2026-11-07
 tier: 3
 specs: []
 prs: []
-commits: []
+commits: ["d4fb36d3"]
 cites: [§5.4]
 related: []
 ---
@@ -29,3 +30,6 @@ obtains its own `tool` by executing something real, or a written decision that t
 test is enough — with the reason, so the next reader does not re-litigate it. It
 becomes worth doing the first night an operator misreads a stale-surface failure
 as a code failure.
+
+## Record
+- 2026-11-07: closed in grooming on the operator's ruling of 2026-11-07, by the second exit: the test is enough. `tests/ontology/test_generated_surfaces_are_current.py` (d4fb36d3) takes its `tool` field by execution, and the ledger records the failing test's id, which names the drift. A hand-written gate would have to obtain its own `tool`, the hole Appendix H names. Reopen the first night an operator misreads a stale-surface failure.

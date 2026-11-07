@@ -1,7 +1,7 @@
 ---
 id: b-348114
 title: Four lines of `CLAUDE.md` and `DESIGN.md` lag what run 27's stack built
-status: open
+status: partial
 tier: 3
 filed: 2026-10-03
 by_hand: true
@@ -37,3 +37,8 @@ night's own settled tasks, or the operator decides otherwise.
 - 2026-10-03: filed from the spec loop's run 27.
 - 2026-10-11: the `DESIGN.md` §4.7 bullet now holds. #774 rewrote the
   sentence for `SA-0253`, which the spec loop's run 34 delivered as #821.
+- 2026-11-07: partial in grooming. One of the four lines holds, the
+  `DESIGN.md` §4.7 sentence at line 628. Three still lag the code.
+  `CLAUDE.md:68` lists only `saffron watch SA-NNNN`. `DESIGN.md:1286`,
+  `:1387` and `:1415` still say "verdict line". `DESIGN.md:1423` still says
+  the header can only show the rate over prior batches.

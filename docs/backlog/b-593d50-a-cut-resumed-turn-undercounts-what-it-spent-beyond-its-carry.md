@@ -1,12 +1,13 @@
 ---
 id: b-593d50
 title: "A resumed turn cut mid-stream records the larger of its own floor and the session's carry, so it undercounts its own spend"
-status: open
+status: wontfix
 tier: 2
 filed: 2026-10-05
+closed: 2026-11-07
 specs: []
 prs: []
-commits: []
+commits: ["c5f34792"]
 cites: [§4.1, §7.1]
 related: [b-209696]
 ---
@@ -37,3 +38,4 @@ cost above the carry.
 ## Record
 
 - 2026-10-05: filed from stage 2 of the delegate-loop plan (the first live stack batches, batches 13 and 14).
+- 2026-11-07: closed in grooming as wontfix. The premise is the reasoned claim that the carry "covers the whole session so far". A measurement from before the filing says otherwise. `c5f34792` (2026-08-20) recorded that a resumed turn reports its own cost, not the session's ($0.00396 fresh, then $0.00199 on resume of the same `session_id`). The comment above `last_cost` in `saffron/cell/session.py` still states it. So the floor and the carry each price one turn, and the cut turn's spend is not hidden behind a session total. Reopen if a re-measurement on the pinned SDK shows a resumed turn reporting a cumulative cost.

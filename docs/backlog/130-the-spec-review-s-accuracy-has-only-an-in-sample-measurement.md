@@ -69,3 +69,7 @@ It showed only whether the fixes worked, for about $80.
 - 2026-09-30: step 2 is set up, not measured.
   `docs/evidence/2026-09-30-spec-review-out-of-sample-preregistration.md`
   proposes the five values. They take effect when its pull request merges.
+- 2026-11-07: the pre-registration is on `main`. `b5240baa` reached it through
+  #616, so the cutoff is set. No counted round is copied into `docs/evidence/`
+  yet. The file's own hard stop is 2026-12-31. Its header still reads
+  **PROPOSED**.

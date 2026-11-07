@@ -154,3 +154,11 @@ arm, and §5.1 carrying the second safety argument. Three findings from doing it
   placement, so K concurrent cells contend for cores `0..n-1` rather than being
   spread. §4.2's question, unanswered, and the reason this runtime is for one
   attended task before it is for a night. **That is what is left of this half.**
+
+- 2026-11-07: the `DEFAULT_SUBNET` constant is gone. Item 143 (#282, #305)
+  replaced it with `runtime.SUBNETS`. Each task network walks
+  `10.200.0.0/16` for a free /24. A refused create moves the walk on only when
+  `networks_on_subnet` names a holder, so the next bullet now gates the walk on
+  podman. `networks_on_subnet` still reads a second column and matches
+  `apple/container`'s "overlap" wording. Rootless `--cpuset-cpus` is unasked.
+  The runtime column in the ledger is not started.

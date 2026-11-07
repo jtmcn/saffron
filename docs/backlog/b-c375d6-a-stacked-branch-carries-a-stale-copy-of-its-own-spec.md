@@ -4,6 +4,7 @@ title: A stacked branch carries its own spec as it stood when its base was cut, 
 status: open
 tier: 2
 filed: 2026-09-25
+by_hand: true
 specs: []
 prs: []
 commits: []
@@ -32,3 +33,5 @@ shows the two copies differ on a stacked fixture.
 ## Record
 
 - 2026-09-25: filed from the spec loop's run 16.
+- 2026-11-07: marked by hand in grooming. The work is in the spec loop's skill under
+  `.claude/`, and `SA-0279` refuses any spec that touches that path.

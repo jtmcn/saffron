@@ -1,11 +1,12 @@
 ---
 id: b-8693ef
 title: A refused PACKAGE blanks a resumed row's pull request link, so no merge moves that row
-status: open
+status: wontfix
 tier: 3
 filed: 2026-10-30
+closed: 2026-11-07
 specs: []
-prs: []
+prs: [1012]
 commits: []
 cites: [§5.7]
 related: [b-af24d1, b-223244]
@@ -38,3 +39,4 @@ assertion changes with this fix.
 
 - 2026-10-30: filed from `SA-0331`, whose guard covers rows that still carry a
   link.
+- 2026-11-07: closed in grooming as wontfix, on the operator's ruling of 2026-11-07. Its own record says only a by-hand `saffron adopt` race reaches it, and none is recorded. Reopen if a refused PACKAGE is seen blanking a carried pull request link.

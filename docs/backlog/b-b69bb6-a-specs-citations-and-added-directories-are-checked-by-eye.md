@@ -1,11 +1,12 @@
 ---
 id: b-b69bb6
 title: A spec's line citations and the directories it adds files to are checked by eye, and both are computable
-status: partial
+status: done
 tier: 2
 filed: 2026-09-20
+closed: 2026-11-07
 specs: [SA-0114, SA-0115]
-prs: [404, 406]
+prs: [404, 406, 424]
 commits: []
 cites: []
 related: [b-281f0a, 130, b-865399]
@@ -94,3 +95,8 @@ place of deriving both by hand.
   Resolution follows in item b-f45f73, and `cite`'s precision in item b-61993a.
 - 2026-09-21: #404 and #406 merged, and `SA-0114` and `SA-0115` retire to
   `done/`. `partial`, because neither agent runs the commands yet.
+- 2026-11-07: closed in grooming. #424 added `create-saffron-spec`, whose
+  pre-flight runs `driver.py cite` and `driver.py enumerators` before any
+  review (`references/preflight.md` checks 5 and 6). Its first review is told
+  what the pre-flight settled. `cite` now runs core's own checker (b-2da959).
+  The one gap left is `enumerators` resolving no receiver, which b-f45f73 holds.

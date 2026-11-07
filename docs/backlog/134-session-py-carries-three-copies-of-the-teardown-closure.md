@@ -9,7 +9,7 @@ specs: [SA-0087]
 prs: [274]
 commits: []
 cites: [§5.1]
-related: [118]
+related: [118, 150]
 ---
 
 ## Problem
@@ -34,3 +34,6 @@ and a measured history of one of them being missed.
 
 one `_report_leaks(removed, created, note)` called from both teardowns, and one
 `_teardown` closure hoisted above the `try` and passed as `note`.
+
+## Record
+- 2026-11-07: item 150 closed in grooming into this item. One closure defined above the try also fixes 150, the critic teardown bound inside the REVIEW branch and read from the REBUT branch.

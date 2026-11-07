@@ -2,7 +2,7 @@
 id: b-4589be
 title: Six spec-loop driver defects that run 8 worked around by hand
 status: partial
-tier: 2
+tier: 3
 filed: 2026-09-19
 by_hand: true
 specs: []
@@ -59,3 +59,8 @@ no commits and a bound in its terminal a halt. `hold` takes several ids or
   from a file or ref. `pattern` matches the CLI's error line (item 158).
   The `record` bullet closed with b-36b551 (#478). `next` and `hold` remain,
   and ADR 7's stack batch retires both.
+- 2026-11-07: b-792ab2 is done, and a stack batch became the loop's default in
+  spec loop run 30. Neither `next` nor `hold` was retired. `SKILL.md` no longer names
+  `hold`, and `next` survives in the attended fallback. So both bullets stand
+  for that path only.
+- 2026-11-07: moved to tier 3 in grooming on the operator's ruling of 2026-11-07. It bites only on the driver's attended path, which is now the fallback.

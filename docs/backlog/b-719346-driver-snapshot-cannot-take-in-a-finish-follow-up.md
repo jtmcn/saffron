@@ -2,13 +2,14 @@
 id: b-719346
 title: "`driver.py snapshot --add` refuses a finish's follow-up, so its pull request is recorded only after a hand edit of the order"
 status: open
-tier: 3
+tier: 2
 filed: 2026-10-27
+by_hand: true
 specs: []
 prs: []
 commits: []
 cites: []
-related: [b-e0044f]
+related: [b-e0044f, b-25f2b2]
 ---
 
 ## Problem
@@ -29,3 +30,8 @@ request and its parent, and `record` reads it without a hand edit.
 ## Record
 
 - 2026-10-27: filed from the spec loop's run 49.
+- 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
+  `.claude/`, and `SA-0279` refuses any spec that touches that path.
+- 2026-11-07: b-25f2b2 closed in grooming into this item. Its `record` refusal of a stack batch's follow-up is the same gap, and this item's fix lets `record` read the follow-up.
+- 2026-11-07: raised to tier 2 in grooming. b-25f2b2 was tier 2, and its gap now lives
+  only here, so this item takes its rank.

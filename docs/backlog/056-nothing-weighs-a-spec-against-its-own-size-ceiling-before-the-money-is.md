@@ -1,13 +1,15 @@
 ---
 id: 56
 title: Nothing weighs a spec against its own size ceiling before the money is spent
-status: open
+status: superseded
 tier: 3
-specs: []
-prs: []
+closed: 2026-11-07
+specs: [SA-0129]
+prs: [502]
 commits: []
 cites: [§4.2.1]
 related: [18, 23, 25]
+superseded_by: b-db95e1
 ---
 
 ## Problem
@@ -56,3 +58,15 @@ them, which retires the idea. **The refusal gate is the wrong home either
 way** — §4.2.1's refusals are all facts (a parent did not merge, a path is
 protected), and this is a forecast. A forecast that blocks is the shape item
 23 is about.
+
+## Record
+
+- 2026-11-07: superseded in grooming by item b-db95e1, done on 2026-09-23.
+  `SA-0129` (#502) gave a spec an `estimated_lines` field, and `driver.py check`
+  now weighs it against the `size` ceiling of the spec's type before a cell
+  runs. The estimate is multiplied by the median overrun over landed specs that
+  declared one, so the predicate is fitted rather than reasoned. At 80% of the
+  ceiling it is a blocker where `size` blocks and a concern elsewhere. Its home is
+  the spec loop's pre-flight, not `saffron queue` and not the refusal gate. The
+  problem this item names is closed there. How well that estimate predicts a
+  landed diff is item b-fbd181.

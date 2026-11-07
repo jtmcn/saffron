@@ -1,11 +1,12 @@
 ---
 id: 9
 title: Unverified against a live model
-status: partial
+status: wontfix
+closed: 2026-11-07
 tier: 3
 specs: [SA-0002]
 prs: [16]
-commits: []
+commits: ["e1a2888f"]
 cites: [§4.3]
 related: [10, 42, 45]
 ---
@@ -79,3 +80,4 @@ production, both recorded elsewhere in this file rather than here:
   commits, 39 new gate failures and an `EXHAUSTED` terminal. The bullet below
   claiming it "did not fire, for the fourth time" describes 2026-08-25 and has
   not held since.
+- 2026-11-07: closed in grooming as wontfix, on the operator's ruling of 2026-11-07. The host re-runs every gate after REBUT and judges the verdict itself, and a rebuttal it cannot judge halts at `REBUTTAL_UNJUDGED` (e1a2888f, `SA-0276`). So a rebuttal that claims a fix and makes none is caught outside the cell, and tests drive that path with fakes. A live measurement would cost a cell built to fail, for one data point. Reopen if a live REBUT is seen claiming a fix it did not make.

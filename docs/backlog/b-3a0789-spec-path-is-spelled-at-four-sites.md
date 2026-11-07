@@ -1,6 +1,6 @@
 ---
 id: b-3a0789
-title: "The queued spec's repo path is spelled `f\".saffron/specs/{candidate.path.name}\"` at four sites"
+title: "The queued spec's repo path is spelled `f\".saffron/specs/{candidate.path.name}\"` at six sites"
 status: open
 tier: 3
 filed: 2026-10-27
@@ -25,3 +25,4 @@ One function names a queued spec's repo path, and each site calls it.
 ## Record
 
 - 2026-10-27: filed from the spec loop's run 49.
+- 2026-11-07: retitled in grooming. The four sites in the title became six: `cli.py` at four and `batch.py` at two.

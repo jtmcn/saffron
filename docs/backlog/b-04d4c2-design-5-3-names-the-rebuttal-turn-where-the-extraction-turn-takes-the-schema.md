@@ -3,6 +3,7 @@ id: b-04d4c2
 title: '§5.3 says the rebuttal turn takes the schema, where the rebuttal extraction turn does'
 status: open
 tier: 3
+by_hand: true
 filed: 2026-09-25
 specs: []
 prs: []

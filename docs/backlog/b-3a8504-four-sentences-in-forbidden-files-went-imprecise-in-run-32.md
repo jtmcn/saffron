@@ -1,11 +1,11 @@
 ---
 id: b-3a8504
 title: "Four sentences in files run 32's specs forbade say less than the code now does"
-status: open
+status: partial
 tier: 3
 filed: 2026-10-09
 specs: []
-prs: [784, 785, 788]
+prs: [784, 785, 788, 957]
 commits: []
 cites: []
 related: []
@@ -33,3 +33,8 @@ Each sentence names what the code does. No behaviour changes.
 ## Record
 
 - 2026-10-09: filed from the spec loop's run 32.
+- 2026-11-07: partial in grooming. `SA-0312` (#957) rewrote the `task.py`
+  docstring, and its refspec sentence is gone. Three sentences are left.
+  They are `file_at`'s docstring (`saffron/repos/mirror.py:259`), the test
+  docstring at `tests/test_package.py:202`, and `tasks_by_repo`'s docstring
+  (`saffron/ledger.py:1182`).

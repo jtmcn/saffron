@@ -8,7 +8,7 @@ specs: []
 prs: [780]
 commits: []
 cites: [§4.2.1]
-related: [b-e0e1cf, b-883f74]
+related: [b-e0e1cf, b-883f74, b-0bd8c9]
 ---
 
 ## Problem
@@ -36,3 +36,7 @@ an open three-layer stack whose `touches` overlap the bottom layer.
 ## Record
 
 - 2026-10-09: filed from the spec loop's run 32.
+- 2026-11-07: recurred in the spec loop's run 50, filed then as b-0bd8c9.
+  A `--stack` batch refused `SA-0327` for overlapping #990, the top layer of
+  an open stack it would be cut from. The operator merged the stack first.
+  b-0bd8c9 closed in grooming as a second sighting of this item.

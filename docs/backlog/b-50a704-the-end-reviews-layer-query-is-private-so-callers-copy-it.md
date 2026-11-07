@@ -1,6 +1,6 @@
 ---
 id: b-50a704
-title: The end review's layer query and Saffron's root path are private, so callers copy them or import a private name
+title: "`saffron-cells` is a bare literal in `session.py` and `end_review.py`, where one public name would do"
 status: open
 tier: 3
 filed: 2026-09-26
@@ -8,7 +8,7 @@ specs: []
 prs: []
 commits: []
 cites: [§2.1]
-related: [b-792ab2]
+related: [b-792ab2, b-115f9b, b-65dbbd]
 ---
 
 ## Problem
@@ -25,9 +25,9 @@ Found in the spec loop's run 18, 2026-09-26, reviewing #528 and #529.
 
 ## Done looks like
 
-- A public `Ledger.stack_layers(batch_key)`, or a public name in `end_review`.
-- One public Saffron root and one cell network name, each imported.
+One public cell network name, which `session.py` and `end_review.py` both import.
 
 ## Record
 
 - 2026-09-26: filed from the spec loop's run 18 (stack #531).
+- 2026-11-07: trimmed in grooming on the operator's ruling of 2026-11-07 to its one unique part. b-115f9b holds the layer query, and `Ledger.stack_layers` now exists. b-65dbbd holds the two copies of `_SAFFRON_ROOT`.

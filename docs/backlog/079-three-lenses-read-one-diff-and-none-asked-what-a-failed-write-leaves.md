@@ -8,7 +8,7 @@ specs: [SA-0062, SA-0286]
 prs: [154, 867]
 commits: []
 cites: [§5.4, §5.5, §9]
-related: [69, 78, 88]
+related: [69, 78, 88, 93]
 ---
 
 ## Problem
@@ -103,3 +103,4 @@ is a measurement of that gap rather than a closing of it.
   lens now asks what a failure leaves behind, and three lenses file a
   contradicted ticked criterion as a `blocker`. The corpus pass that scores the
   change is still owed, so the item stays partial.
+- 2026-11-07: item 93 closed in grooming into this item. Its first step is now this item's too. Measure the corpus metric's spread at a higher `--runs` under the current lens prompts before any prompt change is read off one pass. The newest pass is from 2026-09-11.

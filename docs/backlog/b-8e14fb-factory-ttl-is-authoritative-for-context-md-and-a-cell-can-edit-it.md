@@ -1,12 +1,13 @@
 ---
 id: b-8e14fb
 title: "`ontology/factory.ttl` is authoritative for protected `CONTEXT.md` spans, and a cell can edit any part of it no span renders"
-status: open
+status: done
 tier: 3
 filed: 2026-10-24
+closed: 2026-11-07
 specs: []
 prs: []
-commits: []
+commits: ["504f87c", "0663823"]
 cites: [§4.6]
 related: [72]
 ---
@@ -39,3 +40,4 @@ change there is host-side.
 ## Record
 
 - 2026-10-24: filed from a review of the controlled vocabulary.
+- 2026-11-07: closed in grooming on the operator's ruling of 2026-11-07, by the second exit. Item 72's argument still holds for an edit no span renders. ADR 5 keeps the ontology out of execution, so such an edit changes no behaviour. An edit that changes a rendered span is not complete until `ontology.render` rewrites the protected `CONTEXT.md`, which a cell cannot do. Reopen if a cell's edit to `factory.ttl` ever changes what a shape or the view reads and review misses it.

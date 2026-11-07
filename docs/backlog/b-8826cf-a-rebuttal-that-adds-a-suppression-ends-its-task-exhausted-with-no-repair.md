@@ -1,6 +1,6 @@
 ---
 id: b-8826cf
-title: A rebuttal that adds a suppression ends its task EXHAUSTED, since REBUT gets no repair turn
+title: "A rebuttal that adds a suppression ends its task EXHAUSTED, since REBUT's one repair turn covers form gates and not `integrity`"
 status: open
 tier: 2
 filed: 2026-10-29
@@ -35,3 +35,4 @@ measured run shows it no longer writes one.
 ## Record
 
 - 2026-10-29: filed from the spec loop's run 50.
+- 2026-11-07: retitled in grooming. Since `SA-0311`, REBUT gets one repair turn for form gates. `integrity` is a core gate, so a suppression still gets none.

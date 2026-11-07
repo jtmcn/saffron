@@ -1,12 +1,12 @@
 ---
 id: b-78ccc7
 title: The conventions lens prompt asks nothing that finds what the Standards seat caught in run 21
-status: partial
+status: done
 tier: 2
 filed: 2026-09-29
-closed:
+closed: 2026-11-07
 specs: [SA-0195]
-prs: [600]
+prs: [600, 602]
 commits: []
 cites: [§5.5, §5.6]
 related: [b-abeb74, 162, b-17d0d5, b-5b1f8a, b-66d1c3]
@@ -56,3 +56,4 @@ measured pass builds (item b-abeb74).
 
 - 2026-09-29: filed from the spec loop's run 21.
 - 2026-09-29: `SA-0195` (#600) landed the past-the-hunk section, the `_Avoid_` lists and the three bullets. The verdict prompt still lacks the standing instructions.
+- 2026-11-07: closed in grooming. The verdict-prompt half was stale when the item was filed. `verdict_prompt` passes `context.standing_instructions(claude_md)` (`saffron/phases/rebut.py:331`, from `0d5f8e63` on), `session.py` hands it `claude_md`, and `tests/test_rebut.py:780` asserts the section. `SA-0195`'s own Out of scope said so. The witness exemption from "One source" is in `review-conventions.md:74-77`, and all three neighbour bullets say "a type, constant or helper". The scoring ran for `SA-0195` on the run-20 fixture, one run per arm (#602). A measurement that can tell the arms apart is item b-abeb74's remaining work.

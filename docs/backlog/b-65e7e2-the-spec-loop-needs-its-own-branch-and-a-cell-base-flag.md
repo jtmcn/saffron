@@ -1,14 +1,16 @@
 ---
 id: b-65e7e2
 title: The spec loop merges every spec edit to `main` before a cell can run it, because `saffron cell` has no `--base`
-status: open
+status: superseded
 tier: 2
 filed: 2026-09-19
+closed: 2026-11-07
 specs: []
-prs: []
+prs: [496, 748]
 commits: []
 cites: [§4.2.1, §5.7]
 related: [157, 137, 33]
+superseded_by: b-792ab2
 ---
 
 ## Problem
@@ -45,3 +47,7 @@ and every cell stacks on it:
 
 - 2026-09-19: filed from the spec loop's run 8 (stack #351 ← #360 ← #355 ←
   #366 ← #353), at the operator's request.
+- 2026-11-07: superseded in grooming by b-792ab2. ADR 7 (#496) runs spec
+  review inside a stack batch, and a revised spec runs from the batch's own
+  text without reaching `main`. #748 removed the loop's step 1b spec review, so
+  the loop makes no spec edit a cell must wait on.

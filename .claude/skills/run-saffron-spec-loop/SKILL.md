@@ -65,7 +65,7 @@ and budget, the total, and every spec it refused.
 The loop runs no spec review of its own. A spec is reviewed when it is written,
 by `create-saffron-spec`'s writer and reviewer chain, and a `--stack` batch
 reviews each layer again before its cell. The operator removed the loop's
-review on 2026-10-07, in run 31.
+review on 2026-10-07, in spec loop run 31.
 
 What stays is arithmetic. Run the ceilings check over every spec in the order:
 
@@ -101,7 +101,7 @@ answered by the operator.
 
 ## 2. Run each spec
 
-**A batch is the default.** The operator set this on 2026-10-07, in run 30.
+**A batch is the default.** The operator set this on 2026-10-07, in spec loop run 30.
 Start `saffron batch --repo . --budget <total>` over the order, with the token
 and listeners as in (a). Use `--stack --defer-end-review` unless a parent is an open pull
 request outside the order (b-e0e1cf). Then call `mcp__cell-watch__watch` once with
@@ -206,7 +206,7 @@ Then score the cell's own REVIEW the same way, with `--kind cell` and no
 
    Save both seats' whole reports, verbatim, and score them with Jev. Jev
    reads each report's findings block, so a summary cuts the claims it scores
-   (run 13). A non-zero exit is noted and the loop carries on.
+   (spec loop run 13). A non-zero exit is noted and the loop carries on.
 
    ```bash
    sed -n 's/^export \(TYPESAFE_API_KEY=\)/\1/p' ~/.secrets > <scratch>/jev.env   # once per loop
@@ -242,7 +242,7 @@ Then score the cell's own REVIEW the same way, with `--kind cell` and no
 
    `size` measures what was pushed, so it runs after the push. A branch over
    its ceiling is usually yours to accept: note the overrun in the PR body and
-   carry on. The operator set this on 2026-10-14, in run 39. Ask only when the
+   carry on. The operator set this on 2026-10-14, in spec loop run 39. Ask only when the
    overrun is large, or comes from scope rather than tests the review owed. The
    dry `stack` finds a conflict between neighbours while the branch is fresh. It
 needs two reviewable PRs, so it errors after the first.
@@ -345,7 +345,7 @@ pull request, and `next_spec_round` is `null`. A label never reads the review
 round it sits in. Schema 1 read `pr_seats` that way, and it graded nothing
 (`docs/evidence/2026-10-02-jev-scores-graded.md`). A defect no findings block
 carried, such as one you found yourself, goes in `run-NN-unscored.json`
-beside the spec folders. Run 13's files show the shape.
+beside the spec folders. Spec loop run 13's files show the shape.
 
 ```bash
 uv run .claude/skills/run-saffron-spec-loop/driver.py labels   # every spec in the order
@@ -362,7 +362,7 @@ its PR, every fixed or kept finding the critic missed has a rejection line, and
 ## 6. Hand off to the next delegate
 
 Every loop ends with a handoff, whether it ran its whole order or stopped
-early. The operator asked for this on 2026-09-29, when run 22 stopped before
+early. The operator asked for this on 2026-09-29, when spec loop run 22 stopped before
 its chain. Write `HANDOFF-loop.md` in a fresh temp directory and give the
 operator its path.
 

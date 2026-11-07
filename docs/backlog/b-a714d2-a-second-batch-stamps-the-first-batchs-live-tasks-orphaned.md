@@ -2,12 +2,13 @@
 id: b-a714d2
 title: A second batch stamps the first batch's live tasks ORPHANED, because nothing enforces one batch at a time
 status: open
+tier: 2
 filed: 2026-10-11
 specs: []
 prs: []
 commits: []
 cites: [§4.2.1]
-related: [b-ca3bc6, b-6a692d, b-d9ed45]
+related: [b-ca3bc6, b-6a692d, b-d9ed45, b-615466]
 ---
 
 ## Problem
@@ -37,3 +38,5 @@ task keeps its state.
 ## Record
 
 - 2026-10-11: filed from the parallel-cells survey, beside b-ca3bc6.
+- 2026-11-07: a lock that holds one batch per ledger also meets b-615466's second exit,
+  so the fix closes both items.

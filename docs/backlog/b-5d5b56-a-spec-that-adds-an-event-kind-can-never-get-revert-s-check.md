@@ -1,14 +1,16 @@
 ---
 id: b-5d5b56
 title: A spec that adds an event kind can never get `revert`'s check, because the reverted suite fails to collect
-status: open
+status: superseded
 tier: 2
 filed: 2026-09-19
+closed: 2026-11-07
 specs: []
 prs: []
-commits: []
+commits: ["166d467f"]
 cites: [§5.4]
 related: [49, 50, 51]
+superseded_by: b-cf832a
 ---
 
 ## Problem
@@ -42,3 +44,9 @@ holds that no module-scope list names a kind. A spec that adds a kind then gets
 
 - 2026-09-19: filed from the spec loop's run 8 (stack #351 ← #360 ← #355 ←
   #366 ← #353).
+- 2026-11-07: superseded in grooming by b-cf832a, which filed the same shape
+  in spec loop run 21. Its fix 166d467f makes `.saffron/gates/tests.py` collect per file
+  and report a module that fails to import as `uncollected`. `revert` reads
+  those names as failed without their source
+  (`saffron/gates/core/revert.py:333-357`). So a spec that adds a kind gets a
+  verdict, not `skip`.

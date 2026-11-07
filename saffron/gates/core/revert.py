@@ -21,7 +21,7 @@ from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 
 from saffron.gates.contract import Failure, GateResult
-from saffron.gates.core.scope import matches
+from saffron.gates.core.scope import NO_TEST_PATHS, matches
 from saffron.intake import Criterion
 
 # Revert the given source paths for the `with` block, restoring them after —
@@ -167,7 +167,7 @@ def revert_gate(
         return GateResult(
             gate="revert",
             status="skip",
-            summary="the repo declares no test paths, so source cannot be told from test",
+            summary=NO_TEST_PATHS,
         )
     source = [
         p for p in changed_files if not any(matches(p, pat) for pat in test_paths)

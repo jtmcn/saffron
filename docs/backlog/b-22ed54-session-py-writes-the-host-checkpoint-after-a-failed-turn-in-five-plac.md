@@ -1,6 +1,6 @@
 ---
 id: b-22ed54
-title: "`session.py` writes the host checkpoint after a failed turn in five places"
+title: "`session.py` writes the host checkpoint after a failed turn in four places"
 status: open
 tier: 3
 filed: 2026-10-24
@@ -25,3 +25,4 @@ One helper writes the checkpoint after a failed turn, and every turn site calls 
 ## Record
 
 - 2026-10-24: filed from the spec loop's run 47.
+- 2026-11-07: retitled in grooming. The title's five places are four, both now and at 61ef7c78.

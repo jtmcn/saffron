@@ -119,15 +119,15 @@ class QueueLine:
 def sort_key(line: QueueLine) -> tuple[int, int, int, int, int, str]:
     """§6's order: dismiss in ten seconds, accept in two minutes.
 
-    Skipped repos, then `SCOPE_REVIEW`, then the states that need you —
-    `MERGE_FAILED`, `PLAN_REJECTED`, `PREFLIGHT_FAILED`, `GATE_ERROR` and
-    `NOT_IMPLEMENTED` — then level 3 descending, then elevated risk, then
-    concern count descending. Sorted by state, never grouped by repo.
+    Skipped repos, then `SCOPE_REVIEW`, then the states that need you: each
+    state `_STATE_RANK` ranks 2, and any state neither map names. Then level
+    3 descending, then elevated risk, then concern count descending. Sorted
+    by state, never grouped by repo.
 
     Level 3 is not a state: it pre-empts only the elevated/ordinary fallback
-    below, so a line already in `_STATE_RANK` (`MERGE_FAILED` down through
-    `REBUTTING`) keeps that rank regardless of `sustained` or `unkept` —
-    `REVIEWING`/`REBUTTING` keep sorting with elevated risk, as they did
+    below, so a line whose state `_STATE_RANK` names keeps that rank
+    regardless of `sustained` or `unkept`. `REVIEWING`, `QUEUED` and the
+    other in-flight states keep sorting with elevated risk, as they did
     before this level existed. `sustained` and `unkept` share the bucket —
     a confirmed blocker answered with either an argument the critic rejected
     or a fix nobody committed ranks with you either way (§6) — but `unkept`

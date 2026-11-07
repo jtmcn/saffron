@@ -1,5 +1,8 @@
 # Spec review, out of sample: the pre-registration
 
+**Adopted 2026-09-30**, when #616 merged this file. The cutoff is that date.
+The paragraph below is how the file read before the merge.
+
 **PROPOSED.** Every value below is a proposal. It takes effect when the
 operator approves the pull request that adds this file. The cutoff is that
 merge date. Backlog item 130, step 2.

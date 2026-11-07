@@ -2,6 +2,7 @@
 id: b-4bd68a
 title: A lens can search code only as text, and a command tool would let it edit the tree it judges
 status: open
+tier: 3
 filed: 2026-09-21
 specs: []
 prs: []

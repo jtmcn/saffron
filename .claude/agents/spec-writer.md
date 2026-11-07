@@ -96,7 +96,7 @@ And optionally:
    `tests/test_scheduler.py` has its re-measured paragraph and pinned lists.
 6. **Sweep each criterion's sets.** A claim over a set, named or in passing,
    needs a witness driving every member (`issue-tracker.md`'s Conventions).
-   Reviewers have not caught this alone: run 11's spec blockers were all this
+   Reviewers have not caught this alone: spec loop run 11's spec blockers were all this
    shape (backlog item b-250dc7). For each criterion, list every set its claim
    quantifies over, such as the forms of a call or the spellings of a path.
    Beside each member, name the witness that drives it. Give an undriven member
