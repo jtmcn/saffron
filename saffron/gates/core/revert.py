@@ -21,12 +21,8 @@ from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 
 from saffron.gates.contract import Failure, GateResult
-from saffron.gates.core.scope import matches
+from saffron.gates.core.scope import NO_TEST_PATHS, matches
 from saffron.intake import Criterion
-
-# One sentence for both refusals, so `revert`'s skip and a probe's refusal
-# cannot drift apart (backlog item b-ac2f02).
-NO_TEST_PATHS = "the repo declares no test paths, so source cannot be told from test"
 
 # Revert the given source paths for the `with` block, restoring them after —
 # failing and erroring paths alike. `worktree.source_reverted` is the one

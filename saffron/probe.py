@@ -36,8 +36,7 @@ from typing import Literal
 
 from saffron.gates.baseline import subtract_baseline
 from saffron.gates.contract import GateResult
-from saffron.gates.core.revert import NO_TEST_PATHS
-from saffron.gates.core.scope import matches
+from saffron.gates.core.scope import NO_TEST_PATHS, matches
 from saffron.intake import Mutant
 
 # Redeclared rather than imported from `witness`/`revert`: this module owes

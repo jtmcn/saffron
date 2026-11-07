@@ -10,6 +10,10 @@ import re
 
 from saffron.gates.contract import Failure, GateResult, split_lines
 
+# One sentence for `revert`'s skip and a probe's refusal: source cannot be told
+# from test without declared test paths (backlog item b-ac2f02).
+NO_TEST_PATHS = "the repo declares no test paths, so source cannot be told from test"
+
 # A header from a diff whose prefixes were pinned (`worktree.DIFF_FLAGS`); git
 # quotes both sides together when a path needs C-quoting.
 _HEADER = re.compile(r'^diff --git (?:a/.+ b/.+|"a/.+" "b/.+")$')
