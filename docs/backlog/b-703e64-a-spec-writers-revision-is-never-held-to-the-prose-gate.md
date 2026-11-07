@@ -1,11 +1,11 @@
 ---
 id: b-703e64
 title: A stack batch's spec writer revises a spec the prose gate never reads, so the finish that writes it back goes red
-status: open
+status: partial
 tier: 1
 filed: 2026-10-13
-specs: [SA-0286]
-prs: [867]
+specs: [SA-0286, SA-0327]
+prs: [867, 996]
 commits: []
 cites: [§4.2, §5.4]
 related: []
@@ -46,3 +46,12 @@ before the finish commits it.
   path outside its `touches`. Re-verification reported 24 new failures and the
   finish escalated. Review fixed the concern with one comment on #872.
 - 2026-10-19: recurred in both batches of the spec loop's run 44. Batch 37's finish wrote back `SA-0276`'s revision. Batch 38's wrote back `SA-0281`'s revision and the follow-up `SA-0296`. Each finish escalated red and pushed nothing (b-fe82d9). So #903 carries the spec text from before its revision. `SA-0296` had no file until step 5 wrote it into `done/` by hand.
+- 2026-11-07: partial in grooming. The follow-up half landed in #996
+  (`SA-0327`, item b-e0044f). `write_follow_ups` runs each draft through
+  `finish.judge_draft` before the mint (`saffron/follow_up.py:438`). A draft
+  the finishing suite fails goes back to the writer once, then is pooled. A
+  follow-up whose cell ran now leaves the finishing commit. The revision half
+  is still open. `run_stack_batch` records a writer's revision with no gate
+  (`saffron/batch.py:855`). `commit_finish` writes each layer's latest text
+  into the tree (`saffron/finish.py`). So a revision's `prose` hits can still
+  turn re-verification red.

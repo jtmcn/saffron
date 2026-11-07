@@ -1,14 +1,16 @@
 ---
 id: b-c9a913
 title: "A criterion probe is judged against its declared witness alone, so a blocker another test kills stands after REBUT"
-status: open
+status: superseded
 tier: 2
 filed: 2026-10-10
-specs: []
-prs: [794, 801]
+closed: 2026-11-07
+specs: [SA-0322]
+prs: [794, 801, 978]
 commits: []
 cites: [§5.5]
-related: [117]
+related: [117, b-b9365d]
+superseded_by: b-b9365d
 ---
 
 ## Problem
@@ -40,3 +42,9 @@ cannot tell a vacuous suite from a misnamed witness.
 ## Record
 
 - 2026-10-10: filed from the spec loop's run 33.
+- 2026-11-07: superseded in grooming by b-b9365d, the same defect filed from
+  run 48 and done by `SA-0322` (#978). A survived criterion probe now asks the
+  whole `tests` gate and names each test that failed under its edit
+  (`saffron/phases/review.py`, `SUITE_KILL_SENTENCE`). The second bullet here
+  was decided the other way in `SA-0322`'s Context: a suite kill can be a
+  style failure, so it informs the blocker and never downgrades it.
