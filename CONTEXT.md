@@ -961,12 +961,19 @@ loop review round happens outside any task, so it is never an attempt. It is
 numbered from 1, and Jev scores each one (`driver.py jev`).
 _Avoid_: bare "round", "iteration", and "pass".
 
-> These three are the only place Saffron reuses **run**, **pass**, and
+**Spec loop run**: One numbered pass of the spec loop, from its order's snapshot
+to its hand-off. Its feedback lands in
+`docs/evidence/<date>-spec-loop-skill-feedback-run-<N>.md`. The qualifier is not
+optional: bare **run** is one task's pin. Older records and evidence file names
+write bare "run N", and they stay as history.
+_Avoid_: bare "run" for one, "pass", "round".
+
+> These four are the only place Saffron reuses **run**, **pass**, and
 > **round**, and they are qualified everywhere in prose for that reason.
 > Scoring run and scoring pass name measurement of the product, never the
-> product: nothing under `saffron/` imports the harness. Review round names a
-> step in the spec loop, qualified the same way, because bare round already
-> names an attempt count.
+> product: nothing under `saffron/` imports the harness. Review round and spec
+> loop run name steps in the spec loop, qualified the same way. Bare round
+> already names an attempt count, and bare run names a task's pin.
 
 ---
 

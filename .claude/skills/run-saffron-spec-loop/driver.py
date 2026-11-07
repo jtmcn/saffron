@@ -40,7 +40,7 @@ STATE_DIR = REPO / ".saffron-loop"
 SPECS_DIR = REPO / ".saffron" / "specs"
 ORDER = STATE_DIR / "order.json"
 LEGACY_PLAN = STATE_DIR / "plan.json"
-# The full command: run 31's operator read `snapshot` as `saffron snapshot`.
+# The full command: spec loop run 31's operator read `snapshot` as `saffron snapshot`.
 SNAPSHOT_COMMAND = "uv run .claude/skills/run-saffron-spec-loop/driver.py snapshot"
 ONTOLOGY = REPO / "ontology" / "factory.ttl"
 ONTOLOGY_NS = "urn:software-factory:ns#"
@@ -1552,7 +1552,7 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 def cmd_probe(args) -> int:
     """One vacuity probe, applied only if its find text matches exactly once,
     and always restored. A find that misses, or an edit that never lands,
-    prints a result that reads like "survived" (run 7, #338)."""
+    prints a result that reads like "survived" (spec loop run 7, #338)."""
     command = args.run
     if not command:
         return _fail("give the command to run after --")
@@ -1593,7 +1593,7 @@ def cmd_probe(args) -> int:
         verdict = "killed only by errors, not by an assertion"
     else:
         verdict = "killed"
-    # The verdict gets its own line: uv's warning on stderr once shared it (run 8, #351).
+    # The verdict gets its own line: uv's warning on stderr once shared it (spec loop run 8, #351).
     print(verdict)
     for stream, text in (("stdout", done.stdout), ("stderr", done.stderr)):
         lines = _ANSI.sub("", text).splitlines()
@@ -1901,7 +1901,7 @@ def _spec_at(spec_id: str, commit: str, cwd: Path = REPO) -> Spec | None:
 
 def _spec_given(spec_id: str, given: str) -> Spec | None:
     """The spec at `given`: a file when one exists there, else a ref. A review
-    from `main` of a spec edited on a branch needs one or the other (run 8)."""
+    from `main` of a spec edited on a branch needs one or the other (spec loop run 8)."""
     from saffron.intake import SpecError, parse_spec
 
     path = Path(given)
@@ -2145,7 +2145,7 @@ def _review_rebut_concern(target: Spec, rows: list[PastCell]) -> str | None:
     return None
 
 
-# Landed lines over each spec's own estimate in run 19, median of nine
+# Landed lines over each spec's own estimate in spec loop run 19, median of nine
 # (docs/evidence/2026-09-27-spec-loop-skill-feedback-run-19.md).
 _OVERRUN_FALLBACK = 1.4
 _OVERRUN_MIN_SPECS = 3
@@ -2159,7 +2159,8 @@ _PRE_RAW_ESTIMATES = frozenset(
 def _overrun(ledger, repo_id: int, specs: dict[str, Spec]) -> tuple[float, str]:
     """The ratio `check` prices an estimate at, and where it came from: the
     median of landed lines over `estimated_lines` across specs that declared
-    one, each at its newest landed task, or run 19's figure until three have."""
+    one, each at its newest landed task. Until three have, it is spec loop run
+    19's figure."""
     from statistics import median
 
     lines = {row["task_id"]: row for row in ledger.queue_lines()}
@@ -2184,7 +2185,7 @@ def _overrun(ledger, repo_id: int, specs: dict[str, Spec]) -> tuple[float, str]:
                 newest[spec_id] = size / spec.estimated_lines
     if len(newest) < _OVERRUN_MIN_SPECS:
         return _OVERRUN_FALLBACK, (
-            f"run 19's measured overrun, until {_OVERRUN_MIN_SPECS} landed specs "
+            f"spec loop run 19's measured overrun, until {_OVERRUN_MIN_SPECS} landed specs "
             f"declare an estimate ({len(newest)} do)"
         )
     ratio = round(median(newest.values()), 2)

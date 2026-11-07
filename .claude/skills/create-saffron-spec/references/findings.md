@@ -2,7 +2,7 @@
 
 The evidence this skill's checks come from. Two corpora over the same four
 specs, `SA-0113` to `SA-0116`, written 2026-09-20 and run through cells in the
-spec loop's runs 11 and 12.
+spec loop runs 11 and 12.
 
 Read the second corpus first. It is the one the checks exist to empty.
 
