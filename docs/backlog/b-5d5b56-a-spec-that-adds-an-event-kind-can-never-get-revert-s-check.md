@@ -45,7 +45,7 @@ holds that no module-scope list names a kind. A spec that adds a kind then gets
 - 2026-09-19: filed from the spec loop's run 8 (stack #351 ← #360 ← #355 ←
   #366 ← #353).
 - 2026-11-07: superseded in grooming by b-cf832a, which filed the same shape
-  in run 21. Its fix 166d467f makes `.saffron/gates/tests.py` collect per file
+  in spec loop run 21. Its fix 166d467f makes `.saffron/gates/tests.py` collect per file
   and report a module that fails to import as `uncollected`. `revert` reads
   those names as failed without their source
   (`saffron/gates/core/revert.py:333-357`). So a spec that adds a kind gets a

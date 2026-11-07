@@ -33,4 +33,4 @@ operator chooses to review one, `size` and `stack` take it as a layer.
 - 2026-10-14: filed from the spec loop's run 39.
 - 2026-10-15: again in run 40. `SA-0273` ended `EXHAUSTED` with draft #881, and
   the delegate measured its size through `_size` by hand.
-- 2026-11-07: superseded in grooming by b-2247dd, filed in ae5bb327. That item names the same refusal, `reviewable` requiring `READY_FOR_REVIEW` (`driver.py:158`), across `stack`, `size` and `rebase`, and asks for a test. `record` already stores an `EXHAUSTED` task's state and pull request, since `EXHAUSTED` is in `DONE_STATES`. The run 39 and run 40 sightings here belong to b-2247dd.
+- 2026-11-07: superseded in grooming by b-2247dd, filed in ae5bb327. That item names the same refusal, `reviewable` requiring `READY_FOR_REVIEW` (`driver.py:158`), across `stack`, `size` and `rebase`, and asks for a test. `record` already stores an `EXHAUSTED` task's state and pull request, since `EXHAUSTED` is in `DONE_STATES`. The spec loop run 39 and spec loop run 40 sightings here belong to b-2247dd.

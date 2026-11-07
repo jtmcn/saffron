@@ -46,7 +46,7 @@ from memory.
 
 - 2026-09-21: filed from the spec loop's run 11.
 - 2026-11-07: closed in grooming as wontfix. #748 removed the loop's step 1b
-  spec review on the operator's call in run 31, so its rounds no longer exist.
+  spec review on the operator's call in spec loop run 31, so its rounds no longer exist.
   Spec review rounds now run in `create-saffron-spec`, whose stop rule is two
   rounds (#424), and in the stack batch's bounded revision (ADR 7). The HTML
   report stays with b-0de0b3.

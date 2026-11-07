@@ -39,4 +39,4 @@ fake runtime.
 
 - 2026-10-23: filed from the spec loop's run 46. The reset steps live in
   the run's handoff.
-- 2026-11-07: retitled in grooming. The the title said a hanging create waits forever. `create_network` already bounds it at 120 seconds, and what is missing is a timeout that names the /24 and the bound.
+- 2026-11-07: retitled in grooming. The title said a hanging create waits forever. `create_network` already bounds it at 120 seconds, and what is missing is a timeout that names the /24 and the bound.

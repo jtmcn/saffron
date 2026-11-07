@@ -38,3 +38,4 @@ order row for it.
 - 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
   `.claude/`, and `SA-0279` refuses any spec that touches that path.
 - 2026-11-07: superseded in grooming by b-719346, on the operator's ruling of 2026-11-07. Both are `driver.py record` refusing a finish's follow-up as not in the order. b-719346's fix takes each follow-up into the order, and `record` then reads it.
+- 2026-11-07: b-719346 rises to tier 2 with this item's rank.

@@ -4,6 +4,7 @@ title: The spec loop's `snapshot` strands a child whose other parent already mer
 status: partial
 tier: 2
 filed: 2026-09-26
+by_hand: true
 specs: []
 prs: [917]
 commits: []
@@ -41,3 +42,5 @@ read as a contradiction of SKILL.md step 1.
   child `SA-0249`. `--force --add` refused both as not new, and `record`
   refused both as not in the order. The batch ran them as #801 and #802.
 - 2026-11-07: groomed. `a345fa7c` (#917) counts a parent in `done/` as met in `_order`. A test orders a child with one parent in the order and one merged. The refusal line still prints the scheduler's own reason. It can name a parent in the order and not the entry that kept the spec out.
+- 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
+  `.claude/`, and `SA-0279` refuses any spec that touches that path.

@@ -38,7 +38,7 @@ An `EXHAUSTED` task with a pull request counts as a stack layer in `stack`,
   task with no recorded PR (b-883f74). `size` refused SA-0226 as not
   reviewable, and the delegate measured it with `_token_counts` by hand.
 - 2026-11-07: b-d5db52 closed in grooming as a duplicate of this item. It saw
-  the same refusal in runs 39 and 40, on `SA-0272` (#875) and `SA-0273` (#881).
+  the same refusal in spec loop runs 39 and 40, on `SA-0272` (#875) and `SA-0273` (#881).
   `reviewable` still requires `READY_FOR_REVIEW` (`driver.py:159`).
 - 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
   `.claude/`, and `SA-0279` refuses any spec that touches that path.

@@ -35,4 +35,4 @@ measured run shows it no longer writes one.
 ## Record
 
 - 2026-10-29: filed from the spec loop's run 50.
-- 2026-11-07: retitled in grooming. The since `SA-0311`, REBUT gets one repair turn for form gates. `integrity` is a core gate, so a suppression still gets none.
+- 2026-11-07: retitled in grooming. Since `SA-0311`, REBUT gets one repair turn for form gates. `integrity` is a core gate, so a suppression still gets none.

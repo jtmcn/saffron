@@ -957,15 +957,15 @@ _Avoid_: bare "pass". That is a gate status, and `_Avoid_` under **Attempt**
 already reserves it. Also "round", "sweep", "iteration".
 
 **Review round**: One review of one spec or pull request at one commit, in
-the spec loop's review cycle. One review in a spec chain is one review round.
-Both seats of a step 2c pull request review count as one review round
+the spec chain or the spec loop. One spec review in a spec chain is one review
+round. Both seats of a step 2c pull request review count as one review round
 together. A cell's REVIEW counts as the cell's single review round. A spec
-loop review round happens outside any task, so it is never an attempt. It is
-numbered from 1, and Jev scores each one (`driver.py jev`).
+review or a pull request review happens outside any task, so it is never an
+attempt. It is numbered from 1, and Jev scores each one (`driver.py jev`).
 _Avoid_: bare "round", "iteration", and "pass".
 
-**Spec loop run**: One numbered pass of the spec loop, from its order's snapshot
-to its hand-off. Its feedback lands in
+**Spec loop run**: One spec loop, numbered from 1, from its order's snapshot to
+its hand-off. Its feedback lands in
 `docs/evidence/<date>-spec-loop-skill-feedback-run-<N>.md`. The qualifier is not
 optional: bare **run** is one task's pin. Older records and evidence file names
 write bare "run N", and they stay as history.
@@ -974,9 +974,10 @@ _Avoid_: bare "run" for one, "pass", "round".
 > These four are the only place Saffron reuses **run**, **pass**, and
 > **round**, and they are qualified everywhere in prose for that reason.
 > Scoring run and scoring pass name measurement of the product, never the
-> product: nothing under `saffron/` imports the harness. Review round and spec
-> loop run name steps in the spec loop, qualified the same way. Bare round
-> already names an attempt count, and bare run names a task's pin.
+> product: nothing under `saffron/` imports the harness. Review round names one
+> review in the spec chain or the spec loop, and spec loop run names one spec
+> loop. Both are qualified the same way. Bare round already names an attempt
+> count, and bare run names a task's pin.
 
 ---
 

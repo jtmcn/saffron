@@ -4,6 +4,7 @@ title: The spec loop's driver calls a gate result and a probe outcome a verdict
 status: open
 tier: 3
 filed: 2026-09-19
+by_hand: true
 specs: []
 prs: []
 commits: []
@@ -44,3 +45,6 @@ next one is caught rather than reviewed.
 - 2026-09-19: filed from the spec loop's run 10 (#382). #382's own new use of
   the word was fixed in that pull request's review commit. These three are the
   ones it inherited.
+- 2026-11-07: marked by hand in grooming. The rename is in the spec loop's driver under
+  `.claude/`, which `SA-0279` refuses. The `terms` half edits `.saffron/gates/`,
+  which `.saffron/policy.yaml` protects.

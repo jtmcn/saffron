@@ -7,7 +7,7 @@ filed: 2026-10-19
 closed: 2026-11-07
 specs: []
 prs: []
-commits: ["2da9d326"]
+commits: ["2da9d326", "cd4af485"]
 cites: [§6]
 related: [120, b-032c3e]
 ---
@@ -32,3 +32,4 @@ cannot drift from it again.
 
 - 2026-10-19: filed from the spec loop's run 44.
 - 2026-11-07: closed in grooming. `sort_key`'s docstring now names the states that need you as every state `_STATE_RANK` ranks 2, so it cannot drift from the map again (2da9d326).
+- 2026-11-07: the first fix left the docstring's second paragraph naming the map as `MERGE_FAILED` down through `REBUTTING`, and the first paragraph left out `_UNRANKED`. cd4af485 fixed both, so the docstring now describes what `sort_key` does.

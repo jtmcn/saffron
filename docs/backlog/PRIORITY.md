@@ -118,6 +118,10 @@ spec removes the first run's container. Cell images and the build cache are
 never reclaimed, and one host's free disk fell to 16 GB. The first two stand
 between ADR 10's sequence and two cells on one host.
 
+**Raised 2026-11-07 from tier 3**, in grooming: **b-719346**. `driver.py record`
+refuses a finish's follow-up as not in the order. It took the rank of
+~~**b-25f2b2**~~, the tier 2 item grooming folded into it.
+
 **Placed 2026-11-06**, from the spec loop's run 54: **b-fe3488**, **b-ffb930**,
 **b-0add4c**, then **b-71f95f**. A stack batch starts an order its budget
 cannot run. The follow-up writer's first draft never parses. The record's
@@ -398,7 +402,7 @@ in `policy.yaml`. **b-2227b0**, closed as parked, records a draft ADR.
 ~~**b-01c53d**~~, **b-92fdbe**, **b-d3f977**, **b-f0e351** and **b-87001a**.
 Each is a gap a seat, a finish or the run found and the stack left alone.
 
-**Placed 2026-10-27**, from the spec loop's run 49: **b-719346**,
+**Placed 2026-10-27**, from the spec loop's run 49:
 **b-1b8b1e**, **b-92c92a**, **b-2a03c2**, **b-d2afe3**, **b-1ff5a3** and
 **b-3a0789**. Each is a gap a seat, a finish or the run found and the stack
 left alone.
@@ -406,26 +410,26 @@ left alone.
 **Placed 2026-10-30**, from #996's Standards seat and finish 61: **b-25b7ba**.
 Two renderers spell a new failure, and they disagree on line 0.
 
-**The 2026-09-04 sort's tier 3, and what each run until run 32 added to it.**
+**The 2026-09-04 sort's tier 3, plus what spec loop runs up to 32 added.**
 Each line keeps the order it was filed in.
 
 - From the first sort: **31**, **20**, **53**, ~~**54**~~, **55**, **75**, **76**,
   **77**, **90**, **92**, **96**, **100**, **101** and **108**.
 - Filed 2026-09-12 to 2026-09-19: **116**, **121**, **122**, **130**, **134**,
   ~~**150**~~, **151**, **155**, **156**, **174** and **b-d6bff7**.
-- From runs 7 to 10: **b-990bd9**, **b-7431a2**, **b-9eceda**, **b-bc9951**,
+- From spec loop runs 7 to 10: **b-990bd9**, **b-7431a2**, **b-9eceda**, **b-bc9951**,
   **b-0281e4**, **b-e9db0e**, **b-397edd**, **b-0e20e9**, **b-98dc4d**,
   **b-27b9db**, **b-bbf663** and **b-6a9707**.
-- From the reviews of #393 and `SA-0120`, and runs 13 and 14: **b-d5d290**,
+- From the reviews of #393 and `SA-0120`, and spec loop runs 13 and 14: **b-d5d290**,
   **b-9ed36d**, **b-b431c1**, ~~**b-ac2f02**~~ and **b-49329e**.
 - From ADR 4's review and the superpowers comparison: ~~**b-07f694**~~,
   **b-7c88f8**, **b-e1afbb** and **b-3732ef**.
-- From runs 15 to 17 and `SA-0135`'s review: **b-f30189**, **b-a90136**,
+- From spec loop runs 15 to 17 and `SA-0135`'s review: **b-f30189**, **b-a90136**,
   **b-e06dbc**, **b-32f492**, **b-8fb227**, **b-79d951**, **b-9ead75** and
   **b-04d4c2**.
 - From the stack batch's spec reviews: **b-2d9ae9**, **b-223244**,
   **b-acee54**, **b-6518ba**, **b-6a101f**, **b-7eb5f5** and **b-22ff3f**.
-- From the 2026-09-27 size pricing and run 32: **b-41664e**, **b-4b386f**,
+- From the 2026-09-27 size pricing and spec loop run 32: **b-41664e**, **b-4b386f**,
   **b-d96f14**, **b-9b94c9**, **b-ff3141**, **b-a99c76**, **b-3a8504**,
   **b-7f105f** and **b-8c17dc**.
 - From item 52's review: **b-cec9a7**.
@@ -574,9 +578,9 @@ risk — not, as an earlier draft of this note said, that `.gitignore` in
 *tracked* half only: a `.gitignore` naming itself reaches no diff at all.
 
 **What this ordering costs, recounted in grooming on 2026-11-07.** Tier 1
-holds 15 open items, tier 2 holds 95 and tier 3 holds 198. So tier 3 is two
+holds 15 open items, tier 2 holds 96 and tier 3 holds 197. So tier 3 is two
 thirds of the backlog. That is the deliberate consequence of ranking by the
-milestone rather than by what is nearest to hand. Of the 308 open items, 37
+milestone rather than by what is nearest to hand. Of the 308 open items, 42
 are by hand, since a cell cannot reach their files.
 
 **Placed 2026-11-04**, from the spec loop's run 53: **b-8c6696**, **b-a19ffd**

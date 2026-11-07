@@ -37,4 +37,4 @@ exact spelling `SAFFRON_ALLOW_HOST_PROCESS` accepts.
 ## Record
 
 - 2026-09-30: filed from the spec loop's run 23.
-- 2026-11-07: closed in grooming as superseded by b-e0cd57. That item, filed from run 16, named the same refusal and the same `RAATServe` spelling. `SA-0244` (#796) closed it. `assert_host_is_unreachable` now appends each port's listeners as `lsof` reports their COMMAND, through `_named_hits` (`saffron/preflight.py:217-244`). That truncated name is the exact spelling `SAFFRON_ALLOW_HOST_PROCESS` matches.
+- 2026-11-07: closed in grooming as superseded by b-e0cd57. That item, filed from spec loop run 16, named the same refusal and the same `RAATServe` spelling. `SA-0244` (#796) closed it. `assert_host_is_unreachable` now appends each port's listeners as `lsof` reports their COMMAND, through `_named_hits` (`saffron/preflight.py:217-244`). That truncated name is the exact spelling `SAFFRON_ALLOW_HOST_PROCESS` matches.

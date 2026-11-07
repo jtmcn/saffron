@@ -43,7 +43,7 @@ cannot tell a vacuous suite from a misnamed witness.
 
 - 2026-10-10: filed from the spec loop's run 33.
 - 2026-11-07: superseded in grooming by b-b9365d, the same defect filed from
-  run 48 and done by `SA-0322` (#978). A survived criterion probe now asks the
+  spec loop run 48 and done by `SA-0322` (#978). A survived criterion probe now asks the
   whole `tests` gate and names each test that failed under its edit
   (`saffron/phases/review.py`, `SUITE_KILL_SENTENCE`). The second bullet here
   was decided the other way in `SA-0322`'s Context: a suite kill can be a

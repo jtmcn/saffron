@@ -7,7 +7,7 @@ filed: 2026-09-22
 closed: 2026-11-07
 specs: [SA-0119, SA-0122]
 prs: [431, 436]
-commits: ["2da9d326"]
+commits: ["2da9d326", "cd4af485"]
 cites: [§5.4]
 related: [b-461729]
 ---
@@ -29,3 +29,4 @@ One constant holds the sentence, and both call sites read it.
 
 - 2026-09-22: filed from the spec loop's run 13.
 - 2026-11-07: closed in grooming. `NO_TEST_PATHS` in `saffron/gates/core/revert.py` holds the sentence, and `revert`'s skip and `probe_refusal` both read it (2da9d326). The value is unchanged, so the tests that pin it still pass.
+- 2026-11-07: `NO_TEST_PATHS` moved to `saffron/gates/core/scope.py` in cd4af485, since `revert.py` and `probe.py` both import that module for `matches`. `probe.py` no longer imports a gate module for one string.

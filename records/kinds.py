@@ -144,8 +144,9 @@ AdrStatus = Literal["accepted", "superseded", "deprecated"]
 
 
 class Adr(Identified):
-    """One decision, as it stands today. Never edited except to record a
-    supersession, which is written on both sides in one pull request."""
+    """One decision, as it stands today. Edited only to record a supersession,
+    written on both sides in one pull request, or a dated amendment that
+    follows the text it amends."""
 
     id: Number
     title: str = Field(min_length=1)

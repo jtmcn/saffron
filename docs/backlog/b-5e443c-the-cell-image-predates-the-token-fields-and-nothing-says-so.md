@@ -62,3 +62,4 @@ decision says the event log is their only home.
   check. Items 146 and 147 are done, and neither stores tokens in the ledger.
   The part left, token counts per attempt in the ledger, is b-0e20e9's whole
   Done.
+- 2026-11-07: its tier 2 rank does not carry to b-0e20e9. The tier 2 reason, a stale cell image, is gone since #369, and the remainder was already b-0e20e9's tier 3 work.
