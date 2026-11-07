@@ -2,6 +2,7 @@
 id: b-a714d2
 title: A second batch stamps the first batch's live tasks ORPHANED, because nothing enforces one batch at a time
 status: open
+tier: 2
 filed: 2026-10-11
 specs: []
 prs: []

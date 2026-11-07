@@ -2,6 +2,7 @@
 id: b-262df1
 title: Record helpers sit under tests/ because only tests ran them, and a tool now imports three of them
 status: open
+tier: 3
 filed: 2026-09-20
 specs: []
 prs: []

@@ -2,6 +2,7 @@
 id: b-2bc0d5
 title: Cell images and the build cache are never reclaimed, so every worktree a cell ran from leaves its image behind
 status: open
+tier: 2
 filed: 2026-10-11
 specs: []
 prs: []

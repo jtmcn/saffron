@@ -2,6 +2,7 @@
 id: b-ba0cba
 title: REVIEW and REBUT spend reaches `events.jsonl` only as prose and raw agent payloads, so a follower's running total stalls from IMPLEMENT to the outcome
 status: open
+tier: 3
 filed: 2026-10-07
 specs: []
 prs: []

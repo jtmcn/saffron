@@ -2,6 +2,7 @@
 id: b-036cc5
 title: "`saffron watch` has no typed output, so a follower outside Python parses `events.jsonl` a second time"
 status: open
+tier: 3
 filed: 2026-10-07
 specs: []
 prs: []

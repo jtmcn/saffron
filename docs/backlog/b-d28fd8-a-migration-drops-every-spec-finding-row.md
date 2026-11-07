@@ -2,6 +2,7 @@
 id: b-d28fd8
 title: A migration drops every spec finding row, so the record loses which round raised what
 status: open
+tier: 2
 filed: 2026-10-07
 specs: []
 prs: []

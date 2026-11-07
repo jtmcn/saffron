@@ -2,6 +2,7 @@
 id: b-cd4de2
 title: The spec loop numbers its passes as runs, and run is a ledger term
 status: open
+tier: 3
 filed: 2026-09-22
 specs: []
 prs: []

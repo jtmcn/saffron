@@ -2,6 +2,7 @@
 id: b-d9ed45
 title: Nothing stops one spec running in two cells at once, and the second removes the first one's container and volumes
 status: open
+tier: 2
 filed: 2026-10-11
 specs: []
 prs: []
