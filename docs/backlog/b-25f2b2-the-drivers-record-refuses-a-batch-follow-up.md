@@ -4,6 +4,7 @@ title: "The loop driver's `record` refuses a stack batch's follow-up as \"not in
 status: open
 tier: 2
 filed: 2026-10-09
+by_hand: true
 specs: []
 prs: [789]
 commits: []
@@ -32,3 +33,5 @@ order row for it.
 
 - 2026-10-09: filed from the spec loop's run 32.
 - 2026-10-19: recurred in the spec loop's run 44. `driver.py record SA-0296` refused the follow-up as not in the order, and found no single spec file for it. The delegate recorded it by hand.
+- 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
+  `.claude/`, and `SA-0279` refuses any spec that touches that path.

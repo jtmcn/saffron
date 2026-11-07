@@ -4,6 +4,7 @@ title: The spec loop's driver reads stale state, so `status` shows merged PRs as
 status: partial
 tier: 2
 filed: 2026-09-25
+by_hand: true
 specs: []
 prs: [616]
 commits: []
@@ -40,3 +41,5 @@ is item b-e8027b, and it is recorded there.
   `status` said to run `snapshot --force`. That exited 1 with no candidates.
   The right command was `snapshot --new`, and neither output named it.
 - 2026-11-07: groomed. `history --spec` now reads the spec from a file or a ref (`5106d0a1`, #616). Two parts stay open. `status` still prints each row's state from the order file. It asks GitHub only for its stale list (`_stale_reasons`). `check` still reads the spec from the checkout and takes no ref.
+- 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
+  `.claude/`, and `SA-0279` refuses any spec that touches that path.

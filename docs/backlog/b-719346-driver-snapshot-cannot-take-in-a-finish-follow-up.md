@@ -4,6 +4,7 @@ title: "`driver.py snapshot --add` refuses a finish's follow-up, so its pull req
 status: open
 tier: 3
 filed: 2026-10-27
+by_hand: true
 specs: []
 prs: []
 commits: []
@@ -29,3 +30,5 @@ request and its parent, and `record` reads it without a hand edit.
 ## Record
 
 - 2026-10-27: filed from the spec loop's run 49.
+- 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
+  `.claude/`, and `SA-0279` refuses any spec that touches that path.

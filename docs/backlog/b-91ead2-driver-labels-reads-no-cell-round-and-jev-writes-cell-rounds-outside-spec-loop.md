@@ -4,6 +4,7 @@ title: driver.py labels reads no cell round, and jev writes cell rounds outside 
 status: open
 tier: 3
 filed: 2026-09-29
+by_hand: true
 specs: []
 prs: []
 commits: []
@@ -30,3 +31,5 @@ exits 1 on a scored cell round with no `labels.json`.
 ## Record
 
 - 2026-09-29: filed from the spec loop's run 22.
+- 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
+  `.claude/`, and `SA-0279` refuses any spec that touches that path.

@@ -4,6 +4,7 @@ title: The loop driver's `stack`, `size` and `rebase` refuse an `EXHAUSTED` task
 status: open
 tier: 2
 filed: 2026-10-05
+by_hand: true
 specs: [SA-0204]
 prs: [678]
 commits: []
@@ -39,3 +40,5 @@ An `EXHAUSTED` task with a pull request counts as a stack layer in `stack`,
 - 2026-11-07: b-d5db52 closed in grooming as a duplicate of this item. It saw
   the same refusal in runs 39 and 40, on `SA-0272` (#875) and `SA-0273` (#881).
   `reviewable` still requires `READY_FOR_REVIEW` (`driver.py:159`).
+- 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
+  `.claude/`, and `SA-0279` refuses any spec that touches that path.

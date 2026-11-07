@@ -4,6 +4,7 @@ title: '`driver.py status` has no one-line form, so the operator''s status line 
 status: open
 tier: 3
 filed: 2026-10-02
+by_hand: true
 specs: []
 prs: []
 commits: []
@@ -28,3 +29,5 @@ and pull request, the running cell's phase and the held count, on one line.
 ## Record
 
 - 2026-10-02: filed from the spec loop's run 25.
+- 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
+  `.claude/`, and `SA-0279` refuses any spec that touches that path.

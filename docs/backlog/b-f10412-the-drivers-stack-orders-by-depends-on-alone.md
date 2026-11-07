@@ -4,6 +4,7 @@ title: "The loop driver's `stack` orders layers by `depends_on` alone, so it mis
 status: open
 tier: 2
 filed: 2026-10-09
+by_hand: true
 specs: []
 prs: [780, 788, 790]
 commits: []
@@ -43,3 +44,5 @@ batch whose `depends_on` names none of its predecessors.
   others' parents into them. Its dry run linked the eight PRs out of order
   and was not executed. The operator marked them ready with `gh pr ready` on the
   batch's own bases.
+- 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
+  `.claude/`, and `SA-0279` refuses any spec that touches that path.

@@ -4,6 +4,7 @@ title: driver.py next holds back a child whose EXHAUSTED parent's code is alread
 status: open
 tier: 2
 filed: 2026-10-01
+by_hand: true
 specs: [SA-0151, SA-0174]
 prs: [626, 628]
 commits: []
@@ -29,3 +30,5 @@ task's terminal state, and names the child.
 ## Record
 
 - 2026-10-01: filed from the spec loop's run 24.
+- 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
+  `.claude/`, and `SA-0279` refuses any spec that touches that path.
