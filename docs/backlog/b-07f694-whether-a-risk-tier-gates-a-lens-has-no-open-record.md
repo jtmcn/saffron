@@ -38,3 +38,4 @@ The question is answered in §5.5.1 or §5.6, or a record holds it open, and
   so gating would skip the lens on 79 tasks, not six. The question stays
   with the operator.
 - 2026-11-07: closed in grooming on the operator's ruling of 2026-11-07. No risk tier gates a lens, and every lens runs at every tier. `DESIGN.md` §5.5.1 and §5.6 now say so (4efb4a91). ADR 4's Consequences still call the question open, since an ADR is edited only to record a supersession.
+- 2026-11-07: ADR 4's Consequences now carry the ruling as an amendment, beside the five it already held, so the line above about ADR 4 no longer holds.

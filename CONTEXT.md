@@ -168,7 +168,7 @@ _Avoid_: "failed" for `INFRASTRUCTURE` (a task fails, a night stops), "finished"
 stack order once, at batch start, and never rescans. Each task stacks on its
 predecessor. One end review reads the stack once the batch stops taking tasks, or later
 for a batch started with `--defer-end-review`.
-_Avoid_: "stack run" (a run is a pin), "spec loop" (the delegate's attended pass).
+_Avoid_: "stack run" (a run is a pin), "spec loop" (the delegate's pass that starts one).
 
 **Stack order**: A stack batch's fixed order over its queued specs. A spec joins it
 once every `depends_on` entry is already in the order or on the default branch. The
@@ -224,10 +224,13 @@ the latest one. A revision, a follow-up, a draft and a stack batch's citation
 rewrite each write one. A citation rewrite is recorded under origin `revision`,
 but it is not a Revision.
 
-**Spec loop**: A delegate's pass over the queued specs, each through an attended
-`saffron cell`, into one stack. Each step it does by hand is one the factory does
-not yet do. It hands a step over once a gate, lens or phase can do it.
-_Avoid_: "batch" (unattended, with one budget over every task), "night".
+**Spec loop**: A delegate's pass over the queued specs into one stack. By
+default it starts one `saffron batch --stack` over its order. An attended
+`saffron cell` per spec is the fallback, and taking it is the operator's call.
+Each step it does by hand is one the factory does not yet do. It hands a step
+over once a gate, lens or phase can do it.
+_Avoid_: "batch" (the loop starts one, then reviews, restacks and finishes by
+hand), "night".
 
 **Spec chain**: A delegate's turning of a backlog item or a handed-over finding into
 a spec, through the `spec-writer` and `spec-reviewer` delegates, until its review
@@ -954,7 +957,7 @@ _Avoid_: bare "pass". That is a gate status, and `_Avoid_` under **Attempt**
 already reserves it. Also "round", "sweep", "iteration".
 
 **Review round**: One review of one spec or pull request at one commit, in
-the spec loop's review cycle. A spec review in step 1b is one review round.
+the spec loop's review cycle. One review in a spec chain is one review round.
 Both seats of a step 2c pull request review count as one review round
 together. A cell's REVIEW counts as the cell's single review round. A spec
 loop review round happens outside any task, so it is never an attempt. It is

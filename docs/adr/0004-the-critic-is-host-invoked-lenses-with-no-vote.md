@@ -212,3 +212,6 @@ item 79).
 
 A risk tier adds no lens. Whether a tier gates one is open. Item 6 closed
 without settling it, and backlog item b-07f694 holds the question.
+Amended 2026-11-07, by the operator's ruling for b-07f694: no risk tier gates a
+lens, so every lens runs at every tier. 100 of 179 specs ran `elevated`, so a
+gate would skip a lens on 79 tasks. `DESIGN.md` §5.5.1 and §5.6 record it.
