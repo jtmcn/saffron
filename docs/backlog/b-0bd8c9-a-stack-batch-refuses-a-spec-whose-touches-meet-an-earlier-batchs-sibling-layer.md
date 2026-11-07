@@ -1,14 +1,16 @@
 ---
 id: b-0bd8c9
 title: A stack batch refuses a spec whose touches meet an earlier batch's open layer that is not its ancestor
-status: open
+status: superseded
 tier: 2
 filed: 2026-10-29
+closed: 2026-11-07
 specs: []
 prs: []
-commits: []
+commits: ["c5e5deab"]
 cites: [§4.2]
-related: [b-e0e1cf]
+related: [b-e0e1cf, b-910cef]
+superseded_by: b-910cef
 ---
 
 ## Problem
@@ -36,3 +38,4 @@ as the way out.
 ## Record
 
 - 2026-10-29: filed from the spec loop's run 50.
+- 2026-11-07: closed in grooming as superseded by b-910cef, filed in c5e5deab from run 32. Both name one root cause. `open_pr_refusal` exempts only a candidate's `depends_on` ancestors, never the open stack's recorded chain below the layer a cell is cut from. b-910cef asks for the chain to be read and names a test. This item's run 50 case is a second sighting of it. The exemption still reads `depends_on` alone (`_ancestor_branches`, `saffron/scheduler.py`).
