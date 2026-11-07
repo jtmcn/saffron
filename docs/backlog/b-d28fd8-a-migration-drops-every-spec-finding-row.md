@@ -7,7 +7,7 @@ specs: []
 prs: []
 commits: []
 cites: []
-related: [b-98a3be]
+related: [b-98a3be, b-aee31f]
 ---
 
 ## Problem
@@ -33,3 +33,6 @@ names the six tables it covers.
 
 - 2026-10-07: filed from the first spec review of SA-0226.
 - 2026-10-19: the Problem's "Nothing constructs a record-backed `Ledger` yet" turns false when #907 merges. The cutover this item must precede is then the next step (b-d4b847).
+- 2026-11-07: groomed. `SA-0278` (c7f6a1f3) wired a record-backed `Ledger`,
+  so the cutover in point 3 is past. `migrate` still writes no `spec_finding`
+  fact. b-aee31f closed in grooming as a duplicate of this item.

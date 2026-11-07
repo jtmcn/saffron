@@ -1,14 +1,16 @@
 ---
 id: b-c94a2f
 title: A second `depends_on` entry orders a spec but carries no code into its cell, and nothing says so
-status: open
+status: superseded
 tier: 2
 filed: 2026-10-03
-specs: [SA-0199]
-prs: [657]
+closed: 2026-11-07
+specs: [SA-0199, SA-0312]
+prs: [657, 957]
 commits: []
 cites: [§4.2]
-related: [59, b-877e93]
+related: [59, b-877e93, b-1572e7]
+superseded_by: b-1572e7
 ---
 
 ## Problem
@@ -35,3 +37,11 @@ needs that parent's code.
 ## Record
 
 - 2026-10-03: filed from the spec loop's run 27.
+- 2026-11-07: superseded in grooming by b-1572e7. `SA-0312` (#957) took the
+  other road from this item's exit. It keeps K>1 and makes it carry code.
+  The overlap exemption now walks every entry (`_reachable`,
+  `saffron/scheduler.py:245`). A cell stacks on the deepest open parent, and
+  a spec whose open parents lie on no one chain is refused with a reason, in
+  the scan (`saffron/scheduler.py:995-1007`) and in `run_task`
+  (`_resolve_multi_parent`, `saffron/task.py:344`). A second entry no longer
+  orders a spec in silence.

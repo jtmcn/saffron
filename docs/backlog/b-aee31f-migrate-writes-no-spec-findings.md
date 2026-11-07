@@ -1,14 +1,16 @@
 ---
 id: b-aee31f
 title: "`migrate` writes no `spec_findings`, so a ledger migrated after SA-0226 loses each spec review's findings"
-status: open
+status: superseded
 tier: 2
 filed: 2026-10-08
+closed: 2026-11-07
 specs: [SA-0226]
 prs: [745]
-commits: []
+commits: ["1634a961"]
 cites: [§3.4]
-related: []
+related: [b-d28fd8]
+superseded_by: b-d28fd8
 ---
 
 ## Problem
@@ -28,3 +30,8 @@ migrated ledger folds back to the same rows.
 ## Record
 
 - 2026-10-08: filed from the spec loop's run 31, as SA-0226's spec asks.
+- 2026-11-07: superseded in grooming by b-d28fd8, filed a day earlier in
+  1634a961 for the same gap. Its exit says more: each fact lands after its
+  round's `spec_review` fact, and each value keeps its type. Its record also
+  carries the later cutover evidence. `migrate` still writes no
+  `spec_finding` fact (`saffron/record/migrate.py` names none).
