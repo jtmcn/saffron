@@ -119,10 +119,10 @@ class QueueLine:
 def sort_key(line: QueueLine) -> tuple[int, int, int, int, int, str]:
     """§6's order: dismiss in ten seconds, accept in two minutes.
 
-    Skipped repos, then `SCOPE_REVIEW`, then the states that need you —
-    `MERGE_FAILED`, `PLAN_REJECTED`, `PREFLIGHT_FAILED`, `GATE_ERROR` and
-    `NOT_IMPLEMENTED` — then level 3 descending, then elevated risk, then
-    concern count descending. Sorted by state, never grouped by repo.
+    Skipped repos, then `SCOPE_REVIEW`, then the states that need you, which
+    are every state `_STATE_RANK` ranks 2. Then level 3 descending, then
+    elevated risk, then concern count descending. Sorted by state, never
+    grouped by repo.
 
     Level 3 is not a state: it pre-empts only the elevated/ordinary fallback
     below, so a line already in `_STATE_RANK` (`MERGE_FAILED` down through
