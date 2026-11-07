@@ -4,7 +4,7 @@ title: A spec the order names that no longer parses takes out status, next and s
 status: open
 tier: 3
 filed: 2026-09-16
-by_hand: false
+by_hand: true
 specs: []
 prs: []
 commits: []
@@ -58,3 +58,8 @@ whose spec will not parse reads as stale, naming the spec and the parse error,
 and the other rows still report. A witness that puts a malformed spec in the
 order and asserts `status` exits 1 with the spec id in the message, rather than
 raising.
+
+## Record
+
+- 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
+  `.claude/`, and `SA-0279` refuses any spec that touches that path.

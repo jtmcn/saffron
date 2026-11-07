@@ -1,11 +1,12 @@
 ---
 id: 172
 title: A re-snapshot carries a finished loop's drops into the next, and nothing undoes a drop
-status: open
+status: partial
 tier: 2
 filed: 2026-09-17
+by_hand: true
 specs: []
-prs: []
+prs: [326]
 commits: []
 cites: []
 related: [137]
@@ -35,3 +36,14 @@ command to start a new loop with.
 closed, and says to start fresh with `--new`. Or `_carried` forgets a drop
 recorded before the order's own snapshot. An `undrop` command covers a spec
 dropped by mistake.
+
+## Record
+
+- 2026-11-07: the new-loop half is done. #326 (`8bfb8512`) added
+  `snapshot --new`, which carries no drops and refuses while the last loop has
+  an open pull request. A bare `snapshot` over an existing order now names
+  `--new`, and the skill's step 1 says a new loop starts with it.
+- Left: nothing undoes a drop. The driver has no `undrop`, and
+  `snapshot --force` still carries a drop forward through `_carried`.
+- 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
+  `.claude/`, and `SA-0279` refuses any spec that touches that path.

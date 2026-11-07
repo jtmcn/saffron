@@ -64,3 +64,6 @@ the host is forbidden to import the SDK: if `AssistantMessage` carries no
 (item **147**). Read one real event log after the next base-image rebuild before
 trusting the numbers this item is about.
 
+- 2026-11-07: both blockers named above are closed. Item 147 closed on
+  2026-09-30 and item 146 on 2026-10-10 (#797). What is left is the reading
+  itself, from one night's event log. No evidence file records it yet.

@@ -1,11 +1,11 @@
 ---
 id: 75
 title: Four comments the `witness` wiring falsified, and no queued spec can reach them
-status: open
+status: partial
 tier: 3
 filed: 2026-09-06
-specs: [SA-0061, SA-0062]
-prs: [150]
+specs: [SA-0061, SA-0062, SA-0288]
+prs: [150, 917]
 commits: []
 cites: []
 related: [74]
@@ -61,3 +61,15 @@ one spec owning `saffron/gates/contract.py`,
 `saffron/gates/runner.py` and `tests/test_witness_gate.py`, correcting all four
 in a pass. It is comment-only, so `type: chore` and a small ceiling; the value
 is that the next reader of any of them is not misled about what is built.
+
+## Record
+
+- 2026-11-07: three of the four are gone. #166 corrected `runner.py`.
+  `SA-0288` (#917) deleted `contract.witness_blocking` and its docstring, since
+  `witness` now blocks at every tier. Its review commit `5b4b79fd` rewrote the
+  test docstring to say the reaches half is true.
+- Left: the docstring of
+  `test_a_blocking_witness_failure_is_an_ordinary_blocking_failure` in
+  `tests/test_witness_gate.py`. It still says a special case in
+  `session._blocking` fails nothing in the whole suite. That closure is gone,
+  because the gate suite left `_drive_cell` for `saffron/gates/suite.py`.

@@ -1,10 +1,11 @@
 ---
 id: 14
 title: '`committed` fails on build artifacts a repo does not gitignore'
-status: open
+status: done
 tier: 3
+closed: 2026-11-07
 specs: []
-prs: []
+prs: [552]
 commits: []
 cites: [§2.1, §5.4]
 related: [55]
@@ -83,3 +84,11 @@ untracked paths the baseline call also produced *by directory* would be a
 second identity rule sitting beside the baseline subtraction's, and `CLAUDE.md`
 warns in as many words against making those match. Item 55 (`dist/`) is the
 same family and is one line of `.gitignore`.
+
+- 2026-11-07: closed in grooming. The onboarding requirement the 2026-09-04
+  decision named is written and checked. PR #552 added the `setup-saffron` skill.
+  Its `GATES.md` says a gate that writes a build artifact fails `committed` and
+  the artifact belongs in `.gitignore`. Its `check.py` runs every declared gate
+  and reports each path a gate leaves that `.gitignore` does not cover
+  (`committed: a gate left …`). `tests/test_setup_saffron.py::test_a_gate_that_leaves_a_file_fails_committed`
+  pins it.

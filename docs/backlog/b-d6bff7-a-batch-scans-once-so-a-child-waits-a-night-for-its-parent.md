@@ -5,7 +5,7 @@ status: partial
 tier: 3
 filed: 2026-09-17
 specs: [SA-0106]
-prs: [353]
+prs: [353, 496, 959]
 commits: []
 cites: [§4.2, §4.2.1]
 related: [67, 70, 177]
@@ -56,3 +56,9 @@ can edit:
 - 2026-09-19: #353 merged, so `saffron batch` rescans after each task. The
   prose above is still unedited: `GOTCHAS.md`'s reason, `DESIGN.md:385`, `:400`,
   `:404`, `:408` and `saffron/task.py:130-133`. The item closes when they are.
+- 2026-11-07: two of the six are fixed. #496 (`ed36c599`) rewrote the
+  `GOTCHAS.md` reason. `SA-0312` (#959) dropped the grandchild sentence from
+  `saffron/task.py`. Left: two `DESIGN.md` sentences still say the queue is
+  sorted once. They are "sorted once in memory" (`DESIGN.md:498`) and
+  "read exactly once, at scan" (`DESIGN.md:506`). The in-flight sentences at
+  `DESIGN.md:482` and `:502` want a re-read against the rescan too.
