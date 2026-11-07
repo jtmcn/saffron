@@ -1,14 +1,16 @@
 ---
 id: b-8a6f43
 title: '`snapshot --force` drops every hold, so a scoped loop re-holds its specs after each re-snapshot'
-status: open
+status: superseded
 tier: 3
 filed: 2026-10-02
+closed: 2026-11-07
 specs: []
 prs: []
-commits: []
+commits: ["e8d38ff5"]
 cites: []
-related: [b-c07b92]
+related: [b-c07b92, b-e8027b]
+superseded_by: b-c07b92
 ---
 
 ## Problem
@@ -32,3 +34,4 @@ order records once.
 - 2026-10-03: `SA-0170`, `SA-0183` and `SA-0152` left `specs`. They were the
   specs run 25 held, never a fix for this item. Run 26 held `SA-0152` once,
   and the `snapshot --force` after its spec merged released it, as intended.
+- 2026-11-07: closed in grooming as superseded by b-c07b92. Both items ask for one way to scope a loop to the specs the operator names. A hold was never that tool. `cmd_hold` keeps `next` off a spec whose edit is an open pull request, and `snapshot` clears every hold on purpose since `d21982b1` (`driver.py:914`). Run 26 saw that release work as intended. b-c07b92 carries the scoping need, with three runs of evidence and its 2026-09-30 entry (`e8d38ff5`) placing the fix in the stack batch. A hold that must outlive a re-snapshot while its edit is open is b-e8027b.

@@ -1,12 +1,13 @@
 ---
 id: b-4ddb5b
 title: "`terms` reads a word named to exclude it as a use, so it fails at base in every cell"
-status: open
+status: done
 tier: 3
 filed: 2026-09-30
+closed: 2026-11-07
 specs: []
-prs: []
-commits: []
+prs: [720]
+commits: ["9823f95f"]
 cites: [§5.4]
 related: []
 ---
@@ -37,3 +38,4 @@ recognise, or the sentence is reworded. A test pins whichever it is.
   `saffron/intake.py:158` again.
 - 2026-10-05: every cell of run 28 read `terms=fail` at base on
   `saffron/intake.py:156`, the same docstring after it moved.
+- 2026-11-07: closed in grooming. The sentence was reworded in `557c1ab8` (#720), so the `Spec` docstring names no avoided term. `.saffron/gates/terms` passes on HEAD, 0 failures in 959 files. The `terms` prek hook from `SA-0255`'s review (`9823f95f`) runs the gate over the whole tree in `make check`, so a new hit at base fails before it merges.

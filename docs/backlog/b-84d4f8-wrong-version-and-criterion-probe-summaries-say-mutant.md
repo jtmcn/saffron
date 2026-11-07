@@ -1,13 +1,13 @@
 ---
 id: b-84d4f8
 title: Wrong-version and criterion-probe summaries say "mutant", and wrong versions run under the criterion-probe helper's name
-status: open
+status: partial
 tier: 3
 filed: 2026-09-29
 closed:
 specs: []
 prs: []
-commits: []
+commits: ["e370d835"]
 cites: [§5.4.1, §5.5]
 related: [b-7e69d0, b-37924b, b-a5d4af]
 ---
@@ -37,3 +37,9 @@ kind gets its own. A test reads a wrong-version summary and finds no
 ## Record
 
 - 2026-09-29: filed from the spec loop's run 21.
+- 2026-11-07: partial in grooming. Commit `e370d835` gave `witness_gate` an
+  `edit_noun` for its summaries. `session.py` passes "wrong version" or
+  "criterion probe" for each edit. A wrong-version summary in
+  `tests/test_session.py` now reads "died under their own wrong version".
+  Left: `_apply_criterion_probes` and `review.criterion_probe_outcome` still
+  carry the criterion-probe name for both kinds of edit.

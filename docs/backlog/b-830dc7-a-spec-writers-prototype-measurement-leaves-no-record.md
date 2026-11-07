@@ -1,12 +1,13 @@
 ---
 id: b-830dc7
 title: A spec writer's prototype measurement leaves no record a reviewer can read
-status: open
+status: wontfix
 tier: 3
 filed: 2026-09-29
+closed: 2026-11-07
 specs: []
 prs: []
-commits: []
+commits: ["39166625"]
 cites: []
 related: [b-865399]
 ---
@@ -27,3 +28,4 @@ reads it.
 ## Record
 
 - 2026-09-29: filed from the spec loop's run 22.
+- 2026-11-07: closed in grooming as wontfix. The reader this item served is gone. The operator removed step 1b's spec review in run 31, on 2026-10-07 (`39166625`). The loop now runs only the ceilings check there (`.claude/skills/run-saffron-spec-loop/SKILL.md` step 1b). A spec is reviewed by `create-saffron-spec`'s chain and by the stack batch's spec review. The chain's preflight already asks a writer who prototypes a behaviour to quote what it printed and pin it in a witness (`.claude/skills/create-saffron-spec/references/preflight.md`, "Pin every measurement").
