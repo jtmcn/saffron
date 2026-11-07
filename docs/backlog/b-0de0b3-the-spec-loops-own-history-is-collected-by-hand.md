@@ -36,10 +36,12 @@ execution"). In core these would be facts in the record and never events, since
 
 ## Done looks like
 
-Loop-level facts land in core as record facts under a key for the loop. The
-loop's report renders from them and from the per-task data. A `DESIGN.md`
+PR seat findings and the operator's decisions land in core as record facts
+under the stack batch that ran the loop. The loop's report renders from them,
+beside the batch's own spec review and end review facts. A `DESIGN.md`
 subsection and an ontology term come before any spec.
 
 ## Record
 
 - 2026-09-21: filed from the spec loop's run 11, on the operator's decision.
+- 2026-11-07: re-scoped in grooming on the operator's ruling of 2026-11-07. A stack batch now records each spec review round and each end review finding as a record fact. The skill writes no HTML report. Only the PR seats' findings and the operator's decisions stay in the delegate's notes, so the Done now names those two.

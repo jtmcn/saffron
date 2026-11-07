@@ -8,7 +8,7 @@ specs: [SA-0334, SA-0335]
 prs: []
 commits: []
 cites: []
-related: [b-4eaaa4]
+related: [b-4eaaa4, b-8ef729]
 ---
 
 ## Problem
@@ -34,3 +34,4 @@ the routed ledger `main` builds. Every helper above imports it, and the four
 ## Record
 
 - 2026-11-06: filed from the spec loop's run 54.
+- 2026-11-07: b-8ef729 closed in grooming into this item. Its other half joins this one. Four test modules each define a git isolation helper. One shared helper beside `bare_repo` in `tests/conftest.py` replaces them in the same fix.

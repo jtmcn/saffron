@@ -1,15 +1,17 @@
 ---
 id: 150
 title: The critic teardown closure is bound inside the REVIEW branch and read from the REBUT branch beside it
-status: open
+status: superseded
 tier: 3
 filed: 2026-09-16
+closed: 2026-11-07
 by_hand: false
 specs: [SA-0088]
 prs: [277]
 commits: []
 cites: [§5.6]
-related: [118]
+related: [118, 134]
+superseded_by: 134
 ---
 
 ## Problem
@@ -40,3 +42,6 @@ headroom on a `bug` ceiling — see item 40.
 
 The nine-line `def` moved above `if outcome == "READY_FOR_REVIEW":`, beside
 `reviews` and `recorded`.
+
+## Record
+- 2026-11-07: superseded in grooming by item 134, on the operator's ruling of 2026-11-07. One `_teardown` closure defined above the try, as 134 asks, also ends this item's critic teardown bound in the REVIEW branch and read from the REBUT branch.

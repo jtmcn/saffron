@@ -1,13 +1,15 @@
 ---
 id: 93
 title: Requiring a probe may have cost the adequacy lens recall, and nothing measured it
-status: partial
+status: superseded
+closed: 2026-11-07
 tier: 1
 specs: [SA-0063]
 prs: []
 commits: []
 cites: []
-related: [7, 88]
+related: [7, 88, 79]
+superseded_by: 79
 ---
 
 ## Problem
@@ -48,3 +50,4 @@ prompt at the same `--runs` to answer. The lens prompt now also carries
 no longer current; `docs/evidence/2026-09-11-lens-corpus-claude-md.md` is the
 first pass under the new one, and a future confound pass must compare against
 that record, not this one.
+- 2026-11-07: superseded in grooming by item 79, on the operator's ruling of 2026-11-07. The comparison with the pre-probe prompt is archaeology now, since the lens prompts changed many times after it. Its first step, the metric's spread at a higher `--runs` under the current prompts, moves to item 79's Record.

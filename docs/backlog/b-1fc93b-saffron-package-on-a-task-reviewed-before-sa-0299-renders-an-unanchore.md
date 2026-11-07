@@ -1,11 +1,12 @@
 ---
 id: b-1fc93b
 title: "`saffron package` on a task reviewed before `SA-0299` renders an unanchored survivor as a Disagreement that REBUT never answered"
-status: open
+status: wontfix
 tier: 3
 filed: 2026-10-23
+closed: 2026-11-07
 specs: []
-prs: [928]
+prs: [928, 930]
 commits: []
 cites: [§5.5, §5.7]
 related: [b-e40d09, b-bff156]
@@ -31,3 +32,4 @@ pull request body skips a host-filed survivor that no REBUT answered.
 ## Record
 
 - 2026-10-23: filed from the spec loop's run 46.
+- 2026-11-07: closed in grooming as wontfix, on the operator's ruling of 2026-11-07. No task reviewed before `SA-0299` (#930) is known to wait for `saffron package`. Reopen if one is packaged and its pull request body shows an unanswered Disagreement.

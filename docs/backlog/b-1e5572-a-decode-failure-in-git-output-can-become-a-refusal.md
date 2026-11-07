@@ -1,12 +1,13 @@
 ---
 id: b-1e5572
 title: "`run_task` catches `UnicodeDecodeError` around the whole reader call, so a decode failure in git's own output can become a refusal"
-status: open
+status: wontfix
 tier: 3
 filed: 2026-09-25
+closed: 2026-11-07
 specs: []
 prs: []
-commits: []
+commits: ["fb2f5320"]
 cites: [§4.2]
 related: [b-602d00]
 ---
@@ -32,3 +33,4 @@ output and reads an error, not a refusal.
 ## Record
 
 - 2026-09-25: filed from the spec loop's run 16.
+- 2026-11-07: closed in grooming as wontfix, on the operator's ruling of 2026-11-07. A decode failure in git's own output was never reproduced, and it needs undecodable `ls-tree` output. The catch it names came with `SA-0136` (fb2f5320, #505). Reopen if a refusal is seen that git's output caused.

@@ -1,15 +1,17 @@
 ---
 id: b-25f2b2
 title: "The loop driver's `record` refuses a stack batch's follow-up as \"not in the order\""
-status: open
+status: superseded
 tier: 2
 filed: 2026-10-09
+closed: 2026-11-07
 by_hand: true
 specs: []
 prs: [789]
 commits: []
 cites: []
-related: [b-f10412, b-792ab2]
+related: [b-f10412, b-792ab2, b-719346]
+superseded_by: b-719346
 ---
 
 ## Problem
@@ -35,3 +37,4 @@ order row for it.
 - 2026-10-19: recurred in the spec loop's run 44. `driver.py record SA-0296` refused the follow-up as not in the order, and found no single spec file for it. The delegate recorded it by hand.
 - 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
   `.claude/`, and `SA-0279` refuses any spec that touches that path.
+- 2026-11-07: superseded in grooming by b-719346, on the operator's ruling of 2026-11-07. Both are `driver.py record` refusing a finish's follow-up as not in the order. b-719346's fix takes each follow-up into the order, and `record` then reads it.

@@ -1,13 +1,13 @@
 ---
 id: b-013138
 title: A spec text or spec review row is numbered by its count, so the write after a trimmed fold collides
-status: open
+status: wontfix
 tier: 3
 filed: 2026-09-28
-closed:
+closed: 2026-11-07
 specs: []
 prs: []
-commits: []
+commits: ["67c928ae"]
 cites: [§4.1]
 related: [b-792ab2, 170]
 ---
@@ -35,3 +35,4 @@ trimmed fact list, writes once more, and reads back the new row.
 ## Record
 
 - 2026-09-28: filed from the spec loop's run 20.
+- 2026-11-07: closed in grooming as wontfix, on the operator's ruling of 2026-11-07. The record is append-only (`saffron/record/contract.py`, 67c928ae), so no production path folds a trimmed fact list. Reopen if a path that trims facts is ever added.

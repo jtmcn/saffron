@@ -1,11 +1,12 @@
 ---
 id: 10
 title: Small, measured, cheap
-status: partial
+status: wontfix
+closed: 2026-11-07
 tier: 3
 specs: [SA-0002]
 prs: []
-commits: []
+commits: ["dc8df993"]
 cites: [§5.1]
 related: []
 ---
@@ -49,3 +50,4 @@ _Not stated in the original item._
   §5.1 now carries it: a repo's image pins its runner to the baked
   environment, because the workaround leaves the run green and bills the
   difference to the task.
+- 2026-11-07: closed in grooming as wontfix, on the operator's ruling of 2026-11-07. The last bullet is cosmetic. `session.py` sends `PLAN_PROMPT` before any implement turn (dc8df993), so a plan block from `implement.md` changes nothing. Reopen if the plan prompt ever stops going first.

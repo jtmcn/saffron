@@ -1,13 +1,14 @@
 ---
 id: b-7eb6d3
 title: "`bookkeeping` cannot read an ordinal with two hyphens, so it drafts `<Nth>`"
-status: open
+status: wontfix
 tier: 3
 filed: 2026-10-05
+closed: 2026-11-07
 by_hand: true
 specs: [SA-0200]
 prs: []
-commits: []
+commits: ["f2f136e8"]
 cites: []
 related: [b-7d3810]
 ---
@@ -32,3 +33,4 @@ hundred-and-twenty-first time". A test pins a two-hyphen ordinal.
 - 2026-10-05: filed from the spec loop's run 28.
 - 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
   `.claude/`, and `SA-0279` refuses any spec that touches that path.
+- 2026-11-07: closed in grooming as wontfix, on the operator's ruling of 2026-11-07. The smoke test's newest paragraphs read "Re-measured <date> for SA-NNNN" with no ordinal, from f2f136e8 (#878) on, so the stepping never runs. Reopen if a paragraph counts its re-measures again.

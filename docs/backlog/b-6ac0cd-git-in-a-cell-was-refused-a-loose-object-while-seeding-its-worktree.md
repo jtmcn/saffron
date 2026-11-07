@@ -1,11 +1,12 @@
 ---
 id: b-6ac0cd
 title: Git in a cell was refused a loose object while seeding its worktree, and a retry worked
-status: open
+status: wontfix
 tier: 3
 filed: 2026-10-05
+closed: 2026-11-07
 specs: [SA-0203]
-prs: []
+prs: [847, 792]
 commits: []
 cites: [§5.1]
 related: [b-f582ee]
@@ -54,3 +55,4 @@ this record says which lead failed and why.
   from scratch, which hard-linked the same inodes. `cat` read the same file in
   the same container, so only git's read of it fails. `git repack -d` in the
   checkout cleared it, and every later seed passed.
+- 2026-11-07: closed in grooming as wontfix, on the operator's ruling of 2026-11-07. No loose-object refusal is recorded after the spec loop's run 29 (2026-10-05). `SA-0260` (#847) stopped mirrors hard-linking the checkout's objects, and `SA-0232` (#792) retries the seed. Reopen if a cell is refused a loose object again.

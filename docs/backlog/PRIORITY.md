@@ -15,8 +15,9 @@ are cheaper by hand than through a cell. The argument, the exit criterion, and
 which items go through a cell are in
 `docs/superpowers/plans/2026-09-07-trusting-the-queue.md`.
 
-**Groomed 2026-11-07.** Each open item was checked against the tree, and 28
-were closed as done, superseded or wontfix. Each paragraph that named only
+**Groomed 2026-11-07.** Each open item was checked against the tree, and 47
+were closed as done, superseded or wontfix. 19 of those closed on the
+operator's rulings. Each paragraph that named only
 closed items was dropped. Its ids moved to the closed list at the end of their
 tier, so every record's `tier` still resolves. Each item's own `## Record`
 says what grooming found.
@@ -36,15 +37,15 @@ holds no open item.
 ### Tier 1 — breaks at 03:00 with nobody watching
 
 **Groomed 2026-11-07.** Every item the 2026-09-07 sort named here is closed but
-these: **79**, **93**, **80**, **119**, **42** and **49**, in that order. Each
+these: **79**, **80**, **119**, **42** and **49**, in that order. Each
 closed one is listed at the end of this tier. Each open one's `## Record` says
 what is left.
 
-**79 and 93 come first.** Both ask whether a `0 blockers` line means the diff is
-sound or means nobody looked. 79 is the adequacy lens finding a defect in two
-runs of three. 93 is the corpus metric's unknown resolution. Both wait on a
-corpus pass under the current lens prompts, and the newest pass is from
-2026-09-11. **80** withholds the mutant a witness is judged by and leaves it in
+**79 comes first.** It asks whether a `0 blockers` line means the diff is sound
+or means nobody looked. The adequacy lens found its defect in two runs of
+three. It waits on a corpus pass under the current lens prompts, measured first
+for the metric's spread. The newest pass is from 2026-09-11. ~~**93**~~ folded
+into it on 2026-11-07. **80** withholds the mutant a witness is judged by and leaves it in
 the worktree. **119** leaves the plan turn's share of the budget undecided.
 **42** still reads an errored rebuttal as a confirmed disagreement. Under
 **49**, `revert` never checks a test whose body changed and whose name stayed.
@@ -162,7 +163,7 @@ unwind closes a pipe a reader thread holds.
 
 **From the operator visibility plan and the spec loop's runs 5 to 10**, in
 this order: **43**, **66**, **67**, **98**, **157**, **172**, **b-eac388**,
-**b-bc54d1**, **b-63ac52**, **b-952c34**, **b-60d804**, **b-4589be**,
+**b-bc54d1**, **b-63ac52**, **b-952c34**, **b-60d804**,
 **b-281f0a** and **b-7d3810**. Then **160**, which is what
 item 141's close left. The Gate-only cell's suite is in a file because the
 ledger has no owner column that fits it.
@@ -230,8 +231,8 @@ session transcript, so a strange PR shows what the agent did but not what it rea
 spec's wrong builds listed in prose reach no host run.
 
 **Placed 2026-10-01**, from the spec loop's run 24: **b-426db4**,
-**b-dc5212**, ~~**b-8d654b**~~, then ~~**b-3d2aa1**~~. A Problem-item obligation no
-criterion drove was dropped. `next` held back a child of a merged parent. The
+~~**b-8d654b**~~, then ~~**b-3d2aa1**~~. A Problem-item obligation no
+criterion drove was dropped. The
 finishing commit writes through a symlink, unverified, and drops parse
 failures.
 
@@ -263,7 +264,7 @@ by hand. A step the repo declares would let the finish do both.
 
 **Placed 2026-10-09**, from the spec loop's run 32: **b-910cef**,
 **b-a33889**, **b-180f9f**, ~~**b-8a0c9a**~~, **b-5abe53**, **b-f10412**, then
-**b-25f2b2**. The queue refuses every child of an open stack. A mint or a
+~~**b-25f2b2**~~. The queue refuses every child of an open stack. A mint or a
 revision that meets a cell runtime failure still misses its layer. A
 resumed row keeps a stale merged head. The end review grades heads from
 before the review commits. A `run` route prints nothing. The driver's
@@ -341,7 +342,7 @@ wrong spec at 20 sites.
 ### Tier 3 — real, not urgent
 
 **Placed 2026-11-07**, in grooming, from six open items no tier named:
-**b-ba0cba**, **b-036cc5**, **b-262df1**, **b-4bd68a**, **b-cd4de2**, then
+**b-ba0cba**, **b-036cc5**, **b-262df1**, **b-4bd68a**, ~~**b-cd4de2**~~, then
 **b-98a3be**. A follower of `events.jsonl` sees no typed spend from IMPLEMENT
 to the outcome. `saffron watch` has no typed output for a follower outside
 Python. Record helpers sit under `tests/`, and the loop's driver imports them.
@@ -349,14 +350,14 @@ A lens can search code only as text. The spec loop numbers its passes as runs,
 which is a ledger term. The spec chain records no cost per escaped defect, so
 no step can be cut on evidence.
 
+**Moved 2026-11-07 from tier 2**, on the operator's ruling: **b-dc5212** and
+**b-4589be**. Each bites only on the driver's attended path, which is now the
+fallback.
+
 **Placed 2026-11-06**, from the spec loop's run 54: **b-25c0f5**, then
 **b-980fbd**. Test setup for the routed ledger is restated across a dozen
 files. The record append event's sink skips redaction, and `watch` names the
 wrong first line.
-
-**Placed 2026-10-31**, from `SA-0331`'s third read: **b-8693ef**. A refused PACKAGE
-blanks a carried pull request link, so no merge moves that row. Only a by-hand
-`saffron adopt` race reaches it today.
 
 **Placed 2026-10-16**, from the spec loop's run 42: **b-60317d**.
 `reconcile`'s `head_moved` comment says nothing judges a moved head.
@@ -368,8 +369,8 @@ blanks a carried pull request link, so no merge moves that row. Only a by-hand
 defines a Refusal as before any cell starts, and `ready_task` refuses after one.
 
 **Placed 2026-10-19**, from the spec loop's run 44: **b-b8f0d9**, **b-e9cd43**,
-**b-524b1a**, **b-62e00a**, **b-b33854**, **b-d149c6**, **b-0094bd**, then
-**b-8ef729**. Each is a gap a seat found and the stack left alone.
+**b-524b1a**, **b-62e00a**, **b-b33854**, **b-d149c6**, ~~**b-0094bd**~~, then
+~~**b-8ef729**~~. Each is a gap a seat found and the stack left alone.
 
 **Placed 2026-10-20**, from the spec loop's run 45: **b-5288d7**. Three
 modules each split a `consumes` or `removes` entry at its colon.
@@ -379,7 +380,7 @@ modules each split a `consumes` or `removes` entry at its colon.
 row setting a budget floor.
 
 **Placed 2026-10-23**, from the spec loop's run 46: **b-30cbb8**,
-**b-d038df**, **b-25634b**, **b-19dbc9** and **b-1fc93b**. Each is a gap a
+**b-d038df**, **b-25634b** and **b-19dbc9**. Each is a gap a
 seat or the run found and the stack left alone.
 
 **Placed 2026-10-24**, from the spec loop's run 47: **b-0c5afc**,
@@ -390,7 +391,7 @@ stack left alone.
 **Placed 2026-10-24**, from ADR 11 and the controlled vocabulary review:
 **b-8220e6**, then **b-541e9a**, which apply ADR 11. Then ~~**b-c16c6c**~~ and
 ~~**b-545741**~~, which close gaps between `factory.ttl` and `CONTEXT.md`.
-~~**b-7aefb8**~~ is a property inside `factory.ttl`, and **b-8e14fb** its place
+~~**b-7aefb8**~~ is a property inside `factory.ttl`, and ~~**b-8e14fb**~~ its place
 in `policy.yaml`. **b-2227b0**, closed as parked, records a draft ADR.
 
 **Placed 2026-10-25**, from the spec loop's run 48: ~~**b-9c5b11**~~,
@@ -402,30 +403,26 @@ Each is a gap a seat, a finish or the run found and the stack left alone.
 **b-3a0789**. Each is a gap a seat, a finish or the run found and the stack
 left alone.
 
-**Placed 2026-10-29**, from #990's Spec seat: **b-8971e6**. Two commands
-read a task's spec from the first sorted file for its id.
-
 **Placed 2026-10-30**, from #996's Standards seat and finish 61: **b-25b7ba**.
 Two renderers spell a new failure, and they disagree on line 0.
 
 **The 2026-09-04 sort's tier 3, and what each run until run 32 added to it.**
 Each line keeps the order it was filed in.
 
-- From the first sort: **31**, **20**, **53**, **54**, **55**, **75**, **76**,
+- From the first sort: **31**, **20**, **53**, ~~**54**~~, **55**, **75**, **76**,
   **77**, **90**, **92**, **96**, **100**, **101** and **108**.
-- Each done bar a remnant, outside any spec: **9** and **10**.
 - Filed 2026-09-12 to 2026-09-19: **116**, **121**, **122**, **130**, **134**,
-  **150**, **151**, **155**, **156**, **174** and **b-d6bff7**.
+  ~~**150**~~, **151**, **155**, **156**, **174** and **b-d6bff7**.
 - From runs 7 to 10: **b-990bd9**, **b-7431a2**, **b-9eceda**, **b-bc9951**,
   **b-0281e4**, **b-e9db0e**, **b-397edd**, **b-0e20e9**, **b-98dc4d**,
   **b-27b9db**, **b-bbf663** and **b-6a9707**.
 - From the reviews of #393 and `SA-0120`, and runs 13 and 14: **b-d5d290**,
-  **b-9ed36d**, **b-b431c1**, **b-ac2f02** and **b-49329e**.
-- From ADR 4's review and the superpowers comparison: **b-07f694**,
+  **b-9ed36d**, **b-b431c1**, ~~**b-ac2f02**~~ and **b-49329e**.
+- From ADR 4's review and the superpowers comparison: ~~**b-07f694**~~,
   **b-7c88f8**, **b-e1afbb** and **b-3732ef**.
 - From runs 15 to 17 and `SA-0135`'s review: **b-f30189**, **b-a90136**,
-  **b-e06dbc**, **b-32f492**, **b-8fb227**, **b-79d951**, **b-9ead75**,
-  **b-1e5572** and **b-04d4c2**.
+  **b-e06dbc**, **b-32f492**, **b-8fb227**, **b-79d951**, **b-9ead75** and
+  **b-04d4c2**.
 - From the stack batch's spec reviews: **b-2d9ae9**, **b-223244**,
   **b-acee54**, **b-6518ba**, **b-6a101f**, **b-7eb5f5** and **b-22ff3f**.
 - From the 2026-09-27 size pricing and run 32: **b-41664e**, **b-4b386f**,
@@ -453,7 +450,7 @@ as written, or a witness too weak at one boundary.
 **b-36d318**, then ~~**b-0e3528**~~. Each is a seam review kept as written, stale
 text a split left, or a defect in the loop's own tools.
 
-**Placed 2026-09-28**, from the spec loop's run 20: **b-013138**,
+**Placed 2026-09-28**, from the spec loop's run 20:
 **b-30bbd7**, **b-5ec5c5**, **b-64e40c**, **b-710086**, ~~**b-713e90**~~, then
 **b-74e564**. Each is a seam review kept as written, text a spec could not
 reach, or a gate hole the operator accepted once.
@@ -502,11 +499,9 @@ has no vocabulary test. Four documentation lines lag the stack.
 **Placed 2026-10-04**, from settling item 170's failures: **b-86fa07**. The
 `prose` gate lists every hit in the repo, so the baseline cancels nearly all.
 
-**Placed 2026-10-05**, from the spec loop's run 28: **b-444bed**,
-**b-edcab7**, **b-7eb6d3**, then **b-6ac0cd**. A budget line says stop
-before a REBUT that runs. Three sentences lag the stack. `bookkeeping`
-cannot read a two-hyphen ordinal. Git in a cell was refused a loose object
-once.
+**Placed 2026-10-05**, from the spec loop's run 28: **b-444bed**, then
+**b-edcab7**. A budget line says stop
+before a REBUT that runs. Three sentences lag the stack.
 
 **Placed 2026-10-08**, from the spec loop's run 31: **b-385eba**. The
 regular-file git modes are spelled in three modules.
@@ -579,9 +574,9 @@ risk — not, as an earlier draft of this note said, that `.gitignore` in
 *tracked* half only: a `.gitignore` naming itself reaches no diff at all.
 
 **What this ordering costs, recounted in grooming on 2026-11-07.** Tier 1
-holds 16 open items, tier 2 holds 98 and tier 3 holds 213. So tier 3 is two
+holds 15 open items, tier 2 holds 95 and tier 3 holds 198. So tier 3 is two
 thirds of the backlog. That is the deliberate consequence of ranking by the
-milestone rather than by what is nearest to hand. Of the 327 open items, 40
+milestone rather than by what is nearest to hand. Of the 308 open items, 37
 are by hand, since a cell cannot reach their files.
 
 **Placed 2026-11-04**, from the spec loop's run 53: **b-8c6696**, **b-a19ffd**
@@ -592,7 +587,7 @@ and **b-9bb8b7**. A spec missed the fixtures that pin the plan's sha. §5.3's
 - ~~**14**~~, ~~**19**~~, ~~**22**~~, ~~**23**~~, ~~**56**~~, ~~**62**~~, ~~**64**~~, ~~**65**~~, ~~**68**~~, ~~**86**~~, ~~**87**~~, ~~**91**~~, ~~**99**~~, ~~**105**~~, ~~**106**~~, ~~**107**~~, ~~**110**~~, ~~**111**~~, ~~**123**~~, ~~**124**~~.
 - ~~**125**~~, ~~**127**~~, ~~**131**~~, ~~**132**~~, ~~**133**~~, ~~**139**~~, ~~**175**~~, ~~**176**~~, ~~**b-a1bdba**~~, ~~**b-e0bbbf**~~, ~~**b-e403c1**~~, ~~**b-d1d634**~~, ~~**b-ea1d13**~~, ~~**b-5fa523**~~, ~~**b-76953a**~~, ~~**b-0adc85**~~, ~~**b-111c56**~~, ~~**b-26315b**~~, ~~**b-2dea1c**~~, ~~**b-37924b**~~.
 - ~~**b-542beb**~~, ~~**b-ac97c0**~~, ~~**b-50b566**~~, ~~**b-6a692d**~~, ~~**b-f4eb52**~~, ~~**b-589cf6**~~, ~~**b-df59f8**~~, ~~**b-e88930**~~, ~~**b-ca3bc6**~~, ~~**b-5aa016**~~, ~~**b-f71105**~~, ~~**b-1c4a14**~~, ~~**b-d0baf7**~~.
-- Closed as wontfix: **b-830dc7**.
+- Closed as wontfix: **9**, **10**, **b-1e5572**, **b-013138**, **b-830dc7**, **b-6ac0cd**, **b-7eb6d3**, **b-1fc93b**, **b-8971e6**, **b-8693ef**.
 
 ---
 
