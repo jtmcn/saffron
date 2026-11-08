@@ -4,7 +4,7 @@ title: "`revert` never runs an old test the diff rewrote, so a rewritten test th
 type: feature
 priority: 1
 depends_on: [SA-0341]
-estimated_lines: 162
+estimated_lines: 165
 estimate_measured: true
 touches:
   - saffron/gates/contract.py
@@ -49,7 +49,7 @@ forbidden:
   - tests/test_integrity.py
 budget_usd: 92
 max_attempts: 3
-max_turns: 230
+max_turns: 270
 risk: elevated
 acceptance:
   - claim: >-
@@ -96,17 +96,19 @@ acceptance:
       - A name collected at base or at head joins, not at both.
       - The second run happens after the restore.
   - claim: >-
-      The second subset never changes `revert`'s status, failures or tool.
-      The witness takes seven first-run outcomes, and a diff that adds no new
+      The second subset never changes `revert`'s status, failures or tool,
+      except that a checkout or restore that fails is `error`, as today. The
+      witness takes seven first-run outcomes, and a diff that adds no new
       test. These are a pass verdict, a fail verdict, an errored run and a run
       that did not enumerate. They are also failures keyed on something other
       than a name, a handed name left unaccounted for, and a raised exception.
       It crosses each with eight second-run outcomes. These are one test
       passing, all passing, all failing, an errored run and a raised
       exception. They are also a run that did not enumerate, failures keyed
-      elsewhere and every name uncollected. Each
-      result matches the same call without `locations`, which runs only the
-      first subset.
+      elsewhere and every name uncollected. Each result matches the same
+      call without `locations`, which runs only the first subset. A checkout
+      that fails and a restore that fails each give `error`, with no failures
+      and no tool, with a first subset and without one.
     witness: tests/test_revert.py::test_the_second_subset_never_changes_what_revert_decides
     wrong_versions:
       - One run hands the union of both subsets to the `tests` gate, and its result answers both.
@@ -115,15 +117,20 @@ acceptance:
       - A rewritten test that passes makes the gate `fail`.
       - A second run that raised makes the gate `error`.
       - A rewritten test that passes joins the failures of a `fail` verdict.
+      - A checkout or restore that fails reads as `skip` when the diff adds no new test.
   - claim: >-
       After the reverted run, the summary of every `pass`, `fail` and `skip`
-      carries an advisory clause holding the word `advisory:`. That covers a
+      carries an advisory clause that begins `advisory, does not block: `.
+      That covers a
       pass verdict and a fail verdict. It also covers the three skips for a
       first run with no readable verdict, and the skip for a diff that adds
       no new test. The witness crosses each with the eight second-run outcomes
       criterion 3 names. The clause names each rewritten test that ran and
-      passed, and no rewritten test that failed. An unreadable second run
-      names no test.
+      passed, and no rewritten test that failed. Where one passed of two, it
+      reads `advisory, does not block: 1 of 2 rewritten test(s) passed
+      without their source: ` and then the passing name. Where both passed,
+      it reads the same with `2 of 2` and both names, comma-separated. An
+      unreadable second run names no test.
     witness: tests/test_revert.py::test_each_verdict_after_the_reverted_run_carries_the_advisory
     wrong_versions:
       - The clause rides only the `pass` and `fail` summaries.
@@ -134,6 +141,7 @@ acceptance:
       - The clause is empty when every rewritten test failed.
       - The clause is empty when the second run errored or raised.
       - Failures keyed elsewhere read as every rewritten test passing.
+      - The clause begins `advisory:` alone, so a lens cannot tell it blocks nothing.
   - claim: >-
       With no `locations` at head, `revert` behaves exactly as today. The
       witness drives `None` and an empty map. Each runs the first subset
@@ -146,12 +154,14 @@ acceptance:
       - The diff is read whenever `locations` is not `None`, so an empty map and an unreadable diff append a clause.
   - claim: >-
       With `locations` reported and a diff `revert` cannot read, no second
-      run happens. The first subset's verdict stands, and the summary carries
-      the advisory clause.
+      run happens, and the summary carries the advisory clause. With a first
+      subset, its verdict stands. Without one, the gate gives today's skip
+      for a diff that adds no new test and runs nothing.
     witness: tests/test_revert.py::test_a_diff_revert_cannot_read_leaves_the_second_subset_unrun_and_says_so
     wrong_versions:
       - The parse error escapes the gate.
       - The second subset is silently empty.
+      - The clause is appended only when the diff adds a new test.
   - claim: >-
       `GateSuite` hands `revert` the patch every other core gate reads. Run
       end to end, the `tests` gate's JSON carries `locations` and a rewritten
@@ -172,12 +182,17 @@ acceptance:
 ## Context
 
 Backlog item **49**, the changed-body-same-name half. Every line cited here
-was read at `3586d22e`. That commit amends `DESIGN.md` §5.4 by hand in three
-places, and this spec makes them true. The `collected` paragraph's sibling
-now reads "`locations` is optional, and only `revert` reads it". The
-`revert` paragraph now reads "A test rewritten under its old name is a
-second subset, and it is advisory". The `criteria` paragraph on what it
-cannot see now ends on that second subset.
+was read at `7d08c0e7`. Two hand commits amend `DESIGN.md` §5.4 before it,
+and this spec makes them true. The `collected` paragraph's sibling reads
+"`locations` is optional, and only `revert` reads it". Core compares a
+location with "the lines the diff changes, never a hunk's context". The
+`revert` paragraph reads "A test rewritten under its old name is a second
+subset, and it is advisory". It selects a test when "a changed line under
+`test_paths` reaches" its lines: "an added line inside them, or a removed
+line beside them". A pass there "is reported as advisory". It now says "One
+extra test run, or two when the second subset below holds a name". It also
+says "A checkout or restore that fails is still `error`." The `criteria`
+paragraph on what it cannot see ends on that second subset.
 
 **What `revert` judges today.** Its subset is the names new at head and
 every declared witness collected at head. It leaves out `preserves`
@@ -282,9 +297,12 @@ no module-scope import of a new name to a test file. Build a result's
 `locations` through `GateResult.model_validate` from plain dicts, so a test
 module still collects against the base contract.
 
-**The `diff` argument.** Give `revert_gate` a keyword `diff` that defaults to
-the empty string. The existing calls in `tests/test_revert.py` then stay
-as they are, and criterion 7 pins the one production caller.
+**The `diff` argument.** Give `revert_gate` a required keyword `diff`, with
+no default, like every other argument it takes
+(`saffron/gates/core/revert.py:79-90`). A default fails open: a caller that
+forgets it loses the second subset in silence. Add `diff=""` to each
+existing call in `tests/test_revert.py`, and change nothing else in those
+calls. Criterion 7 pins the one production caller.
 
 **Read the diff with `integrity`'s parser, not `parse_diff`.** `parse_diff`
 counts context lines, so a test within three lines of a change would join.
@@ -292,14 +310,23 @@ Import `_split_blocks`, `_parse_block` and `_DiffError` as `witness` does.
 Read the diff only when `locations` holds a name. An unreadable diff then
 appends the clause and leaves the second subset empty.
 
+**A known false advisory.** A removed line marks the new-side line on each
+side of it, as `DESIGN.md` §5.4 says. So deleting a whole test, with one
+blank line between tests, marks the next test's first line. That neighbour
+joins the second subset, and if it passes reverted the clause names it.
+This is accepted, because the subset blocks nothing.
+
 **Where `locations` comes from.** Merge every head result's map, as
 `_collected` merges `collected`. Never read the base results' map. A
 location's `file` is compared with the diff's new-side path as a string.
 No witness drives a map split across two head results, since one `tests`
 gate fills it.
 
-**The clause.** Begin it with `advisory:`, after the separator the other
-notes use. Name each rewritten test that ran and passed, as the first
+**The clause.** Begin it with `advisory, does not block: `, after the
+separator the other notes use. REVIEW's lenses read every summary unmarked
+(`saffron/phases/review.py:183-187`). An unmarked advisory draws a lens
+blocker and a REBUT round (`saffron/phases/review.py:176-179`), so the words
+must say it blocks nothing. Name each rewritten test that ran and passed, as the first
 subset's verdict defines a pass. Give a count when none passed. Say the run
 gave no readable verdict when it errored, raised, did not enumerate, or
 keyed its failures elsewhere. Append it to the `pass` and `fail` summaries
@@ -308,19 +335,28 @@ and to the three skips at `saffron/gates/core/revert.py:281-330` and
 ran. Leave every summary unchanged when the clause is empty.
 
 **Today's skips still come first.** A diff with neither subset skips where
-it does today, with today's summary. A diff with only the second subset
+it does today, with today's summary. Where `locations` is reported and the
+diff is unreadable, that summary also carries the clause (criterion 6). A diff with only the second subset
 passes the `test_paths`, source and dirty-path checks as today, then runs.
 
-**SA-0338 edits `saffron/gates/core/revert.py:187-200`.** Leave those lines
-alone. This spec assumes `subset` and `unreachable` keep their names below
-them.
+**No queued spec edits `saffron/gates/core/revert.py`.** SA-0338 cites
+`saffron/gates/core/revert.py:187-200` as a reader of a criterion's mutant,
+and its `touches` leaves the file out. Leave those lines as they are
+anyway, since the second subset needs nothing from them.
 
 **No suppression comments.** `# noqa` is an `integrity` suppression token
-(`.saffron/policy.yaml:91`), so an added one fails the attempt. Ruff selects
-no `BLE` rule (`pyproject.toml:86`), so a bare `except Exception` needs none.
+(`.saffron/policy.yaml:91`), so an added line holding one fails the attempt.
+Keep `saffron/gates/core/revert.py:254` byte-identical, indentation and
+comment included, so the diff never re-adds it. Guard the first call with a
+condition inside its `try`, not around it. The second run's `except` carries
+no suppression token. Ruff selects no `BLE` rule (`pyproject.toml:86`), so a
+bare `except Exception` needs none.
 
 **Stale prose to correct.** Rewrite the module docstring's last sentence
-(`saffron/gates/core/revert.py:5-9`) and drop the item 49 clause from the
+(`saffron/gates/core/revert.py:5-9`). Correct `revert_gate`'s docstring
+(`saffron/gates/core/revert.py:91-101`), which says no skip touches
+`reverted` or `run_tests`, "a diff that adds no test" included. With a
+second subset, that diff now runs. Drop the item 49 clause from the
 `ponytail:` (`saffron/gates/core/revert.py:158-160`). Update the module
 docstring and the comments that count the set-aside keys
 (`saffron/record/migrate.py:20-24`, `:82-89`).
