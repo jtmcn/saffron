@@ -184,15 +184,17 @@ def _write_spec(
     forbidden=None,
     consumes=None,
     removes=None,
+    retired_first=None,
     claims=None,
     body="",
 ):
     """A spec with the frontmatter the refusal-gate tests need — `_write`
     only carries id/type/priority, and these tests need `touches`,
     `forbidden`, `depends_on` and a body worth parsing acceptance criteria
-    out of. `consumes` and `removes` take a list of entries. `claims` takes
-    a list of `(claim, witness)` pairs, written as an `acceptance:` block so
-    each one parses into a structured criterion."""
+    out of. `consumes` and `removes` take a list of entries. `retired_first`
+    takes a list of ids. `claims` takes a list of `(claim, witness)` pairs,
+    written as an `acceptance:` block so each one parses into a structured
+    criterion."""
     lines = ["---", f"id: {id}", "title: t", f"type: {type}", f"priority: {priority}"]
     if depends_on:
         lines.append("depends_on:")
@@ -209,6 +211,9 @@ def _write_spec(
     if removes:
         lines.append("removes:")
         lines += [f"  - {json.dumps(r)}" for r in removes]
+    if retired_first:
+        lines.append("retired_first:")
+        lines += [f"  - {r}" for r in retired_first]
     if claims:
         lines.append("acceptance:")
         for claim, witness in claims:
@@ -1975,6 +1980,163 @@ def test_a_parent_that_is_neither_retired_nor_merged_names_both_checks(
     assert "TE-GONE" in reason
     assert "done/" in reason
     assert "no task in the ledger says it merged" in reason
+
+
+def test_a_spec_whose_retired_first_is_not_retired_is_refused_naming_each(
+    tmp_path, ledger
+):
+    """A spec declares `retired_first`, naming ids its own change needs
+    shipped first (backlog item b-e7898b). The scan refuses a candidate
+    whose list names an id not yet in `done/`. It credits nothing a
+    `MERGED` task, a waiting task or the stack base would credit for
+    `depends_on` itself, in one row under that same kind.
+    """
+    from saffron.scheduler import StackBase
+
+    for stack in (False, True):
+        root = tmp_path / f"retired-first-{stack}"
+        root.mkdir()
+        directory = _spec_dir(root)
+        repo_id = _repo(ledger, origin=str(root))
+
+        # TE-1 depends on TE-2, so TE-2 truly qualifies as this order's
+        # own stack base under `stack=True`.
+        _write_spec(
+            directory, "no-task.md", id="TE-1", touches=["t1.py"], depends_on=["TE-2"]
+        )
+        _write_spec(directory, "waiting.md", id="TE-2", touches=["t2.py"])
+        waiting_task = _task_at(
+            ledger,
+            repo_id,
+            spec_id="TE-2",
+            spec_sha=_sha(directory / "waiting.md"),
+            state="READY_FOR_REVIEW",
+        )
+        set_task_package(
+            ledger,
+            waiting_task,
+            "READY_FOR_REVIEW",
+            branch="saffron/TE-2",
+            pushed_sha="f" * 40,
+            pr_url="https://example.invalid/pull/2",
+        )
+        _write_spec(directory, "merged.md", id="TE-3", touches=["t3.py"])
+        _task_at(
+            ledger,
+            repo_id,
+            spec_id="TE-3",
+            spec_sha=_sha(directory / "merged.md"),
+            state="MERGED",
+        )
+        (directory / "done").mkdir()
+        _write_spec(directory / "done", "retired.md", id="TE-9", touches=["t9.py"])
+        (directory / "done" / "broken.md").write_text("no frontmatter here\n")
+        _write_spec(
+            directory,
+            "candidate.md",
+            id="TE-0",
+            touches=["t0.py"],
+            depends_on=["TE-2"],
+            retired_first=["TE-1", "TE-2", "TE-3", "TE-5", "TE-9"],
+        )
+        # A candidate whose `retired_first` names only the retired id is a
+        # candidate in both modes, the mirror image of TE-0's refusal.
+        _write_spec(
+            directory,
+            "satisfied.md",
+            id="TE-8",
+            touches=["t8.py"],
+            retired_first=["TE-9"],
+        )
+
+        candidates, refusals = build_queue(directory, repo_id, ledger, stack=stack)
+        by_id = {c.spec.id: c for c in candidates}
+
+        assert "TE-0" not in by_id, (stack, candidates)
+        assert "TE-8" in by_id, (stack, refusals)
+        assert "satisfied.md" not in [r.path.name for r in refusals], (stack, refusals)
+        if stack:
+            assert by_id["TE-1"].stack_base is not None, (stack, by_id)
+            assert by_id["TE-1"].stack_base == StackBase(
+                spec_id="TE-2",
+                task_id=waiting_task,
+                branch="saffron/TE-2",
+                chain_branches=frozenset(),
+            )
+        hit = next(r for r in refusals if r.path.name == "candidate.md")
+        assert hit.kind == "depends_on", stack
+        reason = hit.reason
+        assert "retired_first" in reason, (stack, reason)
+        assert "done/" in reason, (stack, reason)
+        assert "not retired" in reason, (stack, reason)
+        assert "depends_on" not in reason, (stack, reason)
+        for named in ("TE-1", "TE-2", "TE-3", "TE-5"):
+            assert named in reason, (stack, named, reason)
+        assert "TE-9" not in reason, (stack, reason)
+        assert reason.index("TE-1") < reason.index("TE-2") < reason.index("TE-3")
+        assert reason.index("TE-3") < reason.index("TE-5")
+        assert "1 file in done/ could not be read as a spec" in reason, (stack, reason)
+
+
+def test_a_stack_night_refuses_the_spec_whose_retired_first_parents_are_in_its_order(
+    tmp_path, ledger
+):
+    """`SA-0279`'s own night, replayed (backlog item b-e7898b). Three queued
+    specs chain into one stack order, and a fourth needs them shipped first
+    and names them in `retired_first`. The order takes the chain and
+    refuses the fourth before any cell. Once the chain retires, the fourth
+    is the one candidate left.
+    """
+    root = tmp_path / "chain-queued"
+    root.mkdir()
+    directory = _spec_dir(root)
+    repo_id = _repo(ledger, origin=str(root))
+    _write_spec(directory, "p1.md", id="TE-1", touches=["t1.py"])
+    _write_spec(directory, "p2.md", id="TE-2", touches=["t2.py"], depends_on=["TE-1"])
+    _write_spec(directory, "p3.md", id="TE-3", touches=["t3.py"], depends_on=["TE-2"])
+    _write_spec(
+        directory,
+        "child.md",
+        id="TE-4",
+        touches=["t4.py"],
+        depends_on=["TE-3"],
+        retired_first=["TE-1", "TE-2", "TE-3"],
+    )
+
+    candidates, refusals = build_queue(directory, repo_id, ledger, stack=True)
+
+    assert [c.spec.id for c in candidates] == ["TE-1", "TE-2", "TE-3"]
+    assert len(refusals) == 1, refusals
+    assert refusals[0].path.name == "child.md"
+    assert refusals[0].kind == "depends_on"
+    for parent in ("TE-1", "TE-2", "TE-3"):
+        assert parent in refusals[0].reason
+
+    root2 = tmp_path / "chain-retired"
+    root2.mkdir()
+    directory2 = _spec_dir(root2)
+    repo_id2 = _repo(ledger, origin=str(root2))
+    (directory2 / "done").mkdir()
+    _write_spec(directory2 / "done", "p1.md", id="TE-1", touches=["t1.py"])
+    _write_spec(
+        directory2 / "done", "p2.md", id="TE-2", touches=["t2.py"], depends_on=["TE-1"]
+    )
+    _write_spec(
+        directory2 / "done", "p3.md", id="TE-3", touches=["t3.py"], depends_on=["TE-2"]
+    )
+    _write_spec(
+        directory2,
+        "child.md",
+        id="TE-4",
+        touches=["t4.py"],
+        depends_on=["TE-3"],
+        retired_first=["TE-1", "TE-2", "TE-3"],
+    )
+
+    candidates2, refusals2 = build_queue(directory2, repo_id2, ledger, stack=True)
+
+    assert [c.spec.id for c in candidates2] == ["TE-4"]
+    assert refusals2 == []
 
 
 def test_a_parent_whose_pushed_commit_reached_the_default_branch_satisfies_its_child(
@@ -4805,8 +4967,15 @@ def test_no_real_spec_is_refused_on_its_own_acceptance_criteria(tmp_path, ledger
         "SA-0280",
         "SA-0283",
     ]
+    # Zero at this base: no retired spec declares `retired_first` yet. Named
+    # here so a future declaration lands in its own shape (b-e7898b).
+    retired_first_shaped = [r for r in refusals if "retired_first" in r.reason]
+    assert [r.path.name[:7] for r in retired_first_shaped] == []
     assert all(
         "depends_on" in r.reason
         for r in refusals
-        if r not in disclosed and r not in claude_touching and r not in inline_mutant
+        if r not in disclosed
+        and r not in claude_touching
+        and r not in inline_mutant
+        and r not in retired_first_shaped
     )

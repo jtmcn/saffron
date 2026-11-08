@@ -711,6 +711,33 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         print(f"{spec.id:<10} refused  {retirement}")
         return 1
 
+    # `retired_first` is the operator's own precondition (b-e7898b), read from
+    # `done/` at this base, never the working copy. A spec with none skips this.
+    if spec.retired_first:
+        with tempfile.TemporaryDirectory() as scratch:
+            try:
+                exported = git_mirror.export_saffron_dir(
+                    mirror, base_sha, Path(scratch) / "retired-first"
+                )
+            except git_mirror.GitError as broke:
+                # Its two causes look alike here too (`_protected_paths_at`),
+                # so this names only the read that failed, never "not retired".
+                print(
+                    f"{spec.id:<10} .saffron/specs/{scheduler.RETIRED_DIRNAME}/ "
+                    f"at {base_sha} could not be read, so retired_first could "
+                    f"not be checked: {broke}"
+                )
+                return 2
+            retired, retired_failures = scheduler._retired_ids(
+                exported / ".saffron" / "specs"
+            )
+        not_shipped = scheduler.retired_first_refusal(
+            spec, retired, len(retired_failures)
+        )
+        if not_shipped is not None:
+            print(f"{spec.id:<10} refused  {not_shipped}")
+            return 1
+
     # Recorded, not merely applied: three ceilings govern a run and only one of
     # them appears in the exit. SA-0005 was stopped by the turn ceiling with
     # more than half its budget left, and nothing on the way in had said what

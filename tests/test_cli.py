@@ -3213,7 +3213,11 @@ def _repo_with_spec(
     specs.mkdir(parents=True)
     (specs / "SY-1.md").write_text(spec_text)
     for name, text in (extra_specs or {}).items():
-        (specs / name).write_text(text)
+        # `name` can nest under `done/` (b-e7898b). A plain `specs/<name>`
+        # write before this needed no directory of its own to create.
+        path = specs / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
     if policy_yaml is not None:
         (repo / ".saffron" / "policy.yaml").write_text(policy_yaml)
     for path, spec_id in (markers or {}).items():
@@ -3237,6 +3241,112 @@ _A_SPEC = (
     "---\nid: SY-1\ntitle: One\ntype: chore\n---\n\n"
     "## Acceptance criteria\n- [ ] it works\n"
 )
+
+_A_LIVE_PARENT = "---\nid: TE-2\ntitle: parent\ntype: chore\n---\n\nbody\n"
+
+
+def test_a_spec_whose_retired_first_is_queued_at_base_refuses_before_the_cell_starts(
+    tmp_path, monkeypatch, capsys
+):
+    """`saffron cell`'s own `retired_first` witness (backlog item b-e7898b):
+    a real `done/` at `base_sha`, read through the real `cli._run_cell`, the
+    same shape `test_a_spec_whose_touches_are_protected_refuses_before_the_
+    cell_starts` uses for `protected_touch_refusal`."""
+    repo = _repo_with_spec(
+        tmp_path,
+        spec_text=_A_SPEC,
+        extra_specs={
+            "parent.md": _A_LIVE_PARENT,
+            "done/broken.md": "no frontmatter here\n",
+        },
+    )
+    args = _namespace(repo, tmp_path)
+    args.spec = tmp_path / "SY-9.md"
+    args.spec.write_text(
+        "---\nid: SY-9\ntitle: Nine\ntype: feature\n"
+        "touches: ['src/**']\nretired_first: ['TE-2']\n---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+    # Moved in the working copy only, after the clone. `_local_origin_with_
+    # policy`'s own property: `base_sha`, not that copy, is what gets read.
+    (repo / ".saffron" / "specs" / "done").mkdir(exist_ok=True)
+    (repo / ".saffron" / "specs" / "parent.md").rename(
+        repo / ".saffron" / "specs" / "done" / "parent.md"
+    )
+    monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
+    started = False
+
+    def _started(*_a, **_k):
+        nonlocal started
+        started = True
+        raise SystemExit(0)
+
+    monkeypatch.setattr("saffron.task.run_one_cell", _started)
+    ledger = Ledger(tmp_path / "l.db")
+
+    result = cli._run_cell(args, ledger, tmp_path / "out")
+
+    assert result == 1
+    assert not started  # no cell, no model call
+    out = capsys.readouterr().out
+    assert out.startswith("SY-9")
+    assert "refused" in out
+    assert "retired_first" in out
+    assert "TE-2" in out
+    assert "not retired" in out
+    assert "1 file in done/ could not be read as a spec" in out
+    count = ledger._db.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+    assert count == 0
+    ledger.close()
+
+    # The same precondition met: retired at `base_sha`, queued again only in
+    # the working copy. The cell is reached despite that reversal.
+    repo2 = _repo_with_spec(
+        tmp_path,
+        spec_text=_A_SPEC,
+        dirname="repo2",
+        extra_specs={"done/parent.md": _A_LIVE_PARENT},
+    )
+    args2 = _namespace(repo2, tmp_path)
+    args2.spec = tmp_path / "SY-10.md"
+    args2.spec.write_text(
+        "---\nid: SY-10\ntitle: Ten\ntype: feature\n"
+        "touches: ['src/**']\nretired_first: ['TE-2']\n---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+    (repo2 / ".saffron" / "specs" / "done" / "parent.md").rename(
+        repo2 / ".saffron" / "specs" / "parent.md"
+    )
+
+    cell_spec, _printed = _capture_cell_spec(
+        monkeypatch, repo2, tmp_path, args2, capsys
+    )
+
+    assert cell_spec.spec_id == "SY-10"
+
+    # A third repo with no `.saffron` at `base_sha` at all. The line names
+    # the failed read, never "not retired", and the exit is 2, not 1.
+    third = tmp_path / "third"
+    third.mkdir()
+    repo3 = _local_origin(third)
+    base_sha3 = _rev_parse(repo3, "HEAD")
+    args3 = _namespace(repo3, tmp_path)
+    args3.spec = tmp_path / "SY-11.md"
+    args3.spec.write_text(
+        "---\nid: SY-11\ntitle: Eleven\ntype: feature\n"
+        "touches: ['src/**']\nretired_first: ['TE-2']\n---\n\n"
+        "## Acceptance criteria\n- [ ] it works\n"
+    )
+
+    result3 = cli._run_cell(args3, Ledger(tmp_path / "l3.db"), tmp_path / "out3")
+
+    assert result3 == 2
+    out3 = capsys.readouterr().out
+    assert out3.startswith("SY-11")
+    assert "done/" in out3
+    assert base_sha3 in out3
+    assert "not retired" not in out3
+    assert "refused" not in out3
 
 
 def test_queue_prints_the_real_scheduler_queue_and_writes_nothing_to_the_ledger(

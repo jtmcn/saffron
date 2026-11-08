@@ -925,3 +925,28 @@ def test_a_removes_entry_is_refused_on_each_shape_consumes_refuses():
     # `consumes` with no `depends_on` still refuses, unlike `removes`.
     with pytest.raises(SpecError):
         parse_spec("---\nid: TE-1\ntitle: t\ntype: chore\nconsumes:\n  - a/b.py\n---\n")
+
+
+def test_retired_first_loads_as_a_list_of_ids_with_no_depends_on():
+    """A spec declares `retired_first`, a list of spec ids this spec's own
+    change needs retired first (backlog item b-e7898b). It loads as the
+    declared list, in order, and needs no `depends_on` to parse."""
+    ordered = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: chore\n"
+        "retired_first:\n  - TE-9\n  - TE-2\n---\n"
+    )
+    assert ordered.retired_first == ["TE-9", "TE-2"]
+    assert ordered.depends_on == []
+
+    omitted = parse_spec("---\nid: TE-1\ntitle: t\ntype: chore\n---\n")
+    assert omitted.retired_first == []
+
+    with_parent = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: chore\n"
+        "depends_on: [TE-0]\nretired_first:\n  - TE-0\n---\n"
+    )
+    assert with_parent.retired_first == ["TE-0"]
+
+    with pytest.raises(SpecError) as excinfo:
+        parse_spec("---\nid: TE-1\ntitle: t\ntype: chore\nretired_first: TE-1\n---\n")
+    assert isinstance(excinfo.value.__cause__, ValidationError)
