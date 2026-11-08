@@ -386,8 +386,9 @@ repos        (repo_id, name, origin, mirror_path, policy_sha, image_tag,
 runs         (run_id, batch_id, repo_id, base_sha, preflight, started_at,
               ended_at, status)
 tasks        (task_id, run_id, spec_id, spec_sha, state, risk, branch, policy_sha,
-              prompt_sha, engine_commit, parent_task_id, worktree, volume,
-              budget_usd, spent_usd_est, updated_at)
+              prompt_sha, engine_commit, budget_usd, spent_usd_est, added,
+              removed, pushed_sha, pushed_in_state, pr_url, merged_head_sha,
+              record_key, updated_at)
 attempts     (attempt_id, task_id, phase, n, session_id, model, started_at,
               ended_at, subtype, terminal_reason, num_turns, cost_usd_est,
               cost_floor_usd_est, earned_risk)
@@ -861,7 +862,8 @@ The session opens by writing `plan.json` before touching anything:
 ```json
 {"understanding": "...", "approach": "...",
  "files_to_change": ["src/...", "tests/..."],
- "test_strategy": "...", "risks": ["..."], "blocking_questions": []}
+ "test_strategy": "...", "risks": ["..."], "blocking_questions": [],
+ "estimated_lines": 120, "estimated_test_lines": 40}
 ```
 
 Validated host-side with Pydantic. **Auto-rejected, with no model call,** if any of these holds: `files_to_change` ⊄ `touches`, it intersects `forbidden` or global protected paths, `blocking_questions` is non-empty, or no test file appears and `type` ∈ {feature, bug}. On rejection the session is killed before a single implementation token is spent. On schema-invalid output, one re-prompt with the validation error, then reject.
@@ -1231,7 +1233,7 @@ Dropped findings are recorded with `anchored = false`, not deleted. A lens that 
 
 Four lenses, **different lenses, not repeated ones**:
 
-1. **Correctness & data semantics**: timezones, chunk boundaries, null/gap propagation, unit errors, market-hours assumptions.
+1. **Correctness & data semantics**: timezones, chunk boundaries, null/gap propagation, unit errors, market-hours assumptions, and what a failure leaves behind on disk or in a worktree (`SA-0286`).
 2. **Contract & schema**: public API compatibility, migration reversibility, serialization and schema conformance, anything downstream consumers depend on.
 3. **Test adequacy**: whether the tests in the diff would notice the code being wrong. It catches an assertion on a value the exercised path never reads. It catches a test that constructs the value it then asserts, and a structural check over source text a rename defeats. It catches a witness whose setup is the only input the change is correct for.
 4. **Conventions**: each hunk read against the repo's standing instructions at `base_sha`, and against the code or text it describes. It catches a term used against its meaning, a stated rule broken, and a type, constant or helper restated rather than imported. It reads the `_Avoid_` lists, and a word on one is a finding where the standing instructions enforce them. It also catches a comment, docstring, citation, count, message, log line or prompt string that says what the code or cited text does not. Such a line can sit outside every hunk, when the change made it false (ADR 8, SA-0195).
@@ -1265,7 +1267,7 @@ This section argued until 2026-09-02 that lens #3 in a naive design would be "te
 
 **The host runs the probe the lens names** (`SA-0109`). After REVIEW, the host applies each anchored adequacy finding's vacuity probe in a gate-only cell. A probe that edits a declared test path is `unproven` and never applied. So is every probe in a repo that declares no `test_paths`, since source cannot be told from test (`SA-0119`). For the rest, the host runs the repo's `tests` gate over the probed tree. Only a failure of a test the diff adds kills a probe (`SA-0138`). Any other new failure is recorded beside the verdict and kills nothing. The verdict decides the finding. `survived` makes it a `blocker`, because no test the diff adds noticed the behaviour break. `killed` demotes it to a `note`. `unproven` leaves the severity the lens filed, and a probe the cell could not apply or answer is `unproven`, never `killed`. The lens still runs nothing.
 
-**Blast radius is retired, not deferred**. It is the lens that would have caught the `git config diff.srcPrefix` escape (Appendix L), and that argument stands. But the lens was never built, because it was gated on a risk tier nothing wires. The gap measured on two live diffs was test adequacy instead. Reviving it is a new decision with its own evidence, not the resumption of this one. What the retirement does **not** touch is the second anchoring target above: the reconciler rule blast radius motivated is load-bearing for #3 as it now stands. One consequence is deliberate and worth stating rather than discovering. All four prompts still route callers-and-downstream findings away to "the blast-radius lens". So that class is owned by nobody, and four seats suppress it rather than one seat leaving it uncovered. It stays so on purpose. A `Not yours` list edited to release the remit would scatter it across four lenses. That is the overlap §5.5 spends its no-voting rule on.
+**Blast radius is retired, not deferred**. It is the lens that would have caught the `git config diff.srcPrefix` escape (Appendix L), and that argument stands. But the lens was never built, because it was gated on a risk tier nothing wires. The gap measured on two live diffs was test adequacy instead. Reviving it is a new decision with its own evidence, not the resumption of this one. What the retirement does **not** touch is the second anchoring target above: the reconciler rule blast radius motivated is load-bearing for #3 as it now stands. One consequence is deliberate and worth stating rather than discovering. All four prompts still route callers-and-downstream findings away to "the blast-radius lens". So that class is owned by nobody, and four seats suppress it rather than one seat leaving it uncovered. It stays so on purpose. A `Not yours` list edited to release the remit would scatter it across four lenses. That is the overlap §5.5 spends its no-voting rule on. A second overlap is kept on purpose (`SA-0286`). A truncating write sits in the correctness remit as what a failure leaves behind. It sits in the contract remit too, where a written contract promises the file. The contract lens filed one that way in the 2026-09-07 pass, and `SA-0286` did not take that route from it.
 
 **Ungated, by decision**. The lens runs at every risk tier, not at `elevated` only. Measured against this repo's own specs, 28 of 34 declare `elevated`. So gating would exclude six tasks to save one lens session ($0.76–$0.91 on the two it was priced against). Each lens adds $2 to REVIEW's floor (§4.3). So the third lens, and then the fourth, `conventions` (ADR 8), each raise what REVIEW can spend past a task's budget by $2. The six-task figure dates from 2026-09-02 and no longer holds. Re-measured 2026-09-30: 100 of 179 specs run `elevated` once `elevate_on` applies, and 73 declare it. Gating would now exclude 79 tasks. The operator settled it on 2026-11-07: no tier gates a lens (backlog item b-07f694). A lens skipped on 79 of 179 tasks would weaken what a `0 blockers` line says, and a lens costs under a dollar.
 
@@ -1665,7 +1667,7 @@ It says otherwise (rev 18). `ontology/queries/` therefore stays where it is, as 
   docs/adr/              # one decision per file, as it stands today (ADR 1)
   CONTEXT.md             # what the words mean — injected per phase (§5.3)
   saffron/
-    cli.py                 # batch, run, queue, ratify, gc
+    cli.py                 # batch, run, queue, ratify, gc, fold, migrate
     ledger.py              # SQLite schema + DAO
     record/
       contract.py  refs.py  memory.py  routed.py  fold.py  migrate.py   # the append-only record of facts, the fold that rebuilds a ledger from it, and the migration that writes a ledger's tasks into it (item 170)
