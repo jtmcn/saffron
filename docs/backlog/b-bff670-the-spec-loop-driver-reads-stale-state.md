@@ -7,7 +7,7 @@ tier: 2
 filed: 2026-09-25
 by_hand: true
 specs: []
-prs: [616]
+prs: [616, 1050]
 commits: []
 cites: [§8]
 related: [b-e8027b, b-a4df62]
@@ -45,3 +45,4 @@ is item b-e8027b, and it is recorded there.
 - 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
   `.claude/`, and `SA-0279` refuses any spec that touches that path.
 - 2026-11-07: done by hand in #. `status` asks GitHub, and `check` takes `--spec`.
+- 2026-11-07: done by hand in #1050. `status` asks GitHub, and `check` takes `--spec`.

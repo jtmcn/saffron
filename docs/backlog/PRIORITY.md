@@ -209,7 +209,7 @@ writing `SA-0141`. It is the by-hand edit to §5.3 and the glossary, done in
 that spec's pull request.
 
 **Placed 2026-09-25**, from the spec loop's run 16: ~~**b-04a5d9**~~, ~~**b-e0cd57**~~,
-**b-bff670**, then **b-c375d6**. The first is a PR body that calls a new
+~~**b-bff670**~~, then **b-c375d6**. The first is a PR body that calls a new
 advisory failure present at base. The second is a refusal that names ports
 and not processes. The last two are the loop's tools reading stale state.
 
