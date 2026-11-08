@@ -60,7 +60,8 @@ class ViewGraph:
 
 
 class ViewGraphError(Exception):
-    """The graph failed `shapes_path`. The message is pyshacl's own report."""
+    """The view cannot start. Either the graph failed `shapes_path`, with
+    pyshacl's own report as the message, or the ledger or port refused."""
 
 
 def open_read_only(path: Path) -> sqlite3.Connection:

@@ -13,6 +13,7 @@ import html
 import json
 import socket
 import socketserver
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -995,6 +996,7 @@ def test_a_post_is_405(tmp_path: Path) -> None:
 
 
 def test_a_non_loopback_host_raises(tmp_path: Path) -> None:
+    from saffron.view.graph import ViewGraphError
     from saffron.view.server import make_server
 
     ledger, repo_id, spares = _ledger(tmp_path)
@@ -1021,7 +1023,7 @@ def test_a_non_loopback_host_raises(tmp_path: Path) -> None:
         server = make_server(ledger_path, host=good_host, port=0)
         server.server_close()
 
-    with contextlib.suppress(OSError):
+    with contextlib.suppress(ViewGraphError):
         server = make_server(ledger_path, host="127.0.0.2", port=0)
         server.server_close()
 
@@ -1088,6 +1090,84 @@ def test_serve_exits_2_when_there_is_no_ledger(
         cwd=Path(__file__).resolve().parent.parent,
     )
     assert result.stdout.strip() == "False"
+
+
+@pytest.mark.parametrize("failure", ["status", "column", "port"])
+def test_serve_exits_2_with_one_line_on_each_startup_failure(
+    failure: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An unknown gate status, a ledger missing a column `build` reads, and
+    a port in use each exit 2 with one printed line (b-d269f4)."""
+    from saffron import cli
+
+    monkeypatch.setattr(
+        socketserver.BaseServer,
+        "serve_forever",
+        lambda self: (_ for _ in ()).throw(KeyboardInterrupt),
+    )
+    ledger, repo_id, spares = _ledger(tmp_path)
+    run_id = ledger.create_run(repo_id, "base")
+    task_id = ledger.create_task(run_id, "SA-UP", "su", "bu")
+    _set_task(ledger, task_id, state="DRAFT")
+    attempt = ledger.open_attempt(task_id, "GATING")
+    ledger.record_gate_result(_gate("lint", "pass"), attempt_id=attempt)
+    ledger.create_batch(1.0)
+    _close(ledger, spares)
+
+    db = sqlite3.connect(tmp_path / "ledger.db")
+    if failure == "status":
+        db.execute("UPDATE gate_results SET status = 'mystery'")
+    elif failure == "column":
+        db.execute("ALTER TABLE batches DROP COLUMN spent_usd_est")
+    db.commit()
+    db.close()
+
+    taken = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    taken.bind(("127.0.0.1", 0))
+    taken.listen()
+    extra = ["--port", str(taken.getsockname()[1])] if failure == "port" else []
+    try:
+        assert cli.main(["--home", str(tmp_path), "serve", *extra]) == 2
+    finally:
+        taken.close()
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 1, lines
+    assert lines[0].startswith("serve: "), lines
+
+
+def test_the_index_rounds_each_batchs_budget_and_spend_to_cents(
+    tmp_path: Path,
+) -> None:
+    ledger, _repo_id, spares = _ledger(tmp_path)
+    batch_id = ledger.create_batch(5.0)
+    ledger.close_batch(batch_id, "UNTIL")
+    _set_batch(ledger, batch_id, spent_usd_est=51.952599899999996)
+    _close(ledger, spares)
+
+    with _running(tmp_path / "ledger.db") as base:
+        status, body = _get(base, "/")
+    assert status == 200
+    [row] = _parse(body).tables["batches"]
+    assert row[4] == "5.00"
+    assert row[5] == "51.95"
+    assert "51.9525" not in body
+
+
+def test_a_post_with_a_negative_length_is_405_without_a_read(tmp_path: Path) -> None:
+    ledger, _repo_id, spares = _ledger(tmp_path)
+    _close(ledger, spares)
+
+    with _running(tmp_path / "ledger.db") as base:
+        host, port = urllib.parse.urlsplit(base).netloc.split(":")
+        with socket.create_connection((host, int(port)), timeout=5) as sock:
+            sock.sendall(
+                b"POST / HTTP/1.0\r\nHost: 127.0.0.1\r\nContent-Length: -1\r\n\r\n"
+            )
+            first = sock.recv(4096)
+    assert first.split(b"\r\n", 1)[0].split()[1] == b"405"
 
 
 def test_serve_binds_the_given_port_and_exits_0_when_interrupted(

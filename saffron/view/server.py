@@ -28,7 +28,13 @@ from saffron.intake import DisclosedMutantError, SpecError, parse_spec
 from saffron.projection import DATA_NS, NS, VOCABULARY
 from saffron.report.pr_body import extract_problem
 from saffron.repos.mirror import _REGULAR_MODES
-from saffron.view.graph import LeftOut, ViewGraph, build, open_read_only
+from saffron.view.graph import (
+    LeftOut,
+    ViewGraph,
+    ViewGraphError,
+    build,
+    open_read_only,
+)
 
 FAILURE_LINE_CAP = 200
 
@@ -206,18 +212,27 @@ def make_server(
 ) -> ThreadingHTTPServer:
     """Builds the view graph once and returns an unstarted server on
     `(host, port)`. A graph that fails the shapes raises `ViewGraphError`
-    from `build`, propagated here with no socket touched. `host` must be
+    from `build`, with no socket touched. A ledger `build` cannot read, or a
+    port that refuses the bind, raises it too, as one line. `host` must be
     `localhost` or an IPv4 loopback address, checked before anything else."""
     _check_loopback(host)
     conn = open_read_only(ledger_path)
     try:
         view: ViewGraph = build(conn)
+    except (KeyError, IndexError, sqlite3.Error) as broke:
+        raise ViewGraphError(
+            f"serve: {ledger_path} does not read as a view graph: "
+            f"{type(broke).__name__}: {broke}"
+        ) from broke
     finally:
         conn.close()
     store = ox.Store()
     store.load(input=view.turtle, format=ox.RdfFormat.TURTLE)
     store.load(path=str(VOCABULARY), format=ox.RdfFormat.TURTLE)
-    return _ViewServer((host, port), _Handler, store, view.left_out, ledger_path)
+    try:
+        return _ViewServer((host, port), _Handler, store, view.left_out, ledger_path)
+    except OSError as broke:
+        raise ViewGraphError(f"serve: cannot bind {host}:{port}: {broke}") from broke
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -258,7 +273,9 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length") or 0)
-        self.rfile.read(min(length, _MAX_POST_BODY))
+        # read(-1) reads to EOF, so a negative length would hold the thread.
+        if length > 0:
+            self.rfile.read(min(length, _MAX_POST_BODY))
         self.send_response(405)
         self.send_header("Allow", "GET")
         self.send_header("Content-Length", "0")
@@ -363,8 +380,8 @@ def _batch_row(sol: ox.QuerySolution) -> list[str]:
         html.escape(_text(sol["started"])),
         html.escape(_text(sol["ended"])),
         html.escape(_name(sol["because"])),
-        html.escape(_text(sol["budget"])),
-        html.escape(_text(sol["spent"])),
+        html.escape(_money(sol["budget"])),
+        html.escape(_money(sol["spent"])),
         html.escape(_text(sol["tasks"])),
     ]
 
@@ -503,6 +520,11 @@ _CENTS = Decimal("0.01")
 
 def _round_cents(value: Decimal) -> str:
     return str(value.quantize(_CENTS, rounding=ROUND_HALF_UP))
+
+
+def _money(value: _Term | None) -> str:
+    """A bound decimal rounded to cents, or `""` for an unbound one."""
+    return "" if value is None else _round_cents(Decimal(value.value))
 
 
 def _attempt_solutions(store: ox.Store, task_id: int) -> list[ox.QuerySolution]:
