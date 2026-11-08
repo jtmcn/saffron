@@ -171,7 +171,7 @@ path and the retirement marker (`saffron/scheduler.py:949-969`).
 Everything above `saffron/scheduler.py:971` runs in both modes.
 
 **The attended path**. `_run_cell` loads the spec from the given path
-(`saffron/cli.py:637`). It refuses on the protected list and on a
+(`saffron/cli.py:650`). It refuses on the protected list and on a
 retirement marker, each read at `base_sha`, and prints
 `{spec.id:<10} refused  {reason}` and returns 1 (`saffron/cli.py:664-689`).
 The ceilings are resolved next (`saffron/cli.py:695`).
@@ -239,7 +239,7 @@ Add a sentence on the field to the module docstring of
   model-authored code (§2). The spec's author names them. The item's
   "every spec queued at its base" is met for the specs the author names.
 - **A stack batch's recorded spec text**. `_recorded_spec_text`
-  (`saffron/task.py:632`) re-checks a recorded text before its cell. A revision
+  (`saffron/task.py:638`) re-checks a recorded text before its cell. A revision
   that adds `retired_first` is not checked there. The order already
   refused or admitted the spec on its committed text.
 - **The shape of an id**. An entry is not validated against the `id`
