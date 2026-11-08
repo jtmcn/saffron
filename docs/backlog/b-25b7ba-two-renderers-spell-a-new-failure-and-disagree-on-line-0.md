@@ -7,7 +7,7 @@ filed: 2026-10-30
 closed: 2026-11-08
 by_hand: true
 specs: []
-prs: []
+prs: [1081]
 commits: []
 cites: [§5.4]
 related: [b-e0044f]
@@ -34,4 +34,4 @@ drives a failure at line 0 through each caller.
 ## Record
 
 - 2026-10-30: filed from the spec loop's run 50.
-- 2026-11-08: done by hand.
+- 2026-11-08: done by hand in #1081.

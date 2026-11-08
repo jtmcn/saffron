@@ -7,7 +7,7 @@ filed: 2026-09-29
 closed: 2026-11-08
 by_hand: true
 specs: [SA-0194]
-prs: [598]
+prs: [598, 1081]
 commits: []
 cites: []
 related: [b-38d45f]
@@ -32,4 +32,4 @@ rename above and reads the finding unanchored.
 ## Record
 
 - 2026-09-29: filed from the spec loop's run 22.
-- 2026-11-08: done by hand.
+- 2026-11-08: done by hand in #1081.
