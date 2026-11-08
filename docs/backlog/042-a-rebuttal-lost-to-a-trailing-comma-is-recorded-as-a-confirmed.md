@@ -3,7 +3,7 @@ id: 42
 title: A rebuttal lost to a trailing comma is recorded as a confirmed disagreement
 status: partial
 tier: 1
-specs: [SA-0040, SA-0071]
+specs: [SA-0040, SA-0071, SA-0340]
 prs: [93, 215]
 commits: []
 cites: []
