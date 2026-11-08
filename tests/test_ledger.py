@@ -1067,7 +1067,7 @@ def test_a_tasks_mutants_commit_is_a_task_created_fact_the_fold_keeps(tmp_path):
     assert ledger.task_mutants_commit(with_commit) == "c" * 40
     assert ledger.task_mutants_commit(without_commit) is None
 
-    # The key is on the fact itself, `None` included, not merely absent
+    # The key is on the fact itself, `None` included, not absent
     # and defaulted by a reader.
     without_key = ledger.record_key(without_commit)
     assert without_key is not None
