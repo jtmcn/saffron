@@ -39,7 +39,8 @@ costs $8–22 and about an hour. Your job is to find defects like that first.
 2. `CLAUDE.md`, especially "Invariants worth knowing before editing", and
    `CONTEXT.md`, especially the _Avoid_ lines.
 3. `docs/agents/issue-tracker.md`'s conventions for `acceptance`, `witness`,
-   `mutant` and `preserves`.
+   `mutant` and `preserves`. A mutant lives on `refs/saffron/mutants`, never
+   inline: `git show refs/saffron/mutants:<spec id>.yaml` prints a spec's.
 4. Every `DESIGN.md` section the spec cites.
 5. Every file the spec names, and every file that calls, imports or reads what
    the spec changes. Find them with `git grep` at `base`.
@@ -62,9 +63,9 @@ trivial.
    necessary. A symbol the change adds that only a later spec calls needs a
    `pending_symbols` entry, or the `dead` gate fails the task: a blocker.
 3. **Witness/mutant discipline.** A spec whose change edits existing code
-   declares a `mutant` per criterion. Where one is missing, name a plausible
-   wrong implementation its witness would pass; if you can, that is a
-   blocker. A `preserves: true` witness must already exist at `base` (use
+   has a `mutant` per criterion on the ref, keyed by witness. Where one is
+   missing, name a plausible wrong implementation its witness would pass;
+   if you can, that is a blocker. A `preserves: true` witness must already exist at `base` (use
    `git grep` for the test name). A non-`preserves` witness must not already
    pass at `base`. Name the existing test at `base` that already passes and
    would serve as the witness, and that is a blocker. Behaviour that already
