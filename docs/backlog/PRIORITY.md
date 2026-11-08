@@ -271,7 +271,7 @@ longer retires a spec, so the delegate retires each one and closes its item
 by hand. A step the repo declares would let the finish do both.
 
 **Placed 2026-10-09**, from the spec loop's run 32: **b-910cef**,
-**b-a33889**, **b-180f9f**, ~~**b-8a0c9a**~~, ~~**b-5abe53**~~, **b-f10412**, then
+~~**b-a33889**~~, **b-180f9f**, ~~**b-8a0c9a**~~, ~~**b-5abe53**~~, **b-f10412**, then
 ~~**b-25f2b2**~~. The queue refuses every child of an open stack. A mint or a
 revision that meets a cell runtime failure still misses its layer. A
 resumed row keeps a stale merged head. The end review grades heads from
