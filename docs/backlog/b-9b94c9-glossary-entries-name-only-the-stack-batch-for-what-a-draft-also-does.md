@@ -7,7 +7,7 @@ closed: 2026-11-08
 by_hand: true
 filed: 2026-10-09
 specs: []
-prs: [781, 782, 787]
+prs: [781, 782, 787, 1062]
 commits: []
 cites: []
 related: [b-466005, b-98a3be]
@@ -37,4 +37,4 @@ unchanged afterwards.
 ## Record
 
 - 2026-10-09: filed from the spec loop's run 32.
-- 2026-11-08: done by hand.
+- 2026-11-08: done by hand in #1062.

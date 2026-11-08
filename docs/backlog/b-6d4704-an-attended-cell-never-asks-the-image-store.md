@@ -5,7 +5,7 @@ status: partial
 tier: 3
 filed: 2026-10-14
 specs: [SA-0289]
-prs: [871]
+prs: [871, 1062]
 commits: []
 cites: [§4.2.1, §5.1.2]
 related: [b-1c20da]

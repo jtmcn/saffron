@@ -6,7 +6,7 @@ tier: 2
 by_hand: true
 filed: 2026-10-27
 specs: [SA-0326]
-prs: []
+prs: [1062]
 commits: []
 cites: [§4.1, §5.7, §6.1]
 related: [b-549012]
