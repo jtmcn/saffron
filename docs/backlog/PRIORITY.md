@@ -209,7 +209,7 @@ writing `SA-0141`. It is the by-hand edit to §5.3 and the glossary, done in
 that spec's pull request.
 
 **Placed 2026-09-25**, from the spec loop's run 16: ~~**b-04a5d9**~~, ~~**b-e0cd57**~~,
-**b-bff670**, then **b-c375d6**. The first is a PR body that calls a new
+~~**b-bff670**~~, then **b-c375d6**. The first is a PR body that calls a new
 advisory failure present at base. The second is a refusal that names ports
 and not processes. The last two are the loop's tools reading stale state.
 
@@ -370,7 +370,7 @@ wrong first line.
 **Placed 2026-10-16**, from the spec loop's run 42: **b-60317d**.
 `reconcile`'s `head_moved` comment says nothing judges a moved head.
 
-**Placed 2026-10-17**, from the spec loop's run 43: **b-74a122**.
+**Placed 2026-10-17**, from the spec loop's run 43: ~~**b-74a122**~~.
 `CONTEXT.md`'s Refusal entry lacks the citation cause.
 
 **Placed 2026-11-02**, from the spec loop's run 52: **b-e4cb58**. `CONTEXT.md`
@@ -407,7 +407,7 @@ in `policy.yaml`. **b-2227b0**, closed as parked, records a draft ADR.
 Each is a gap a seat, a finish or the run found and the stack left alone.
 
 **Placed 2026-10-27**, from the spec loop's run 49:
-**b-1b8b1e**, **b-92c92a**, **b-2a03c2**, **b-d2afe3**, **b-1ff5a3** and
+**b-1b8b1e**, **b-92c92a**, **b-2a03c2**, **b-d2afe3**, ~~**b-1ff5a3**~~ and
 **b-3a0789**. Each is a gap a seat, a finish or the run found and the stack
 left alone.
 
@@ -417,21 +417,21 @@ Two renderers spell a new failure, and they disagree on line 0.
 **The 2026-09-04 sort's tier 3, plus what spec loop runs up to 32 added.**
 Each line keeps the order it was filed in.
 
-- From the first sort: **31**, **20**, **53**, ~~**54**~~, **55**, **75**, **76**,
+- From the first sort: **31**, **20**, **53**, ~~**54**~~, ~~**55**~~, **75**, **76**,
   **77**, **90**, **92**, **96**, **100**, **101** and **108**.
 - Filed 2026-09-12 to 2026-09-19: **116**, **121**, **122**, **130**, **134**,
   ~~**150**~~, **151**, **155**, **156**, **174** and **b-d6bff7**.
 - From spec loop runs 7 to 10: **b-990bd9**, **b-7431a2**, **b-9eceda**, **b-bc9951**,
   **b-0281e4**, **b-e9db0e**, **b-397edd**, **b-0e20e9**, **b-98dc4d**,
-  **b-27b9db**, **b-bbf663** and **b-6a9707**.
+  **b-27b9db**, ~~**b-bbf663**~~ and **b-6a9707**.
 - From the reviews of #393 and `SA-0120`, and spec loop runs 13 and 14: **b-d5d290**,
   **b-9ed36d**, **b-b431c1**, ~~**b-ac2f02**~~ and **b-49329e**.
 - From ADR 4's review and the superpowers comparison: ~~**b-07f694**~~,
   **b-7c88f8**, **b-e1afbb** and **b-3732ef**.
 - From spec loop runs 15 to 17 and `SA-0135`'s review: **b-f30189**, **b-a90136**,
   **b-e06dbc**, **b-32f492**, **b-8fb227**, **b-79d951**, **b-9ead75** and
-  **b-04d4c2**.
-- From the stack batch's spec reviews: **b-2d9ae9**, **b-223244**,
+  ~~**b-04d4c2**~~.
+- From the stack batch's spec reviews: ~~**b-2d9ae9**~~, **b-223244**,
   **b-acee54**, **b-6518ba**, **b-6a101f**, **b-7eb5f5** and **b-22ff3f**.
 - From the 2026-09-27 size pricing and spec loop run 32: **b-41664e**, **b-4b386f**,
   **b-d96f14**, **b-9b94c9**, **b-ff3141**, **b-a99c76**, **b-3a8504**,
@@ -498,7 +498,7 @@ holds, and `status` has no one-line form.
 run at once.
 
 **Placed 2026-10-03**, from the spec loop's run 27: **b-3b8eb2**,
-**b-3c17ab**, **b-835bfb**, **b-2944c9**, **b-b2fffe**, then **b-348114**.
+**b-3c17ab**, **b-835bfb**, **b-2944c9**, **b-b2fffe**, then ~~**b-348114**~~.
 The host never sees which criterion failed. REVIEW counts a test-side wrong
 version as unproven. A host listener that starts mid-loop is caught only at
 preflight. The rate's header key is spelled at seven sites. `SETTLED_STATES`
@@ -521,7 +521,7 @@ leave a side untested. The fold writes its spend rollup twice. A closed
 no socket list names no process.
 
 **Placed 2026-10-12**, from the spec loop's run 35: ~~**b-bff156**~~,
-**b-d3b755**, then **b-d7959f**. `ready_task` returns a Refusal after a cell.
+**b-d3b755**, then ~~**b-d7959f**~~. `ready_task` returns a Refusal after a cell.
 The host-probe line is built twice. The Mint entry says a re-offer waits.
 
 **Placed 2026-10-14**, from the spec loop's run 38: **b-6d4704**, **b-65dbbd**,
@@ -532,7 +532,7 @@ spells the proxy's Dockerfile by hand. §5.1 calls `/gates` the one bind mount.
 **b-dc41ef**. The loop's driver refuses an `EXHAUSTED` task with a PR. A
 History run's snapshot ignores `--home`.
 
-**Placed 2026-10-13**, from the spec loop's run 37: **b-be3adc**, then
+**Placed 2026-10-13**, from the spec loop's run 37: ~~**b-be3adc**~~, then
 **b-e4ab6f**. §5.5 lists lens #1 without the failure path. The code calls the
 subnet pool a bare pool.
 
@@ -563,7 +563,7 @@ sorts a reviewer's notes, and its stop signal adds nothing over a blocker count.
 **b-e8f092**. Each clears one area's hits, and together they bring the gate to zero.
 
 **Placed 2026-10-07**, from the spec loop's run 30: **b-cd41ac**, **b-7338e7**,
-then **b-d22c5a**. A spec named helpers absent at its base. Two repo rows on one
+then ~~**b-d22c5a**~~. A spec named helpers absent at its base. Two repo rows on one
 mirror prune each other. The docs name no `saffron migrate`.
 
 **b-d5d290 is filed here and is the fourth instance of one shape.** Building
@@ -587,7 +587,7 @@ thirds of the backlog. That is the deliberate consequence of ranking by the
 milestone rather than by what is nearest to hand. Of the 308 open items, 42
 are by hand, since a cell cannot reach their files.
 
-**Placed 2026-11-04**, from the spec loop's run 53: **b-8c6696**, **b-a19ffd**
+**Placed 2026-11-04**, from the spec loop's run 53: **b-8c6696**, ~~**b-a19ffd**~~
 and **b-9bb8b7**. A spec missed the fixtures that pin the plan's sha. §5.3's
 `plan.json` lacks the estimate fields. Two resolvers copy one landedness rule.
 
