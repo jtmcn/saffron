@@ -170,7 +170,7 @@ SIGTERM during a silent agent turn waits for the turn to end, because the
 unwind closes a pipe a reader thread holds.
 
 **From the operator visibility plan and the spec loop's runs 5 to 10**, in
-this order: **43**, **66**, ~~**67**~~, **98**, **157**, **172**, **b-eac388**,
+this order: **43**, **66**, ~~**67**~~, **98**, ~~**157**~~, ~~**172**~~, **b-eac388**,
 **b-bc54d1**, **b-63ac52**, **b-952c34**, **b-60d804**,
 **b-281f0a** and **b-7d3810**. Then **160**, which is what
 item 141's close left. The Gate-only cell's suite is in a file because the

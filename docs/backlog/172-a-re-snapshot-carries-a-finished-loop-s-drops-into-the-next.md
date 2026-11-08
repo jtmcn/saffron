@@ -1,12 +1,13 @@
 ---
 id: 172
 title: A re-snapshot carries a finished loop's drops into the next, and nothing undoes a drop
-status: partial
+status: done
+closed: 2026-11-07
 tier: 2
 filed: 2026-09-17
 by_hand: true
 specs: []
-prs: [326]
+prs: [326, 1049]
 commits: []
 cites: []
 related: [137]
@@ -47,3 +48,4 @@ dropped by mistake.
   `snapshot --force` still carries a drop forward through `_carried`.
 - 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
   `.claude/`, and `SA-0279` refuses any spec that touches that path.
+- 2026-11-07: done by hand in #1049.
