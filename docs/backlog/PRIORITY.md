@@ -141,7 +141,7 @@ its batch. The `tests` gate takes a printed warning for every failure.
 `SA-0294` ports it. A batch stops at a candidate it cannot pay for, though a
 later one fits.
 
-**Placed 2026-10-17**, from the spec loop's run 43: ~~**b-3a79a0**~~. The loop's
+**Placed 2026-10-17**, from the spec loop's run 43: **b-3a79a0**. The loop's
 driver orders a stack by `depends_on`, not by the stack base a batch built.
 
 **Placed 2026-10-19**, from the spec loop's run 44: ~~**b-619b7d**~~, **b-71e2df**,
@@ -274,7 +274,7 @@ longer retires a spec, so the delegate retires each one and closes its item
 by hand. A step the repo declares would let the finish do both.
 
 **Placed 2026-10-09**, from the spec loop's run 32: **b-910cef**,
-~~**b-a33889**~~, **b-180f9f**, ~~**b-8a0c9a**~~, ~~**b-5abe53**~~, ~~**b-f10412**~~, then
+~~**b-a33889**~~, **b-180f9f**, ~~**b-8a0c9a**~~, ~~**b-5abe53**~~, **b-f10412**, then
 ~~**b-25f2b2**~~. The queue refuses every child of an open stack. A mint or a
 revision that meets a cell runtime failure still misses its layer. A
 resumed row keeps a stale merged head. The end review grades heads from

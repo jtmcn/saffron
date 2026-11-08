@@ -1,13 +1,12 @@
 ---
 id: b-3a79a0
 title: The loop's driver orders and guards a stack by `depends_on`, not by the stack base a batch built
-status: done
+status: partial
 tier: 2
 filed: 2026-10-17
-closed: 2026-11-08
 by_hand: true
 specs: []
-prs: []
+prs: [1067]
 commits: []
 cites: [§4.2.1]
 related: [b-cab612, b-f73cd0]
@@ -42,4 +41,4 @@ a running batch's stack sits on. Each has a test.
 
 - 2026-10-17: filed from the spec loop's run 43.
 - 2026-10-19: recurred in the spec loop's run 44. `driver.py stack` ordered #914 below #913 and left out #915 and #912. `driver.py size` measured `SA-0287` from the wrong base and read 0 tokens, where the diff is +118/-6. The delegate measured it and linked all eleven layers by hand, as stack #916.
-- 2026-11-08: done by hand.
+- 2026-11-08: partial by hand in #1067. `stack` follows the recorded predecessor and `status` warns before a push under a running child. A batch records a layer's base only at `READY_FOR_REVIEW`, so a child still in IMPLEMENT with no `depends_on` link goes unseen. Recording the base when the cell starts is a core change.

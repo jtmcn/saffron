@@ -1,13 +1,12 @@
 ---
 id: b-f10412
 title: "The loop driver's `stack` orders layers by `depends_on` alone, so it misreads a stack batch's chain"
-status: done
+status: partial
 tier: 2
 filed: 2026-10-09
-closed: 2026-11-08
 by_hand: true
 specs: []
-prs: [780, 788, 790]
+prs: [780, 788, 790, 1067]
 commits: []
 cites: []
 related: [b-2247dd, b-883f74]
@@ -47,4 +46,4 @@ batch whose `depends_on` names none of its predecessors.
   batch's own bases.
 - 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
   `.claude/`, and `SA-0279` refuses any spec that touches that path.
-- 2026-11-08: done by hand.
+- 2026-11-08: partial by hand in #1067. `stack` orders a batch's layers by the predecessor the ledger records. A hand-packaged layer has no ledger pull request, so `stack` still leaves it out, and naming one on the command line is not built.
