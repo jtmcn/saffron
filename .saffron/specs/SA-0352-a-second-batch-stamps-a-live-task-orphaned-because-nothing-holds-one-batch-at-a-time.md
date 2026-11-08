@@ -37,7 +37,7 @@ forbidden:
   - tests/test_cli.py
   - tests/test_reconcile.py
   - tests/test_sigterm.py
-budget_usd: 52
+budget_usd: 56
 max_attempts: 3
 max_turns: 230
 risk: standard
@@ -82,6 +82,7 @@ acceptance:
       - The contender waits for the lock rather than refusing at once.
       - A pid file created with `O_EXCL` stands in for the lock, so a killed holder's file refuses every later batch.
       - The lock file's descriptor is inheritable, so the holder's surviving child keeps the lock.
+      - A contender opens the lock file with mode `w`, so it truncates the holder's pid and command before its flock is refused.
   - claim: >-
       The lock lasts exactly as long as its holder's command. The witness
       drives each of `saffron batch`, `saffron cell` and `saffron draft` as
@@ -90,7 +91,7 @@ acceptance:
       each ends, a batch on the same home starts its work.
     witness: tests/test_home_lock.py::test_the_home_is_freed_when_its_holder_returns_or_raises
     wrong_versions:
-      - The lock is released on a normal return alone, so a holder that raised keeps it until the process exits.
+      - The lock is a raw `os.open` descriptor closed after a normal return alone, so a holder that raised keeps it.
       - The lock file is opened once at import and never closed.
 ---
 
@@ -143,8 +144,8 @@ There a second descriptor in the same process got `EWOULDBLOCK` from
 `LOCK_EX | LOCK_NB` on a held file. A child process took the lock, started a
 grandchild and was killed with SIGKILL. The lock was free at once, the
 grandchild still alive. Python opens a descriptor non-inheritable by default.
-Linux `flock` keeps the same per-description rule. That half is reasoned,
-not measured in the cell image.
+`tests/test_report.py:1992-1996` already runs the in-process refusal on Linux.
+The cross-process release under SIGKILL is not measured on Linux.
 
 **A docstring the change makes false.** `saffron/reconcile.py`'s module
 docstring names "a stamping scan that marks a live cell's row `ORPHANED`" as
@@ -168,10 +169,13 @@ Hold one exclusive lock per home:
 
 1. **A new module, `saffron/home_lock.py`.** A context manager takes the home
    directory and the command's name. It opens a lock file beside
-   `ledger.db` in that home and takes `fcntl.flock` with
-   `LOCK_EX | LOCK_NB`. On success it writes its own pid and the command's
-   name into the file. It holds the lock until the block exits, by return or
-   by raise. When the lock is held, it raises an exception carrying the pid
+   `ledger.db` in that home without truncating it, as
+   `os.open(path, os.O_RDWR | os.O_CREAT)` or mode `a+` does, never mode `w`.
+   The descriptor stays close-on-exec, so no child the command starts
+   inherits the lock. It then takes `fcntl.flock` with `LOCK_EX | LOCK_NB`.
+   Only once the lock is taken does it truncate the file and write its own
+   pid and the command's name. It holds the lock until the block exits, by
+   return or by raise. When the lock is held, it raises an exception carrying the pid
    and command the file names. It never waits.
 2. **`main` takes it.** After the home `Ledger` opens, `main` wraps the
    dispatch of `cell`, `batch` and `draft` in that context manager. The
@@ -228,15 +232,39 @@ assertion rather than a collection error. Reuse `_seed_repo`, `_seed_task`,
   holder is a batch, its `_batch` stub hands the contender's call to the real
   `_batch`, kept before the replacement.
 - Criterion 3 runs each holder from a child script, in the shape of
-  `tests/test_sigterm.py:275-341`. Its stub starts a sleeping child process,
-  writes a marker and sleeps. The contender is a second child script, a
-  batch whose `_batch` stub prints a marker line. Run it with a 30 second
+  `tests/test_sigterm.py:275-341`. Its stub starts a grandchild that sleeps
+  300 seconds. Start it with `close_fds=False`, and its stdout and stderr on
+  `subprocess.DEVNULL`. Popen's default `close_fds=True` closes an
+  inheritable descriptor too, so the inheritable wrong version would pass.
+  The stub then writes the grandchild's pid into a marker file and sleeps.
+  The test waits for the marker under its own 30 second deadline. Each
+  child script's environment drops `SAFFRON_CELL_RUNTIME`, as
+  `tests/test_sigterm.py:361` does. The contender is a second child script,
+  a batch whose `_batch` stub prints a marker line. Run it with a 30 second
   timeout. Seed the dead holder's row before the holder starts, then run the
   last batch in the test's own process as in criterion 2. Reap the killed
-  holder with `wait()` before that batch starts. Kill every child in a
-  `finally`.
+  holder with `wait()`, and check the grandchild is alive with
+  `os.kill(pid, 0)`, before that batch starts. Kill the holder and the
+  grandchild in a `finally`.
 - Criterion 4 runs each holder twice. Its stub runs a contender batch, then
-  returns 0 or raises `RuntimeError`.
+  returns 0 or raises `RuntimeError`. A flag the test sets tells the stub
+  it is the holder. Call depth does not, because the batch after a holder
+  ends is a first call again.
+
+**What a prototype measured.** A throwaway `home_lock.py` and witnesses for
+criteria 3 and 4 ran on the host at `8b93875c`. Both witnesses failed with
+`cli.py`'s change reverted.
+
+- Criterion 3 passed on the correct build. With the descriptor made
+  inheritable by `os.set_inheritable`, it failed, because the last batch was
+  refused and exited 2. With the grandchild on Popen's default
+  `close_fds=True`, that wrong version passed.
+- A contender that opened the lock file with `O_TRUNC` failed criterion 3.
+  Its refusal read the pid as unknown.
+- Criterion 4 passed on the correct build. A file-object lock closed only
+  after a normal return passed it too, since the object is closed by
+  refcount once the raise unwinds. The raw `os.open` form of that wrong
+  version failed on the raise case. So that is the wrong version listed.
 
 **Every new test must fail with the source reverted.** At base no lock
 exists, so each contender starts its work. Each witness asserts that the
