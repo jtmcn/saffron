@@ -3,7 +3,7 @@ id: SA-0338
 title: A criterion's mutant lives in the spec, so a cell reads it from HEAD
 type: feature
 priority: 1
-estimated_lines: 260
+estimated_lines: 300
 estimate_measured: true
 touches:
   - saffron/mutants.py
@@ -14,6 +14,8 @@ touches:
   - saffron/ledger.py
   - saffron/cli.py
   - saffron/scheduler.py
+  - saffron/follow_up.py
+  - saffron/agents/prompts/spec-writer.md
   - docs/agents/issue-tracker.md
   - docs/evidence/scripts/2026-09-14-spec-reviewer-backtest.py
   - tests/test_mutants.py
@@ -26,6 +28,7 @@ touches:
   - tests/test_cli.py
   - tests/test_worktree.py
   - tests/test_scheduler.py
+  - tests/test_follow_up.py
 forbidden:
   - DESIGN.md
   - CONTEXT.md
@@ -47,15 +50,14 @@ forbidden:
   - refs/**
   - saffron/gates/**
   - saffron/record/**
-  - saffron/agents/**
+  - saffron/agents/*.py
   - saffron/phases/**
   - saffron/cell/worktree.py
-  - saffron/follow_up.py
   - saffron/regate.py
   - saffron/commit_review.py
-budget_usd: 56
+budget_usd: 62
 max_attempts: 3
-max_turns: 260
+max_turns: 300
 acceptance:
   - claim: >-
       `ensure_mirror` on an existing mirror fetches `refs/saffron/mutants`
@@ -75,9 +77,11 @@ acceptance:
       `saffron.mutants.ref_commit` names the commit `refs/saffron/mutants`
       points at in a mirror, and `None` where the ref is absent.
       `read_mutants` reads `<spec id>.yaml` at the commit it is given, never
-      the ref's head. It returns each witness's `Mutant`, `replace`
-      defaulted to the empty string. It returns no mutants for a `None`
-      commit, for a tree with no such file, and for an empty mapping.
+      the ref's head, and parses it with `parse_mutants`. It returns each
+      witness's `Mutant`, `replace` defaulted to the empty string. It
+      returns no mutants for a `None` commit, for a tree with no such file,
+      and for an empty mapping. `parse_mutants` over the same text returns
+      the same dict.
     witness: tests/test_mutants.py::test_mutants_are_read_from_the_ref_by_spec_id_and_witness
     wrong_versions:
       - "`read_mutants` reads the file at the ref's head and ignores the commit it is given."
@@ -96,10 +100,11 @@ acceptance:
       - The handed spec's own criteria are given the mutants in place.
   - claim: >-
       A mutants file that cannot apply to its spec raises a `SpecError`
-      subclass that names the file or the witness. `read_mutants` raises for
-      four shapes. They are a YAML error, a top-level value that is not a
-      mapping, an entry with an empty `find`, and an entry with a key
-      `Mutant` does not declare. `attach_mutants` raises for three more. They
+      subclass that names the file or the witness. `parse_mutants` raises
+      for six shapes. They are a YAML error, a top-level value that is not
+      a mapping, an entry that is not a mapping, an entry with no `file`,
+      an entry with an empty `find`, and an entry with a key `Mutant` does
+      not declare. `attach_mutants` raises for three more. They
       are a witness no criterion declares, a witness two criteria declare,
       and a criterion that declares `subject:` and gets no mutant. A mutant
       whose `find` the spec's body, a claim or a wrong version spells out
@@ -113,6 +118,7 @@ acceptance:
       - A top-level list reads as no mutants.
       - A YAML error escapes as the YAML library's own exception.
       - An entry is read key by key, so a key `Mutant` does not declare is ignored.
+      - Only some validation errors are wrapped, so a malformed entry escapes as pydantic's own error.
   - claim: >-
       `discover_specs` refuses a spec any of whose criteria declares
       `mutant:` inline. The refusal is a `DiscoveryFailure` carrying the
@@ -144,11 +150,13 @@ acceptance:
       - A given task whose row records no commit falls back to the ref's head.
   - claim: >-
       `run_task` returns `Refused` before any cell starts, and prints its
-      one refused line, in four cases. They are a handed spec that declares
+      one refused line, in five cases. They are a handed spec that declares
       `mutant:` inline, a task's recorded spec text that declares one, a
       `<spec id>.yaml` that is not valid YAML, and a mutant on the ref whose
-      `find` the spec's body spells out. The reason names the witness, the
-      file or the disclosure.
+      `find` the spec's body spells out. The fifth is a given task whose
+      recorded commit the mirror does not hold, which never raises
+      `GitError`. The reason names the witness, the file, the disclosure or
+      the commit.
     witness: tests/test_task.py::test_run_task_refuses_an_inline_mutant_or_an_unreadable_mutants_file_before_its_cell
     wrong_versions:
       - The inline check runs before the recorded text replaces the handed spec, so an inline mutant in a recorded text reaches its cell.
@@ -156,6 +164,7 @@ acceptance:
       - A `MutantsError` is left to raise out of `run_task`.
       - Only `MutantsError` and `InlineMutantError` are caught, so a disclosed mutant from the ref raises.
       - The refusal prints nothing.
+      - The recorded commit is read without checking the mirror holds it, so `GitError` escapes `run_task`.
   - claim: >-
       `create_task` takes a keyword `mutants_commit` and writes it into the
       `task_created` fact, `None` included, and into a `tasks` column of
@@ -183,6 +192,17 @@ acceptance:
     wrong_versions:
       - The adapter reads the ref once when it is built, so a later move is missed.
       - The mint passes no commit.
+  - claim: >-
+      A follow-up candidate any of whose criteria declares `mutant:` inline
+      is refused by `follow_up._validate`, whatever edit it names, and its
+      reason names the witness. A candidate with no inline mutant passes
+      it. The spec-writer prompt tells the writer to declare no mutant in
+      the spec.
+    witness: tests/test_follow_up.py::test_a_follow_up_declaring_any_mutant_inline_is_refused
+    wrong_versions:
+      - Only a mutant naming a probe the group's findings wrote is refused, as at base.
+      - The check reads the first criterion alone, so a mutant on the second passes.
+      - The prompt keeps saying only that new code declares no mutant.
 ---
 
 ## Context
@@ -190,9 +210,11 @@ acceptance:
 Backlog item **80**, part 1 of 2. It cites `DESIGN.md` §5.4.1, which the
 operator amended by hand at this spec's base. Its paragraph "A mutant lives
 on `refs/saffron/mutants`, never in the spec" says what this spec makes true.
-`SA-0339` depends on this spec and adds `saffron mutant`, the command that
-writes the ref. Every line number below was read at this spec's own
-commit, whose parent is `8c024ec6`.
+The mirror takes the ref in a second fetch of its own, and `run_task` reads
+each criterion's mutant. Three older sentences there now put the mutant on
+the ref, supplied by the spec's author. `SA-0339` depends on this spec and
+adds `saffron mutant`, the command that writes the ref. Every line number
+below was read at `20adc839`.
 
 **A cell reads its mutant from `HEAD`.** A criterion declares its mutant
 inline (`saffron/intake.py:138`). A batch runs committed specs, and the cell
@@ -219,17 +241,21 @@ exactly exits 128 with "couldn't find remote ref" when the checkout lacks
 it. A second fetch of `+refs/saffron/mutants*:refs/saffron/mutants*` with
 `--prune` takes the ref and exits 0 without one. It deletes the mirror's
 copy once the checkout does. Without the `+`, a move to an unrelated commit
-is rejected as non-fast-forward and the fetch exits 1. On the host, that
-glob pruned only names that start `refs/saffron/mutants`. A
-`refs/saffron/tasks/*` ref stayed.
+is rejected as non-fast-forward and the fetch exits 1. In both, that glob
+pruned only names that start `refs/saffron/mutants`. A
+`refs/saffron/tasks/*` ref and a `refs/saffron/values/*` ref stayed.
 
 **Every reader of a criterion's mutant reads the parsed spec.** They are
 `witness_gate` (`saffron/gates/core/witness.py:146`), `run_witness`
 (`saffron/gates/runner.py:234`), `revert_gate`
 (`saffron/gates/core/revert.py:187-200`), `source_mutated`
 (`saffron/cell/worktree.py:660`) and the probe at
-`saffron/cell/session.py:2062`. `saffron/follow_up.py:223-227` reads a
-follow-up candidate's. `saffron/gates/baseline.py:28-32` reads a
+`saffron/cell/session.py:2062`. `follow_up._validate` reads a follow-up
+candidate's, and refuses only a mutant naming a probe the group's own
+findings wrote (`saffron/follow_up.py:216-227`). An inline mutant naming any
+other edit passes, so that follow-up is minted and then refused at
+`run_task` on every run. The spec-writer prompt says only that new code
+declares no mutant (`saffron/agents/prompts/spec-writer.md:4-5`). `saffron/gates/baseline.py:28-32` reads a
 `survived-mutant` code, never a mutant. So filling `Criterion.mutant` from the ref before the `CellSpec` is
 built changes none of them.
 
@@ -275,11 +301,15 @@ writer. It holds:
 - `ref_commit(mirror)`, the commit the ref names, or `None` where it is
   absent. Run `git rev-parse --verify --quiet` on the ref and read a nonzero
   exit as absent.
-- `read_mutants(mirror, commit, spec_id)`, a dict from witness to `Mutant`.
-  Read `<spec_id>.yaml` at `commit` with `file_at`
-  (`saffron/repos/mirror.py:254`). Validate each entry with
-  `Mutant.model_validate`. Raise `MutantsError` for a shape criterion 4
-  names.
+- `parse_mutants(text, where)`, a dict from witness to `Mutant`. `where`
+  names the file in each error. Validate each entry with
+  `Mutant.model_validate`, and wrap every YAML and validation error in
+  `MutantsError`. `SA-0339` parses its `--from` file with this function, so
+  the writer and the reader share one parser.
+- `read_mutants(mirror, commit, spec_id)`. Read `<spec_id>.yaml` at
+  `commit` with `file_at` (`saffron/repos/mirror.py:254`) and hand the text
+  to `parse_mutants`. Return no mutants for a `None` commit or a missing
+  file.
 - `attach_mutants(spec, found)`, a copy of the spec with each criterion's
   mutant set from `found`. It raises `MutantsError` for the three shapes
   criterion 4 names, then runs the disclosure check on the copy.
@@ -297,7 +327,10 @@ rule, since the mutant arrives after parse. Update the docstrings of
 
 **`run_task`.** After the recorded-text rebind and before the `CellSpec`,
 pick the commit. A given `task_id` takes `ledger.task_mutants_commit`. A
-minted task takes `ref_commit(base.mirror)`. Then run
+call with no `task_id` takes `ref_commit(base.mirror)`. A commit the mirror
+does not hold, as after a re-clone, refuses the task and names the commit.
+Check it with `has_commit` (`saffron/repos/mirror.py:285`) before any read,
+since `file_at` raises `GitError` for it. Then run
 `refuse_inline_mutants`, `read_mutants` and `attach_mutants`. On a
 `SpecError`, print the refused line and return `Refused`, as the recorded
 text refusals do (`saffron/task.py:758-760`). Collapse the reason onto one
@@ -312,6 +345,14 @@ loop and to the fold's insert. Read the payload with `.get`. Add
 (`saffron/ledger.py:1669`). `_drive_cell` passes `spec.mutants_commit`.
 `_stack_mint` passes `mutants.ref_commit(pinned.mirror)`, read inside the
 minting closure.
+
+**Follow-ups.** In `follow_up._validate`, refuse a candidate any of whose
+criteria declares a mutant inline, and name the witness in the reason. This
+replaces the probe comparison at `saffron/follow_up.py:216-227`, which the
+new rule covers. Change `saffron/agents/prompts/spec-writer.md:4-5` to tell
+the writer to declare no mutant in the spec. Keep that prompt free of any
+`saffron/` path, since `test_cores_spec_writer_prompts_fill_every_slot_and_name_no_repo_tool`
+(`tests/test_spec_review.py`) refuses one.
 
 **The mirror.** After the existing fetch in `ensure_mirror`, add a second
 `fetch --prune origin` of `+refs/saffron/mutants*:refs/saffron/mutants*`.
@@ -349,6 +390,13 @@ is already credited there. It keeps that function's comment at
   Assert the inline refusals are exactly the promoted specs that declare a
   mutant, `SA-0063` aside, and that they number more than 30. Measured, they
   number 64. Leave them out of its final `depends_on` check.
+- `tests/test_follow_up.py` hands four accepted candidates an inline
+  mutant, at `:437`, `:488`, `:845` and `:983`. Drop the mutant from each,
+  so each is still accepted. Case 9 at `:457-461` is still refused, and its
+  reason still holds the word `mutant`.
+- `spec_drift`'s docstring (`saffron/cell/session.py:146-150`) says the
+  worktree copy defeats the withholding of `mutant`. Say instead that this
+  was item 80's measurement, and a queued spec now carries no mutant.
 - `docs/agents/issue-tracker.md:57-73` shows `mutant:` inside `acceptance:`.
   Drop `mutant` from the criterion's fields and from the example. Add a
   short paragraph and a second YAML example. They say the mutant lives on
@@ -374,30 +422,39 @@ test body.
 
 - **`saffron mutant`.** `SA-0339` writes and pushes the ref. Tests here
   create it with plain git.
-- **`saffron regate`, `saffron package` and `saffron review`.** Each reads
-  a spec file or a recorded text on its own. `regate` loads one at
-  `saffron/regate.py:91`, and `ready_task` at `saffron/task.py:1298`.
+- **`saffron regate`, `saffron adopt`, `saffron package` and `saffron review`.**
+  Each reads a spec file or a recorded text on its own. `regate` loads one
+  at `saffron/regate.py:91`, and `ready_task` at `saffron/task.py:1298`.
   `commit_review` loads one at `saffron/commit_review.py:138`. After this
-  spec none of the three sees a ref mutant. Reading `task_mutants_commit`
-  there is a follow-up.
+  spec none of them sees a ref mutant. A backlog item for that is filed
+  with this spec.
+- **A requeued task whose pinned file does not parse.** A task given to
+  `run_task` reads at the commit its row recorded. If `<spec id>.yaml`
+  there raises `MutantsError`, a requeued task outside a stack is refused
+  at every run, and fixing the ref never reaches it. That is the price of
+  a record that says what ran. A stack task re-mints at `_stack_mint`
+  (`saffron/cli.py:1449`) and picks up the fix. Retiring or re-queueing the
+  spec as a new task clears it.
 - **`saffron/record/migrate.py`.** It writes `task_created` from a stored
   row and carries no `mutants_commit` (`saffron/record/migrate.py:428-440`).
   A migrated task folds to `None`. Every task that predates this spec had
   no ref to record.
-- **`saffron/follow_up.py:223-227`.** It compares a follow-up candidate's
-  inline mutant with its own probes. A candidate that declares one is now refused
-  at `run_task`, so that check only fires earlier.
-- **Hand edits under `.claude/`.** `SA-0279` refuses them in `touches`.
-  The operator lands these in this spec's pull request.
-  `.claude/agents/spec-reviewer.md:42` and `:64-65` describe a criterion
-  declaring a mutant in the spec.
-  `.claude/skills/run-saffron-spec-loop/driver.py:2251-2256`,
-  `_subject_concerns`, reads inline mutants, so it never fires on a queued
-  spec after this. `.claude/skills/run-saffron-spec-loop/SKILL.md:84`
-  describes that concern. `driver.py`'s `_known_specs` reads `done/` with
-  `discover_specs`
-  (`.claude/skills/run-saffron-spec-loop/driver.py:1871`) and needs
-  `retired=True` there.
+- **Edits under `.claude/`.** `SA-0279` refuses them in `touches`. Each
+  lands in the cell PR's review commit, by hand. None can land in the spec
+  PR, since `discover_specs` takes no `retired` keyword until this cell
+  lands.
+  - `.claude/skills/run-saffron-spec-loop/driver.py:1871`. `_known_specs`
+    reads `done/` with `discover_specs`, and needs `retired=True`.
+    Without it, `driver.py check` and `history` drop every done spec that
+    declares a mutant inline, the worst-case rows of the ceilings line
+    among them.
+  - `.claude/skills/run-saffron-spec-loop/driver.py:2251-2256`.
+    `_subject_concerns` reads inline mutants, so it never fires on a
+    queued spec after this. It reads the ref instead.
+  - `.claude/agents/spec-reviewer.md:42` and `:64-65`. They describe a
+    criterion declaring a mutant in the spec.
+  - `.claude/skills/run-saffron-spec-loop/SKILL.md:84`. It describes the
+    subject concern.
 - **`DESIGN.md` §5.4.1.** Amended by hand at this spec's base.
 - **A spec in `done/`.** It keeps its inline mutants as history and is
   never run. No migration.
@@ -425,7 +482,8 @@ mirror's copy. Call `ensure_mirror` once after the clone with no ref, which
 kills the exact-name version. Hold a `refs/saffron/tasks/<key>` ref in the
 mirror and the same name at another commit in the checkout.
 
-**Criterion 2** builds a bare mirror. Write one commit holding `SA-1.yaml`
+**Criterion 2** builds a bare mirror. Before any ref exists, assert
+`ref_commit` is `None` and `read_mutants` at a `None` commit returns `{}`. Write one commit holding `SA-1.yaml`
 with two entries, one without `replace`, and `SA-2.yaml` holding `{}`. Then
 move the ref to a commit holding a different `SA-1.yaml` and a decoy
 `SA-1.yml`. Read at both commits. Compare whole dicts of `Mutant` with `==`.
@@ -434,8 +492,8 @@ move the ref to a commit holding a different `SA-1.yaml` and a decoy
 order, and gives the third criterion no entry. Assert the handed spec's
 criteria all still carry `None`.
 
-**Criterion 4** drives each of the seven shapes in one test. Assert
-`isinstance(exc, SpecError)` for the four read failures. Drive the
+**Criterion 4** drives each of the nine shapes in one test. Assert
+`isinstance(exc, SpecError)` for the six parse failures. Drive the
 disclosure through the body, a sibling's claim and a wrong version.
 
 **Criterion 5** writes two files into `tmp_path`. One declares its mutant on
@@ -452,7 +510,9 @@ passes gate 0, and `mutant_find=` adds an inline mutant (`:914-962`). Pick a
 case, hand a clean spec and record the inline text on the task. Otherwise
 the handed spec alone refuses it, and the first wrong version passes. For
 the disclosed case, give the ref's entry a `find` of `revised body`, which
-`_rev_text`'s default body spells.
+`_rev_text`'s default body spells. For the missing commit, mint a row with
+`mutants_commit="f" * 40` and assert the reason holds its first twelve
+characters.
 
 **Criterion 8** follows
 `test_an_engine_commit_is_a_fact_the_fold_keeps` (`tests/test_ledger.py:1008`).
@@ -469,6 +529,17 @@ assert the stripped text no longer names it.
 (`tests/test_cli.py:9599`), over a real bare mirror. Mint once with no ref,
 then once after each of two moves.
 
+**Criterion 11** calls `follow_up._validate` directly, with a
+`FollowUpGroup` holding no findings. Build one candidate with
+`_candidate(..., mutant=...)`, which puts the mutant on the first criterion,
+and one with `_spec_text` that puts it on the second. Read the prompt with
+its whitespace collapsed, since a sentence can wrap.
+
+**The cell-marked test is the operator's to run.** `pyproject.toml`'s
+`addopts` deselects `-m cell`, so no gate in the cell runs it, and no
+criterion names it. The operator runs `uv run pytest -m cell` with that
+test's name on the cell's head before the pull request merges.
+
 **A mirror path that does not exist.** Many `run_task` and `_stack_mint`
 tests pass a mirror path that is no repository. `ref_commit` reads any
 nonzero exit as no ref, so they run unchanged. Say so in a `ponytail:`
@@ -482,10 +553,10 @@ lines in `docs/agents/issue-tracker.md`. Write none with an em dash, a
 semicolon, a contraction, the perfect tense or a sentence over 25 words.
 Keep each docstring within ten lines.
 
-**Size.** A prototype at `8c024ec6` measured 838 changed tokens with
-`size_gate`'s counter outside the test paths, about 210 lines. It held every
-source edit above, the tracker edit, the ten witnesses, the five test edits
-and the cell-marked test. Every wrong version above failed its witness
-there. The cell-marked test passed against apple/container with
+**Size.** A prototype at `8c024ec6` measured 989 changed tokens with
+`size_gate`'s counter outside the test paths, about 247 lines. It held every
+source edit above, the tracker and prompt edits, the eleven witnesses, the
+test edits and the cell-marked test. Every wrong version above failed its
+witness there. The cell-marked test passed against apple/container with
 `saffron/cell-base:python`. A margin of about 50 lines for docstrings makes
-`estimated_lines` 260. The `feature` ceiling is 3000 tokens.
+`estimated_lines` 300. The `feature` ceiling is 3000 tokens.
