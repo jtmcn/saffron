@@ -114,7 +114,7 @@ spec removes the first run's container. Cell images and the build cache are
 never reclaimed, and one host's free disk fell to 16 GB. The first two stand
 between ADR 10's sequence and two cells on one host.
 
-**Raised 2026-11-07 from tier 3**, in grooming: **b-719346**. `driver.py record`
+**Raised 2026-11-07 from tier 3**, in grooming: ~~**b-719346**~~. `driver.py record`
 refuses a finish's follow-up as not in the order. It took the rank of
 ~~**b-25f2b2**~~, the tier 2 item grooming folded into it.
 

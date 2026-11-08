@@ -544,6 +544,79 @@ def _carried(previous: list[OrderRow]) -> tuple[list[OrderRow], dict[str, str]]:
     return kept, held
 
 
+def _follow_up_rows(known: set[str]) -> list[OrderRow]:
+    """Each follow-up that ran in a batch holding one of `known`, from the
+    ledger. A row carries its branch, its pull request and its parent layer.
+    Its text goes to the state dir, so `record` loads it as any spec (b-719346)."""
+    from saffron.intake import SpecError, parse_spec
+    from saffron.scheduler import DONE_STATES
+
+    ledger, repo_id, _url = _ledger_and_repo()
+    found: dict[str, OrderRow] = {}
+    try:
+        if repo_id is None:
+            return []
+        urls = {r["task_id"]: r["pr_url"] for r in ledger.queue_lines() if r["pr_url"]}
+        for batch_id in range(1, ledger.latest_batch_id() + 1):
+            if not known & {t["spec_id"] for t in ledger.batch_tasks(batch_id)}:
+                continue
+            layers = ledger.stack_layers(batch_id)
+            for f in ledger.batch_follow_ups(batch_id):
+                if f["state"] == "QUEUED" or f["spec_id"] in known:
+                    continue  # a follow-up a batch never ran, or one the order holds
+                tasks = ledger.tasks_by_spec_id(repo_id, f["spec_id"])
+                task = next((t for t in tasks if t["task_id"] == f["task_id"]), None)
+                if task is None:
+                    continue
+                texts = ledger.spec_texts(f["task_id"])
+                text = next(
+                    (t for t in texts if t["spec_sha"] == task["spec_sha"]), texts[-1]
+                )
+                try:
+                    spec = parse_spec(text["text"])
+                except SpecError:
+                    continue
+                dest = STATE_DIR / "follow-ups" / PurePosixPath(text["path"]).name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(text["text"].encode("utf-8"))
+                parent = _follow_up_parent(f["task_id"], layers)
+                url = urls.get(f["task_id"], "")
+                row = OrderRow(
+                    spec_id=f["spec_id"],
+                    path=_relative(dest),
+                    priority=spec.priority,
+                    depends_on=[parent] if parent else [],
+                    spec_sha=task["spec_sha"],
+                    pr=int(url.rstrip("/").rsplit("/", 1)[-1])
+                    if "/pull/" in url
+                    else None,
+                    branch=task["branch"],
+                    title=spec.title,
+                    budget_usd=spec.budget_usd,
+                    risk=spec.risk,
+                )
+                if task["state"] in DONE_STATES:
+                    row.state, row.pushed_sha = task["state"], task["pushed_sha"] or ""
+                else:
+                    row.last_state = task["state"]
+                found[row.spec_id] = row
+    finally:
+        ledger.close()
+    return list(found.values())
+
+
+def _follow_up_parent(task_id: int, layers: Sequence) -> str | None:
+    """The layer a follow-up was cut from: its recorded predecessor when it
+    became a layer, else the top layer recorded before it ran."""
+    own = next((x for x in layers if x["task_id"] == task_id), None)
+    if own is not None:
+        keys = {x["task_key"]: x["spec_id"] for x in layers}
+        return keys.get(own["predecessor_key"])
+    # Follow-ups run in task order, after every layer of the order's own pass.
+    below = [x for x in layers if x["generation"] == 0 or x["task_id"] < task_id]
+    return below[-1]["spec_id"] if below else None
+
+
 # ------------------------------------------------------------ the stack
 
 
@@ -990,11 +1063,21 @@ def cmd_snapshot(args) -> int:
     known = {p.spec_id for p in previous}
     arrived = [p for p in ordered if args.force and known and p.spec_id not in known]
     wanted = {p.spec_id for p in arrived} if args.add == [] else set(args.add or ())
-    if unknown := wanted - {p.spec_id for p in arrived}:
+    # A follow-up already ran, so it joins with no `--add` (b-719346).
+    follow_ups = _follow_up_rows(known | {p.spec_id for p in ordered})
+    taken = {p.spec_id for p in follow_ups}
+    if unknown := wanted - {p.spec_id for p in arrived} - taken:
         return _fail(f"not new since the last snapshot: {', '.join(sorted(unknown))}")
     added = [p for p in arrived if p.spec_id in wanted]
     left_out = [p for p in arrived if p.spec_id not in wanted]
-    ordered = [p for p in ordered if p not in left_out]
+    ordered = _sequence([p for p in ordered if p not in left_out] + follow_ups)
+    if follow_ups:
+        print(f"follow-ups a batch ran, taken in ({len(follow_ups)}):")
+        for p in follow_ups:
+            parent = f"above {p.depends_on[0]}" if p.depends_on else "no parent found"
+            pr = f"#{p.pr}" if p.pr else "(no PR)"
+            print(f"  {p.spec_id}  {p.state or p.last_state}  {pr}  {parent}")
+        print()
     if held_out:
         print(f"edited while its pull request is open ({len(held_out)}):")
         for reason in held_out.values():

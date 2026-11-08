@@ -114,8 +114,10 @@ local commits, and restack the layers above once the batch drains.
 `driver.py rebase --execute` moves each layer onto the one below, as step 4
 says. Then push each layer and run `saffron finish <batch id> --repo .`
 with the token as in (a). The batch's deferral line names the id. The finish
-reads each branch at origin, so it grades only pushed commits. Record each
-follow-up it runs with `driver.py record`, and read
+reads each branch at origin, so it grades only pushed commits. Run
+`driver.py snapshot --force` after it. The snapshot takes in each follow-up the
+batch ran, with its branch, its pull request and its parent (b-719346). Then
+record each follow-up with `driver.py record`, and read
 `~/.saffron/batches/v0/finish/<batch id>/findings.json` for step 5. The attended path below is the fallback, and taking it is the
 operator's call.
 
