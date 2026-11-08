@@ -112,6 +112,94 @@ def test_a_mirror_fetch_neither_prunes_nor_overwrites_the_records_refs(
     assert git(mirror, "rev-parse", "other") == git(origin, "rev-parse", "other")
 
 
+def _record_commit(repo, path, content, message):
+    """A root commit over one blob, built with `hash-object`, `mktree` and
+    `commit-tree`, so two calls are unrelated to each other."""
+    blob = subprocess.run(
+        ["git", "-C", str(repo), "hash-object", "-w", "--stdin"],
+        input=content,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    tree = subprocess.run(
+        ["git", "-C", str(repo), "mktree"],
+        input=f"100644 blob {blob}\t{path}\n",
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    return subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=T",
+            "commit-tree",
+            tree,
+            "-m",
+            message,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def test_a_mirror_fetch_takes_the_mutants_ref_and_still_spares_the_records_refs(
+    tmp_path, origin, monkeypatch
+):
+    """A second, globbed fetch runs after the one that excludes it, since
+    that exclusion drops `refs/saffron/mutants` from the first fetch. A
+    checkout with no such ref still fetches cleanly. A move to an
+    unrelated commit is followed, and a deletion is pruned. A task ref
+    under `refs/saffron/` stays the mirror's own throughout."""
+    isolated = tmp_path / "git-home"
+    isolated.mkdir()
+    monkeypatch.setenv("HOME", str(isolated))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(isolated))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    path = tmp_path / "m.git"
+    mirror = ensure_mirror(origin, path)
+
+    # No ref anywhere yet: an exact-name second fetch would fail outright,
+    # where a glob tolerates its absence.
+    ensure_mirror(origin, path)
+    with pytest.raises(subprocess.CalledProcessError):
+        git(mirror, "rev-parse", "--verify", "-q", "refs/saffron/mutants")
+
+    main_sha = git(mirror, "rev-parse", "main")
+    key = "a" * 32
+    git(mirror, "update-ref", f"refs/saffron/tasks/{key}", main_sha)
+    git(
+        origin,
+        "update-ref",
+        f"refs/saffron/tasks/{key}",
+        git(origin, "rev-parse", "feature"),
+    )
+
+    first = _record_commit(origin, "SY-1.yaml", "a: 1\n", "first mutants commit")
+    git(origin, "update-ref", "refs/saffron/mutants", first)
+    ensure_mirror(origin, path)
+    assert git(mirror, "rev-parse", "refs/saffron/mutants") == first
+    assert git(mirror, "rev-parse", f"refs/saffron/tasks/{key}") == main_sha
+
+    # Unrelated to `first`: only a forced update moves the mirror's copy.
+    second = _record_commit(origin, "SY-1.yaml", "a: 2\n", "second mutants commit")
+    git(origin, "update-ref", "refs/saffron/mutants", second)
+    ensure_mirror(origin, path)
+    assert git(mirror, "rev-parse", "refs/saffron/mutants") == second
+
+    git(origin, "update-ref", "-d", "refs/saffron/mutants")
+    ensure_mirror(origin, path)
+    with pytest.raises(subprocess.CalledProcessError):
+        git(mirror, "rev-parse", "--verify", "-q", "refs/saffron/mutants")
+    assert git(mirror, "rev-parse", f"refs/saffron/tasks/{key}") == main_sha
+
+
 def test_resolve_pull_request_finds_base_and_head(tmp_path, origin):
     mirror = ensure_mirror(origin, tmp_path / "m.git")
     base, head, title = resolve_pull_request(mirror, 42)

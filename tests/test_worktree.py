@@ -2757,3 +2757,108 @@ def test_a_cell_seeded_from_a_mirror_holding_non_branch_refs_holds_none_of_them(
         runtime.remove_container(container)
         runtime.remove_volume(volume)
         runtime.remove_volume(f"{volume}-state")
+
+
+# --- backlog item 80: a cell seeded from the fetch holds no mutant --------
+
+
+def _mutants_file_commit(repo: Path, content: str) -> tuple[str, str, str]:
+    """A root commit over one `SY-1.yaml`, with its blob and tree too, so a
+    caller can check the cell holds none of the three objects."""
+    blob = subprocess.run(
+        ["git", "-C", str(repo), "hash-object", "-w", "--stdin"],
+        input=content,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    tree = subprocess.run(
+        ["git", "-C", str(repo), "mktree"],
+        input=f"100644 blob {blob}\tSY-1.yaml\n",
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    commit = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=T",
+            "commit-tree",
+            tree,
+            "-m",
+            "mutants",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    return blob, tree, commit
+
+
+@pytest.mark.cell
+def test_a_cell_seeded_from_a_mirror_that_fetched_the_mutants_ref_holds_no_mutant(
+    tmp_path, network
+):
+    """The mirror's second fetch picks up `refs/saffron/mutants` from the
+    checkout. `read_mutants` reads a real mutant off it. A cell seeded
+    from that mirror, as `_drive_cell` seeds one, holds none of it."""
+    from saffron import mutants
+
+    origin = tmp_path / "origin"
+    base = _seed_repo(origin)
+    mirror = tmp_path / "m.git"
+    mirror_ops.ensure_mirror(origin, mirror)
+
+    blob, tree, commit = _mutants_file_commit(
+        origin, "tests/test_a.py::test_one:\n  file: a.py\n  find: x\n"
+    )
+    subprocess.run(
+        ["git", "-C", str(origin), "update-ref", "refs/saffron/mutants", commit],
+        check=True,
+        capture_output=True,
+    )
+    mirror_ops.ensure_mirror(origin, mirror)
+
+    assert mutants.ref_commit(mirror) == commit
+    assert mutants.read_mutants(mirror, commit, "SY-1") == {
+        "tests/test_a.py::test_one": Mutant(file="a.py", find="x"),
+    }
+
+    volume, container = "saffron-test-wt9", "saffron-test-cell9"
+    runtime.remove_volume(volume)
+    runtime.remove_volume(f"{volume}-state")
+    runtime.create_volume(volume)
+    runtime.remove_container(container)
+    try:
+        worktree.prepare_worktree(
+            mirror=mirror,
+            volume=volume,
+            base_sha=base,
+            branch="saffron/test",
+            image=image.BASE_TAG,
+            container=container,
+            network=network,
+            env={},
+            gates_dir=_gates_dir(tmp_path),
+        )
+        assert worktree.head_sha(container) == base
+        refs = runtime.exec_(
+            container,
+            ["git", "for-each-ref", "--format=%(refname)"],
+            workdir="/work",
+        )
+        assert refs.stdout.split() == ["refs/heads/saffron/test"]
+        for obj in (blob, tree, commit):
+            cat = runtime.exec_(
+                container, ["git", "cat-file", "-e", obj], workdir="/work"
+            )
+            assert cat.returncode != 0, obj
+    finally:
+        runtime.remove_container(container)
+        runtime.remove_volume(volume)
+        runtime.remove_volume(f"{volume}-state")

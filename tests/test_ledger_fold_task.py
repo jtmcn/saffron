@@ -174,6 +174,7 @@ def _drive_every_kind(source: Ledger, after) -> tuple[str, int]:
         budget_usd=17.5,
         policy_sha="c" * 64,
         prompt_sha="g" * 64,
+        mutants_commit="u" * 40,
     )
     key = _key(source, task_id)
     after(key)
@@ -411,13 +412,15 @@ def _ledger_that_predates_pushed_in_state(path: Path) -> Ledger:
     """A ledger written before `tasks.pushed_in_state`, opened as today's."""
     before = SCHEMA.replace(
         "    merged_head_sha TEXT,\n"
-        "    pushed_in_state TEXT\n"
+        "    pushed_in_state TEXT,\n"
+        "    mutants_commit TEXT\n"
         "    -- Below the column, not above it: a comment above the *last* column\n"
         "    -- broke `DROP COLUMN` on SQLite 3.51.0, measured 2026-09-19. 3.53.1 is fine.\n"
         ");",
         "    merged_head_sha TEXT\n);",
     )
     assert "pushed_in_state" not in before  # otherwise this proves nothing
+    assert "mutants_commit" not in before
     old = sqlite3.connect(path)
     old.executescript(before)
     old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r', 'o', '/m')")

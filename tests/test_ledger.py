@@ -1043,6 +1043,99 @@ def test_an_engine_commit_is_a_fact_the_fold_keeps(tmp_path):
     folded.close()
 
 
+def test_a_tasks_mutants_commit_is_a_task_created_fact_the_fold_keeps(tmp_path):
+    """`create_task`'s `mutants_commit` keyword writes a `task_created`
+    fact and a `tasks` column of the same name, `None` included. A fold
+    rebuilds the column from the fact, and a fact written without the key
+    at all folds to `None` too. A ledger built before the column existed
+    gains it on open."""
+    from dataclasses import replace
+
+    from saffron.record.memory import MemoryRecord
+
+    record = MemoryRecord()
+    path = tmp_path / "ledger.db"
+    ledger = Ledger(path, record=record)
+    repo_id = ledger.upsert_repo("r", "https://o", "/m.git", policy_sha="p" * 64)
+    run_id = ledger.create_run(repo_id, "a" * 40)
+
+    with_commit = ledger.create_task(
+        run_id, "SA-1", "s" * 64, branch="b1", mutants_commit="c" * 40
+    )
+    without_commit = ledger.create_task(run_id, "SA-2", "s" * 64, branch="b2")
+
+    assert ledger.task_mutants_commit(with_commit) == "c" * 40
+    assert ledger.task_mutants_commit(without_commit) is None
+
+    # The key is on the fact itself, `None` included, not absent
+    # and defaulted by a reader.
+    without_key = ledger.record_key(without_commit)
+    assert without_key is not None
+    without_created = next(
+        f for f in record.read(without_key) if f.kind == "task_created"
+    )
+    assert "mutants_commit" in without_created.payload
+    assert without_created.payload["mutants_commit"] is None
+
+    fold_path = tmp_path / "fold.db"
+    folded = Ledger(fold_path)
+    for task_id in (with_commit, without_commit):
+        key = ledger.record_key(task_id)
+        assert key is not None
+        folded.fold_task(key, record.read(key))
+
+    assert folded.task_mutants_commit(with_commit) == "c" * 40
+    assert folded.task_mutants_commit(without_commit) is None
+
+    # A fact written without the key at all, as `migrate.py` writes one.
+    key = ledger.record_key(with_commit)
+    assert key is not None
+    facts = record.read(key)
+    stripped = replace(
+        facts[0],
+        payload={k: v for k, v in facts[0].payload.items() if k != "mutants_commit"},
+    )
+    no_key_path = tmp_path / "no-key.db"
+    no_key = Ledger(no_key_path)
+    no_key.fold_task(key, [stripped, *facts[1:]])
+    assert no_key.task_mutants_commit(with_commit) is None
+
+    ledger.close()
+    folded.close()
+    no_key.close()
+
+    # A ledger built before the column existed gains it on open, and its
+    # existing row reads `None` for the column it predates.
+    old_schema = SCHEMA.replace(
+        "    pushed_in_state TEXT,\n    mutants_commit TEXT\n",
+        "    pushed_in_state TEXT\n",
+    )
+    assert "mutants_commit" not in old_schema  # otherwise this proves nothing
+    old_path = tmp_path / "old.db"
+    old = sqlite3.connect(old_path)
+    old.executescript(old_schema)
+    old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r', 'o', '/m')")
+    old.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
+    old.execute(
+        "INSERT INTO tasks (run_id, spec_id, spec_sha, state, record_key) "
+        "VALUES (1, 'SA-0016', 's', 'QUEUED', 'k1')"
+    )
+    old.commit()
+    old.close()
+
+    reopened = Ledger(old_path)
+    columns = {
+        row["name"]
+        for row in reopened._db.execute("PRAGMA table_info(tasks)").fetchall()
+    }
+    assert "mutants_commit" in columns
+    old_task_id = reopened._db.execute(
+        "SELECT task_id FROM tasks WHERE record_key = 'k1'"
+    ).fetchone()["task_id"]
+    assert reopened.task_mutants_commit(old_task_id) is None
+    reopened.close()
+
+
 # Each `tasks` column maps to one reader, `path::qualname` (§4.2.1).
 # The reader is a SELECT naming the column, or a row subscript.
 _TASKS_COLUMN_READERS: dict[str, str] = {
@@ -1065,6 +1158,7 @@ _TASKS_COLUMN_READERS: dict[str, str] = {
     "record_key": "saffron/ledger.py::Ledger.record_key",
     "merged_head_sha": "saffron/reconcile.py::reconcile",
     "pushed_in_state": "saffron/scheduler.py::_stale_rebuttal_unjudged",
+    "mutants_commit": "saffron/ledger.py::Ledger.task_mutants_commit",
 }
 
 # A column with no reader, and the reason it stays that way.

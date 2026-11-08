@@ -377,6 +377,71 @@ def test_discover_specs_on_an_empty_directory_returns_nothing(tmp_path):
     assert discover_specs(tmp_path) == ([], [])
 
 
+def test_a_queued_spec_declaring_an_inline_mutant_is_refused_and_a_retired_one_parses(
+    tmp_path,
+):
+    """Item 80: a mutant now lives on `refs/saffron/mutants`, so a queued
+    spec that still declares one inline is refused before any cell starts.
+    A `retired=True` scan, as `done/` gets, keeps a shipped spec's history."""
+    from saffron.intake import InlineMutantError, refuse_inline_mutants
+
+    text = (
+        "---\nid: TE-1\ntitle: t\ntype: feature\n"
+        "acceptance:\n"
+        "  - claim: the total is clamped at zero\n"
+        "    witness: tests/test_billing.py::test_never_negative\n"
+        "    mutant:\n"
+        "      file: saffron/billing.py\n"
+        "      find: 'max(total, 0)'\n"
+        "      replace: 'total'\n"
+        "---\n\nbody\n"
+    )
+    (tmp_path / "a.md").write_text(text)
+
+    specs, failures = discover_specs(tmp_path)
+    assert specs == []
+    assert len(failures) == 1
+    failure = failures[0]
+    assert failure.spec is not None
+    assert failure.spec.id == "TE-1"
+    assert "tests/test_billing.py::test_never_negative" in failure.reason
+
+    specs, failures = discover_specs(tmp_path, retired=True)
+    assert failures == []
+    assert specs[0].spec.acceptance[0].mutant is not None
+
+    with pytest.raises(InlineMutantError) as excinfo:
+        refuse_inline_mutants(parse_spec(text))
+    assert excinfo.value.spec.id == "TE-1"
+    assert isinstance(excinfo.value, SpecError)
+
+    # The mutant sits on the second criterion, never the first: the check
+    # must not stop looking after one.
+    on_second = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: feature\n"
+        "acceptance:\n"
+        "  - claim: c1\n    witness: t.py::test_w1\n"
+        "  - claim: c2\n    witness: t.py::test_w2\n"
+        "    mutant:\n"
+        "      file: a.py\n"
+        "      find: unrelated_edit\n"
+        "---\n\nbody\n"
+    )
+    with pytest.raises(InlineMutantError) as second_excinfo:
+        refuse_inline_mutants(on_second)
+    assert "t.py::test_w2" in str(second_excinfo.value)
+    assert isinstance(second_excinfo.value, SpecError)
+
+    subject_only = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: feature\n"
+        "acceptance:\n"
+        "  - claim: c\n    witness: t.py::test_w\n"
+        "    subject: a/b.py\n"
+        "---\n\nbody\n"
+    )
+    refuse_inline_mutants(subject_only)
+
+
 def test_discovery_refuses_a_directory_that_is_not_there(tmp_path):
     """A wrong base commit, a repo that never had the directory, or a path
     assembled with the wrong join all produce a missing path. `Path.glob`
@@ -694,19 +759,17 @@ def test_a_subject_needs_a_mutant_and_a_canonical_path():
     assert declared.subject == "saffron/agents/prompts/review.md"
     assert undeclared.subject is None
 
-    with pytest.raises(SpecError) as excinfo:
-        parse_spec(
-            "---\nid: TE-1\ntitle: t\ntype: feature\n"
-            "acceptance:\n"
-            "  - claim: c\n    witness: t.py::test_w\n"
-            "    subject: a/b.py\n"
-            "---\n\nbody\n"
-        )
-    cause = excinfo.value.__cause__
-    assert isinstance(cause, ValidationError)
-    msg = cause.errors()[0]["msg"]
-    assert "t.py::test_w" in msg
-    assert "subject" in msg
+    # A bare `subject` with no mutant now parses: the mutant arrives later,
+    # from the ref, and `attach_mutants` is where this pairing is enforced.
+    bare = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: feature\n"
+        "acceptance:\n"
+        "  - claim: c\n    witness: t.py::test_w\n"
+        "    subject: a/b.py\n"
+        "---\n\nbody\n"
+    )
+    assert bare.acceptance[0].subject == "a/b.py"
+    assert bare.acceptance[0].mutant is None
 
     bad_paths = ["", "/a", "a/./b", "a/../b", "a/b/", "a//b"]
     for path in bad_paths:

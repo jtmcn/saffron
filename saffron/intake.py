@@ -73,6 +73,16 @@ class DisclosedMutantError(SpecError):
         self.spec = spec
 
 
+class InlineMutantError(SpecError):
+    """A queued spec declares `mutant:` inline (item 80). A mutant now lives
+    on `refs/saffron/mutants`, never in the spec. Carries the parsed spec,
+    like `DisclosedMutantError`, for the same credit `_retired_ids` needs."""
+
+    def __init__(self, message: str, spec: Spec) -> None:
+        super().__init__(message)
+        self.spec = spec
+
+
 def _is_canonical_path(path: str) -> bool:
     """Whether `path` is repo-relative: `/`-split segments all non-empty and
     none `.` or `..`. False for an absolute path, a trailing `/`, and a `//`."""
@@ -136,9 +146,9 @@ class Criterion(BaseModel):
     checked the opposite way — green at both sides. A new test can never
     preserve: it did not pass at base."""
     mutant: Mutant | None = None
-    """The edit that would falsify `claim` (§5.4.1). Absent by default, and
-    every spec in this repo predates the field — an omitted `mutant` must
-    parse exactly as it did before this field existed."""
+    """The edit that would falsify `claim` (§5.4.1). A mutant lives on
+    `refs/saffron/mutants`, and `saffron.mutants.attach_mutants` sets it.
+    `parse_spec` keeps an inline one, and `refuse_inline_mutants` refuses it."""
     subject: str | None = None
     """The path a claim is about, when `mutant.file` is not that code
     (backlog item b-000d04). `None` by default, and every criterion
@@ -169,13 +179,11 @@ class Criterion(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _subject_needs_a_mutant_and_a_canonical_path(self) -> Criterion:
-        """A `subject` only narrows an exemption `mutant` already opened, and
-        only a canonical path reaches `revert_gate`'s comparison cleanly."""
+    def _subject_is_a_canonical_path(self) -> Criterion:
+        """Only a canonical path reaches `revert_gate`'s comparison cleanly.
+        A `subject` needs a mutant too, checked once the ref fills it in."""
         if self.subject is None:
             return self
-        if self.mutant is None:
-            raise ValueError(f"{self.witness} declares a subject with no mutant")
         if not _is_canonical_path(self.subject):
             raise ValueError(
                 f"subject {self.subject!r} has a path that is not canonical"
@@ -363,6 +371,13 @@ def parse_spec(text: str) -> Spec:
     except ValidationError as exc:
         raise SpecError(f"spec frontmatter is invalid: {exc}") from exc
 
+    refuse_disclosed_mutants(spec)
+    return spec
+
+
+def refuse_disclosed_mutants(spec: Spec) -> None:
+    """Raise `DisclosedMutantError` where a criterion's mutant names text
+    `spec` also puts in its own body, a claim, or a wrong version."""
     # Item 82: a mutant the spec itself spells out is a mutant handed to the
     # implementer. The body *is* prompt text — `build_system_prompt` passes it
     # as the substituted `{spec}` value — and so is a claim, which
@@ -389,7 +404,7 @@ def parse_spec(text: str) -> Spec:
         if criterion.mutant is None:
             continue
         find = criterion.mutant.find
-        where = "body" if find in body else None
+        where = "body" if find in spec.body else None
         if where is None:
             for witness, claim in claims:
                 if find in claim:
@@ -414,7 +429,18 @@ def parse_spec(text: str) -> Spec:
                 "determines, or declare a witness and no mutant",
                 spec,
             )
-    return spec
+
+
+def refuse_inline_mutants(spec: Spec) -> None:
+    """Raise `InlineMutantError` where any criterion of `spec` declares
+    `mutant:` inline. A queued spec now reads its mutant from the ref."""
+    for criterion in spec.acceptance:
+        if criterion.mutant is not None:
+            raise InlineMutantError(
+                f"{criterion.witness} declares a mutant inline; a mutant "
+                "now lives on refs/saffron/mutants, never in the spec",
+                spec,
+            )
 
 
 def load_spec(path: Path) -> tuple[Spec, str]:
@@ -461,12 +487,16 @@ class DiscoveryFailure:
     reason: str
     spec: Spec | None = None
     """Set when the file parsed and was refused on policy rather than shape —
-    `DisclosedMutantError`. The id is readable, which is the whole difference
+    `DisclosedMutantError`, or an inline `mutant:` on a non-retired scan
+    (`InlineMutantError`). The id is readable, which is the whole difference
     for `scheduler._retired_ids`."""
 
 
 def discover_specs(
     directory: Path,
+    *,
+    # Skips `refuse_inline_mutants`, so a `done/` scan keeps a spec as it shipped (item 80).
+    retired: bool = False,
 ) -> tuple[list[DiscoveredSpec], list[DiscoveryFailure]]:
     """Parse every spec in `directory`, letting no single file take down the scan.
 
@@ -497,7 +527,9 @@ def discover_specs(
     for path in sorted(directory.glob("*.md"), key=lambda p: p.name):
         try:
             spec, spec_sha = load_spec(path)
-        except DisclosedMutantError as exc:
+            if not retired:
+                refuse_inline_mutants(spec)
+        except (DisclosedMutantError, InlineMutantError) as exc:
             failures.append(DiscoveryFailure(path=path, reason=str(exc), spec=exc.spec))
             continue
         except SpecError as exc:

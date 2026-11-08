@@ -50,7 +50,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import get_args
 
-from saffron import preflight, spec_review
+from saffron import mutants, preflight, spec_review
 from saffron.agents import context
 from saffron.agents.findings import Finding
 from saffron.cell import runtime
@@ -66,7 +66,13 @@ from saffron.events import (
     Teardown,
     describe,
 )
-from saffron.intake import Spec, SpecError, discover_specs, parse_spec
+from saffron.intake import (
+    Spec,
+    SpecError,
+    discover_specs,
+    parse_spec,
+    refuse_inline_mutants,
+)
 from saffron.ledger import Ledger, _ledger_time
 from saffron.phases import package as package_phase
 from saffron.phases.rebut import (
@@ -746,13 +752,13 @@ def run_task(
     """One task, start to finish: stack it if it has a parent, run its cell,
     and package a reviewable or standing-blocker `EXHAUSTED` result alike.
 
-    A given `handoff` replaces `_resolve_stacked_on` (`Handoff`, `SA-0143`).
-    Given a `task_id`, `_recorded_spec_text` runs first and rebinds `spec`,
-    `spec_sha` and `ceilings` to the task's recorded text (ADR 7). `state`
-    on the outcome is PACKAGE's own, not the pre-packaging `READY_FOR_REVIEW`.
-    Returns `Refused` before any cell exists: for an unresolved
-    `spec.consumes`, a refused recorded text, open parents on no one chain,
-    or a stale `REBUTTAL_UNJUDGED` parent (`b-1572e7`, `SA-0330`). A base the mirror lacks raises `GitError`."""
+    A given `handoff` replaces `_resolve_stacked_on` (`SA-0143`). A `task_id`
+    rebinds `spec`, `spec_sha` and `ceilings` to the recorded text (ADR 7).
+    `state` on the outcome is PACKAGE's own. `Refused` comes before any cell:
+    an unresolved `consumes`, a refused recorded text, open parents on no one
+    chain, or a stale `REBUTTAL_UNJUDGED` parent (`SA-0330`). So does a mutant
+    that is inline, disclosed or unreadable on the ref (`SA-0338`). A base
+    the mirror lacks raises `GitError`."""
     if task_id is not None:
         recorded = _recorded_spec_text(ledger, task_id, spec, base)
         if isinstance(recorded, Refused):
@@ -761,6 +767,26 @@ def run_task(
         if recorded is not None:
             spec, spec_sha = recorded
             ceilings = spec_ceilings(spec)
+
+    # A given task reads at the commit its own row recorded, so a later move
+    # of the ref leaves it alone. A fresh one reads the ref's current head.
+    mutants_commit = (
+        ledger.task_mutants_commit(task_id)
+        if task_id is not None
+        else mutants.ref_commit(base.mirror)
+    )
+    if mutants_commit is not None and not has_commit(base.mirror, mutants_commit):
+        reason = f"mutants commit {mutants_commit[:12]} is not in the mirror"
+        print(f"{spec.id:<10} refused  {reason}")
+        return Refused(reason=reason)
+    try:
+        refuse_inline_mutants(spec)
+        found = mutants.read_mutants(base.mirror, mutants_commit, spec.id)
+        spec = mutants.attach_mutants(spec, found)
+    except SpecError as exc:
+        reason = " ".join(str(exc).split())
+        print(f"{spec.id:<10} refused  {reason}")
+        return Refused(reason=reason)
 
     if emit is None:
         # Print plus the task's own log, the shape `session._default_emit` and
@@ -843,6 +869,7 @@ def run_task(
         max_attempts=ceilings.max_attempts,
         max_turns=ceilings.max_turns,
         task_id=task_id,
+        mutants_commit=mutants_commit,
     )
     # A `consumes` entry resolves against the tree base `CellSpec` names.
     # An entry the reader cannot read joins the unresolved ones by name.

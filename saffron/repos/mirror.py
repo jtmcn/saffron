@@ -16,6 +16,8 @@ from pathlib import Path
 
 from saffron.cell.worktree import DIFF_FLAGS
 
+MUTANTS_REF = "refs/saffron/mutants"
+
 _ADDED = re.compile(r"(\d+) insertions?\(\+\)")
 _REMOVED = re.compile(r"(\d+) deletions?\(-\)")
 
@@ -78,6 +80,15 @@ def ensure_mirror(origin: Path | str, mirror_path: Path) -> Path:
             "origin",
             "+refs/*:refs/*",
             "^refs/saffron/*",
+        )
+        # A second fetch: the exclusion above drops the mutants ref from the
+        # first one. The glob lets a checkout that deletes it prune it here too.
+        _git(
+            mirror_path,
+            "fetch",
+            "--prune",
+            "origin",
+            f"+{MUTANTS_REF}*:{MUTANTS_REF}*",
         )
         return mirror_path
 

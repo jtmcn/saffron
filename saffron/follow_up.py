@@ -117,7 +117,7 @@ def _origin_file_text(specs_dir: Path, spec_id: str) -> str:
     Never one matched by its name. A file can carry a different name
     than its frontmatter id.
     """
-    discovered, _failures = intake.discover_specs(specs_dir)
+    discovered, _failures = intake.discover_specs(specs_dir, retired=True)
     for entry in discovered:
         if entry.spec.id == spec_id:
             return entry.path.read_text()
@@ -192,7 +192,6 @@ def _validate(
     *,
     candidate_id: str,
     origin: intake.Spec,
-    group: FollowUpGroup,
     allowed: set[str],
 ) -> str | None:
     """`None` when `candidate` can become a follow-up. Otherwise the
@@ -214,17 +213,11 @@ def _validate(
     for path in candidate.touches:
         if path not in allowed:
             return f"touches {path!r}, outside the allowed paths"
-    written_edits = {
-        (qualified.finding.probe.file, qualified.finding.probe.find)
-        for qualified in group.findings
-        if qualified.finding.probe is not None
-    }
+    # Item 80: a follow-up candidate is minted straight into `run_task`, which
+    # refuses any inline mutant whatever edit it names.
     for criterion in candidate.acceptance:
-        if criterion.mutant is None:
-            continue
-        edit = (criterion.mutant.file, criterion.mutant.find)
-        if edit in written_edits:
-            return "declares a mutant naming a probe its own findings wrote"
+        if criterion.mutant is not None:
+            return f"{criterion.witness} declares a mutant inline"
     return None
 
 
@@ -423,7 +416,6 @@ def write_follow_ups(
                 candidate_spec,
                 candidate_id=candidate_id,
                 origin=origin,
-                group=group,
                 allowed=allowed,
             )
             if reason is not None:

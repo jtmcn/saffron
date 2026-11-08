@@ -139,15 +139,14 @@ def _default_emit(event: Event, *, log: EventLog) -> None:
 def spec_drift(gates_dir: Path, spec_id: str, spec_sha: str) -> str | None:
     """The spec the host is judging against, versus the one the cell can read.
 
-    `saffron cell <path>` loads the file the operator names, on disk, now.
-    The cell's worktree is built from the mirror, so it carries whatever
+    `saffron cell <path>` loads the file the operator names, on disk, now. The
+    cell's worktree is built from the mirror, so it carries whatever
     `.saffron/specs/` held at that commit. Nothing compared them, and on
     `SA-0064`'s second run they differed: the host's copy had a criterion's
     mutant removed an hour earlier and the mirror's still carried it, so the
     implementer reasoned about a contract the host was not judging it against
-    (item 85). It is also the measurement item 80 asked for — the prompt-level
-    withholding of `mutant` is defeated by the worktree copy, demonstrably
-    rather than in principle.
+    (item 85). This was item 80's measurement, and a queued spec now carries no
+    mutant at all.
 
     Reported, never refused: an operator iterating on a spec is exactly what
     produced this, and refusing would stop the workflow that found it.
@@ -391,6 +390,9 @@ class CellSpec:
     # A stack batch's own task, minted by its spec review before this cell
     # runs. `_drive_cell` reads its run and reuses it, rather than minting one.
     task_id: int | None = None
+    # The commit `refs/saffron/mutants` was read at for `acceptance`'s
+    # mutants, `None` where the mirror held no such ref (item 80).
+    mutants_commit: str | None = None
 
     def __post_init__(self) -> None:
         # A resolver that could not find the parent must say `None`. An empty
@@ -2267,6 +2269,7 @@ def _drive_cell(
             # third input beside spec_sha and policy_sha (§4.1).
             prompt_sha=context.prompt_sha(),
             thread_pool_uncapped=thread_pool_uncapped,
+            mutants_commit=spec.mutants_commit,
         )
         start_spend = 0.0
 

@@ -154,7 +154,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     -- The commit GitHub reported a merge at, written once by `reconcile`
     -- (backlog item 97). NULL until a merge for this row is observed.
     merged_head_sha TEXT,
-    pushed_in_state TEXT
+    pushed_in_state TEXT,
+    mutants_commit TEXT
     -- Below the column, not above it: a comment above the *last* column
     -- broke `DROP COLUMN` on SQLite 3.51.0, measured 2026-09-19. 3.53.1 is fine.
 );
@@ -433,6 +434,7 @@ class Ledger:
             "merged_head_sha",
             "record_key",
             "pushed_in_state",
+            "mutants_commit",
         ):
             if column not in existing:
                 self._db.execute(f"ALTER TABLE tasks ADD COLUMN {column} TEXT")
@@ -818,7 +820,7 @@ class Ledger:
             risk = payload["risk"] if payload["risk"] is not None else "standard"
             resolved_run = run_id if run_id is not None else self._run_for(fact)
             cursor = self._db.execute(
-                "INSERT INTO tasks (run_id, spec_id, spec_sha, state, risk, branch, budget_usd, policy_sha, prompt_sha, record_key, updated_at) VALUES (?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO tasks (run_id, spec_id, spec_sha, state, risk, branch, budget_usd, policy_sha, prompt_sha, mutants_commit, record_key, updated_at) VALUES (?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     resolved_run,
                     payload["spec_id"],
@@ -828,6 +830,7 @@ class Ledger:
                     payload["budget_usd"],
                     payload["policy_sha"],
                     payload["prompt_sha"],
+                    payload.get("mutants_commit"),
                     fact.task_key,
                     at,
                 ),
@@ -1502,6 +1505,8 @@ class Ledger:
         policy_sha: str | None = None,
         prompt_sha: str | None = None,
         thread_pool_uncapped: bool | None = None,
+        # The commit `refs/saffron/mutants` was read at, `None` with no such ref.
+        mutants_commit: str | None = None,
     ) -> int:
         """`policy_sha` is the declaration the cell's gates ran under — read
         from the export at `base_sha` (§5.4). `prompt_sha` is
@@ -1539,6 +1544,7 @@ class Ledger:
                 # b-0569f7: a shared kernel with no thread_env cap, or None
                 # where the caller never decided.
                 "thread_pool_uncapped": thread_pool_uncapped,
+                "mutants_commit": mutants_commit,
                 **self._run_facts(run_id),
             },
         )
@@ -1675,6 +1681,14 @@ class Ledger:
             "SELECT policy_sha FROM tasks WHERE task_id = ?", (task_id,)
         ).fetchone()
         return row["policy_sha"] if row is not None else None
+
+    def task_mutants_commit(self, task_id: int) -> str | None:
+        """The commit `refs/saffron/mutants` was read at for this task, on
+        record since `create_task`. `None` where the mirror held no ref."""
+        row = self._db.execute(
+            "SELECT mutants_commit FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        return row["mutants_commit"] if row is not None else None
 
     def record_policy(self, task_id: int, policy_sha: str) -> None:
         """Written by PACKAGE when re-verification ran (§5.7, backlog item 16),
