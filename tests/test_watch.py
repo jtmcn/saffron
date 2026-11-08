@@ -779,3 +779,53 @@ def test_following_every_task_parses_no_line_written_before_it_started(
 
     assert lines == [f"SY-1 {describe(appended)}"]
     assert len(parsed) == 1
+
+
+def test_the_json_view_carries_each_typed_event_and_its_line(tmp_path):
+    """b-036cc5: `as_json` prints one object per event. Its `event` parses
+    back to the event `read_log` typed, beside the line `describe` rendered.
+    The newest-task cut and the noise filter still apply."""
+    from saffron.events import _parse_line
+
+    task_dir = tmp_path / "SY-9"
+    log = EventLog(task_dir)
+    first_task, second_task = _two_tasks("SY-9")
+    noise = Agent(
+        timestamp=9.0,
+        spec_id="SY-9",
+        raw=False,
+        event={"type": "tool_result", "is_error": False},
+    )
+    for event in [*first_task, *second_task, noise]:
+        log.append(event)
+
+    shaped = [
+        json.loads(line) for line in watch.follow(task_dir, as_json=True, sleep=_once)
+    ]
+
+    assert [_parse_line(json.dumps(obj["event"])) for obj in shaped] == second_task
+    assert [obj["line"] for obj in shaped] == [describe(e) for e in second_task]
+
+    root = tmp_path / "root"
+    root.mkdir()
+    joined = second_task[0]
+    polls: list[float] = []
+
+    def sleep(seconds: float) -> bool:
+        polls.append(seconds)
+        if len(polls) == 1:
+            EventLog(root / "SY-1").append(joined)
+            return True
+        return False
+
+    every = [
+        json.loads(line)
+        for line in watch.follow_every_task(root, as_json=True, sleep=sleep)
+    ]
+    assert every == [
+        {
+            "event": shaped[0]["event"],
+            "line": describe(joined),
+            "task": "SY-1",
+        }
+    ]
