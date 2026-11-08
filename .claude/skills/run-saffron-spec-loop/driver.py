@@ -1310,20 +1310,27 @@ def _owners_running(spec_id: str) -> list[str]:
     return [line.strip()[:120] for line in found.stdout.splitlines() if line.strip()]
 
 
+def _findings_are_latest(directory: Path) -> bool:
+    """Whether `findings.json` in a batch directory is the latest run's REVIEW.
+
+    Each run recreates `gates/` before REVIEW, so a file no older than it is
+    the latest run's. `record` and `jev --kind cell` share this rule.
+    """
+    gates_dir = directory / "gates"
+    try:
+        findings_mtime = (directory / "findings.json").stat().st_mtime
+    except OSError:
+        return False
+    return not gates_dir.is_dir() or findings_mtime >= gates_dir.stat().st_mtime
+
+
 def _review_lenses_line(spec_id: str) -> str:
     """The lenses the spec's latest REVIEW ran, read from `findings.json` in
-    its batch directory. A re-run overwrites that file, and each run
-    recreates `gates/` first. A `findings.json` no older than `gates/`
-    belongs to the latest run."""
+    its batch directory. A re-run overwrites that file."""
     none_recorded = "lenses: none recorded for this spec's latest run"
     directory = JEV_ROOT / "v0" / spec_id
     findings_path = directory / "findings.json"
-    gates_dir = directory / "gates"
-    try:
-        findings_mtime = findings_path.stat().st_mtime
-    except OSError:
-        return none_recorded
-    if gates_dir.is_dir() and findings_mtime < gates_dir.stat().st_mtime:
+    if not _findings_are_latest(directory):
         return none_recorded
     try:
         data = json.loads(findings_path.read_text())
@@ -1333,7 +1340,7 @@ def _review_lenses_line(spec_id: str) -> str:
         return none_recorded
     names = []
     for entry in data:
-        if not isinstance(entry, dict) or "lens" not in entry:
+        if not isinstance(entry, dict) or not isinstance(entry.get("lens"), str):
             return none_recorded
         error = entry.get("error")
         marker = " (error)" if isinstance(error, str) and error else ""
@@ -1787,13 +1794,7 @@ def _jev_cell(
         diff = (directory / "patch.diff").read_text()
     except (OSError, json.JSONDecodeError, KeyError) as exc:
         return _fail(f"no finished cell to score at {directory}: {exc}")
-    # A re-run reuses `directory` and writes `baseline.json` before REVIEW, so an
-    # older `findings.json` is an earlier run's REVIEW.
-    baseline = directory / "baseline.json"
-    if (
-        baseline.is_file()
-        and (directory / "findings.json").stat().st_mtime < baseline.stat().st_mtime
-    ):
+    if not _findings_are_latest(directory):
         return _fail(f"{directory}'s REVIEW predates its latest run, so no score")
     # Saved beside the other kinds, so `labels` finds the round its labels grade (b-91ead2).
     base = JEV_ROOT / "spec-loop" / spec_id / "cell"
@@ -2786,7 +2787,12 @@ def _review_change_lines(target: Spec, specs: dict[str, Spec]) -> list[str]:
         spec = specs.get(current_id)
         if spec is None:
             continue
-        if current_id in live_ids:
+        if current_id in live_ids and not spec.touches:
+            lines.append(
+                f"review: {current_id} is not retired and declares no touches, "
+                "so whether it changes REVIEW cannot be read from its frontmatter."
+            )
+        elif current_id in live_ids:
             matches = [e for e in spec.touches if _is_review_trigger(e)]
             if matches:
                 lines.append(

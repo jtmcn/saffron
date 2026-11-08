@@ -1287,6 +1287,11 @@ def test_record_names_the_lenses_the_specs_latest_review_ran(loop, monkeypatch, 
     touch(findings_path, 200)
     assert record() == (0, first_line + none_recorded)
 
+    # 8b. a `lens` that is not a string (b-a09d30).
+    findings_path.write_text(json.dumps([{"lens": None, "findings": []}]))
+    touch(findings_path, 200)
+    assert record() == (0, first_line + none_recorded)
+
     # 9. gone entirely.
     findings_path.unlink()
     assert record() == (0, first_line + none_recorded)
@@ -2319,7 +2324,11 @@ def test_check_says_an_unretired_ancestors_review_change_is_not_in_this_specs_re
         lines += ["---", "", "body", ""]
         (target / f"{spec_id}-x.md").write_text("\n".join(lines))
 
-    write("SA-0910", ["SA-0999", "SA-0906", "SA-0903"], ["saffron/phases/review.py"])
+    write(
+        "SA-0910",
+        ["SA-0999", "SA-0906", "SA-0903", "SA-0912"],
+        ["saffron/phases/review.py"],
+    )
     write(
         "SA-0906",
         ["SA-0901", "SA-0903"],
@@ -2363,6 +2372,7 @@ def test_check_says_an_unretired_ancestors_review_change_is_not_in_this_specs_re
     write("SA-0907", [], ["saffron/agents/prompts/review-correctness.md"])
     write("SA-0908", [], ["saffron/phases/review.py"], done=True)
     write("SA-0911", ["SA-0908"], ["f.py"])
+    write("SA-0912", [], [])
 
     expected = [
         "review: SA-0903 is not retired and touches saffron/phases/rebut.py, "
@@ -2380,6 +2390,9 @@ def test_check_says_an_unretired_ancestors_review_change_is_not_in_this_specs_re
         "review: SA-0907 is not retired and touches "
         "saffron/agents/prompts/review-correctness.md. This spec's REVIEW is main's and "
         "will not run that change, so budget_usd should not assume it.",
+        # b-a09d30: a spec with no `touches` hides its REVIEW reach.
+        "review: SA-0912 is not retired and declares no touches, so whether it "
+        "changes REVIEW cannot be read from its frontmatter.",
     ]
 
     def review_lines(out):

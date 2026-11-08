@@ -480,7 +480,7 @@ The last two are gaps in the spec chain's own tools. **b-9529e9** and
 ~~**b-91ead2**~~ came from closing the run. The scoring driver cannot reach a
 fixture head or clean up after a kill, and `labels` reads no cell round.
 
-**Placed 2026-09-30**, from the spec loop's run 23: **b-a09d30**,
+**Placed 2026-09-30**, from the spec loop's run 23: ~~**b-a09d30**~~,
 **b-979dbe**, ~~**b-4ddb5b**~~, then ~~**b-2dc561**~~. The first two are gaps the
 seats left in `SA-0196` and `SA-0161`. `terms` fails at base on a disavowal.
 Preflight names a listener's address but not its process.
