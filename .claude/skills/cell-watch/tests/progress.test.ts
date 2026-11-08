@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { parse, summarize } from '../hooks/progress'
+import { backlogStatus, isItem, parse, summarize } from '../hooks/progress'
 
 const line = (o: object) => JSON.stringify(o)
 const base = { spec_id: 'SA-0222' }
@@ -85,4 +85,17 @@ test('only a budget_usd ceiling with no rebut spend stops the task', async () =>
   const turns = line({ kind: 'Budget', timestamp: 32, ...base, ceiling: 'max_turns', value: 180, limit: 180 })
   const keys = summarize(parse([LIVE[0], stop, rebut, turns].join('\n'))).milestones.map(m => m.key)
   expect(keys).toEqual(['SA-0222:Budget:30'])
+})
+
+test('a backlog record is counted by its id, and the index files are not', () => {
+  expect(isItem('docs/backlog/b-0add4c-the-records-git-calls.md')).toBe(true)
+  expect(isItem('docs/backlog/128-by-hand-names-who.md')).toBe(true)
+  expect(isItem('docs/backlog/README.md')).toBe(false)
+  expect(isItem('docs/backlog/PRIORITY.md')).toBe(false)
+  expect(isItem('')).toBe(false)
+})
+
+test('the backlog segment names the total and the open count, and nothing when there is no backlog', () => {
+  expect(backlogStatus(657, 180)).toBe('backlog 657 · 180 open')
+  expect(backlogStatus(0, 0)).toBe('')
 })

@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { View, Watch } from '../types'
-import { parse, summarize } from './progress'
+import { backlogStatus, isItem, parse, summarize } from './progress'
 import type { CellEvent } from './progress'
 
 const PLUGIN = 'cell-watch'
@@ -11,6 +11,8 @@ const TOOL_NAME = 'watch'
 const TOOL = 'mcp__cell-watch__watch'
 const PANE = PLUGIN
 const POLL_MS = 3000
+const BACKLOG_MS = 60_000
+const BACKLOG = 'docs/backlog'
 const WINDOW_HOURS = 12
 const SPEC = /^SA-\d+$/
 const NO_WATCH: Watch = { spec: '', follow: false, wake: true }
@@ -21,6 +23,31 @@ const view = atom({ plugin: 'cell-watch', key: 'view' } as const, NO_VIEW)
 const announced = atom({ plugin: 'cell-watch', key: 'announced' } as const, [])
 
 let timer: Timer | undefined
+let backlogTimer: Timer | undefined
+// Module variables, so a reload recounts rather than show a stale tally.
+let watched = ''
+let tally = ''
+
+// One status line per mod: the watched task's, then the backlog count.
+function show($: EngineInterface, status?: string) {
+  if (status !== undefined) watched = status
+  const text = [watched, tally].filter(Boolean).join(' · ')
+  $.ui.status(text || undefined)
+}
+
+// Counted from the session's working tree, so a checkout with no `docs/backlog` shows nothing.
+async function countBacklog($: EngineInterface): Promise<string> {
+  const found = await $.process.run(['find', BACKLOG, '-maxdepth', '1', '-name', '*.md'])
+  const items = found.stdout.split('\n').filter(isItem)
+  if (items.length === 0) return ''
+  const open = await $.process.run(['grep', '-l', '-x', 'status: open', ...items])
+  return backlogStatus(items.length, open.stdout.split('\n').filter(Boolean).length)
+}
+
+async function recount($: EngineInterface): Promise<void> {
+  tally = await countBacklog($).catch(() => '')
+  show($)
+}
 let inFlight: Promise<string[]> | undefined
 
 async function batches($: EngineInterface): Promise<string> {
@@ -57,18 +84,18 @@ async function check($: EngineInterface, announce: boolean): Promise<string[]> {
   const spec = w.follow ? await newestSpec($, w.since ?? 0) : w.spec
   if (!spec) {
     await update($, view, () => NO_VIEW)
-    $.ui.status(undefined)
+    show($, '')
     return []
   }
   const log = await events($, spec)
   if (log === undefined) {
-    $.ui.status(`${spec} · log past 4 MiB, cell-watch cannot read it`)
+    show($, `${spec} · log past 4 MiB, cell-watch cannot read it`)
     return []
   }
   const progress = summarize(log)
   const next: View = { spec, status: progress.status || `${spec} · no log yet`, lines: progress.lines.slice(-200) }
   await update($, view, () => next)
-  $.ui.status(next.status)
+  show($, next.status)
 
   const milestones = [...progress.milestones]
   // A batch runs one task at a time (saffron/batch.py), so a newer spec's log means the last one packaged.
@@ -121,7 +148,7 @@ async function idle(): Promise<void> {
 async function halt($: EngineInterface): Promise<string> {
   await idle()
   await update($, watch, () => NO_WATCH)
-  $.ui.status(undefined)
+  show($, '')
   return 'cell-watch stopped.'
 }
 
@@ -166,6 +193,9 @@ export const register: Register = on => {
     // A hot reload drops the timer but keeps $.state, so a watch in progress resumes.
     const w = await read($, watch)
     if (w.spec || w.follow) arm($)
+    backlogTimer?.cancel()
+    backlogTimer = $.clock.every(BACKLOG_MS, () => void recount($))
+    void recount($)
     return next(e)
   })
 

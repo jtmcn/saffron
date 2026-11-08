@@ -152,3 +152,14 @@ export function summarize(all: CellEvent[]): Progress {
   const money = spent === null ? '' : ` · ${usd(spent)}/${usd(budget)}`
   return { spec, status: spec ? `${spec} · ${where}${money}` : '', lines, milestones }
 }
+
+// A backlog record is `<id>-<slug>.md`; README.md and PRIORITY.md are not items.
+const ITEM = /^(b-[0-9a-f]{6}|\d{3})-.+\.md$/
+
+export function isItem(path: string): boolean {
+  return ITEM.test(path.split('/').at(-1) ?? '')
+}
+
+export function backlogStatus(total: number, open: number): string {
+  return total ? `backlog ${total} · ${open} open` : ''
+}
