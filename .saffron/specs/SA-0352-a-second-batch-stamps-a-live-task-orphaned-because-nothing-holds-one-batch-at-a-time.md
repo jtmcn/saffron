@@ -250,6 +250,9 @@ assertion rather than a collection error. Reuse `_seed_repo`, `_seed_task`,
   returns 0 or raises `RuntimeError`. A flag the test sets tells the stub
   it is the holder. Call depth does not, because the batch after a holder
   ends is a first call again.
+- In criteria 1 and 4, the holder's stub reads and clears the flag before
+  it calls the contender. At revert the contender then records its work
+  rather than recursing through `cli.main`.
 
 **What a prototype measured.** A throwaway `home_lock.py` and witnesses for
 criteria 3 and 4 ran on the host at `8b93875c`. Both witnesses failed with
