@@ -55,11 +55,14 @@ acceptance:
       start is filed with an error, in `findings.json`,
       `criterion-probes.json` or `wrong-versions.json`. The
       task's spend is its spend before REVIEW plus the cost of each session
-      that ran. The witness drives a cut at each of the three kinds of
-      session: the third lens, the second criterion probe, and the second
-      wrong-version session.
+      that ran. A lens that failed with a cost takes that cost off REVIEW's
+      pool, so the next lens's cap is lower by it. The witness drives a cut at
+      each of the three kinds of session: the fourth lens after a failed
+      second lens, the second criterion probe, and the second wrong-version
+      session.
     witness: tests/test_session.py::test_a_review_that_crosses_its_pool_starts_no_later_session
     wrong_versions:
+      - A lens that failed costs the pool nothing, so the third lens is capped at $5.00 rather than $3.75 and the fourth lens starts.
       - Each of the three REVIEW calls opens its own pool from the remainder, so the criterion probes start after a lens was cut.
       - A session starts while the pool holds more than zero, so the second criterion probe starts with $1.75 left.
       - Only a lens that did not start ends the task `REVIEW_INCOMPLETE`, so a criterion probe or wrong version cut reaches `READY_FOR_REVIEW`.
@@ -83,7 +86,7 @@ acceptance:
     witness: tests/test_session.py::test_a_review_that_fits_its_pool_runs_every_session_capped_at_what_is_left
     wrong_versions:
       - The pool is never decremented, so every session is capped at the whole remainder as at base.
-      - The pool is floored at `REVIEW_FLOOR_USD` once, so a $3.00 remainder cuts the third lens.
+      - The pool is floored at `REVIEW_FLOOR_USD` once, so a $3.00 remainder cuts the fourth lens.
       - The floor is a fixed $8.00, so a three-lens REVIEW opens at $8.00 rather than $6.00.
       - A session starts only while the pool holds more than the floor, so the three-lens REVIEW cuts its last session at $2.00.
       - The pool opens at the whole `budget_usd` rather than the remainder.
@@ -101,20 +104,24 @@ acceptance:
 ## Context
 
 Backlog item **b-d39d9a**, under `DESIGN.md` §4.3 and §5.5. Related:
-b-2f4746. Every line below was read at `03322712`.
+b-2f4746. Every line below was read at `964ad3a7`.
 
-**What the design now says.** Commit `03322712` amended the design by hand.
+**What the design now says.** Commits `fa20707d` and `964ad3a7` amended the
+design by hand, and `84a8df56` amended the glossary by hand, in this pull
+request.
 §4.3's paragraph now opens "REVIEW draws on one pool, and REBUT departs from
 the spend row" (`DESIGN.md:534`). It says REVIEW's pool is the remainder when
-REVIEW starts, floored at $2 per declared lens. Each later session gets what
+REVIEW starts, floored at $2 per declared lens "so the lenses share at least
+$2 each". The floor does not promise that every lens starts. Each later session gets what
 the pool has left, and the host takes each cost off as it ends. A session the
 pool cannot cover does not start, and the task ends `REVIEW_INCOMPLETE`.
 §5.5's paragraph on that state now says the same, and that "Its line then says
-the review was cut at its budget" (`DESIGN.md:1241`). §5.5.1's "Ungated"
-paragraph now prices each lens at $2 of REVIEW's floor (`DESIGN.md:1258`).
-`CONTEXT.md`'s `REVIEW_INCOMPLETE` entry gained "A REVIEW session its pool
-could not cover ends the task here too" (`CONTEXT.md:758-759`). This spec
-makes those four passages true of the code.
+the review was cut at its budget" (`DESIGN.md:1253`). §5.5.1's "Ungated"
+paragraph now prices each lens at $2 of REVIEW's floor (`DESIGN.md:1270`).
+`CONTEXT.md` gained a **Review pool** entry that says the same
+(`CONTEXT.md:90-94`). Its `REVIEW_INCOMPLETE` entry gained "A REVIEW session
+its pool could not cover ends the task here too" (`CONTEXT.md:766-767`). This
+spec makes those five passages true of the code.
 
 **What REVIEW spends today.** `critic_budget` returns the remainder, floored at
 `REVIEW_FLOOR_USD` of $2 (`saffron/cell/session.py:184-186`, `:90`). REVIEW
@@ -231,13 +238,15 @@ that takes off each cost from one that counts sessions. A plan and an IMPLEMENT 
 $3.00, under the $8.00 floor.
 
 - Criterion 1 drives three cells, each with two criteria declaring one wrong
-  version. One cell's first two lenses cost $3.00 and $4.00 from an $8.00
-  pool, so the third lens is cut. One cell's lenses leave $2.50 and its first
+  version. One cell's first lens costs $3.00 from an $8.00 pool. Its second
+  lens raises `AgentFailed` carrying a $1.25 attempt, and its third costs
+  $2.00, so the fourth lens is cut. The third lens's cap is $3.75. One cell's lenses leave $2.50 and its first
   criterion probe costs $0.75, so the second probe is cut. One cell's
   sessions leave $3.50 and its first wrong-version session costs $2.00, so
   the second is cut. Each asserts the cap sequence, the state, the spend and
-  both lines. It also reads the three records, in order, as the sessions
-  that ran followed by sessions with an `error`.
+  both lines. It also reads the three records, in order. The sessions that
+  answered carry no `error`, and the failed lens and every session that did
+  not start carry one.
 - Criterion 2 drives three cells, each with three criteria declaring one
   wrong version. One opens at a $20.00 remainder. It re-prompts the second
   lens, the second probe and the second wrong-version session. It fails the
@@ -277,9 +286,9 @@ the re-prompt rule and the session per criterion. Two tests in
 `tests/test_session.py` assert that a later session holds the same cap as an
 earlier one. They are
 `test_each_claim_is_asked_of_its_own_session_that_is_never_shown_a_witness`
-(`tests/test_session.py:11959`) and
+(`tests/test_session.py:11865`, its assert at `:11959`) and
 `test_criterion_probes_and_wrong_versions_share_one_gate_only_cell_and_the_spend`
-(`tests/test_session.py:13670`). Assert the cap REVIEW's pool leaves instead.
+(`tests/test_session.py:13577`, its assert at `:13670`). Assert the cap REVIEW's pool leaves instead.
 A prototype of the change failed these seven tests and the `critic_budget`
 test, and no others.
 
@@ -295,6 +304,10 @@ keyword.
 of $3.30 is "the remainder `critic_budget()` left". The function goes, so name
 REVIEW's cap there instead. Leave `LENS_CEILINGS` as it is.
 
-**Words.** Write "REVIEW's pool" in comments and docstrings, never a bare
-"pool" (`CONTEXT.md:88`). New comments and docstrings take no em-dash,
+**Docstrings.** `run_review`'s docstring opens "Every declared lens, in
+order" (`saffron/phases/review.py:377`). A cut makes that untrue, so say a
+lens REVIEW's pool cannot cover does not start.
+
+**Words.** Write "REVIEW's pool" or "the review pool" in comments and
+docstrings, never a bare "pool" (`CONTEXT.md:90-94`). New comments and docstrings take no em-dash,
 semicolon, contraction or sentence over 25 words.
