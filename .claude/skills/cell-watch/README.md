@@ -21,7 +21,9 @@ step. A `claude -p --agent delegate` session listed the tool on 2026-10-07.
 - `/cell-watch stop` ends the watch.
 - The tool takes `{ spec?, stop? }` and does the same, always with wake-ups.
 
-The status line reads `SA-0222 · IMPLEMENT #1 · $6.26/$26.00`.
+The status line reads `SA-0222 · IMPLEMENT #1 · $6.26/$26.00 · backlog 657 · 180 open`.
+The backlog segment counts `docs/backlog/` records in the session's working
+tree each minute, and it shows alone when no task is watched.
 
 ## What wakes the session
 
