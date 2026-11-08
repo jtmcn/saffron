@@ -20,6 +20,8 @@ source = "docs/BACKLOG.md item 69: `pinned=derived` invisible to an assertion ma
 # Neither review lens filed anything in either declared range; recorded 0/0.
 recorded_seen = 0
 recorded_graded = 0
+# The lens set the recorded scoring run held. `calibrate` refuses any other.
+recorded_lenses = ["correctness", "contract", "adequacy"]
 
 [[defects]]
 id = "pinned-base-unwitnessed"

@@ -173,7 +173,7 @@ exception has a shape worth memorising: **core invokes declared gates, never too
 
 ### Invariants worth knowing before editing
 
-The seven marked **(gated)** are enforced by `.saffron/rules/`, run by the `structure` gate and
+The eight marked **(gated)** are enforced by `.saffron/rules/`, run by the `structure` gate and
 a prek hook; the rest are still prose. Promote one when you find it broken — `ast-grep test`
 means a rule ships with the failing snippet that proves it fires. Read
 `.saffron/sgconfig.yml` before writing one.
@@ -190,6 +190,9 @@ means a rule ships with the failing snippet that proves it fires. Read
   ceilings that bound each task. **(gated over `saffron/`)**
 - **The view only reads.** Nothing in `saffron/` but `cli.py` imports `saffron.view`, so no page's
   query becomes a scheduler's input (ADR 9, ADR 5). **(gated over `saffron/`)**
+- **A prompt is a Markdown file.** A `_PROMPT` constant in `saffron/` loads its text with
+  `context.turn_prompt` or `build_system_prompt`. The `prose` gate reads Markdown, so a prompt
+  in a Python string is prose no gate reads (item 161). **(gated over `saffron/`)**
 - **Import a name from the module that defines it.** The `dead` gate's vulture treats a name in
   `__all__`, or imported as itself, as used everywhere. So no `__all__` and no `import x as x`,
   and no aliased import in an `__init__.py`. **(gated over all Python)**

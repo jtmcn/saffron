@@ -111,13 +111,6 @@ def _write_manifest(out: Path, fixtures: list[corpus.Fixture]) -> None:
         )
     )
 
-TEST_PATHS = ("tests/**",)
-"""This repo's own declared `integrity.test_paths` globs. `check_probe`
-matches them by the rule `revert` uses, never as a path prefix. An edit
-to a test satisfies the number by construction, so `check_probe` requires
-this argument."""
-
-
 def _tests_gate_in_cell(
     container: str, executable: Path, cwd: Path, subset: list[str]
 ) -> GateResult:
@@ -179,6 +172,7 @@ def _apply_probes(
     out: Path,
     container: str,
     gates: dict[str, Path],
+    test_paths: list[str],
     cwd: Path,
 ) -> list[probe_check.ProbeResult]:
     """Every probe of one fixture, applied and asked, recorded as each lands.
@@ -242,7 +236,8 @@ def _apply_probes(
                 baseline=baseline,
                 mutate=partial(worktree.source_mutated, container),
                 run_tests=run_tests,
-                test_paths=TEST_PATHS,
+                # The fixture head's own globs, since `--fixtures` points anywhere.
+                test_paths=test_paths,
                 # The corpus asks whether any collected test notices (b-19b255).
                 counted=baseline.collected,
             )
@@ -485,6 +480,7 @@ def main() -> int:
                     out=out,
                     container=container,
                     gates=gates,
+                    test_paths=policy.integrity.test_paths,
                     cwd=mirror,
                 )
         finally:

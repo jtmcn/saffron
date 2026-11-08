@@ -402,6 +402,33 @@ def test_the_predicate_reproduces_every_fixture_s_recorded_answer():
     corpus.calibrate_corpus(corpus.load_corpus(FIXTURES))
 
 
+STANDARDS = REPO / "docs" / "evidence" / "fixtures-standards" / "run-20"
+
+
+def test_every_shipped_fixture_declares_the_lens_set_its_recorded_run_held():
+    """Without the declaration a recorded run that lost a lens reads the same as
+    one made before that lens existed (b-6d43da)."""
+    for fixture in corpus.load_corpus(FIXTURES) + corpus.load_corpus(STANDARDS):
+        assert fixture.recorded_lenses is not None, fixture.spec_id
+        held = {r.lens for r in fixture.recorded_reviews()}
+        assert held == set(fixture.recorded_lenses), fixture.spec_id
+
+
+def test_calibrate_refuses_a_recorded_run_that_lost_a_declared_lens(tmp_path):
+    """An adequacy-only recorded run against a three-lens declaration."""
+    shutil.copytree(FIXTURES / "SA-0062", tmp_path, dirs_exist_ok=True)
+    recorded = tmp_path / "recorded-findings.json"
+    rows = [r for r in json.loads(recorded.read_text()) if r["lens"] == "adequacy"]
+    recorded.write_text(json.dumps(rows))
+    fixture = lens_scoring.load_fixture(tmp_path)
+    with pytest.raises(lens_scoring.FixtureError) as raised:
+        lens_scoring.calibrate(fixture)
+    assert str(raised.value) == (
+        "SA-0062: the recorded scoring run holds adequacy, but fixture.toml "
+        "declares adequacy, contract, correctness"
+    )
+
+
 def test_the_second_number_counts_probes_not_findings():
     """A finding with no probe is not a probe that failed — it is a finding
     from a lens that was never asked for one. Contract and correctness
@@ -483,16 +510,6 @@ def _load_driver():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
-
-
-def test_the_driver_passes_check_probe_this_repos_declared_globs():
-    """`TEST_PATHS` is this repo's own declared `integrity.test_paths` globs,
-    because `check_probe` matches globs (backlog b-461729)."""
-    from saffron.repos.policy import load_policy
-
-    driver = _load_driver()
-    policy, _sha = load_policy(REPO)
-    assert list(driver.TEST_PATHS) == policy.integrity.test_paths
 
 
 PROBE = Mutant(file="saffron/gates/core/scope.py", find="== 0", replace="== 1")
@@ -983,6 +1000,41 @@ def test_a_raise_stops_that_fixture_rather_than_probing_a_tree_it_cannot_trust(
     assert "unknown state" in recorded[1]["reason"]
     assert "0 of 0" in pass_.table
     assert "2 unproven" in pass_.table
+
+
+def _saffron_dir_declaring_test_paths(root, globs):
+    """A `.saffron/` export with a `tests` gate and its own `test_paths`."""
+    gates = root / ".saffron" / "gates"
+    gates.mkdir(parents=True, exist_ok=True)
+    (root / ".saffron" / "policy.yaml").write_text(
+        "gates:\n  tests: { blocking: true }\n"
+        f"integrity:\n  test_paths: {json.dumps(globs)}\n"
+    )
+    (gates / "tests").write_text("#!/bin/sh\nexit 0\n")
+    (gates / "tests").chmod(0o755)
+    return root
+
+
+def test_a_probe_is_refused_on_the_fixture_heads_own_declared_test_paths(
+    tmp_path, monkeypatch
+):
+    """The test-path globs come from the policy at the fixture's head, as its
+    gates do. A repo that keeps its tests outside `tests/` stays guarded."""
+    pass_ = _drive(
+        tmp_path,
+        monkeypatch,
+        saffron_dir=_saffron_dir_declaring_test_paths(
+            tmp_path / "other-layout", ["saffron/gates/core/**"]
+        ),
+    )
+
+    recorded = json.loads((pass_.out / "SA-0045" / "probes.json").read_text())
+    assert [entry["verdict"] for entry in recorded] == ["unproven"]
+    assert (
+        recorded[0]["reason"]
+        == "saffron/gates/core/scope.py is a test; a probe must target source"
+    )
+    assert pass_.mutated == []
 
 
 def test_a_head_declaring_no_tests_gate_is_unproven_and_not_an_abort(

@@ -7,6 +7,8 @@ head_sha = "b9cbb5cc1db0b40390e0aad045a3ed97d405b823"
 source = "backlog item b-abeb74, run 20 Standards seat, SA-0191 measurement plan"
 recorded_seen = 0
 recorded_graded = 0
+# The lens set the recorded scoring run held. `calibrate` refuses any other.
+recorded_lenses = ["correctness", "contract", "adequacy"]
 
 [[defects]]
 id = "timeout-comment-contradicts"
