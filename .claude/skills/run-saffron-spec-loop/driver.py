@@ -885,7 +885,30 @@ def watch_pattern() -> str:
 # ------------------------------------------------------------- commands
 
 
+def _on_loop_branch() -> str | None:
+    """The checked-out `saffron/` branch, if any. Its `.saffron/specs/` is the
+    text its base was cut from, so a spec reads as edited when it is not (item 157)."""
+    try:
+        branch = _git("rev-parse", "--abbrev-ref", "HEAD")
+    except GitError:
+        return None
+    return branch if branch.startswith("saffron/") else None
+
+
+def _refuse_on_loop_branch(command: str) -> int | None:
+    branch = _on_loop_branch()
+    if branch is None:
+        return None
+    return _fail(
+        f"{command} reads specs from the checkout, and {branch} is checked out. "
+        "Its spec text predates the loop's fixes. Switch to the default branch, "
+        "or review the branch in its own worktree"
+    )
+
+
 def cmd_snapshot(args) -> int:
+    if (refused := _refuse_on_loop_branch("snapshot")) is not None:
+        return refused
     if ORDER.is_file() and not (args.force or args.new):
         return _fail(
             f"{ORDER.relative_to(REPO)} exists — pass --force to re-snapshot this "
@@ -1058,6 +1081,8 @@ def _next_spec(
 def cmd_next(args) -> int:
     """`--again` hands back a spec a cell stopped on without deciding — the
     case is a reopened rate-limit window."""
+    if (refused := _refuse_on_loop_branch("next")) is not None:
+        return refused
     _reconcile_first()
     rows = _load()
     if reasons := _stale(rows):
@@ -1582,6 +1607,20 @@ def cmd_drop(args) -> int:
     return 0
 
 
+def cmd_undrop(args) -> int:
+    """Put a dropped spec back in the order, pending (item 172)."""
+    rows = _load()
+    match = next((p for p in rows if p.spec_id == args.spec_id), None)
+    if match is None:
+        return _fail(f"{args.spec_id} is not in the order")
+    if match.dropped is None:
+        return _fail(f"{args.spec_id} is not dropped")
+    was, match.dropped = match.dropped, None
+    _save(rows)
+    print(f"{match.spec_id}  back in the order (it was dropped: {was})")
+    return 0
+
+
 # pytest's exit codes: 1 is a failed test; 2-5 are an interrupt, an internal
 # error, a usage error and no tests collected, none of which is a verdict.
 _PYTEST_NOT_A_VERDICT = {2, 3, 4, 5}
@@ -1664,6 +1703,8 @@ def cmd_hold(args) -> int:
 
 
 def cmd_status(_args) -> int:
+    if (refused := _refuse_on_loop_branch("status")) is not None:
+        return refused
     # The state dir is ignored by git, so every new worktree opens with no order.
     if not ORDER.is_file() and not LEGACY_PLAN.is_file():
         print(
@@ -3074,6 +3115,10 @@ def main() -> int:
     p.add_argument("spec_id")
     p.add_argument("--why", required=True, help="what the operator should know")
     p.set_defaults(func=cmd_drop)
+
+    p = sub.add_parser("undrop", help="put a dropped spec back in the order")
+    p.add_argument("spec_id")
+    p.set_defaults(func=cmd_undrop)
 
     p = sub.add_parser("hold", help="keep next off a spec whose edit is still open")
     p.add_argument("spec_id")
