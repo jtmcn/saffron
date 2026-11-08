@@ -1,9 +1,11 @@
 ---
 id: b-17d0d5
 title: The Standards end-review lens runs over a repo with no `CLAUDE.md` and judges its diff against nothing
-status: open
+status: done
 tier: 3
 filed: 2026-09-26
+closed: 2026-11-08
+by_hand: true
 specs: [SA-0192]
 prs: []
 commits: []
@@ -28,3 +30,4 @@ invitation. `SA-0153` was named to decide it and did not.
 ## Record
 
 - 2026-09-26: filed from the spec loop's run 18 (stack #531).
+- 2026-11-08: done by hand.

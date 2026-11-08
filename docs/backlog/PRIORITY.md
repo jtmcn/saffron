@@ -453,7 +453,7 @@ compares the index to the records in that direction. It ranks here, beside
 128 and 129. ~~**b-61127f**~~, the ADR layer, is done.
 
 **Placed 2026-09-26**, from the spec loop's run 18: **b-615466**, **b-50a704**,
-**b-17d0d5**, then ~~**b-830357**~~. Each is a stack batch seam that review kept
+~~**b-17d0d5**~~, then ~~**b-830357**~~. Each is a stack batch seam that review kept
 as written, or a witness too weak at one boundary.
 
 **Placed 2026-09-27**, from the spec loop's run 19: **b-1e9a7a**,

@@ -337,6 +337,9 @@ def end_review_prompt(
     argument its string never references.
     """
     template = (prompts_dir / END_LENSES[lens]).read_text()
+    standing = context.standing_instructions(claude_md)
+    if lens == "standards" and not standing:
+        standing = review.NO_STANDING_INSTRUCTIONS
     return context.build_system_prompt(
         "REVIEW",
         context_md,
@@ -349,7 +352,7 @@ def end_review_prompt(
         base=fields.base,
         head=fields.head,
         known=fields.known,
-        standing_instructions=context.standing_instructions(claude_md),
+        standing_instructions=standing,
         criteria=_criteria_lines(acceptance),
         constraints=context.constraints_block(touches, forbidden, []),
     )
