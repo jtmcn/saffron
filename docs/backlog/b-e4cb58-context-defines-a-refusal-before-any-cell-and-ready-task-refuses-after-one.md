@@ -1,11 +1,13 @@
 ---
 id: b-e4cb58
 title: "`CONTEXT.md` defines a Refusal as before any cell starts, and `ready_task` returns `Refused` after one"
-status: open
+status: done
 tier: 3
+closed: 2026-11-08
+by_hand: true
 filed: 2026-11-02
 specs: []
-prs: []
+prs: [1062]
 commits: []
 cites: [§5.7]
 related: [b-74a122]
@@ -29,3 +31,4 @@ name.
 
 - 2026-11-02: filed from the spec loop's run 52. `CONTEXT.md` was forbidden
   to `SA-0329`.
+- 2026-11-08: done by hand. The entry now covers `saffron package`'s refusals after the cell. The `Refused` docstring in `saffron/task.py` still says before any cell starts, which a cell can fix.
