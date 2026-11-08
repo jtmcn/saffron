@@ -410,7 +410,7 @@ in `policy.yaml`. **b-2227b0**, closed as parked, records a draft ADR.
 Each is a gap a seat, a finish or the run found and the stack left alone.
 
 **Placed 2026-10-27**, from the spec loop's run 49:
-**b-1b8b1e**, **b-92c92a**, **b-2a03c2**, **b-d2afe3**, ~~**b-1ff5a3**~~ and
+**b-1b8b1e**, **b-92c92a**, **b-2a03c2**, ~~**b-d2afe3**~~, ~~**b-1ff5a3**~~ and
 **b-3a0789**. Each is a gap a seat, a finish or the run found and the stack
 left alone.
 
