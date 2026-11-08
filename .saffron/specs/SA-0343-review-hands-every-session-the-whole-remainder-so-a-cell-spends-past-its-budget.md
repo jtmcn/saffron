@@ -104,10 +104,10 @@ acceptance:
 ## Context
 
 Backlog item **b-d39d9a**, under `DESIGN.md` §4.3 and §5.5. Related:
-b-2f4746. Every line below was read at `964ad3a7`.
+b-2f4746. Every line below was read at `6dfa5092`.
 
-**What the design now says.** Commits `fa20707d` and `964ad3a7` amended the
-design by hand, and `84a8df56` amended the glossary by hand, in this pull
+**What the design now says.** Commits `5054cd61` and `01796b83` amended the
+design by hand, and `ad7049ad` amended the glossary by hand, in this pull
 request.
 §4.3's paragraph now opens "REVIEW draws on one pool, and REBUT departs from
 the spend row" (`DESIGN.md:534`). It says REVIEW's pool is the remainder when
@@ -219,7 +219,9 @@ criteria. The cell reached `READY_FOR_REVIEW` at $76.77.
 
 **Stack order.** `depends_on: [SA-0342]` orders the stack only. `SA-0342`
 edits `revert.py` and the gate contract, and this spec consumes nothing it
-adds. `SA-0340` also edits `session.py`, at REBUT's write site. Keep this
+adds. `SA-0338`, `SA-0340` and `SA-0341` also edit `session.py`, at the mint,
+REBUT's write site and `_RebutCap`, so its line numbers shift in the cell's
+tree. Find each site by name. Keep this
 spec's edits in `session.py` inside REVIEW's block and the budget helpers.
 
 **Mutants and new code.** The code each criterion is about is new: the pool,
@@ -237,8 +239,8 @@ that takes off each cost from one that counts sessions. A plan and an IMPLEMENT 
 `budget_usd` of 10.2 a remainder of $10.00. A `budget_usd` of 3.2 leaves
 $3.00, under the $8.00 floor.
 
-- Criterion 1 drives three cells, each with two criteria declaring one wrong
-  version. One cell's first lens costs $3.00 from an $8.00 pool. Its second
+- Criterion 1 drives three cells at a `budget_usd` of 8.2, each with two
+  criteria declaring one wrong version. One cell's first lens costs $3.00 from an $8.00 pool. Its second
   lens raises `AgentFailed` carrying a $1.25 attempt, and its third costs
   $2.00, so the fourth lens is cut. The third lens's cap is $3.75. One cell's lenses leave $2.50 and its first
   criterion probe costs $0.75, so the second probe is cut. One cell's
@@ -295,8 +297,11 @@ test, and no others.
 **The two evidence scripts.** Each passes `budget_usd=args.budget_usd` to
 `run_review` (`docs/evidence/scripts/2026-09-07-lens-scoring.py:184`,
 `docs/evidence/scripts/2026-09-08-lens-corpus.py:453`). Each help text calls
-that figure "per lens" (`:83`, `:311`). Keep it per lens: hand `run_review` a
-pool of that figure times `len(review.LENSES)`, and say so in the help text.
+that figure "per lens" (`:83`, `:311`). Hand `run_review` a
+pool of that figure times `len(review.LENSES)`. Rewrite each help text to say
+the flag sets the whole review pool, and `:83`'s "three lenses" to the four
+`review.LENSES` holds. Also rewrite the comment at `saffron/cell/session.py:3169-3170`,
+which calls the ceiling one figure computed once.
 `tests/test_corpus.py:573` replaces `run_review` with a stub that takes any
 keyword.
 
