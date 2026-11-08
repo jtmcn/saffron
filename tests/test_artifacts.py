@@ -622,3 +622,18 @@ def test_a_root_cause_of_one_token_is_refused():
     sentence."""
     with pytest.raises(ScopeProposalRefused, match="root cause"):
         validate_scope_proposal(_proposal(root_cause="x"), touches=TOUCHES)
+
+
+def test_one_function_in_size_builds_the_over_ceiling_message():
+    """b-a90136: `size_gate` and `judge_estimate` share one builder, so
+    neither module spells the failure text itself."""
+    from pathlib import Path
+
+    from saffron.agents import artifacts
+    from saffron.gates.core import size
+
+    assert size.over_ceiling(1301, "bug", 1300) == (
+        "1301 changed tokens exceeds the bug ceiling of 1300"
+    )
+    assert "changed tokens exceeds" not in Path(artifacts.__file__).read_text()
+    assert Path(size.__file__).read_text().count("changed tokens exceeds") == 1
