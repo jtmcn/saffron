@@ -7,7 +7,7 @@ filed: 2026-09-25
 closed: 2026-11-08
 by_hand: true
 specs: []
-prs: []
+prs: [1078]
 commits: []
 cites: [§4.2, §5.5]
 related: [b-bff670]
