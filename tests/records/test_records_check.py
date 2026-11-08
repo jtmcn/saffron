@@ -386,8 +386,18 @@ def test_a_tiered_item_is_named_under_its_tier(broken):
     assert v.field == "tier" and "2" in v.message
 
 
+def test_an_item_the_index_ranks_carries_a_tier(broken):
+    item = _item(broken, "002-the-index-drifts.md")
+    _rewrite(item, "tier: 2\n", "")
+    [v] = check_priority(
+        load(BACKLOG, broken), broken / "docs" / "backlog" / "PRIORITY.md"
+    )
+    assert v.path == item and v.field == "tier"
+    assert v.message == "item 2 has no tier, but PRIORITY.md names it under tier 2"
+
+
 def test_an_id_named_under_another_tier_in_prose_is_fine(broken):
-    # The index narrates a move under the old tier; the rule runs records → index.
+    # The index narrates a move under the old tier. One matching heading is enough.
     _rewrite(
         broken / "docs" / "backlog" / "PRIORITY.md",
         "**2**.",

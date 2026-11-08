@@ -540,6 +540,16 @@ def check_priority(records: list[Record], priority_md: Path) -> list[Violation]:
                 named_under.setdefault(n, set()).add(tier)
     for n, r in by_id.items():
         t = _backlog(r).tier
+        ranked = sorted(named_under.get(n, set()))
+        if t is None and ranked:
+            out.append(
+                Violation(
+                    r.path,
+                    "tier",
+                    f"item {n} has no tier, but PRIORITY.md names it under tier "
+                    + " and ".join(map(str, ranked)),
+                )
+            )
         if t is not None and t not in named_under.get(n, set()):
             out.append(
                 Violation(

@@ -442,7 +442,7 @@ Each line keeps the order it was filed in.
 - From item 52's review: ~~**b-cec9a7**~~.
 
 **Placed 2026-09-20**: **161**, **162**, **163**, **126**, **128** and ~~**129**~~,
-then **b-7d2acf**. The first three are what PR #317 left on the `prose` gate. A
+then ~~**b-7d2acf**~~. The first three are what PR #317 left on the `prose` gate. A
 prompt written as a Python string is invisible to it. Its rules read register
 and not instruction form, and its sentence limit fights §8's line budget. 126 is
 a cache write the REVIEW lenses pay for three times, at the cost of plan
