@@ -1,9 +1,10 @@
 ---
 id: b-c375d6
 title: A stacked branch carries its own spec as it stood when its base was cut, so a PR seat reading that copy reviews against stale text
-status: open
+status: done
 tier: 2
 filed: 2026-09-25
+closed: 2026-11-08
 by_hand: true
 specs: []
 prs: []
@@ -35,3 +36,4 @@ shows the two copies differ on a stacked fixture.
 - 2026-09-25: filed from the spec loop's run 16.
 - 2026-11-07: marked by hand in grooming. The work is in the spec loop's skill under
   `.claude/`, and `SA-0279` refuses any spec that touches that path.
+- 2026-11-08: done by hand. `record` names the text the cell ran when the pushed head's copy differs.

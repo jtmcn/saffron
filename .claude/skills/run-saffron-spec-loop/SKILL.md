@@ -189,6 +189,8 @@ Once the process has exited, an in-flight state is a **halt**: the cell stopped
 at a ceiling and nothing decided the task. `record` says so, and a halt goes
 to the operator (GOTCHAS, Recording). `record` also prints the lenses the
 REVIEW ran. Put that line in the seats' `{KNOWN}` (step 2c).
+When the branch's copy of the spec differs from the text the cell ran, `record`
+names a file holding that text. Give it to the seats as `{SPEC}`.
 
 Then score the cell's own REVIEW the same way, with `--kind cell` and no
 `--report` or `--commit`. Its round is saved under `cell/` beside the
