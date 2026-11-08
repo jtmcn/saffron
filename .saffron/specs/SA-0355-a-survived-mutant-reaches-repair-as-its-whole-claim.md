@@ -53,11 +53,12 @@ acceptance:
       `survived-mutant` failure whose message still names the claim, and
       quotes the mutant's `case` when one is declared. Each failure quotes its
       own criterion's case and no other's. A mutant with no `case` gives the
-      message the base gives, character for character. Neither the `find` nor
-      the `replace` text of any mutant appears in the serialized gate result,
-      or in the text `saffron.phases.implement.repair_prompt` renders from its
-      failures. The witness drives three surviving criteria in one call, two
-      with distinct cases and one with none. Their mutants are read from a
+      message the base gives, character for character. No mutant's `find`
+      text appears in the serialized gate result, or in the text
+      `saffron.phases.implement.repair_prompt` renders from its failures.
+      Neither does a mutant's `replace` text that no claim or case holds. The
+      witness drives three surviving criteria in one call, in this order: two
+      with distinct cases, then one with none. Their mutants are read from a
       mutants file's text by `saffron.mutants.parse_mutants`, and applied
       through `tests.mutation.host_mutator`.
     witness: tests/test_witness_gate.py::test_a_surviving_mutant_quotes_its_own_case_and_never_its_edit
@@ -67,23 +68,28 @@ acceptance:
       - A mutant with no case still gets the case's lead-in, or the text `None`, appended to its message.
       - The message quotes the `find` text beside the case, so REPAIR can locate the line.
       - The case is added to the gate's summary and never to a failure's message.
+      - A survivor with no case carries over the case of the survivor before it.
   - claim: >-
       A mutants file's entry may declare `case`, a string. `parse_mutants`
-      loads it as declared and loads an entry without it as `None`. It refuses
-      an empty case and a whitespace-only one as a `MutantsError` naming the
-      file. The witness drives all four.
+      loads it as declared, whitespace included, and loads an entry without
+      it as `None`. It refuses an empty case and a whitespace-only one as a
+      `MutantsError` naming the file. The witness drives all five: a plain
+      case, a case with leading and trailing spaces, an omitted case, an
+      empty one and a whitespace-only one.
     witness: tests/test_mutants.py::test_a_mutant_case_loads_when_declared_and_is_refused_blank
     wrong_versions:
       - The field defaults to the empty string, so an entry without a case loads as `""`.
       - Only the empty string is refused, so a case of three spaces loads.
       - A blank case is stripped to `None` and loads.
+      - A declared case is stripped on load, so its leading and trailing spaces are lost.
   - claim: >-
       `saffron.mutants.attach_mutants` refuses a mutant whose `find` text its
       own `case` holds, and one whose `find` text another criterion's mutant's
       `case` holds, as a `DisclosedMutantError`. For the second, the message
       names the witness whose case holds the text. A case holding no mutant's
       `find` attaches, and the attached criterion carries it. The witness
-      drives all three in one spec of two criteria.
+      drives each in one spec of two criteria. It drives the second in both
+      orders: the holder's criterion first, then second.
     witness: tests/test_mutants.py::test_a_case_that_holds_any_mutants_find_is_refused_as_a_disclosure
     wrong_versions:
       - Only a criterion's own case is compared with its own find, so a sibling's case that holds it attaches.
@@ -92,6 +98,7 @@ acceptance:
       - The refusal is raised as a plain `MutantsError`.
       - The sibling refusal says "its own case" and never names the holder's witness.
       - The `replace` text is compared too, so an empty `replace`, which every string holds, refuses a clean case.
+      - Each find is checked only against the cases of criteria up to and including its own, so a holder declared after it attaches.
 ---
 
 ## Context
@@ -139,7 +146,8 @@ take the new field with no edit of their own.
 2. **A survivor quotes it.** The `survived-mutant` message keeps
    everything it carries today. It then quotes the surviving mutant's case,
    where one is declared. With no case, the message is exactly today's. The
-   message still names neither the `find` nor the `replace` text.
+   message adds no `find` text, and no `replace` text beyond what a claim
+   or a case already holds.
 3. **The disclosure check reads it.** Every survivor's message reaches
    REPAIR with its case. So a case holding any mutant's `find` hands that
    edit to the implementer. `refuse_disclosed_mutants` refuses a `find` that any
@@ -173,6 +181,9 @@ concept, so no glossary entry is owed.
   It is the same function, but a queued spec's inline mutant is refused at
   intake, so no witness drives that path.
 - `saffron/mutants.py`. Nothing in it changes.
+- `SA-0339`'s `README.md` line and the `saffron mutant` help text. Neither is
+  known to name the fields of a mutant. The delegate greps `SA-0339`'s merged
+  `README.md` before this spec runs.
 
 ## Notes for the agent
 
@@ -188,6 +199,9 @@ criteria add `retired_first` to `Spec` and name neither `Mutant` nor
 `refuse_disclosed_mutants`. Find each of the two by its name. At priority 1
 this spec then runs before `SA-0352` to `SA-0354`, and `SA-0353` forbids
 `saffron/intake.py`.
+
+**`DESIGN.md` §5.4.1.** Amended by hand at this spec's base, to say a
+mutant can carry a case and a survivor's failure quotes it.
 
 **Edit or new.** The case field, its quoting and its disclosure check are
 new code, so the base fixes none of their spelling. No criterion declares a
@@ -215,15 +229,17 @@ validator pass `None` through left every one green. The locked Pydantic is
 `repair_prompt` inside the test body, as `tests/test_mutants.py` does.
 
 - Criterion 1 writes three files, each holding its own `find` once. Give each
-  `find` and `replace` a shared distinctive prefix, so one substring check
-  covers every edit. Build the mutants with `parse_mutants` over one YAML
+  `find` and `replace` a shared distinctive prefix that no claim or case
+  holds, so one substring check covers every edit. Declare the two criteria
+  with cases first and the case-less one last. Build the mutants with `parse_mutants` over one YAML
   text, as the ref holds them. Give each criterion its own claim, and assert
   the case-less one's message equals the base format in full. Render
   `repair_prompt` over the failures, each wrapped as `NewFailure("witness",
   failure)`.
 - Criterion 3 parses one spec with two criteria, neither of whose witness
-  ids contains the other. For the sibling case, put the holder's case on the first
-  criterion and the disclosed `find` on the second.
+  ids contains the other. For the sibling case, put the holder's case on the
+  first criterion and the disclosed `find` on the second. Then swap them,
+  with the disclosed `find` on the first and the holder's case on the second.
 
 **Every new test fails with the source reverted.** On the prototype, all
 three failed with `saffron/` reverted. `Mutant` refuses `case` as an extra
