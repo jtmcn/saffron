@@ -1,4 +1,4 @@
-"""The record rules a tool outside `tests/` also runs. `tests/records/check.py`
+"""The record rules a tool outside `tests/` also runs. `records/check.py`
 imports them, so `make check` applies the definition the driver prints from."""
 
 from __future__ import annotations

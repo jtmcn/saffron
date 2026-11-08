@@ -17,7 +17,7 @@ Measured on batch 19's finishing commit `ecf59477`, in the spec loop's run 31.
 
 The finish once moved each layer's spec to `.saffron/specs/done/`. This
 repo's records rule refuses a spec in `done/` whose backlog item is still
-`open` (`tests/records/check.py:494`). The finish can write spec files only,
+`open` (`records/check.py:494`). The finish can write spec files only,
 and core knows nothing of `docs/backlog/`. So every finish with an open item
 failed its own gate suite. b-a63235 took the move out of the finish. The
 delegate now retires each spec and closes its item by hand, in the step-5

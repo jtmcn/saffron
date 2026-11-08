@@ -9,12 +9,9 @@ from pathlib import Path
 
 import pytest
 
+import records.check
 import records.rules
-import tests.records.check
-from records.kinds import KINDS, Identified, Kind
-from records.load import Record, load
-from records.rules import Violation, check_priority, cited_items
-from tests.records.check import (
+from records.check import (
     appendix_letters,
     building_pr,
     check_all,
@@ -31,6 +28,11 @@ from tests.records.check import (
     check_specs_name_their_items,
     check_specs_resolve,
 )
+from records.kinds import KINDS, Identified, Kind
+from records.load import Record, load
+from records.rules import Violation, check_priority, cited_items
+from saffron.probe import probe_refusal
+from saffron.repos.policy import load_policy
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "good"
 REPO = Path(__file__).resolve().parents[2]
@@ -96,7 +98,7 @@ def test_random_ids_leave_no_gap_in_the_numbered_ids(broken):
 
 
 def test_a_numbered_id_past_the_last_is_a_violation(broken, monkeypatch):
-    monkeypatch.setattr(tests.records.check, "LAST_NUMBERED", 2)
+    monkeypatch.setattr(records.check, "LAST_NUMBERED", 2)
     [v] = check_ids(load(BACKLOG, broken))
     assert v.path == _item(broken, "003-a-corpse-reads-as-drained.md")
     assert "new-id" in v.message
@@ -273,18 +275,25 @@ def test_check_all_runs_every_check(monkeypatch):
     # The expected set is every `check_*` the module defines, not check_all's body.
     names = {
         name
-        for name, fn in inspect.getmembers(tests.records.check, inspect.isfunction)
+        for name, fn in inspect.getmembers(records.check, inspect.isfunction)
         if name.startswith("check_")
         and name != "check_all"
-        and fn.__module__ in ("tests.records.check", "records.rules")
+        and fn.__module__ in ("records.check", "records.rules")
     }
     for name in names:
         sentinel = Violation(Path(name), "sentinel", name)
         monkeypatch.setattr(
-            tests.records.check, name, lambda *_, sentinel=sentinel: [sentinel]
+            records.check, name, lambda *_, sentinel=sentinel: [sentinel]
         )
     ran = {v.message for v in check_all(FIXTURE, set(), principles=set())}
     assert ran == names
+
+
+def test_a_probe_on_the_checking_code_is_answered_not_refused():
+    # b-98dc4d: a probe on the checking logic must reach a cell under this repo's policy.
+    policy, _ = load_policy(REPO)
+    target = Path(inspect.getfile(check_all)).relative_to(REPO).as_posix()
+    assert probe_refusal(target, policy.integrity.test_paths) is None
 
 
 def test_the_rules_a_tool_also_runs_have_one_definition_in_records():
@@ -292,7 +301,7 @@ def test_the_rules_a_tool_also_runs_have_one_definition_in_records():
     for name in ("spec_files", "first_cited_item", "context_section", "check_priority"):
         fn = getattr(records.rules, name)
         assert fn.__module__ == "records.rules"
-        assert getattr(tests.records.check, name) is fn
+        assert getattr(records.check, name) is fn
     driver = Path(".claude/skills/run-saffron-spec-loop/driver.py")
     assert "from tests." not in (REPO / driver).read_text()
 
@@ -580,32 +589,32 @@ def _write_adr(root: Path, adr_id: int, status: str, extra: str = "") -> Path:
 def test_adr_ids_run_from_one_with_no_gap_or_repeat(tmp_path: Path):
     gap = tmp_path / "gap"
     shutil.copytree(FIXTURE, gap)
-    assert tests.records.check.check_adr_ids(load(_adr_kind(), gap)) == []
+    assert records.check.check_adr_ids(load(_adr_kind(), gap)) == []
     directory = gap / _adr_kind().directory
     (directory / "0002-the-fixture-decision-superseded.md").rename(
         directory / "0003-x.md"
     )
     _rewrite(directory / "0003-x.md", "id: 2", "id: 3")
-    [v] = tests.records.check.check_adr_ids(load(_adr_kind(), gap))
+    [v] = records.check.check_adr_ids(load(_adr_kind(), gap))
     assert v.field == "id" and "2" in v.message and "not contiguous" in v.message
 
     from_two = tmp_path / "from_two"
     _write_adr(from_two, 2, "accepted")
     _write_adr(from_two, 3, "accepted")
-    violations = tests.records.check.check_adr_ids(load(_adr_kind(), from_two))
+    violations = records.check.check_adr_ids(load(_adr_kind(), from_two))
     assert any(v.field == "id" and "missing [1]" in v.message for v in violations)
 
     twice = tmp_path / "twice"
     shutil.copytree(FIXTURE, twice)
     shutil.copy(_adr(twice, "0001-a-fixture-decision.md"), _adr(twice, "0001-again.md"))
-    violations = tests.records.check.check_adr_ids(load(_adr_kind(), twice))
+    violations = records.check.check_adr_ids(load(_adr_kind(), twice))
     assert any(
         v.field == "id" and "1 is used more than once" in v.message for v in violations
     )
 
 
 def test_adr_supersession_is_held_equal_on_both_sides(tmp_path: Path):
-    assert tests.records.check.check_adr_supersession(load(_adr_kind(), FIXTURE)) == []
+    assert records.check.check_adr_supersession(load(_adr_kind(), FIXTURE)) == []
 
     root = tmp_path / "root"
     _write_adr(root, 1, "accepted")
@@ -618,7 +627,7 @@ def test_adr_supersession_is_held_equal_on_both_sides(tmp_path: Path):
     _write_adr(root, 8, "deprecated", "superseded_by: [1]\n")
     _write_adr(root, 9, "superseded", "superseded_by: [99]\n")
 
-    violations = tests.records.check.check_adr_supersession(load(_adr_kind(), root))
+    violations = records.check.check_adr_supersession(load(_adr_kind(), root))
     assert any(
         v.field == "supersedes" and "99" in v.message and "does not exist" in v.message
         for v in violations
@@ -659,10 +668,7 @@ def test_adr_supersession_is_held_equal_on_both_sides(tmp_path: Path):
 
 def test_an_adr_cites_only_appendices_that_exist(tmp_path: Path):
     letters = {"A", "B"}
-    assert (
-        tests.records.check.check_adr_appendices(load(_adr_kind(), FIXTURE), letters)
-        == []
-    )
+    assert records.check.check_adr_appendices(load(_adr_kind(), FIXTURE), letters) == []
 
     broken = tmp_path / "root"
     shutil.copytree(FIXTURE, broken)
@@ -671,14 +677,12 @@ def test_an_adr_cites_only_appendices_that_exist(tmp_path: Path):
         "appendices: [A]",
         "appendices: [A, Z]",
     )
-    [v] = tests.records.check.check_adr_appendices(load(_adr_kind(), broken), letters)
+    [v] = records.check.check_adr_appendices(load(_adr_kind(), broken), letters)
     assert v.field == "appendices" and "Z" in v.message
 
 
 def test_an_adr_cites_only_principles_that_exist(tmp_path: Path):
-    assert (
-        tests.records.check.check_adr_principles(load(_adr_kind(), FIXTURE), {1}) == []
-    )
+    assert records.check.check_adr_principles(load(_adr_kind(), FIXTURE), {1}) == []
 
     broken = tmp_path / "root"
     shutil.copytree(FIXTURE, broken)
@@ -692,7 +696,7 @@ def test_an_adr_cites_only_principles_that_exist(tmp_path: Path):
         "- **1** upholds.",
         "- **99** upholds. Planted.\n- **1** upholds.",
     )
-    [v] = tests.records.check.check_adr_principles(load(_adr_kind(), broken), {1})
+    [v] = records.check.check_adr_principles(load(_adr_kind(), broken), {1})
     assert v.field == "principles" and "[99], which do not exist" in v.message
 
 
@@ -758,9 +762,7 @@ def test_an_adr_principles_section_declares_exactly_its_principles(
     broken = tmp_path / "root"
     shutil.copytree(FIXTURE, broken)
     _rewrite(_adr(broken, name), old, new)
-    violations = tests.records.check.check_adr_principles(
-        load(_adr_kind(), broken), {1}
-    )
+    violations = records.check.check_adr_principles(load(_adr_kind(), broken), {1})
     assert any(v.field == "principles" and expected in v.message for v in violations), (
         violations
     )
