@@ -87,6 +87,12 @@ _Avoid_: "the checkout", "the clone", "the workspace", "the sandbox dir".
 **Subnet pool**: The /16 that a task's internal networks draw from, one /24 each (`runtime.SUBNETS["pool"]`, `DESIGN.md` §5.1). A network claims its /24 by being created on it, never by a listing taken first.
 _Avoid_: a bare "pool". That word alone is a batch's concurrency pool.
 
+**Review pool**: The money REVIEW's sessions share (`DESIGN.md` §4.3). It opens at the task's
+remainder when REVIEW starts, floored at `REVIEW_FLOOR_USD` per declared lens. Each session is
+capped at what is left, and its cost comes off as it ends. A session it cannot cover does not
+start, and the task ends `REVIEW_INCOMPLETE`.
+_Avoid_: a bare "pool", "the critic budget".
+
 **Operator**: The human. Singular per deployment, by design (ADR 10).
 _Avoid_: "the user", "the reviewer" (reviewing is one of several things they do).
 
