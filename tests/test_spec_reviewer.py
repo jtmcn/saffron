@@ -19,3 +19,30 @@ def test_the_spec_review_agent_has_no_edit_tool():
         "Glob",
         "Bash",
     }
+
+
+PROMPT = AGENT.parents[2] / "saffron" / "agents" / "prompts" / "spec-review.md"
+
+
+def _flat(path: Path) -> str:
+    return " ".join(path.read_text().split())
+
+
+def test_both_spec_reviews_check_each_named_symbol_exists_at_base():
+    """b-cd41ac: a spec named five helpers absent at its base, and two
+    spec reviews passed it."""
+    assert "A missing one is a `build` blocker (b-cd41ac)." in _flat(AGENT)
+    assert (
+        "Does every function, test helper or other name the spec tells the cell "
+        "to reuse exist at this snapshot." in _flat(PROMPT)
+    )
+
+
+def test_both_spec_reviews_check_each_prescribed_line_against_the_code():
+    """b-aff9ea: a spec dictated a line that contradicted the code, and the
+    cell wrote it as told."""
+    assert "contradicts either is a `build` blocker (b-aff9ea)." in _flat(AGENT)
+    assert (
+        "Does every line the spec tells the cell to write verbatim agree with "
+        "the code and with this repository's own definitions" in _flat(PROMPT)
+    )

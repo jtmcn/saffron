@@ -293,7 +293,7 @@ exists leaves no row. A stack batch at a threshold spends into its shares.
 `watch` cannot follow the follow-up writer or the end review.
 
 **Placed 2026-10-12**, from the spec loop's run 35: **b-714ccd**,
-**b-aff9ea**, **b-54ad4f**, ~~**b-7ee599**~~, then **b-82cf2e**. A witness on a
+~~**b-aff9ea**~~, **b-54ad4f**, ~~**b-7ee599**~~, then **b-82cf2e**. A witness on a
 default value passes REBUT. A spec can prescribe a false line. No gate
 resolves a citation. A stack batch's follow-up guard has no witness. `migrate`
 writes a false package fact for an adopted row.
@@ -431,7 +431,7 @@ Each line keeps the order it was filed in.
   **b-9ed36d**, **b-b431c1**, ~~**b-ac2f02**~~ and **b-49329e**.
 - From ADR 4's review and the superpowers comparison: ~~**b-07f694**~~,
   **b-7c88f8**, **b-e1afbb** and **b-3732ef**.
-- From spec loop runs 15 to 17 and `SA-0135`'s review: **b-f30189**, **b-a90136**,
+- From spec loop runs 15 to 17 and `SA-0135`'s review: **b-f30189**, ~~**b-a90136**~~,
   **b-e06dbc**, **b-32f492**, **b-8fb227**, **b-79d951**, ~~**b-9ead75**~~ and
   ~~**b-04d4c2**~~.
 - From the stack batch's spec reviews: ~~**b-2d9ae9**~~, ~~**b-223244**~~,
@@ -565,7 +565,7 @@ sorts a reviewer's notes, and its stop signal adds nothing over a blocker count.
 **b-817ef7**, **b-80cad7**, **b-37de22**, **b-c962c7**, **b-30fed0**, then
 **b-e8f092**. Each clears one area's hits, and together they bring the gate to zero.
 
-**Placed 2026-10-07**, from the spec loop's run 30: **b-cd41ac**, **b-7338e7**,
+**Placed 2026-10-07**, from the spec loop's run 30: ~~**b-cd41ac**~~, **b-7338e7**,
 then ~~**b-d22c5a**~~. A spec named helpers absent at its base. Two repo rows on one
 mirror prune each other. The docs name no `saffron migrate`.
 

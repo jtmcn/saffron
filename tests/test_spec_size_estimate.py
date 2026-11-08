@@ -311,6 +311,41 @@ def test_the_overrun_counts_no_measured_estimate():
     assert "run 19" in basis
 
 
+def test_a_measured_estimate_is_priced_at_what_measured_specs_landed():
+    # b-fbd181: run 31's three measured specs landed at 1.6x to 1.7x.
+    specs = _declaring({"SA-0225": 100, "SA-0226": 100, "SA-0228": 100, "SA-0201": 100})
+    for spec_id in ("SA-0225", "SA-0226", "SA-0228"):
+        specs[spec_id].estimate_measured = True
+    landed = [
+        ("SA-0225", "MERGED", 170, 0),
+        ("SA-0226", "MERGED", 160, 0),
+        ("SA-0228", "MERGED", 165, 0),
+        ("SA-0201", "MERGED", 900, 0),  # a hand estimate, and not counted
+    ]
+    ratio, basis = driver._measured_overrun(_LandedLedger(landed), 1, specs)
+    assert ratio == 1.65
+    assert "3" in basis and "measured" in basis
+
+    # Two landed measured specs is too few, so a measured estimate stays at 1.0.
+    ratio, basis = driver._measured_overrun(_LandedLedger(landed[:2]), 1, specs)
+    assert ratio == 1.0
+    assert "measured, so no overrun applies" in basis
+
+
+def test_check_prices_a_measured_estimate_at_the_measured_overrun(monkeypatch, capsys):
+    target = _spec("SA-0009", spec_type="feature")
+    target.max_turns = 100
+    target.budget_usd = 100.0
+    target.estimated_lines = 500
+    target.estimate_measured = True
+    target.risk = "elevated"
+    monkeypatch.setattr(driver, "_measured_overrun", lambda *a, **k: (1.65, "pinned"))
+    rc, out = _run(monkeypatch, capsys, target, [], ratio=1.4)
+    assert rc == 1, out
+    [blocker] = [x for x in out if x.startswith("blocker: estimated_lines=")]
+    assert "× 1.65 (pinned)" in blocker, blocker
+
+
 class _TwoShaLedger(_LandedLedger):
     """One spec landed twice, at two spec shas. `tasks_by_spec` lists the
     newer sha's group first, as a dict keyed by first sight need not."""

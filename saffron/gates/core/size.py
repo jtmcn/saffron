@@ -45,6 +45,11 @@ _TOKENS_PER_LINE = 4
 _TOKEN_DIFF_BOUND = 10**9
 
 
+def over_ceiling(tokens: int, spec_type: str, ceiling: int) -> str:
+    """The `size` failure message, which the plan checkpoint also quotes."""
+    return f"{tokens} changed tokens exceeds the {spec_type} ceiling of {ceiling}"
+
+
 def _file_blocks(diff: str) -> list[tuple[str, list[str], list[str], int]]:
     """Every file block that carries a hunk, as its path, its two token
     streams, and its physical changed-line count.
@@ -312,21 +317,10 @@ def size_gate(
             ),
         )
 
+    message = over_ceiling(tokens, spec_type, ceiling)
     return GateResult(
         gate="size",
         status="fail",
-        failures=[
-            Failure(
-                file="",
-                code="diff-too-large",
-                message=(
-                    f"{tokens} changed tokens exceeds the {spec_type} ceiling of "
-                    f"{ceiling}"
-                ),
-            )
-        ],
-        summary=(
-            f"{tokens} changed tokens exceeds the {spec_type} ceiling "
-            f"of {ceiling}{caveat}"
-        ),
+        failures=[Failure(file="", code="diff-too-large", message=message)],
+        summary=f"{message}{caveat}",
     )
