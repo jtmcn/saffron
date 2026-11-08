@@ -36,3 +36,13 @@ def test_both_spec_reviews_check_each_named_symbol_exists_at_base():
         "Does every function, test helper or other name the spec tells the cell "
         "to reuse exist at this snapshot." in _flat(PROMPT)
     )
+
+
+def test_both_spec_reviews_check_each_prescribed_line_against_the_code():
+    """b-aff9ea: a spec dictated a line that contradicted the code, and the
+    cell wrote it as told."""
+    assert "contradicts either is a `build` blocker (b-aff9ea)." in _flat(AGENT)
+    assert (
+        "Does every line the spec tells the cell to write verbatim agree with "
+        "the code and with this repository's own definitions" in _flat(PROMPT)
+    )

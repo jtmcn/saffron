@@ -40,6 +40,9 @@ measured carries `witness`.
   snapshot.
 - Does every function, test helper or other name the spec tells the cell
   to reuse exist at this snapshot. A missing one is a `build` blocker.
+- Does every line the spec tells the cell to write verbatim agree with
+  the code and with this repository's own definitions at this snapshot. A
+  line that contradicts either is a `build` blocker.
 
 ## What the repo declares
 

@@ -1,7 +1,9 @@
 ---
 id: b-aff9ea
 title: "A spec can prescribe a documentation line that contradicts the code, and the cell copies it faithfully"
-status: open
+status: done
+closed: 2026-11-08
+by_hand: true
 tier: 2
 filed: 2026-10-12
 specs: []
@@ -33,3 +35,4 @@ checks prescribed text, and no item carried it.
 ## Record
 
 - 2026-10-12: filed from the spec loop's run 35 (#847), carrying run 34's third feedback item.
+- 2026-11-08: done by hand.

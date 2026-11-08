@@ -293,7 +293,7 @@ exists leaves no row. A stack batch at a threshold spends into its shares.
 `watch` cannot follow the follow-up writer or the end review.
 
 **Placed 2026-10-12**, from the spec loop's run 35: **b-714ccd**,
-**b-aff9ea**, **b-54ad4f**, ~~**b-7ee599**~~, then **b-82cf2e**. A witness on a
+~~**b-aff9ea**~~, **b-54ad4f**, ~~**b-7ee599**~~, then **b-82cf2e**. A witness on a
 default value passes REBUT. A spec can prescribe a false line. No gate
 resolves a citation. A stack batch's follow-up guard has no witness. `migrate`
 writes a false package fact for an adopted row.
