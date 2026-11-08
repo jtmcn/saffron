@@ -1729,7 +1729,10 @@ def cmd_status(_args) -> int:
                 if p.pending and p.last_state
                 else ""
             )
-            if p.reviewable and p.pushed_sha:  # item 14: what is left to review
+            live = _pr_state(p.pr) if p.reviewable and p.pr is not None else None
+            if live in ("MERGED", "CLOSED"):  # b-bff670: the order file is not GitHub
+                extra = f"  {live.lower()} on GitHub"
+            elif p.reviewable and p.pushed_sha:  # item 14: what is left to review
                 head = _origin_head(p.branch)
                 extra = (
                     f"  reviewed {head[:8]}"
@@ -2388,10 +2391,19 @@ def cmd_check(args) -> int:
     status. A declared `estimated_lines` is priced at the measured overrun.
     At or above 80% of its type's `size` ceiling it blocks where `size`
     blocks, with or without past cells, and is a concern elsewhere."""
+    from saffron.intake import SpecError
+
     specs = _known_specs()
-    target = specs.get(args.spec_id)
+    if args.spec:  # b-bff670: a spec edited on a branch is judged as edited
+        try:
+            target = _spec_given(args.spec_id, args.spec)
+        except (GitError, SpecError, OSError) as err:
+            return _fail(f"--spec {args.spec}: {err}")
+    else:
+        target = specs.get(args.spec_id)
     if target is None:
-        return _fail(f"no spec declares {args.spec_id}")
+        at = f" at {args.spec}" if args.spec else ""
+        return _fail(f"no spec declares {args.spec_id}{at}")
     ledger, repo_id, _url = _ledger_and_repo()
     try:
         if repo_id is None:
@@ -3172,6 +3184,9 @@ def main() -> int:
         "and its estimated_lines against its size ceiling",
     )
     p.add_argument("spec_id")
+    p.add_argument(
+        "--spec", help="read the spec from this file or ref, not the checkout"
+    )
     p.set_defaults(func=cmd_check)
 
     p = sub.add_parser("pattern", help="print the Monitor's grep -E pattern")
