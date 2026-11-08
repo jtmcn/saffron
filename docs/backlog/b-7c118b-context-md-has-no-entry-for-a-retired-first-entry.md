@@ -1,12 +1,13 @@
 ---
 id: b-7c118b
 title: '`CONTEXT.md` has no entry for a `retired_first` entry, the field SA-0350 adds'
-status: open
+status: done
+closed: 2026-11-07
 tier: 2
 by_hand: true
 filed: 2026-11-07
 specs: [SA-0350]
-prs: []
+prs: [1042]
 commits: []
 cites: [§4.2.1]
 related: [b-e7898b]
@@ -38,3 +39,4 @@ after `SA-0350` merges.
 ## Record
 
 - 2026-11-07: filed with `SA-0350`.
+- 2026-11-07: the entry landed by hand in #1042, beside `SA-0350`.
