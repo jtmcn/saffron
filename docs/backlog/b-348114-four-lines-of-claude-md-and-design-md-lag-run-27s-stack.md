@@ -1,7 +1,8 @@
 ---
 id: b-348114
 title: Four lines of `CLAUDE.md` and `DESIGN.md` lag what run 27's stack built
-status: partial
+status: done
+closed: 2026-11-07
 tier: 3
 filed: 2026-10-03
 by_hand: true
@@ -42,3 +43,4 @@ night's own settled tasks, or the operator decides otherwise.
   `CLAUDE.md:68` lists only `saffron watch SA-NNNN`. `DESIGN.md:1286`,
   `:1387` and `:1415` still say "verdict line". `DESIGN.md:1423` still says
   the header can only show the rate over prior batches.
+- 2026-11-07: done by hand in #1052.

@@ -158,7 +158,8 @@ origin. Intake reads each criterion's mutant from the mirror's copy. A queued
 spec that still declares a `mutant:` inline is refused.
 
 **What `SA-0338` leaves in `saffron/mutants.py`.** Read from its spec at the
-head of `joel/spec-mutants-ref`. `MUTANTS_REF` names the ref. `MutantsError`
+head of `joel/spec-mutants-ref`. `MUTANTS_REF` names the ref. Its review
+commit moved it to `saffron/repos/mirror.py`, so import it from there. `MutantsError`
 is a `SpecError`. `parse_mutants(text, where)` returns a dict from witness to
 `Mutant`, and `where` names the file in each error. It wraps every YAML and
 validation error in `MutantsError`. It refuses a YAML error and a value that is

@@ -97,3 +97,100 @@ before the review and told the reviewer it was amended.
 on a prototype before the first review had no blocker in their last review.
 The one spec whose writer reasoned about its arrangements had a blocker in
 its first review.
+
+
+## `SA-0351`, from b-a68b24 (spec loop run 55)
+
+One writer, two reviews and two revisions, beside a running batch. The draft
+took 27 minutes and about 205k tokens. The writer built a prototype before the
+first review and rebuilt it for each revision.
+
+The change makes a declared mutant whose find matches other than once fail the
+`witness` gate. The failure names the criterion and the count, and still
+withholds the edit.
+
+**Review 1: two blockers, three concerns.**
+
+- A failure from find counts alone carried no `tool`. Against a base where a
+  mutant ran, `suite_drift` read that as drift, and the task would end
+  `GATE_ERROR`. This is pre-flight 8, an invariant the change breaks. The
+  prototype had passed every witness, since none ran `GateSuite.against`.
+- The summary check passed a version that counted the new failures as
+  survivors. This is pre-flight 1.
+
+**Review 2: no blocker, two concerns.** Criterion 6's witness drove one
+criterion, so a tool fallback taken only when every criterion miscounted
+passed. The writer added a second criterion and measured the drift.
+
+**What this run adds.** A prototype that passes its own witnesses still missed
+the drift path. The one blocker that mattered came from reading `baseline.py`,
+which no witness ran. Pre-flight 8 should name `suite_drift` for any change
+to a gate's `tool`.
+
+
+## `SA-0352`, from b-a714d2 (spec loop run 55)
+
+One writer, two reviews and one revision, beside a running batch. The draft
+took 33 minutes and about 180k tokens. The revision built a prototype and ran
+each wrong version it doubted.
+
+The design is one exclusive `flock` on a file beside the home ledger. A batch,
+a cell and a draft each hold it. A second command on the same home exits 2
+and names the holder's pid.
+
+**Review 1: one blocker, four concerns.**
+
+- The witness shape the notes cited starts its child with the default
+  `close_fds`. That closes an inheritable descriptor too, so the wrong
+  version "the lock is inheritable" passed. The prototype measured it. This
+  is pre-flight 10, an arrangement argued rather than run.
+- A file object closed only on a normal return still passed the raise case,
+  since refcounting closes it as the raise unwinds. The prototype measured
+  this too. Pre-flight 10 again.
+- The cited lock precedent opens with mode `w`, so a contender would erase
+  the holder's pid before its refusal. This is pre-flight 3, a name the spec
+  leans on that means something else at base.
+
+**Review 2: no blocker, two concerns.** A holder flag the stub never cleared
+let a reverted contender recurse until `main` returned 2. The delegate added
+the sentence by hand. The first criterion's six wrong versions were reasoned
+and not run.
+
+**What this run adds.** Both blockers in this run were arrangements, and each
+cost one prototype run to settle. A writer brief should ask for a prototype
+run of every wrong version that turns on process or descriptor behaviour.
+
+
+## `SA-0350`, from b-e7898b (spec loop run 55)
+
+One writer, two reviews and two revisions, beside a running batch. The draft
+took 23 minutes and about 198k tokens. Each review took 5 to 6 minutes.
+
+The design is a declared field. A spec that adds a refusal names the specs it
+would refuse in `retired_first`, and intake refuses it until each is in
+`done/`. The brief ruled out running the new rule on the host.
+
+**Review 1: no blocker, three concerns.**
+
+- A corpus test asserts every refusal reason holds `depends_on`. The first
+  retired spec that declares the field would fail it. This is pre-flight 6,
+  a change that breaks a live test. The writer had not read that assert.
+- An unreadable `done/` file gave a reason the filesystem contradicts. This is
+  pre-flight 4. The base already carries a suffix for this case.
+- The stack-mode witness never made its parent a stack base, so a wrong
+  version that credits the base passed. This is pre-flight 1, a set member
+  the witness never drove.
+
+**Review 2: no blocker, three concerns.**
+
+- `saffron cell` exited 1 on a failed base export, though `cli.py`'s contract
+  gives a setup failure 2. Pre-flight 8 missed it. The first revision added
+  the branch, so this class came from a fix.
+- The cell path passed the unreadable count with no witness. This is
+  pre-flight 1 again, on the branch the first revision added.
+- Whether the parent becomes the stack base was unmeasured. The writer ran
+  `build_queue` and confirmed it, which is pre-flight 10.
+
+**What this run adds.** Both review 2 concerns sat on code the first revision
+wrote. A revision brief should ask the writer to run pre-flight 1 and 8 on
+each branch it adds, not only on the findings it answers.

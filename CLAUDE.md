@@ -66,6 +66,7 @@ uv run saffron package SA-NNNN --repo .    # run PACKAGE alone on a task whose o
 uv run saffron finish <batch id> --repo .  # run a deferred stack batch's own end review, follow-ups and finish
 uv run saffron adopt SA-NNNN 502 --repo .  # name a by-hand pull request as a task's own
 uv run saffron watch SA-NNNN               # follow a task's event log; --no-follow for a finished one
+uv run saffron watch                       # follow every task directory under the batch tree
 uv run saffron batch --repo . --budget 50 --until 06:30   # v0.6: a night, unattended
 uv run saffron fold --repo <mirror> --into <ledger.db>    # rebuild a ledger from the record
 uv run saffron migrate --from <ledger.db>  # write a stored ledger's tasks into the record and push each to its repo's origin
