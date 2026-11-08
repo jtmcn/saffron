@@ -696,3 +696,39 @@ def test_an_sql_comment_added_to_a_schema_is_new_at_head():
     base = 'S = """\n-- Old; kept.\nCREATE TABLE t (x);\n"""\n'
     head = 'S = """\n-- Old; kept.\nCREATE TABLE t (x);\n-- New; added.\n"""\n'
     assert _new_at_head("saffron/l.py", base, head) == [(4, "semicolon")]
+
+
+def _yaml_codes(text: str) -> list[tuple[int, str]]:
+    found = _prose().check(text, "saffron/x.yaml", "prose", root=REPO)
+    return [(f.line, f.code) for f in found]
+
+
+def test_a_yaml_comment_is_held_to_the_word_and_comment_rules():
+    """#908 put a four-line comment with a semicolon in a policy template (b-e9cd43)."""
+    text = "# one; two\n# b\n# c\nkey: 1  # three — four\n"
+    assert _yaml_codes(text) == [(1, "comment-block"), (1, "semicolon"), (4, "em-dash")]
+
+
+def test_a_hash_in_a_yaml_value_or_block_scalar_is_not_a_comment():
+    text = (
+        "a: 'x # one; two'\n"
+        'b: "y # three; four"\n'
+        "c: z#five; six\n"
+        "d: |\n"
+        "  # seven; eight\n"
+        "e: 1\n"
+        "# nine; ten\n"
+    )
+    assert _yaml_codes(text) == [(7, "semicolon")]
+
+
+def test_scope_reaches_the_yaml_a_cell_or_a_person_writes():
+    prose = _prose()
+    listed = _tracked()
+    for path in (
+        ".saffron/policy.yaml",
+        ".saffron/sgconfig.yml",
+        ".claude/skills/setup-saffron/templates/policy.yaml",
+    ):
+        assert path in listed, path
+        assert prose.in_scope(path), path
