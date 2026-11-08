@@ -111,12 +111,12 @@ class QueueLine:
     # fix it never committed — §6's other level-3 count, ranked with
     # `sustained` but never folded into it: an argument the critic defeated
     # and a promise nobody kept are different failures and get different
-    # words. Placed beside `sustained`, for the same reason it is last.
+    # words. Placed beside `sustained`.
     unkept: int = 0
     # Item 42: a blocker standing after a turn nobody could read, ranked
     # level 3 by `sort_key`, beside `sustained` and `unkept`.
     unread: int = 0
-    # Item 42: a blocker a readable turn skipped, ranked level 3 by
+    # Item 42: a blocker a readable turn left unanswered, ranked level 3 by
     # `sort_key`, beside `sustained` and `unkept`.
     unanswered: int = 0
 
