@@ -1005,7 +1005,7 @@ def _refuse(
     if (retirement := retirement_refusal(candidate.spec, markers)) is not None:
         return "retirement_marker", retirement
 
-    # Read whatever `check_dependencies` says below: a stack night's own
+    # Runs above the `check_dependencies` return, so a stack night's own
     # order still answers to this precondition (b-e7898b).
     if (
         not_shipped := retired_first_refusal(
@@ -1295,7 +1295,7 @@ def build_queue(
     ledger could satisfy, which is refused, because no row can say its parent
     merged. `specs/done/` is read either way, and `SA-0020` is why: retirement
     is the operator's assertion, not the ledger's, and a repo with no rows at
-    all is exactly the repo whose work was done by hand. So is `retired_first`.
+    all is exactly the repo whose work was done by hand. `retired_first` reads it too.
 
     `repo_slug` is `owner/repo` for the two refusals that need GitHub's
     state. `None` — the default, and what every caller before `SA-0017`

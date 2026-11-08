@@ -2109,8 +2109,8 @@ def test_a_stack_night_refuses_the_spec_whose_retired_first_parents_are_in_its_o
     assert len(refusals) == 1, refusals
     assert refusals[0].path.name == "child.md"
     assert refusals[0].kind == "depends_on"
-    for parent in ("TE-1", "TE-2", "TE-3"):
-        assert parent in refusals[0].reason
+    for entry in ("TE-1", "TE-2", "TE-3"):
+        assert entry in refusals[0].reason
 
     root2 = tmp_path / "chain-retired"
     root2.mkdir()

@@ -3242,7 +3242,7 @@ _A_SPEC = (
     "## Acceptance criteria\n- [ ] it works\n"
 )
 
-_A_LIVE_PARENT = "---\nid: TE-2\ntitle: parent\ntype: chore\n---\n\nbody\n"
+_A_QUEUED_SPEC = "---\nid: TE-2\ntitle: queued\ntype: chore\n---\n\nbody\n"
 
 
 def test_a_spec_whose_retired_first_is_queued_at_base_refuses_before_the_cell_starts(
@@ -3250,13 +3250,13 @@ def test_a_spec_whose_retired_first_is_queued_at_base_refuses_before_the_cell_st
 ):
     """`saffron cell`'s own `retired_first` witness (backlog item b-e7898b):
     a real `done/` at `base_sha`, read through the real `cli._run_cell`, the
-    same shape `test_a_spec_whose_touches_are_protected_refuses_before_the_
-    cell_starts` uses for `protected_touch_refusal`."""
+    same shape as the protected-touch witness,
+    `test_a_spec_whose_touches_are_protected_refuses_before_the_cell_starts`."""
     repo = _repo_with_spec(
         tmp_path,
         spec_text=_A_SPEC,
         extra_specs={
-            "parent.md": _A_LIVE_PARENT,
+            "queued.md": _A_QUEUED_SPEC,
             "done/broken.md": "no frontmatter here\n",
         },
     )
@@ -3267,11 +3267,11 @@ def test_a_spec_whose_retired_first_is_queued_at_base_refuses_before_the_cell_st
         "touches: ['src/**']\nretired_first: ['TE-2']\n---\n\n"
         "## Acceptance criteria\n- [ ] it works\n"
     )
-    # Moved in the working copy only, after the clone. `_local_origin_with_
-    # policy`'s own property: `base_sha`, not that copy, is what gets read.
+    # Moved in the working copy only, after `_repo_with_spec` cloned it:
+    # `base_sha`, not that copy, is what gets read.
     (repo / ".saffron" / "specs" / "done").mkdir(exist_ok=True)
-    (repo / ".saffron" / "specs" / "parent.md").rename(
-        repo / ".saffron" / "specs" / "done" / "parent.md"
+    (repo / ".saffron" / "specs" / "queued.md").rename(
+        repo / ".saffron" / "specs" / "done" / "queued.md"
     )
     monkeypatch.setattr("saffron.phases.package.github_slug", lambda _url: "o/r")
     started = False
@@ -3305,7 +3305,7 @@ def test_a_spec_whose_retired_first_is_queued_at_base_refuses_before_the_cell_st
         tmp_path,
         spec_text=_A_SPEC,
         dirname="repo2",
-        extra_specs={"done/parent.md": _A_LIVE_PARENT},
+        extra_specs={"done/queued.md": _A_QUEUED_SPEC},
     )
     args2 = _namespace(repo2, tmp_path)
     args2.spec = tmp_path / "SY-10.md"
@@ -3314,8 +3314,8 @@ def test_a_spec_whose_retired_first_is_queued_at_base_refuses_before_the_cell_st
         "touches: ['src/**']\nretired_first: ['TE-2']\n---\n\n"
         "## Acceptance criteria\n- [ ] it works\n"
     )
-    (repo2 / ".saffron" / "specs" / "done" / "parent.md").rename(
-        repo2 / ".saffron" / "specs" / "parent.md"
+    (repo2 / ".saffron" / "specs" / "done" / "queued.md").rename(
+        repo2 / ".saffron" / "specs" / "queued.md"
     )
 
     cell_spec, _printed = _capture_cell_spec(
