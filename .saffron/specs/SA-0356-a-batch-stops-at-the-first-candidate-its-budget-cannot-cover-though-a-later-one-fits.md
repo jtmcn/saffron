@@ -47,15 +47,19 @@ acceptance:
       when it was checked. A candidate passed over is named once, however many
       later rescans offer it again. A batch that passed over a candidate ends
       `BUDGET` once no candidate it has not tried fits, and its row closes
-      `BUDGET`. The witness passes over the first candidate before any spend
-      and a later one after a spend, runs a candidate after each, and rescans
-      the whole list after every task.
+      `BUDGET`. That holds unless the breaker's count stands, which ends
+      `INFRASTRUCTURE`. The witness passes over the first candidate before any
+      spend and a later one after a spend, runs a candidate after each, and
+      rescans the whole list after every task. A second batch in the witness
+      aborts two tasks in a row and then passes over a candidate. It closes
+      `INFRASTRUCTURE`, where the base closes `BUDGET`.
     witness: tests/test_batch.py::test_a_batch_passes_over_a_candidate_its_budget_cannot_cover_and_runs_the_next_that_fits
     wrong_versions:
       - The line is printed and the batch then returns `BUDGET` at once, as at base, so no later candidate runs.
       - The set of candidates passed over is cleared after each rescan, so the first candidate is named again after each task.
       - A batch that passed over a candidate and then ran out of candidates returns `DRAINED`.
       - What is left is read once, before the first candidate, so a candidate the first task's spend no longer fits still runs.
+      - A pass out of candidates returns `BUDGET` for any candidate passed over before it reads the breaker's count, so two aborts in a row close `BUDGET`.
   - claim: >-
       A stack batch that passes over a spec of its order records it as a miss.
       Every later spec of the order whose `depends_on` reaches it is refused
@@ -74,11 +78,14 @@ acceptance:
       A follow-up whose `budget_usd` exceeds what is left is passed over the
       same way, named on the same line, and the next follow-up that fits runs
       on the order's top layer. The follow-up passed over is named in the
-      `follow-ups unrun` line, and the batch ends `BUDGET`.
+      `follow-ups unrun` line, and the batch ends `BUDGET`. It is named
+      once, though the follow-up pass offers it again after the next
+      follow-up's task.
     witness: tests/test_batch.py::test_a_follow_up_its_budget_cannot_cover_is_passed_over_and_the_next_one_runs
     wrong_versions:
       - The follow-up pass returns `BUDGET` at its first follow-up over budget, so the second follow-up never runs.
       - The follow-up pass returns `DRAINED` once every follow-up was tried.
+      - The set of follow-ups passed over is cleared after each rescan, so the $40 follow-up is named a second time with `28.000 left`.
   - claim: >-
       A candidate whose `budget_usd` equals what is left still runs. A lone
       candidate over it runs nothing, and the batch closes `BUDGET`.
@@ -147,7 +154,12 @@ stopped `BUDGET`. `SA-0294` needs $25 and never ran.
 3. **`BUDGET` ends a pass that passed over a candidate.** A pass out of
    candidates with the breaker's count standing returns `INFRASTRUCTURE`, as
    today. Otherwise it returns `BUDGET` when it passed over any candidate,
-   and `DRAINED` when it passed over none.
+   and `DRAINED` when it passed over none. This changes one outcome. At base
+   the budget check (`saffron/batch.py:277`) comes before the breaker's
+   (`:280`). So two aborts in a row, then a candidate over budget, close
+   `BUDGET` and exit `0`. Now that candidate is passed over and the breaker
+   ends the batch `INFRASTRUCTURE`, which exits `2`. That is the intended
+   outcome, because two aborts in a row mean a broken host.
 4. **A stack batch records the miss.** For the order's pass, `_drive` hands
    the candidate it passed over to a callable `run_stack_batch` gives it. That
    callable records `missed[spec id] = frozenset({spec id})`, removes the spec
@@ -174,13 +186,18 @@ stopped `BUDGET`. `SA-0294` needs $25 and never ran.
   still assumes every earlier candidate ran. For a chain, criterion 5 holds
   that as the least `--budget` that starts the layer. A spec that reaches no
   earlier one now starts under a lower `--budget` whenever an earlier spec is
-  passed over. The printed line stays true as a budget that admits it. A
-  tighter threshold is a separate item.
+  passed over. The printed line stays true as a budget that admits it. Its
+  docstring becomes false, though. It says every earlier candidate has
+  already spent its budget by the time the next one's admission is checked
+  (`saffron/cli.py:2124-2126`). It stays false until a later item fixes it,
+  since `saffron/cli.py` is `forbidden` here.
 - A plain batch's dependents of a candidate passed over. Its rescan is
   `build_queue`, which judges each `depends_on` as today, and this spec
   leaves it alone.
 - `DESIGN.md` and `CONTEXT.md`, which are `protected`. §4.2.1's "the budget
-  is gone" becomes true of the code, so neither needs an edit.
+  is gone" becomes true of the code, so `DESIGN.md` needs no edit.
+  `CONTEXT.md`'s Refusal entry gained "A spec its budget passed over counts
+  as missed", amended by hand in this spec's pull request.
 - The revision check's own `unrevised` refusal (`saffron/batch.py:838-858`).
 
 ## Notes for the agent
@@ -205,7 +222,11 @@ collects at base and fails there.
   Assert the runner saw the second and fourth candidates. Assert the reason
   and the row's status are `BUDGET`. The lines holding `over budget` are
   exactly two, in order. The first candidate's says `needs 30.000, 20.000
-  left` and the third's says `needs 8.000, 5.000 left`.
+  left` and the third's says `needs 8.000, 5.000 left`. Then call `run_batch`
+  again at $20 over candidates at $1, $1 and $50. Its `FakeRunner` returns
+  two `GATE_ERROR` outcomes whose runs `_spend` $0.50 each. Assert the runner
+  saw the first two, and the reason and the row's status are
+  `INFRASTRUCTURE`.
 - Criterion 2 calls `run_stack_batch` at $30 with `StackDoubles`' runner, which
   spends $1 a task, and no review. The order is `TE-1` $5, `TE-2` $50, `TE-3`
   $5 on `TE-2`, `TE-4` $5, and `TE-5` $5 on `TE-3`. Assert the runner calls
@@ -216,8 +237,9 @@ collects at base and fails there.
   `reserve_usd=6.0`, `writer_usd=2.0` and `StackDoubles`' review, mint, end
   review and follow-ups. The follow-ups are $40 and then $1. Assert the
   runner calls are the order spec and then the $1 follow-up on it. Assert the
-  reason is `BUDGET`. The lines hold the $40 follow-up's `needs 40.000,
-  29.000 left` and `follow-ups unrun  <its id>`.
+  reason is `BUDGET`. The lines holding `over budget` are exactly one, the
+  $40 follow-up's `needs 40.000, 29.000 left`. The lines also hold
+  `follow-ups unrun  <its id>`.
 
 These arrangements were run against a prototype of the change. Every wrong
 version listed under each criterion failed its witness, and with
