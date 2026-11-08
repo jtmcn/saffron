@@ -1,9 +1,11 @@
 ---
 id: b-8acb05
 title: "`prose` keys a long docstring by its function's name, so a rename makes an old one new, and joining lines slips it back under"
-status: open
+status: done
 tier: 2
 filed: 2026-10-08
+closed: 2026-11-08
+by_hand: true
 specs: [SA-0225]
 prs: [746]
 commits: []
@@ -34,3 +36,4 @@ cannot leave the hit by joining lines. A rule-test shows both cases.
 ## Record
 
 - 2026-10-08: filed from the spec loop's run 31.
+- 2026-11-08: done by hand.

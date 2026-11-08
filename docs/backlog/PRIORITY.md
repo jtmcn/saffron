@@ -263,7 +263,7 @@ the cell token from whoever starts it, so a delegate must hold the credential.
 **b-fbd181**. Nothing runs `terms` over `main`, so it went red unseen. A
 measured estimate priced two specs at half what landed, and `size` only advised.
 
-**Placed 2026-10-08**, from the spec loop's run 31: **b-8acb05**, **b-fe82d9**,
+**Placed 2026-10-08**, from the spec loop's run 31: ~~**b-8acb05**~~, **b-fe82d9**,
 then **b-d28fd8**. A rename re-keys `prose`'s docstring hit, and joining lines
 slips it back under. An escalated stack finish names none of its failures.
 `migrate` drops `spec_findings`. b-d28fd8 took ~~**b-aee31f**~~'s place in

@@ -65,6 +65,8 @@ CODE_DIRS = (
 COMMENT_LIMIT = 2
 # A summary and two short paragraphs; a module docstring describes a file and is exempt.
 DOCSTRING_LIMIT = 10
+# Ruff's default width. `E501` is off, so joining two lines would otherwise shorten a docstring.
+DOCSTRING_WIDTH = 88
 
 SENTENCE_LIMIT = 25
 # Saffron's own intensifiers, measured. "exactly" and "deliberately" carry meaning here.
@@ -309,8 +311,9 @@ def _comment_blocks(text: str) -> list[Hit]:
 
 def _long_docstrings(text: str) -> list[Hit]:
     """One hit per line past `DOCSTRING_LIMIT` in each function, class and test
-    docstring. Subtraction compares identities, so a shrink then adds none and
-    a growth adds only the lines past its base (b-ec607a)."""
+    docstring, a line wider than `DOCSTRING_WIDTH` counted as the lines it wraps
+    to. A hit is keyed by its line's text, not the name, so a rename adds none
+    and a shrink adds none (b-8acb05, b-ec607a)."""
     found = []
     for node in _documented(text) or []:
         if isinstance(node, ast.Module):
@@ -318,9 +321,15 @@ def _long_docstrings(text: str) -> list[Hit]:
         doc = ast.get_docstring(node, clean=False)
         if doc is None:
             continue
-        for line in range(DOCSTRING_LIMIT + 1, doc.count("\n") + 2):
-            excerpt = _excerpt(f"{node.name}, line {line}")
-            found.append(Hit(node.body[0].lineno, "docstring-length", excerpt))
+        wrapped = [
+            line[i : i + DOCSTRING_WIDTH]
+            for line in doc.split("\n")
+            for i in range(0, max(len(line), 1), DOCSTRING_WIDTH)
+        ]
+        for line in wrapped[DOCSTRING_LIMIT:]:
+            held = _flat(line)
+            excerpt = _excerpt(held) or "a blank line"
+            found.append(Hit(node.body[0].lineno, "docstring-length", excerpt, held))
     return found
 
 
