@@ -1,11 +1,13 @@
 ---
 id: b-5a69db
 title: "A night stopped by SIGTERM or Ctrl-C closes `INFRASTRUCTURE`, which `CONTEXT.md` defines as the breaker firing"
-status: open
+status: done
 tier: 3
+closed: 2026-11-08
+by_hand: true
 filed: 2026-10-11
 specs: []
-prs: []
+prs: [1062]
 commits: []
 cites: [§4.2.1]
 related: [65, b-5df2a7]
@@ -34,3 +36,4 @@ new stop reason names it. The vocabulary in `ontology/factory.ttl`, the
 ## Record
 
 - 2026-10-11: filed from the spec loop's run 34 (#812).
+- 2026-11-08: done by hand. `CONTEXT.md` widens `INFRASTRUCTURE` to a raise that leaves the row open, an operator's stop included. The vocabulary, `StopReason` and the `CHECK` keep the same five reasons.

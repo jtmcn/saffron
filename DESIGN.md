@@ -1456,6 +1456,8 @@ You approve in GitHub by marking PACKAGE's draft ready, and `saffron reconcile` 
 
 **`saffron regate <task id>` judges a pull request's head until the train exists**. Review commits pushed after PACKAGE reach no gate the cell passed (backlog item 97). The command runs the task's gate suite over the head GitHub holds, in gate-only cells. Its baseline is the merge base with the branch the pull request targets. Its gates and policy come from the task's own `base_sha`, so no later change to them judges an older task. It records the result beside the task and leaves the state alone. No agent runs. It judges the branch as GitHub shows it, which is not the merged result the train would judge.
 
+**`saffron review <task id>` reads a pull request's review commits with the end review's two lenses**. A review commit reaches no in-cell lens and no REBUT (backlog item b-549012). The range runs from the packaged head, or its rebased copy after a restack, to the branch's head at origin. Each lens turn is a COMMIT_REVIEW attempt on the task. The findings land in the task directory under `commit-reviews/`, and the state never moves. It exits `0` with no blocker and `1` on a blocker. It exits `2` when it declines the task or a lens errors (`SA-0326`).
+
 Green-in-isolation is not green-after-merge. The conflict-set scheduler prevents *file* collisions but not *semantic* ones. Two tasks can each pass while jointly breaking an invariant, and stacked branches (§4.2) make this more likely, not less. The train catches it at machine cost rather than at yours.
 
 ### 6.2 The run record view

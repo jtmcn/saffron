@@ -1,12 +1,12 @@
 ---
 id: b-bc8343
 title: The glossary names no review commit and no commit review, the read SA-0326 adds
-status: open
+status: partial
 tier: 2
 by_hand: true
 filed: 2026-10-27
 specs: [SA-0326]
-prs: []
+prs: [1062]
 commits: []
 cites: [§4.1, §5.7, §6.1]
 related: [b-549012]
@@ -42,3 +42,4 @@ can land. All of it lands after `SA-0326` merges.
 ## Record
 
 - 2026-10-27: filed with `SA-0326`.
+- 2026-11-08: partly done by hand. `CONTEXT.md` gains Review commit and Commit review, and widens End-review lens and Phase. `DESIGN.md` §6.1 gains the `saffron review` paragraph. Open: the stack page's COMMIT_REVIEW row in `saffron/report/stack.py`, which a cell can land.
