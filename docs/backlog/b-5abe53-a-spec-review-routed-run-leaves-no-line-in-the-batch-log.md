@@ -1,7 +1,9 @@
 ---
 id: b-5abe53
 title: "A stack batch's spec review routed `run` leaves no line in the batch log"
-status: open
+status: done
+closed: 2026-11-07
+by_hand: true
 tier: 2
 filed: 2026-10-09
 specs: []
@@ -31,3 +33,4 @@ drives a stack batch through a `run` route and reads the line.
 ## Record
 
 - 2026-10-09: filed from the spec loop's run 32.
+- 2026-11-07: recurred in run 55 (batch 70, `SA-0338`). Fixed by hand in #1046.
