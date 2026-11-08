@@ -1,14 +1,16 @@
 ---
 id: b-7f105f
 title: "No gate reads a YAML comment, so the comment rule goes unenforced in `.pre-commit-config.yaml`"
-status: open
+status: superseded
 tier: 3
 filed: 2026-10-09
+closed: 2026-11-08
 specs: []
 prs: [790]
 commits: []
 cites: []
-related: [b-f8fa24]
+related: [b-f8fa24, b-e9cd43]
+superseded_by: b-e9cd43
 ---
 
 ## Problem
@@ -30,3 +32,4 @@ says why not.
 ## Record
 
 - 2026-10-09: filed from the spec loop's run 32.
+- 2026-11-08: superseded by b-e9cd43. Commit 83b84e0b (#1077) made `prose` read YAML comments under the comment rules, and `in_scope('.pre-commit-config.yaml')` is true at origin/main. The ratchet holds the existing hits as its baseline.
