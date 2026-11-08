@@ -361,7 +361,7 @@ A lens can search code only as text. The spec loop numbers its passes as runs,
 which is a ledger term. The spec chain records no cost per escaped defect, so
 no step can be cut on evidence.
 
-**Moved 2026-11-07 from tier 2**, on the operator's ruling: **b-dc5212** and
+**Moved 2026-11-07 from tier 2**, on the operator's ruling: ~~**b-dc5212**~~ and
 **b-4589be**. Each bites only on the driver's attended path, which is now the
 fallback.
 
