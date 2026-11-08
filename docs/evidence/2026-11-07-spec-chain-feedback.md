@@ -79,3 +79,21 @@ though the brief said not to. The delegate deleted each and edited
    first.
 4. A child spec drafted in parallel gets its parent's chosen names before its
    draft ends, not after the first review.
+
+## `SA-0354`, from b-e7b6a2 (spec loop run 55)
+
+One writer and one review. The draft took 27 minutes and about 205k tokens,
+and the review took about 5 minutes.
+
+**Review 1: no blocker, no concern, four notes.** It is the first first review
+in this run with nothing to fix.
+
+The writer built a prototype before it reported. It ran the new witness at
+base, ran each of the 13 wrong versions against it, and corrected four
+citations that had moved. The delegate landed the one `DESIGN.md` sentence
+before the review and told the reviewer it was amended.
+
+**What this run adds.** The three specs whose writers ran every wrong version
+on a prototype before the first review had no blocker in their last review.
+The one spec whose writer reasoned about its arrangements had a blocker in
+its first review.
