@@ -12,7 +12,9 @@ step. A `claude -p --agent delegate` session listed the tool on 2026-10-07.
 ## Use
 
 - `/cell-watch` follows the newest task log under `~/.saffron/batches/v0`, so
-  it moves to each next spec of a batch by itself.
+  it moves to each next spec of a batch by itself. It takes only a log written
+  since the watch began. So it waits for the batch's first task, and not the
+  last batch's final one (b-2d2014).
 - `/cell-watch SA-NNNN` follows one task.
 - `--pane` opens a pane of the task's lines.
 - `--quiet` keeps the status line and toasts and submits no prompt.

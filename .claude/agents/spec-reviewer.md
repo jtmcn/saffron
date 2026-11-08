@@ -100,6 +100,10 @@ trivial.
    is a floor (the row was cut off at its own ceiling, so it says what the
    cell *needed at least*, not what it used) or a use.
 
+   The budget half passes over a runaway row and names the one it passed. A
+   runaway ended over its size ceiling, or hit a turn or budget ceiling before
+   REVIEW. Its spend measures that ceiling, not the shape (b-206d2c).
+
    - **Blocker** when the turns half says `below by` or `level with it`: the
      rule is at or below, and `level with it` is the equality case.
    - **Blocker** when the budget half says `below by`: that is `budget_usd`

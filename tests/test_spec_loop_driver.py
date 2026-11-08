@@ -899,6 +899,32 @@ def test_a_resnapshot_keeps_the_outcome_of_a_spec_edited_while_its_pr_is_open(
     assert [r for r in driver._stale(rows) if edited in r] != []
 
 
+def test_a_spec_the_order_names_that_will_not_parse_is_a_stale_row_not_a_traceback(
+    loop, capsys
+):
+    """Item 151. `status` printed its whole table, then died on `SpecError`
+    with no spec named. `next` and `snapshot --force` died the same way."""
+    broken, sibling, _merged, _new = loop.ids
+    driver._save([loop.row(0, state="READY_FOR_REVIEW", pr=10), loop.row(1)])
+    spec_file = driver.REPO / driver._load()[0].path
+    spec_file.write_text("---\nid: [unclosed\n  title: x: y\n---\n")
+
+    assert driver.cmd_status(argparse.Namespace()) == 1
+    out, err = capsys.readouterr()
+    assert sibling in out  # the other rows still report
+    assert f"{broken}: " in out and "does not parse" in out
+    assert broken in err
+
+    assert driver.cmd_next(argparse.Namespace(again=False)) == 1
+    assert "does not parse" in capsys.readouterr().err
+
+    loop.scan_returns(1)
+    assert driver.cmd_snapshot(argparse.Namespace(force=True, new=False, add=None)) == 0
+    assert "#10 is still open" in capsys.readouterr().out
+    kept = {p.spec_id: p for p in driver._load()}
+    assert kept[broken].pr == 10 and kept[broken].edited_sha == ""
+
+
 def test_a_resnapshot_looks_past_only_the_loops_own_open_prs():
     # Hiding every open PR also hid step 5's backlog PR from the conflict set.
     import json
@@ -1734,6 +1760,8 @@ def _cell(
     started_at="2026-09-14 12:00:00",
     *,
     peak_cut_off=False,
+    implement_usd=2.5,
+    runaway="",
 ):
     return driver.PastCell(
         spec_id=spec_id,
@@ -1744,7 +1772,7 @@ def _cell(
         state="READY_FOR_REVIEW",
         budget_usd=6.0,
         plan=driver.Spend(20, 1.82),
-        implement=driver.Spend(44, 2.5),
+        implement=driver.Spend(44, implement_usd),
         repair=driver.Spend(0, 0.0),
         peak_turns=41,
         review_usd=0.8,
@@ -1752,7 +1780,62 @@ def _cell(
         endings=[],
         peak_cut_off=peak_cut_off,
         size=None,
+        runaway=runaway,
     )
+
+
+def test_a_cell_cut_off_before_review_or_over_its_size_ceiling_is_a_runaway(tmp_path):
+    # b-206d2c. The fixture's REBUTTING budget cut adds nothing to the pre-review total.
+    from saffron.gates.contract import GateResult
+
+    ledger, repo_id = _ledger_with_one_cell(tmp_path)
+    specs = {"SA-0001": _spec("SA-0001")}
+    (cell,) = driver._past_cells(ledger, repo_id, specs)
+    assert cell.runaway == "cut off at its turn ceiling"
+
+    task_id = ledger.tasks_by_spec_id(repo_id, "SA-0001")[-1]["task_id"]
+    attempt = ledger.open_attempt(task_id, "REPAIRING")
+    ledger.close_attempt(
+        attempt,
+        session_id=None,
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=0.1,
+    )
+    ledger.record_gate_result(
+        GateResult(gate="size", status="fail", tool="size 1", summary="over"),
+        attempt_id=attempt,
+    )
+    (cell,) = driver._past_cells(ledger, repo_id, specs)
+    ledger.close()
+    assert cell.runaway == "over its size ceiling"
+
+
+def test_the_budget_floor_skips_a_runaway_row_and_names_it():
+    # b-206d2c: SA-0162 ran away at $39.72, and its peer SA-0277 spent $11.51.
+    target = _spec("SA-0306", touches=2, criteria=3)
+    target.budget_usd = 32
+    target.max_turns = 80
+    steady = _cell("SA-0277", "bug", 2, 3, implement_usd=11.51 - 1.82)
+    runaway = _cell(
+        "SA-0162",
+        "bug",
+        2,
+        3,
+        implement_usd=39.72 - 1.82,
+        runaway="over its size ceiling",
+    )
+
+    assert driver._budget_blocker(target, [steady, runaway]) is None
+    ceilings = driver._ceilings_line(target, [steady, runaway])
+    assert "SA-0277's pre-review total $11.51, above by $20.49" in ceilings
+    assert "past SA-0162's runaway $39.72 (over its size ceiling)" in ceilings
+
+    # A runaway is still the floor when no other row is left, and says so.
+    alone = driver._ceilings_line(target, [runaway])
+    assert "$39.72 (a runaway, over its size ceiling), below by $7.72" in alone
+    assert driver._budget_blocker(target, [runaway]) is not None
 
 
 def test_history_lists_only_the_same_type_most_similar_shape_first():
