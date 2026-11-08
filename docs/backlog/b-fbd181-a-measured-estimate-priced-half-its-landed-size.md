@@ -1,7 +1,8 @@
 ---
 id: b-fbd181
 title: "A measured estimate priced two specs at half their landed size, and `size` only advised at `standard`, so both layers shipped over the ceiling"
-status: open
+status: partial
+by_hand: true
 tier: 2
 filed: 2026-10-07
 specs: []
@@ -40,3 +41,7 @@ Either way, a spec that lands at twice its estimate shows in the check's ratio.
   1.6x to 1.7x: SA-0226 at 1506 tokens against 924, SA-0225 at 2881 against
   1740, and SA-0228 at 943 against 564. SA-0225 ended 119 tokens under its
   ceiling.
+- 2026-11-08: partial by hand. `check` prices a measured estimate at the median
+  overrun of landed measured specs, or 1.0 until three land. Left:
+  `docs/agents/issue-tracker.md` still says `check` prices a measured estimate
+  at 1.0, and that file was held for queued specs.

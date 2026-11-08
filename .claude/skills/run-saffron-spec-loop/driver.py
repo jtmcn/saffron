@@ -2642,13 +2642,11 @@ _PRE_RAW_ESTIMATES = frozenset(
 )
 
 
-def _overrun(ledger, repo_id: int, specs: dict[str, Spec]) -> tuple[float, str]:
-    """The ratio `check` prices an estimate at, and where it came from: the
-    median of landed lines over `estimated_lines` across specs that declared
-    one, each at its newest landed task. Until three have, it is spec loop run
-    19's figure."""
-    from statistics import median
-
+def _landed_ratios(
+    ledger, repo_id: int, specs: dict[str, Spec], *, measured: bool
+) -> dict[str, float]:
+    """Landed lines over `estimated_lines` for each spec that declared one,
+    measured or by hand as `measured` says, each at its newest landed task."""
     lines = {row["task_id"]: row for row in ledger.queue_lines()}
     landed_rows: dict[str, list] = {}
     for (spec_id, _sha), rows in ledger.tasks_by_spec(repo_id).items():
@@ -2656,9 +2654,9 @@ def _overrun(ledger, repo_id: int, specs: dict[str, Spec]) -> tuple[float, str]:
     newest: dict[str, float] = {}
     for spec_id, rows in landed_rows.items():
         spec = specs.get(spec_id)
-        if spec is None or spec.estimated_lines is None or spec.estimate_measured:
+        if spec is None or spec.estimated_lines is None:
             continue
-        if spec_id in _PRE_RAW_ESTIMATES:
+        if spec.estimate_measured is not measured or spec_id in _PRE_RAW_ESTIMATES:
             continue
         for row in sorted(rows, key=lambda r: r["task_id"]):
             landed = lines.get(row["task_id"])
@@ -2669,6 +2667,16 @@ def _overrun(ledger, repo_id: int, specs: dict[str, Spec]) -> tuple[float, str]:
             ):
                 size = landed["added"] + (landed["removed"] or 0)
                 newest[spec_id] = size / spec.estimated_lines
+    return newest
+
+
+def _overrun(ledger, repo_id: int, specs: dict[str, Spec]) -> tuple[float, str]:
+    """The ratio `check` prices a hand estimate at, and where it came from: the
+    median of landed lines over `estimated_lines` across specs that declared
+    one. Until three have, it is spec loop run 19's figure."""
+    from statistics import median
+
+    newest = _landed_ratios(ledger, repo_id, specs, measured=False)
     if len(newest) < _OVERRUN_MIN_SPECS:
         return _OVERRUN_FALLBACK, (
             f"spec loop run 19's measured overrun, until {_OVERRUN_MIN_SPECS} landed specs "
@@ -2676,6 +2684,23 @@ def _overrun(ledger, repo_id: int, specs: dict[str, Spec]) -> tuple[float, str]:
         )
     ratio = round(median(newest.values()), 2)
     return ratio, f"the median over {len(newest)} landed specs that declared one"
+
+
+def _measured_overrun(
+    ledger, repo_id: int, specs: dict[str, Spec]
+) -> tuple[float, str]:
+    """`_overrun` over measured estimates alone, which a prototype prices
+    without the witnesses its spec asks for (b-fbd181). Until three land, 1.0."""
+    from statistics import median
+
+    newest = _landed_ratios(ledger, repo_id, specs, measured=True)
+    if len(newest) < _OVERRUN_MIN_SPECS:
+        return 1.0, (
+            f"measured, so no overrun applies until {_OVERRUN_MIN_SPECS} measured "
+            f"specs land ({len(newest)} do)"
+        )
+    ratio = round(median(newest.values()), 2)
+    return ratio, f"the median over {len(newest)} landed specs that measured theirs"
 
 
 def _size_estimate_priced(
@@ -2694,8 +2719,6 @@ def _size_estimate_priced(
     if lines is None:
         print("size: no estimated_lines declared")
         return None, None
-    if target.estimate_measured:
-        ratio, basis = 1.0, "measured, so no overrun applies"
     ceiling = _CEILINGS.get(target.type, _DEFAULT_CEILING)
     priced = ceil(round(lines * ratio, 6))
     price = priced * _TOKENS_PER_LINE
@@ -2826,7 +2849,8 @@ def cmd_check(args) -> int:
         if repo_id is None:
             return _fail("this repo has no ledger row yet")
         cells = _past_cells(ledger, repo_id, specs)
-        ratio, basis = _overrun(ledger, repo_id, specs)
+        overrun = _measured_overrun if target.estimate_measured else _overrun
+        ratio, basis = overrun(ledger, repo_id, specs)
     finally:
         ledger.close()
     rows = _select_rows(target, cells)
