@@ -141,6 +141,9 @@ its batch. The `tests` gate takes a printed warning for every failure.
 `SA-0294` ports it. A batch stops at a candidate it cannot pay for, though a
 later one fits.
 
+**Placed 2026-11-08**, from `SA-0356`'s spec chain: **b-d1c277**. The queue's
+stack thresholds assume every earlier candidate ran.
+
 **Placed 2026-10-17**, from the spec loop's run 43: **b-3a79a0**. The loop's
 driver orders a stack by `depends_on`, not by the stack base a batch built.
 
