@@ -741,7 +741,7 @@ def _size(
     test_paths: Sequence[str] = (),
     cwd: Path = REPO,
 ) -> GateResult:
-    """The `size` gate's own verdict from `lower` to `upper`. It runs only in
+    """The `size` gate's own gate result from `lower` to `upper`. It runs only in
     the cell, so review commits can take a branch past it unseen (item 40)."""
     from saffron.cell.worktree import DIFF_FLAGS
     from saffron.gates.core.size import size_gate
@@ -1754,8 +1754,8 @@ def cmd_undrop(args) -> int:
 
 
 # pytest's exit codes: 1 is a failed test; 2-5 are an interrupt, an internal
-# error, a usage error and no tests collected, none of which is a verdict.
-_PYTEST_NOT_A_VERDICT = {2, 3, 4, 5}
+# error, a usage error and no tests collected, none of which is an outcome.
+_PYTEST_NO_OUTCOME = {2, 3, 4, 5}
 _ERROR_KILL = re.compile(r" - (?!AssertionError)\w+Error\b")
 # One space: a captured log line pads its level (`ERROR    root:...`).
 _SUMMARY_ROW = re.compile(r"^(FAILED|ERROR) \S")
@@ -1799,16 +1799,16 @@ def cmd_probe(args) -> int:
     failed = [line for line in output if _SUMMARY_ROW.match(line)]
     is_pytest = any("pytest" in part for part in command)
     if done.returncode == 0:
-        verdict = "survived"
-    elif is_pytest and done.returncode in _PYTEST_NOT_A_VERDICT:
-        verdict = f"no verdict (pytest exited {done.returncode})"
+        outcome = "survived"
+    elif is_pytest and done.returncode in _PYTEST_NO_OUTCOME:
+        outcome = f"no outcome (pytest exited {done.returncode})"
     elif failed and all(_ERROR_KILL.search(line) for line in failed):
         # A mutant that raises is not one a test caught (REVIEW-PROMPT.md).
-        verdict = "killed only by errors, not by an assertion"
+        outcome = "killed only by errors, not by an assertion"
     else:
-        verdict = "killed"
-    # The verdict gets its own line: uv's warning on stderr once shared it (spec loop run 8, #351).
-    print(verdict)
+        outcome = "killed"
+    # The outcome gets its own line: uv's warning on stderr once shared it (spec loop run 8, #351).
+    print(outcome)
     for stream, text in (("stdout", done.stdout), ("stderr", done.stderr)):
         lines = _ANSI.sub("", text).splitlines()
         if lines:
@@ -2419,7 +2419,7 @@ def _overrun(ledger, repo_id: int, specs: dict[str, Spec]) -> tuple[float, str]:
     return ratio, f"the median over {len(newest)} landed specs that declared one"
 
 
-def _size_verdict(
+def _size_estimate_priced(
     target: Spec, ratio: float, basis: str, elevate_on: list[str]
 ) -> tuple[str | None, str | None]:
     """How `estimated_lines`, times the overrun, prices against the `size`
@@ -2572,7 +2572,9 @@ def cmd_check(args) -> int:
         ledger.close()
     rows = _select_rows(target, cells)
     print(_ceilings_line(target, rows))
-    size_blocker, size_concern = _size_verdict(target, ratio, basis, _elevate_on())
+    size_blocker, size_concern = _size_estimate_priced(
+        target, ratio, basis, _elevate_on()
+    )
     if size_concern:
         print(f"concern: {size_concern}")
     for line in _review_change_lines(target, specs) + _subject_concerns(target):

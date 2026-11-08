@@ -4063,3 +4063,16 @@ def test_a_ref_mutant_a_claim_discloses_is_a_concern_not_a_raise(tmp_path):
     filled = driver._with_ref_mutants(target, mirror)
     assert isinstance(filled, str), filled
     assert filled.startswith("concern: SA-0009's mutants on the ref cannot be read")
+
+
+def test_the_driver_says_verdict_only_for_a_verdict_it_names_the_owner_of():
+    # b-6a9707: CONTEXT.md keeps "verdict" for the critic's answer at REBUT, and
+    # no gate scans this file's vocabulary. A gate result or probe outcome fails here.
+    owned = ("turns/verdict.md", "REBUT's verdict", "grade.verdict")
+    text = (REPO / ".claude/skills/run-saffron-spec-loop/driver.py").read_text()
+    stray = [
+        f"driver.py:{n}: {line.strip()}"
+        for n, line in enumerate(text.splitlines(), 1)
+        if "verdict" in line.lower() and not any(o in line for o in owned)
+    ]
+    assert stray == []
