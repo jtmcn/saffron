@@ -220,3 +220,20 @@ One writer session of 32 minutes, a revision of 12, and two reviews. The prototy
 ## Checks to build (SA-0355)
 
 7. Pre-flight 1 should ask, of every claim over several inputs, whether their order is fixed. Both of review 1's arrangement concerns were order.
+
+## SA-0356 (b-f73cd0), spec loop run 55
+
+The delegate settled the arm in `decisions:`. The batch passes over a candidate its budget cannot cover, since §4.2.1 ends a batch only when "the budget is gone". One writer session of 25 minutes, a revision of 12, and two reviews. The prototype measured 87 changed tokens, and every wrong version was killed.
+
+**Review 1: 0 blockers, 2 concerns, 3 notes.**
+
+- A standing breaker and an over-budget candidate closed `BUDGET` at base and would close `INFRASTRUCTURE` under the spec, unstated. Pre-flight 2 missed it, because the two criteria never met on that input.
+- CONTEXT.md's Refusal entry named only a missed task, and a passed-over spec mints none. Pre-flight 8 missed it. The delegate amended the entry by hand.
+- The over-budget line's witness counted one exact line. A repeat printed a different figure, so the count passed it. The writer found that while answering the note, which is pre-flight 1.
+
+**Review 2: 0 blockers, 1 concern, 1 note.** A stack night that passed over a spec ends `BUDGET`, so it runs no follow-ups, and the spec gave no reason. The delegate added one. The hand-written CONTEXT.md sentence was wider than what the spec builds, because a passed-over follow-up is never a layer miss. That is check 3 of an earlier record once more: a hand edit, read against the criteria after the writer, still overstated them.
+
+## Checks to build (SA-0356)
+
+8. Pre-flight 2 should pair every new path with each existing stop reason, not only with the criteria. Both of review 1's stop-reason findings came from an outcome order the base fixes and the spec reorders.
+9. A hand edit to a protected file should be drafted by the writer from the criteria, then read by the delegate. Three runs in a row have overstated it when the delegate wrote it.

@@ -375,7 +375,8 @@ The refusal itself costs nothing. A refusal the queue scan makes reaches stdout 
 one line, and no morning queue row records it. `run_task` also refuses a task whose `consumes` entry does not resolve, or
 cannot be read, at the tree base. That refusal prints one line and writes no queue
 row. A stack batch also refuses a spec its stack order never takes, and every spec
-whose `depends_on` reaches a missed task. It refuses a revision the budget left cannot
+whose `depends_on` reaches a missed task. A spec of its order that its budget passed
+over counts as missed. It refuses a revision the budget left cannot
 cover. Before its spec review, it refuses a spec with a citation that does not resolve
 once `rewrite_moved_citations` moves what it can.
 `saffron package` refuses after the cell ended, before it reruns PACKAGE. It refuses a

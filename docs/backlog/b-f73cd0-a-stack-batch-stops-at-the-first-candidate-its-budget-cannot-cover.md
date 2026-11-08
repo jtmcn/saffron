@@ -4,7 +4,7 @@ title: A batch stops at the first candidate its budget cannot cover, though a la
 status: open
 tier: 2
 filed: 2026-10-16
-specs: []
+specs: [SA-0356]
 prs: []
 commits: []
 cites: [§4.2.1]
