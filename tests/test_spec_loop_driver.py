@@ -1394,6 +1394,20 @@ def test_known_specs_skips_a_missing_done_directory(tmp_path, monkeypatch):
     assert set(driver._known_specs()) == {"SA-0001"}
 
 
+def test_known_specs_keeps_a_retired_spec_with_an_inline_mutant(tmp_path, monkeypatch):
+    # SA-0338: a `done/` spec ships its inline mutant, and the ceilings rows need it.
+    specs_dir = tmp_path / ".saffron" / "specs"
+    (specs_dir / "done").mkdir(parents=True)
+    (specs_dir / "done" / "SA-0002-y.md").write_text(
+        "---\nid: SA-0002\ntitle: y\ntype: bug\nacceptance:\n"
+        "  - claim: c\n    witness: t.py::t\n"
+        "    mutant: {file: f.py, find: a, replace: b}\n---\n"
+    )
+    monkeypatch.setattr(driver, "SPECS_DIR", specs_dir)
+
+    assert set(driver._known_specs()) == {"SA-0002"}
+
+
 def test_history_splits_a_cells_spend_by_phase_and_names_how_attempts_ended(tmp_path):
     # SA-0087: 47 of 60 turns went to the plan checkpoint, and nothing showed
     # the operator that a cell of its shape needed more.
@@ -3760,3 +3774,28 @@ def test_check_names_a_mutant_outside_touches_that_declares_no_subject(
     assert rc == 0, out
     assert len(named) == 1, out
     assert named[0].startswith("concern: ") and "criterion 1" in named[0], out
+
+
+def test_subject_concerns_read_a_mutant_from_the_ref_not_the_spec(tmp_path):
+    """SA-0338: a queued spec carries no inline mutant, so the concern reads
+    the ref. A spec with none there is left as it is."""
+    from saffron.intake import Criterion
+    from tests.test_mutants import _bare, _commit
+
+    mirror = _bare(tmp_path)
+    mutants = "t.py::t: {file: elsewhere.py, find: a, replace: b}\n"
+    commit = _commit(mirror, {"SA-0009.yaml": mutants}, "mutants")
+    subprocess.run(
+        ["git", "-C", str(mirror), "update-ref", "refs/saffron/mutants", commit],
+        check=True,
+    )
+    target = _spec("SA-0009")
+    target.acceptance_criteria = []
+    target.acceptance = [Criterion(claim="c", witness="t.py::t")]
+
+    filled = driver._with_ref_mutants(target, mirror)
+    assert not isinstance(filled, str), filled
+    assert filled.acceptance[0].mutant is not None
+    assert filled.acceptance[0].mutant.file == "elsewhere.py"
+    other = _spec("SA-0010")
+    assert driver._with_ref_mutants(other, mirror) is other
