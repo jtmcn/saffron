@@ -1,0 +1,36 @@
+id: shell-gate-tool-must-be-executed
+language: bash
+severity: error
+message: the `tool` field must be obtained by executing the tool, never a literal
+note: |
+  DESIGN.md §5.4; Appendix H. The shell half of `gate-tool-must-be-executed`.
+  Build the value from the tool's own output: `tool="ruff $(ruff --version)"`.
+
+# A value carrying an expansion was computed, so only a constant is refused.
+utils:
+  constant:
+    not:
+      any:
+        - kind: command_substitution
+        - kind: simple_expansion
+        - kind: expansion
+        - has:
+            stopBy: end
+            any:
+              - kind: command_substitution
+              - kind: simple_expansion
+              - kind: expansion
+rule:
+  any:
+    # tool="ruff 0.16.3"
+    - kind: variable_assignment
+      all:
+        - has: { field: name, regex: '^tool$' }
+        - has: { field: value, matches: constant }
+    # printf '{"gate":"format","tool":"ruff 0.16.3"}', the contract written by hand.
+    # `%` and `$` exclude a format slot or a variable filled in at run time.
+    - kind: raw_string
+      regex: '"tool"\s*:\s*"[^"%$]*"'
+    - kind: string
+      matches: constant
+      regex: '\\"tool\\"\s*:\s*\\"[^"%$\\]*\\"'

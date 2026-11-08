@@ -706,6 +706,7 @@ def test_a_rules_exemptions_are_the_named_files():
         "podman-runtime-is-runtime-only": ["saffron/cell/runtimes/podman.py"],
         "agent-sdk-import-is-runner-only": ["images/agent_runner.py"],
         "gate-tool-must-be-executed": ["tests/**"],
+        "shell-gate-tool-must-be-executed": None,
         "no-alias-in-package-init": None,
         "no-reexport": None,
         "one-task-driver": ["saffron/task.py"],
@@ -782,7 +783,8 @@ def test_every_rules_path_scope_still_reaches_a_file(tmp_path):
     dead = []
     for rule_file in _rule_files():
         rule = yaml.safe_load(rule_file.read_text())
-        assert rule["language"] == "python", (
+        scopes = [g for k in ("files", "ignores") for g in rule.get(k) or []]
+        assert not scopes or rule["language"] == "python", (
             f"{rule_file.name} is not Python; `_covers` probes with `kind: module`, "
             "which is Python's root node — give it the new language's root first"
         )
@@ -967,6 +969,27 @@ def test_structure_fails_on_code_its_rules_reject(tmp_path):
     # ast-grep counts lines from zero and every other gate here reports them from
     # one, so an unconverted line reads as the line above the defect.
     assert result.failures[0].line == 1
+
+
+def test_structure_fails_a_shell_gate_that_writes_its_tool_as_a_literal(tmp_path):
+    """`format` builds its contract in `sh`, which a Python rule never reads (item 77)."""
+    gate = _rules_tree(tmp_path)
+    fmt = tmp_path / ".saffron" / "gates" / "format"
+    fmt.write_text(
+        re.sub(r"^tool=.*$", 'tool="ruff 0.16.3"', fmt.read_text(), flags=re.M)
+    )
+    done = subprocess.run(
+        [str(gate)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="structure")
+    assert result.status == "fail", result.summary
+    assert [(f.file, f.code) for f in result.failures] == [
+        (".saffron/gates/format", "shell-gate-tool-must-be-executed")
+    ]
 
 
 def test_structure_fails_a_skip_bound_to_a_name(tmp_path):

@@ -1,0 +1,70 @@
+id: shell-gate-tool-must-be-executed
+snapshots:
+  echo "{\"gate\":\"format\",\"tool\":\"ruff 0.16.3\"}":
+    labels:
+    - source: '"{\"gate\":\"format\",\"tool\":\"ruff 0.16.3\"}"'
+      style: primary
+      start: 5
+      end: 53
+  local tool="ruff 0.16.3":
+    labels:
+    - source: tool="ruff 0.16.3"
+      style: primary
+      start: 6
+      end: 24
+    - source: tool
+      style: secondary
+      start: 6
+      end: 10
+    - source: '"ruff 0.16.3"'
+      style: secondary
+      start: 11
+      end: 24
+  printf '{"gate":"format","tool":"ruff 0.16.3","failures":[]}\n':
+    labels:
+    - source: '''{"gate":"format","tool":"ruff 0.16.3","failures":[]}\n'''
+      style: primary
+      start: 7
+      end: 63
+  tool="ruff 0.16.3":
+    labels:
+    - source: tool="ruff 0.16.3"
+      style: primary
+      start: 0
+      end: 18
+    - source: tool
+      style: secondary
+      start: 0
+      end: 4
+    - source: '"ruff 0.16.3"'
+      style: secondary
+      start: 5
+      end: 18
+  tool='ruff 0.16.3':
+    labels:
+    - source: tool='ruff 0.16.3'
+      style: primary
+      start: 0
+      end: 18
+    - source: tool
+      style: secondary
+      start: 0
+      end: 4
+    - source: '''ruff 0.16.3'''
+      style: secondary
+      start: 5
+      end: 18
+  tool=ruff:
+    labels:
+    - source: tool=ruff
+      style: primary
+      start: 0
+      end: 9
+    - source: tool
+      style: secondary
+      start: 0
+      end: 4
+    - source: ruff
+      style: secondary
+      start: 5
+      end: 9

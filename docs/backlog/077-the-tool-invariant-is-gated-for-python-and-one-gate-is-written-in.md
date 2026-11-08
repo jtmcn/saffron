@@ -1,7 +1,9 @@
 ---
 id: 77
 title: The `tool` invariant is gated for Python, and one gate is written in shell
-status: open
+status: done
+closed: 2026-11-08
+by_hand: true
 tier: 3
 specs: []
 prs: [145]
@@ -30,3 +32,7 @@ a `language: bash` rule in `.saffron/rules/` with its own
 `invalid` snippet for `tool="<literal>"`, and `ruleDirs` already loads it. Cheap;
 it is here rather than in #145 because the rule needs its own false-positive
 measurement against the five wrappers and `format`'s own `case` arms.
+
+## Record
+
+- 2026-11-08: done by hand. A gate-policy change: the new `structure` rule `shell-gate-tool-must-be-executed` reads the shell gates, which `languageGlobs` maps to bash by basename. It reports 0 matches on the tree and fires on `format` rewritten to a literal.

@@ -17,10 +17,7 @@ ignores:
 # `t = "ruff 1.0"` then `tool=t`, or `"ruff " + v` — is out of a structural
 # rule's reach. The branches below are the forms that write the literal *at* the
 # field, which is every way the defect has actually been written here.
-# ponytail: this rule is `language: python`, and `.saffron/gates/format` builds
-# its whole contract in `sh`. A shell gate writing `tool="ruff 0.16.3"` is out of
-# reach until a `language: bash` rule exists — backlog item 77. CLAUDE.md's
-# `(gated)` says so rather than implying the invariant is covered everywhere.
+# The shell gates are `shell-gate-tool-must-be-executed`'s (backlog item 77).
 utils:
   # The field name matched on the string's *content*, not on its source text. A
   # `string` node's text carries its quotes and its prefix, so a regex anchored

@@ -1,0 +1,18 @@
+id: shell-gate-tool-must-be-executed
+valid:
+  - 'tool="ruff $(ruff --version 2>/dev/null | awk ''{print $2}'')"'
+  - 'tool=$(ruff --version)'
+  - 'tool="$version"'
+  - 'tool="ruff ${v}"'
+  - 'toolchain="uv 0.4.0"'
+  - 'printf ''{"gate":"format","status":"pass","tool":"%s"}\n'' "$tool"'
+  - 'echo ''{"gate":"format","status":"error","summary":"ruff not on PATH"}'''
+  - 'echo "{\"tool\":\"$tool\"}"'
+  - 'exec python3 "$(dirname "$0")/lint.py"'
+invalid:
+  - 'tool="ruff 0.16.3"'
+  - 'tool=''ruff 0.16.3'''
+  - 'tool=ruff'
+  - 'local tool="ruff 0.16.3"'
+  - 'printf ''{"gate":"format","tool":"ruff 0.16.3","failures":[]}\n'''
+  - 'echo "{\"gate\":\"format\",\"tool\":\"ruff 0.16.3\"}"'
