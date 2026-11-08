@@ -7,7 +7,7 @@ filed: 2026-09-20
 closed: 2026-11-08
 by_hand: true
 specs: []
-prs: [388]
+prs: [388, 1071]
 commits: []
 cites: []
 related: [128, 129, 170]
@@ -48,4 +48,4 @@ own test.
 **Filed 2026-09-20**, from #388. That pull request set the field on 127 and 131
 by hand and left the hole open.
 
-- 2026-11-08: done by hand.
+- 2026-11-08: done by hand in #1071.
