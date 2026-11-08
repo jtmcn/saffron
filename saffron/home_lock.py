@@ -29,9 +29,8 @@ class HomeLocked(Exception):
     """Another command already holds `home`'s lock.
 
     `pid` and `command` come from the lock file the holder wrote, read
-    before this exception is raised. Either is `None` when the file was
-    empty or unreadable, the shape a killed holder's file can leave for
-    an instant before it is reused.
+    before this exception is raised. Either is `None` when the file is
+    read between the holder's truncate and its write.
     """
 
     def __init__(self, pid: int | None, command: str | None) -> None:

@@ -623,8 +623,8 @@ def _locked_dispatch(args: argparse.Namespace, run: Callable[[], int]) -> int:
     """Run `cell`, `batch` or `draft` under the home lock (`saffron/home_lock.py`).
 
     A lock already held refuses at once, with one line naming the
-    holder's pid and command. It exits `2`, the same code SIGTERM and
-    every other infrastructure abort already use.
+    holder's pid and command. It exits `2`, the code every other
+    infrastructure abort uses.
 
     Nothing in `run` executes, so the refused command starts no work and
     writes nothing to the ledger.
