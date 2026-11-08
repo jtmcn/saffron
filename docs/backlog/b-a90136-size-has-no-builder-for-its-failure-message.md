@@ -1,11 +1,13 @@
 ---
 id: b-a90136
 title: '`size` has no builder for its failure message, so the plan checkpoint restates it'
-status: open
+status: done
+closed: 2026-11-08
+by_hand: true
 tier: 3
 filed: 2026-09-23
 specs: []
-prs: []
+prs: [1080]
 commits: []
 cites: [§5.4]
 related: [b-408cf5, b-89ec93]
@@ -31,3 +33,4 @@ source.
 ## Record
 
 - 2026-09-23: filed from the spec loop's run 15 (#473, #483).
+- 2026-11-08: done by hand in #1080.

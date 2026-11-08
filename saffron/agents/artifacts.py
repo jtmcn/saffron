@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from saffron.agents import context
 from saffron.gates.core.scope import matches
-from saffron.gates.core.size import _TOKENS_PER_LINE, ceiling_for
+from saffron.gates.core.size import _TOKENS_PER_LINE, ceiling_for, over_ceiling
 from saffron.gates.suite import size_blocks
 from saffron.repos.policy import effective_risk
 
@@ -321,8 +321,8 @@ def judge_estimate(
     forecast, since no diff exists yet (§5.6).
 
     `None` within the ceiling. Over it and `size_blocks` says the tier
-    blocks: raises `PlanRejected`, carrying a copy of the `size` gate's
-    failure message that a test pins to `size_gate`'s own. Over it and
+    blocks: raises `PlanRejected`, carrying the `size` gate's own
+    failure message, from `over_ceiling`. Over it and
     advisory: returns the sentence the checkpoint emits instead of rejecting.
     Test lines are left out only where `test_paths` are declared, as `size` does.
     """
@@ -333,9 +333,7 @@ def judge_estimate(
         return None
 
     tier = effective_risk(risk, plan.files_to_change, elevate_on)
-    gate_message = (
-        f"{priced} changed tokens exceeds the {spec_type} ceiling of {ceiling}"
-    )
+    gate_message = over_ceiling(priced, spec_type, ceiling)
     not_counted = (
         f", {left_out} of the plan's lines under the declared test paths not counted"
         if left_out

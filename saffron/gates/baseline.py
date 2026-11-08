@@ -22,6 +22,17 @@ class NewFailure(NamedTuple):
     failure: Failure
 
 
+def render(new_failure: NewFailure) -> str:
+    """`[gate] file:line code: message`, `?` for a missing line, and no
+    `file:line ` segment at all for a failure that carries no file."""
+    failure = new_failure.failure
+    loc = ""
+    if failure.file:
+        line = failure.line if failure.line is not None else "?"
+        loc = f"{failure.file}:{line} "
+    return f"[{new_failure.gate}] {loc}{failure.code}: {failure.message}"
+
+
 def _cancels(gate: str, failure: Failure) -> bool:
     """Whether a baseline failure cancels its match at head.
 

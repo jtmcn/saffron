@@ -1,11 +1,13 @@
 ---
 id: b-cd41ac
 title: "A spec told its cell to reuse five test helpers that did not exist at its base, and two spec reviews passed it"
-status: open
+status: done
+closed: 2026-11-08
+by_hand: true
 tier: 3
 filed: 2026-10-07
 specs: []
-prs: []
+prs: [1080]
 commits: []
 cites: []
 related: []
@@ -27,3 +29,4 @@ and reports a missing one as a `build` blocker.
 ## Record
 
 - 2026-10-07: filed from the spec loop's run 30 (#733).
+- 2026-11-08: done by hand in #1080.

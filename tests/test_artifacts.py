@@ -640,3 +640,18 @@ def test_judge_estimate_reads_the_ceiling_size_holds_when_it_runs(monkeypatch):
     )
     assert size.ceiling_for("docs") == 1
     assert judge_estimate(plan, "docs", "standard", [], []) is not None
+
+
+def test_one_function_in_size_builds_the_over_ceiling_message():
+    """b-a90136: `size_gate` and `judge_estimate` share one builder, so
+    neither module spells the failure text itself."""
+    from pathlib import Path
+
+    from saffron.agents import artifacts
+    from saffron.gates.core import size
+
+    assert size.over_ceiling(1301, "bug", 1300) == (
+        "1301 changed tokens exceeds the bug ceiling of 1300"
+    )
+    assert "changed tokens exceeds" not in Path(artifacts.__file__).read_text()
+    assert Path(size.__file__).read_text().count("changed tokens exceeds") == 1

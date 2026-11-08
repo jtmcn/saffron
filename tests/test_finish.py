@@ -870,6 +870,10 @@ def test_a_draft_is_judged_on_its_own_commit_atop_the_head_under_a_ref_the_judge
                 gate="lint",
                 failure=Failure(file="b.py", line=None, code="E3", message="bad"),
             ),
+            NewFailure(
+                gate="lint",
+                failure=Failure(file="c.py", line=0, code="E4", message="top"),
+            ),
         ]
 
     before_refs = _refs(stack.mirror)
@@ -880,6 +884,7 @@ def test_a_draft_is_judged_on_its_own_commit_atop_the_head_under_a_ref_the_judge
         "[tests] a.py:3 E1: boom",
         "[size] E2: too big",
         "[lint] b.py:? E3: bad",
+        "[lint] c.py:0 E4: top",
     ]
     assert len(calls) == 1
     assert _refs(stack.mirror) == before_refs

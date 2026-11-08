@@ -76,7 +76,8 @@ uv run .claude/skills/run-saffron-spec-loop/driver.py check SA-NNNN
 It exits 1 on a blocker. Two rules compare `max_turns` and `budget_usd` with
 what `history` prints for cells of the same shape. The third prices
 `estimated_lines` against the `size` ceiling of the spec's type, times the
-overrun landed specs measured, or 1.0 when `estimate_measured: true`. At or
+overrun landed specs measured. A spec with `estimate_measured: true` takes
+the overrun of landed measured specs instead, or 1.0 until three land. At or
 above 80% of the ceiling it blocks at `elevated` and prints a concern at
 `standard`. A blocker goes to the operator before the cell: raise the ceiling,
 run the spec as written, split it, or drop it. A spec of a shape no past cell

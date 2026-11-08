@@ -1,14 +1,16 @@
 ---
 id: b-14ccc7
 title: A live-cell test fails when two worktrees run `make check` at once
-status: open
+status: superseded
 tier: 3
 filed: 2026-10-03
+closed: 2026-11-08
 specs: []
-prs: []
-commits: []
+prs: [1064]
+commits: ["c2e91851"]
 cites: []
 related: []
+superseded_by: b-92fdbe
 ---
 
 ## Problem
@@ -29,3 +31,4 @@ the same host cannot pass or fail it.
 ## Record
 
 - 2026-10-03: filed from the spec loop's run 26.
+- 2026-11-08: closed by hand as superseded by b-92fdbe. Its commit `c2e91851` (#1064) made the test assert only its own probe pid, so a parallel suite on the same host cannot pass or fail it.

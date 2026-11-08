@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import Literal
 
 from pydantic import BaseModel
@@ -151,9 +152,10 @@ def parse_diff(diff: str) -> DiffFacts:
             # they match no finding, so they drop rather than crash.
             path = line[4:].removeprefix("b/")
         elif line.startswith(("rename from ", "rename to ")):
-            # A pure rename has no ± line, but the path itself is an identifier
-            # a caller still names — the diff "renamed" it (§5.5).
-            tokens.update(_WORD.findall(line.split(" ", 2)[2]))
+            # A pure rename has no ± line, so its path stands in (§5.5). The stem
+            # only: an extension like `py` would anchor every finding naming one.
+            stem = PurePosixPath(line.split(" ", 2)[2]).with_suffix("")
+            tokens.update(_WORD.findall(str(stem)))
         elif header := _HUNK.match(line):
             start, count = int(header.group(2)), int(header.group(3) or 1)
             if count:  # zero for a deleted file and for a deletion-only hunk

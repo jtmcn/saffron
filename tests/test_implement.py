@@ -826,6 +826,13 @@ def test_a_failure_with_no_path_does_not_render_an_empty_one():
     assert listed.splitlines() == ["- [size] diff-too-large: 601 > 600"]
 
 
+def test_a_failure_at_line_0_renders_its_line_as_the_finish_renders_it():
+    """b-25b7ba: `line or '?'` read line 0 as missing, unlike the finish."""
+    new = [NewFailure("lint", Failure(file="a.py", line=0, code="E0", message="m"))]
+    _, _, listed = implement.repair_prompt(new).partition("\n\n")
+    assert listed.splitlines() == ["- [lint] a.py:0 E0: m"]
+
+
 def test_telemetry_is_off_because_the_proxy_would_deny_it_anyway():
     """The allowlist permits api.anthropic.com and nothing else, so statsig
     traffic becomes denied CONNECTs and startup latency that reads as a hang."""
