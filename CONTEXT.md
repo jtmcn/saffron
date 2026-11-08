@@ -314,6 +314,12 @@ before any cell starts. An unresolved entry refuses the task. A spec that declar
 with no `depends_on` does not parse.
 _Avoid_: "import", "dependency" (that is a `depends_on` entry).
 
+**Retired-first entry**: An entry in a spec's `retired_first` list. It names a spec that
+must sit in `done/` at the spec's base before its cell runs. The queue scan and
+`saffron cell` refuse the spec while one does not. A spec that adds or widens a refusal
+names each queued spec the new rule would refuse.
+_Avoid_: "prerequisite", "parent" (that is a `depends_on` entry).
+
 ---
 
 ## 3. Scope
