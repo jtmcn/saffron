@@ -389,6 +389,25 @@ def test_a_long_docstring_is_new_only_where_it_crosses_the_limit_or_passes_its_b
     assert _new_at_head("saffron/d.py", at(12), at(14)) == [(2, "docstring-length")] * 2
 
 
+def test_a_renamed_function_keeps_its_long_docstring_old_and_a_join_stays_a_hit():
+    """SA-0225's rename made an old docstring new, and its cell joined two lines
+    into one of 103 characters to slip under the limit (b-8acb05)."""
+
+    def at(name: str, lines: list[str]) -> str:
+        body = "\n".join(f"    {line}" for line in lines[1:])
+        return f'def {name}():\n    """{lines[0]}\n{body}"""\n'
+
+    lines = [f"Line {i} " + "word " * 8 + "end." for i in range(1, 12)]
+    base = at("_problem", lines)
+    assert _new_at_head("saffron/p.py", base, at("extract_problem", lines)) == []
+    joined = [*lines[:3], lines[3] + lines[4], *lines[5:]]
+    assert len(joined) == 10 and len(joined[3]) > 88
+    assert [
+        f.code
+        for f in _prose().check(at("f", joined), "saffron/p.py", "prose", root=REPO)
+    ] == ["docstring-length"]
+
+
 def test_a_new_long_comment_is_new_though_an_old_one_is_trimmed():
     """`22855a4` added three long comments and cut three older ones to two lines."""
     old = "# a1\n# a2\n# a3\nx = 1\n"
@@ -643,13 +662,13 @@ def _docstring_hits(text: str) -> list[str]:
 def test_a_docstring_over_ten_lines_is_a_hit_and_ten_are_not():
     # Run 7: SA-0105's cell answered "a short comment" with an 18-line docstring.
     text = _docstring("short", 10) + _docstring("test_long", 11)
-    assert _docstring_hits(text) == ["test_long, line 11"]
+    assert _docstring_hits(text) == ["line 11"]
 
 
 def test_a_module_docstring_is_exempt_and_a_class_docstring_is_not():
     long = "\n".join(f"line {i}" for i in range(1, 13))
     text = f'"""{long}"""\n\nclass C:\n    """{long}"""\n'
-    assert _docstring_hits(text) == ["C, line 11", "C, line 12"]
+    assert _docstring_hits(text) == ["line 11", "line 12"]
 
 
 def test_an_sql_comment_in_a_string_is_held_to_the_comment_rules():

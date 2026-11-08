@@ -1,11 +1,13 @@
 ---
 id: b-050733
 title: "Specs and cells use bare \"run\" for one turn or one agent call, and nothing catches it"
-status: open
+status: done
 tier: 3
 filed: 2026-10-05
+closed: 2026-11-08
+by_hand: true
 specs: []
-prs: []
+prs: [1074]
 commits: []
 cites: []
 related: []
@@ -34,3 +36,4 @@ command names raise no false hit.
 ## Record
 
 - 2026-10-05: filed from stage 2 of the delegate-loop plan (the first live stack batches, batches 13 and 14).
+- 2026-11-08: done by hand in #1074.

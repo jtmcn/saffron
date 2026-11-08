@@ -1,0 +1,112 @@
+id: prompt-is-a-file
+snapshots:
+  PLAN_PROMPT = """Write a plan.\nThen stop.""":
+    labels:
+    - source: PLAN_PROMPT = """Write a plan.\nThen stop."""
+      style: primary
+      start: 0
+      end: 45
+    - source: PLAN_PROMPT
+      style: secondary
+      start: 0
+      end: 11
+    - source: '"""Write a plan.\nThen stop."""'
+      style: secondary
+      start: 14
+      end: 45
+  PLAN_PROMPT = "Write a plan for the spec.":
+    labels:
+    - source: PLAN_PROMPT = "Write a plan for the spec."
+      style: primary
+      start: 0
+      end: 42
+    - source: PLAN_PROMPT
+      style: secondary
+      start: 0
+      end: 11
+    - source: '"Write a plan for the spec."'
+      style: secondary
+      start: 14
+      end: 42
+  PLAN_PROMPT = "Write a plan. " + FOOTER:
+    labels:
+    - source: PLAN_PROMPT = "Write a plan. " + FOOTER
+      style: primary
+      start: 0
+      end: 39
+    - source: PLAN_PROMPT
+      style: secondary
+      start: 0
+      end: 11
+    - source: '"Write a plan. "'
+      style: secondary
+      start: 14
+      end: 30
+    - source: '"Write a plan. " + FOOTER'
+      style: secondary
+      start: 14
+      end: 39
+  PLAN_PROMPT = ("Write a plan " "for the spec."):
+    labels:
+    - source: PLAN_PROMPT = ("Write a plan " "for the spec.")
+      style: primary
+      start: 0
+      end: 47
+    - source: PLAN_PROMPT
+      style: secondary
+      start: 0
+      end: 11
+    - source: '"Write a plan "'
+      style: secondary
+      start: 15
+      end: 30
+    - source: ("Write a plan " "for the spec.")
+      style: secondary
+      start: 14
+      end: 47
+  PLAN_PROMPT = f"Write a plan for {spec}.":
+    labels:
+    - source: PLAN_PROMPT = f"Write a plan for {spec}."
+      style: primary
+      start: 0
+      end: 41
+    - source: PLAN_PROMPT
+      style: secondary
+      start: 0
+      end: 11
+    - source: f"Write a plan for {spec}."
+      style: secondary
+      start: 14
+      end: 41
+  PLAN_PROMPT = textwrap.dedent("""Write a plan."""):
+    labels:
+    - source: PLAN_PROMPT = textwrap.dedent("""Write a plan.""")
+      style: primary
+      start: 0
+      end: 50
+    - source: PLAN_PROMPT
+      style: secondary
+      start: 0
+      end: 11
+    - source: '"""Write a plan."""'
+      style: secondary
+      start: 30
+      end: 49
+    - source: textwrap.dedent("""Write a plan.""")
+      style: secondary
+      start: 14
+      end: 50
+  'PLAN_PROMPT: str = "Write a plan for the spec."':
+    labels:
+    - source: 'PLAN_PROMPT: str = "Write a plan for the spec."'
+      style: primary
+      start: 0
+      end: 47
+    - source: PLAN_PROMPT
+      style: secondary
+      start: 0
+      end: 11
+    - source: '"Write a plan for the spec."'
+      style: secondary
+      start: 19
+      end: 47
