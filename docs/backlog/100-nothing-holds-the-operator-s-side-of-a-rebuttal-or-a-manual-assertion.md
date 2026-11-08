@@ -1,7 +1,9 @@
 ---
 id: 100
 title: Nothing holds the operator's side of a rebuttal, or a manual assertion, to the operator
-status: open
+status: done
+closed: 2026-11-08
+by_hand: true
 tier: 3
 specs: []
 prs: []
@@ -26,3 +28,7 @@ a third qualified association in `RebuttalShape` — at most one,
 role in `( factory:agrees factory:disagrees )`, agent `sh:class factory:Operator` —
 and a shape putting a manual assertion's `earl:assertedBy` on the operator, each
 with a negative fixture naming a delegate.
+
+## Record
+
+- 2026-11-08: done by hand. The item's recipe, one qualified association with an Operator agent, conforms when a delegate adjudicates, since that association is not counted. So `RebuttalShape` caps adjudications at one and requires an Operator agent on each, and `ManualAssertionShape` is new.

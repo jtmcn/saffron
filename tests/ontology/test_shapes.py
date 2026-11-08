@@ -527,3 +527,44 @@ def test_the_adr_shape_allows_exactly_the_statuses_records_accepts(shapes_graph)
         shapes_graph, shapes_graph.value(prop, SH["in"])
     )
     assert {str(v) for v in listed} == set(typing.get_args(AdrStatus))
+
+
+_REBUTTAL = (
+    f"{_ACTING} @prefix earl: <http://www.w3.org/ns/earl#> . "
+    ":f a factory:Finding ; factory:severity factory:blocker ; earl:mode earl:semiAuto ; "
+    "earl:assertedBy :c ; earl:subject :d . :d a factory:Diff, earl:TestSubject . "
+    ":i a factory:ImplementerSession ; prov:actedOnBehalfOf :operator . "
+    ":c a factory:CriticLens . :rb a factory:Rebuttal ; prov:used :f ; "
+    "prov:qualifiedAssociation "
+    "[ prov:agent :i ; prov:hadRole factory:disputes ] , "
+    "[ prov:agent :c ; prov:hadRole factory:confirms ]"
+)
+
+
+@pytest.mark.parametrize(
+    ("graph", "components"),
+    [
+        (f"{_REBUTTAL} .", set()),
+        (
+            f"{_REBUTTAL} , [ prov:agent :operator ; prov:hadRole factory:agrees ] .",
+            set(),
+        ),
+        (
+            f"{_REBUTTAL} , [ prov:agent :s ; prov:hadRole factory:agrees ] .",
+            {SH.OrConstraintComponent},
+        ),
+        (
+            f"{_REBUTTAL} , [ prov:agent :operator ; prov:hadRole factory:agrees ] ,"
+            " [ prov:agent :operator ; prov:hadRole factory:disagrees ] .",
+            {SH.QualifiedMaxCountConstraintComponent},
+        ),
+    ],
+    ids=["unadjudicated", "operator", "delegate", "twice"],
+)
+def test_a_rebuttal_is_adjudicated_once_and_by_the_operator(
+    graph, components, shapes_graph
+):
+    """A delegate that types the adjudication still records the operator as its agent."""
+    conforms, found, text = _components(graph, shapes_graph)
+    assert conforms == (not components), text
+    assert found == components, text

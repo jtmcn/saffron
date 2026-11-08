@@ -1,0 +1,10 @@
+@prefix factory: <urn:software-factory:ns#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix earl: <http://www.w3.org/ns/earl#> .
+@prefix : <urn:software-factory:data:> .
+
+# A delegate typed the rejection, so the record names the delegate, not the operator.
+:adj a earl:Assertion ; earl:assertedBy :delegate ; earl:subject :pr ;
+    earl:mode earl:manual ; earl:result [ earl:outcome earl:failed ] .
+:delegate a factory:Delegate ; prov:actedOnBehalfOf :operator .
+:operator a factory:Operator .
