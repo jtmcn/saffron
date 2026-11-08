@@ -4,7 +4,7 @@ title: "The follow-up writer emits `wrong_versions` as objects, so its first dra
 status: open
 tier: 2
 filed: 2026-11-06
-specs: []
+specs: [SA-0353]
 prs: []
 commits: []
 cites: [§3]

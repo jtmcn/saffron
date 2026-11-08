@@ -80,6 +80,20 @@ though the brief said not to. The delegate deleted each and edited
 4. A child spec drafted in parallel gets its parent's chosen names before its
    draft ends, not after the first review.
 
+## SA-0353 (b-ffb930), spec loop run 55
+
+Three writer sessions: the draft took 47 minutes and 298k tokens. Two reviews. The writer ran 33, 41 and then 44 wrong versions on a prototype, and every one was killed.
+
+**Review 1: 1 blocker, 4 concerns, 4 notes.** The blocker was the delegate's own brief. It told the writer to have core name the repo's `prose` gate, and core names no repo gate (§2.1, `rebut.py:208-209`). No pre-flight check reads a brief against §2.1. The concerns were a session cost the admission checks undercount (pre-flight 7), a failed send-back discarding a parsed draft (pre-flight 2), a refusal SA-0338 adds that the check never ran (pre-flight 4), and a set member no witness drove (pre-flight 1).
+
+**Review 2: 2 blockers, 4 concerns, 5 notes.** The send-back turn did work and emitted the block in one turn, against principle 18 (pre-flight 8, the design read). Nothing witnessed the cost of a failed send-back (pre-flight 1). The concerns were which text survives a send-back (pre-flight 2), a regression on a draft that never parsed, an untested bound of 2, and an inline prompt outside `prompt_sha`. The delegate settled every one in a final revision, with no third review: a send-back is a work turn and then the existing extraction turn.
+
+## Checks to build (SA-0353)
+
+5. Read the delegate's `decisions:` block against §2.1 and the principles before dispatch. The first review's blocker came from a decision, not the writer.
+6. Pre-flight 8 should name principle 18 for any new turn that both does work and emits a schema.
+
+
 ## `SA-0354`, from b-e7b6a2 (spec loop run 55)
 
 One writer and one review. The draft took 27 minutes and about 205k tokens,
