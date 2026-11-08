@@ -25,6 +25,7 @@ from saffron import (
     end_review,
     finish,
     follow_up,
+    home_lock,
     mutants,
     preflight,
     qualify,
@@ -396,13 +397,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         if args.command == "cell":
-            return _cell_guarding_sigterm(args, ledger, out_dir)
+            return _locked_dispatch(
+                args, lambda: _cell_guarding_sigterm(args, ledger, out_dir)
+            )
 
         if args.command == "batch":
-            return _guarding_sigterm(lambda: _batch(args, ledger, out_dir))
+            return _locked_dispatch(
+                args, lambda: _guarding_sigterm(lambda: _batch(args, ledger, out_dir))
+            )
 
         if args.command == "draft":
-            return _draft(args, ledger, out_dir)
+            return _locked_dispatch(args, lambda: _draft(args, ledger, out_dir))
 
         if args.command == "queue":
             return _queue(args, ledger)
@@ -614,6 +619,24 @@ def _pushed_landed(mirror: Path, base_sha: str, pushed_sha: str) -> bool:
     )
 
 
+def _locked_dispatch(args: argparse.Namespace, run: Callable[[], int]) -> int:
+    """Run `cell`, `batch` or `draft` under the home lock (`saffron/home_lock.py`).
+
+    A lock already held refuses at once, with one line naming the
+    holder's pid and command. It exits `2`, as a setup failure does.
+    Only SIGTERM's teardown exits `143`.
+
+    Nothing in `run` executes, so the refused command starts no work and
+    writes nothing to the ledger.
+    """
+    try:
+        with home_lock.lock(args.home, f"saffron {args.command}"):
+            return run()
+    except home_lock.HomeLocked as locked:
+        print(f"saffron: {locked}")
+        return 2
+
+
 def _guarding_sigterm(run: Callable[[], int]) -> int:
     """`run`, with SIGTERM made to unwind it the way Ctrl-C does.
 
@@ -710,6 +733,33 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     if retirement is not None:
         print(f"{spec.id:<10} refused  {retirement}")
         return 1
+
+    # `retired_first` is the operator's own precondition (b-e7898b), read from
+    # `done/` at this base, never the working copy. A spec with none skips this.
+    if spec.retired_first:
+        with tempfile.TemporaryDirectory() as scratch:
+            try:
+                exported = git_mirror.export_saffron_dir(
+                    mirror, base_sha, Path(scratch) / "retired-first"
+                )
+            except git_mirror.GitError as broke:
+                # Its two causes look alike here too (`_protected_paths_at`),
+                # so this names only the read that failed, never "not retired".
+                print(
+                    f"{spec.id:<10} .saffron/specs/{scheduler.RETIRED_DIRNAME}/ "
+                    f"at {base_sha} could not be read, so retired_first could "
+                    f"not be checked: {broke}"
+                )
+                return 2
+            retired, retired_failures = scheduler._retired_ids(
+                exported / ".saffron" / "specs"
+            )
+        not_shipped = scheduler.retired_first_refusal(
+            spec, retired, len(retired_failures)
+        )
+        if not_shipped is not None:
+            print(f"{spec.id:<10} refused  {not_shipped}")
+            return 1
 
     # Recorded, not merely applied: three ceilings govern a run and only one of
     # them appears in the exit. SA-0005 was stopped by the turn ceiling with

@@ -232,6 +232,9 @@ class Spec(BaseModel):
     # A path or `path:name` this spec deletes (backlog item b-e773d9). Needs
     # no `depends_on`, since a spec can remove a name nothing here built.
     removes: list[str] = Field(default_factory=list)
+    # Spec ids that must sit in `done/` at this spec's base before its cell
+    # runs (backlog item b-e7898b). `scheduler.retired_first_refusal` reads it.
+    retired_first: list[str] = Field(default_factory=list)
     envelope: list[str] = Field(default_factory=list)
     touches: list[str] = Field(default_factory=list)
     forbidden: list[str] = Field(default_factory=list)

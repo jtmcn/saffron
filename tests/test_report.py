@@ -750,6 +750,48 @@ def test_the_sustained_cell_is_empty_rather_than_zero():
     assert "0 concerns" in rendered
 
 
+def test_unread_and_unanswered_blockers_rank_with_sustained_and_render_apart():
+    """Item 42: `unread` and `unanswered` both default to 0. Either one
+    above 0 lifts a line in any `_RANKED_BY_RISK` state to level 3. That
+    holds beside a sustained blocker, above an elevated line, whatever the
+    line's own state. Each renders its own singular/plural cell, and a
+    count of 0 renders nothing in either."""
+    default = line()
+    assert (default.unread, default.unanswered) == (0, 0)
+
+    for state in _RANKED_BY_RISK:
+        unread_line = line(spec_id="A", state=state, concerns=0, unread=1)
+        unanswered_line = line(spec_id="B", state=state, concerns=0, unanswered=1)
+        elevated = line(spec_id="C", state=state, concerns=2, risk="elevated")
+        sustained = line(spec_id="D", state=state, concerns=0, sustained=1)
+        assert sort_key(unread_line)[0] == sort_key(sustained)[0], state
+        assert sort_key(unanswered_line)[0] == sort_key(sustained)[0], state
+        assert sort_key(unread_line)[0] < sort_key(elevated)[0], state
+        assert sort_key(unanswered_line)[0] < sort_key(elevated)[0], state
+
+    # Within level 3 the two tiebreak after `unkept`, `unread` first.
+    assert sort_key(line(spec_id="A", unread=1)) < sort_key(
+        line(spec_id="B", unanswered=1)
+    )
+    assert sort_key(line(spec_id="A", unread=1)) < sort_key(line(spec_id="B"))
+
+    # The closing tag pins the cell's exact text, since "1 unread blocker"
+    # is itself a substring of the plural "1 unread blockers".
+    rendered = render_index([line(unread=1, unanswered=2, concerns=0)], header={})
+    assert "<td>1 unread blocker</td>" in rendered
+    assert "<td>2 unanswered blockers</td>" in rendered
+
+    rendered_plural = render_index(
+        [line(unread=2, unanswered=1, concerns=0)], header={}
+    )
+    assert "<td>2 unread blockers</td>" in rendered_plural
+    assert "<td>1 unanswered blocker</td>" in rendered_plural
+
+    rendered_zero = render_index([line(unread=0, unanswered=0, concerns=0)], header={})
+    assert "unread" not in rendered_zero
+    assert "unanswered" not in rendered_zero
+
+
 def test_the_header_is_rendered():
     assert "trailing accept rate" in render_index(
         [line()], header={"trailing accept rate": "—"}

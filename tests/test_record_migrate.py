@@ -2648,6 +2648,68 @@ def test_the_top_up_sets_aside_only_its_named_differences(tmp_path: Path) -> Non
     )
 
 
+def test_the_top_up_sets_aside_a_live_rebuttals_answer_and_error(
+    tmp_path: Path,
+) -> None:
+    """Item 42: the top-up sets aside a `rebuttal` fact's `answer` and
+    `error` keys, as it sets aside a `gate_result`'s own keys. `migrate`
+    derives neither yet. So a held `rebuttal` fact carrying them, the empty
+    error included, agrees with the one derived for the same row. The same
+    keys on a `finding` fact still disagree, and so does a held `rebuttal`
+    whose `verdict` differs."""
+    from saffron.record.migrate import migrate
+
+    ledger = Ledger(tmp_path / "source.db")
+    repo_id = ledger.upsert_repo("saffron", "/o", "/m.git", None)
+    batch_id = ledger.create_batch(budget_usd=50.0)
+    task_id = _rich_task(ledger, repo_id, batch_id, "SA-9401")
+    key = _key(ledger, task_id)
+    source_path = tmp_path / "source.db"
+    ledger.close()
+
+    truth = MemoryRecord()
+    migrate(source_path, truth)
+    full = truth.read(key)
+    rebuttal_index = next(i for i, f in enumerate(full) if f.kind == "rebuttal")
+    finding_index = next(i for i, f in enumerate(full) if f.kind == "finding")
+
+    # No backfill: on a record with no prior facts, `_finding_facts`
+    # derives neither key, which the set-aside below could otherwise mask.
+    assert "answer" not in full[rebuttal_index].payload
+    assert "error" not in full[rebuttal_index].payload
+
+    def _tweaked_payload(index: int, **payload_changes: Any) -> list[Fact]:
+        copy = list(full)
+        copy[index] = replace(
+            copy[index], payload={**copy[index].payload, **payload_changes}
+        )
+        return copy
+
+    _assert_agrees_and_gains_nothing(
+        source_path,
+        key,
+        _tweaked_payload(rebuttal_index, answer="answered", error=""),
+    )
+    _assert_agrees_and_gains_nothing(
+        source_path,
+        key,
+        _tweaked_payload(rebuttal_index, answer="unread", error="boom"),
+    )
+
+    # The set-aside is `rebuttal`'s own, not every kind's: the same two keys
+    # on a `finding` fact still disagree.
+    _assert_disagrees(
+        source_path,
+        key,
+        _tweaked_payload(finding_index, answer="answered", error=""),
+    )
+
+    # A real disagreement on the same fact is never erased by the set-aside.
+    _assert_disagrees(
+        source_path, key, _tweaked_payload(rebuttal_index, verdict="withdrawn")
+    )
+
+
 def test_a_topped_up_ref_ends_on_the_ledgers_state_only_where_its_own_differs(
     tmp_path: Path,
 ) -> None:

@@ -1743,6 +1743,55 @@ def test_a_ledger_that_predates_the_cost_floor_column_gains_it(tmp_path):
     ledger.close()
 
 
+def test_a_ledger_built_before_the_answer_columns_gains_both_and_records_an_answer(
+    tmp_path,
+):
+    """Item 42: a `findings` table that predates `answer` and `rebuttal_error`
+    gains both on open, the same way `attempts` gains `cost_floor_usd_est`
+    above. Its existing row keeps a null answer and error, and the next
+    `record_rebuttal` this ledger writes records its own."""
+    path = tmp_path / "old.db"
+    before = SCHEMA.replace(
+        "    rebuttal       TEXT,\n    answer         TEXT,\n    rebuttal_error TEXT\n",
+        "    rebuttal       TEXT\n",
+    )
+    assert before != SCHEMA  # otherwise this proves nothing
+    old = sqlite3.connect(path)
+    old.executescript(before)
+    old.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r', 'o', '/m')")
+    old.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
+    old.execute(
+        """INSERT INTO tasks (run_id, spec_id, spec_sha, state, branch)
+           VALUES (1, 'SA-0001', 's', 'READY_FOR_REVIEW', 'saffron/SA-0001')"""
+    )
+    old.execute(
+        "INSERT INTO findings (task_id, lens, severity, file, claim, anchored, "
+        "verdict, rebuttal) VALUES (1, 'correctness', 'blocker', 'x.py', 'c', 1, "
+        "'confirmed', 'already there')"
+    )
+    old.commit()
+    old.close()
+
+    ledger = Ledger(path)
+    (old_row,) = ledger.findings(1)
+    assert (old_row["answer"], old_row["rebuttal_error"]) == (None, None)
+
+    (finding_id,) = ledger.record_findings(
+        1,
+        [
+            Finding(
+                lens="correctness", severity="blocker", file="y.py", line=1, claim="d"
+            )
+        ],
+    )
+    ledger.record_rebuttal(
+        finding_id, verdict="confirmed", rebuttal="new one", answer="answered", error=""
+    )
+    _, new_row = ledger.findings(1)
+    assert (new_row["answer"], new_row["rebuttal_error"]) == ("answered", "")
+    ledger.close()
+
+
 def test_a_ledger_that_predates_both_migrations_opens_and_keeps_its_rows(tmp_path):
     """The one ledger that exists needed both, and the order is load-bearing:
     the `tool` ALTER runs first so `_add_gate_result_reference`'s rebuild can

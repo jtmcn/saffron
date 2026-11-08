@@ -604,6 +604,58 @@ def first_answers(rebuttal: RebuttalTurn) -> dict[int, Rebuttal]:
     return answered
 
 
+BlockerAnswer = Literal["answered", "unanswered", "unread"]
+
+
+def blocker_answers(turn: RebuttalTurn, blockers: int) -> dict[int, BlockerAnswer]:
+    """Each of `blockers` numbers, 1 through `blockers`, mapped to item 42's
+    own answer (§5.6). Every number reads `unread` when `turn.error` is not
+    `None`, the empty string included. Otherwise a number reads `answered` when `first_answers` holds
+    it, and `unanswered` when it does not.
+    """
+    if turn.error is not None:
+        return {n: "unread" for n in range(1, blockers + 1)}
+    answered = first_answers(turn)
+    return {
+        n: "answered" if n in answered else "unanswered" for n in range(1, blockers + 1)
+    }
+
+
+def _withdrawn(rebut_result: RebutResult) -> set[int]:
+    """Blocker numbers a verdict withdrew. Read after the host's own
+    quote and refusal checks already ran, so a withdrawal left here is one
+    that stands (§5.6)."""
+    return {
+        v.finding
+        for lens in rebut_result.verdicts
+        for v in lens.verdicts
+        if v.verdict == "withdrawn"
+    }
+
+
+def _standing_with(
+    rebut_result: RebutResult | None, blockers: int, answer: BlockerAnswer
+) -> int:
+    """One body for both counts below, as `_confirmed_with` is for its two."""
+    if rebut_result is None:
+        return 0
+    withdrawn = _withdrawn(rebut_result)
+    answers = blocker_answers(rebut_result.rebuttal, blockers)
+    return sum(1 for n, a in answers.items() if a == answer and n not in withdrawn)
+
+
+def unread_blockers(rebut_result: RebutResult | None, blockers: int) -> int:
+    """§6: how many of `blockers` read `unread`, never "argued nothing"
+    (§4.3), and that no verdict withdrew. Zero with no `RebutResult`."""
+    return _standing_with(rebut_result, blockers, "unread")
+
+
+def unanswered_blockers(rebut_result: RebutResult | None, blockers: int) -> int:
+    """§6: how many of `blockers` read `unanswered`, a blocker a readable turn
+    left unanswered, and that no verdict withdrew. Zero with no `RebutResult`."""
+    return _standing_with(rebut_result, blockers, "unanswered")
+
+
 def _confirmed_with(rebut_result: RebutResult, action: str) -> int:
     """Blockers whose first answer was `action` and whose verdict kept it standing.
 
@@ -631,8 +683,8 @@ def sustained_blockers(rebut_result: RebutResult | None) -> int:
     """§6 level 3: how many blockers the rebuttal did **not** dispose of.
 
     A blocker is sustained when one finding number carries an `argued` rebuttal
-    and a `confirmed` or `contradicted` verdict. The verdict alone would count a
-    blocker fixed and committed, and rank a task by work already done.
+    and a `confirmed` or `contradicted` verdict. `unread_blockers` and
+    `unanswered_blockers` sit beside it, counted by answer rather than verdict.
 
     Zero with no `RebutResult`, with a rebuttal turn that errored, and for a
     blocker verdicted but never rebutted, which never enters `_confirmed_with`'s

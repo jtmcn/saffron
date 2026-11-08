@@ -47,6 +47,13 @@ only the later of two candidates, compared as strings, or the one candidate
 beside a partner that is already waiting. The reason names a parent and
 never the field, so the spec loop's own deferral on that text does not
 swallow it.
+
+Backlog item b-e7898b adds `retired_first`, a list of spec ids this spec
+declares must already sit in `done/` at its own base. `retired_first_refusal`
+credits only that: not a `MERGED` task, not a waiting task, not a place in a
+stack order, not the stack base. `SA-0279` named its own three parents this
+way in prose, and nothing read it. This check turns that sentence into a
+fact the scan and `saffron cell` can both refuse on before any cell starts.
 """
 
 from __future__ import annotations
@@ -662,6 +669,20 @@ def _retired_ids(directory: Path) -> tuple[frozenset[str], list[DiscoveryFailure
     return frozenset(credited), stopped
 
 
+def _unreadable_retired_suffix(unreadable_retired: int) -> str:
+    """The suffix `_dependency_refusal` and `retired_first_refusal` each
+    append when `done/` held a file that did not parse, or the empty string
+    when none did. One place for the text both reasons carry."""
+    if not unreadable_retired:
+        return ""
+    plural = "s" if unreadable_retired > 1 else ""
+    return (
+        f" — and {unreadable_retired} file{plural} in "
+        f"{RETIRED_DIRNAME}/ could not be read as a spec, so it "
+        "declares no id to credit"
+    )
+
+
 def _dependency_refusal(
     dep: str,
     *,
@@ -697,14 +718,7 @@ def _dependency_refusal(
         # Saying it had not run would name a check this scan cannot perform.
         # A file in `done/` that does not parse declares no id, so this
         # branch is reachable with the parent sitting in `done/`.
-        blind = ""
-        if unreadable_retired:
-            plural = "s" if unreadable_retired > 1 else ""
-            blind = (
-                f" — and {unreadable_retired} file{plural} in "
-                f"{RETIRED_DIRNAME}/ could not be read as a spec, so it "
-                "declares no id to credit"
-            )
+        blind = _unreadable_retired_suffix(unreadable_retired)
         return (
             f"depends_on {dep} is not among the specs in this directory, not "
             f"retired to {RETIRED_DIRNAME}/ as shipped, and no task in the "
@@ -735,6 +749,29 @@ def _dependency_refusal(
         )
 
     return f"depends_on {dep} is {states[-1]}, which is not {DEPENDENCY_MERGED}"
+
+
+def retired_first_refusal(
+    spec: Spec, retired: frozenset[str], unreadable_retired: int
+) -> str | None:
+    """Why one of `spec`'s own `retired_first` ids has not shipped, or
+    `None` (backlog item b-e7898b).
+
+    `retired` is `_retired_ids`' own answer at this scan's base: the id sits
+    in `done/`, or it does not. Nothing else counts here. A `MERGED` task,
+    a waiting task, a stack-order place and the stack base are each a
+    different fact than the one this asks. It asks only whether the work
+    already reached the default branch.
+    """
+    missing = [dep for dep in spec.retired_first if dep not in retired]
+    if not missing:
+        return None
+    verb = "is" if len(missing) == 1 else "are"
+    suffix = _unreadable_retired_suffix(unreadable_retired)
+    return (
+        f"retired_first names {', '.join(missing)}, which {verb} not "
+        f"retired to {RETIRED_DIRNAME}/ as shipped{suffix}"
+    )
 
 
 def _entry_subject(entry: str) -> tuple[str, str]:
@@ -967,6 +1004,15 @@ def _refuse(
     # `saffron:retired-by` markers instead of the spec's acceptance criteria.
     if (retirement := retirement_refusal(candidate.spec, markers)) is not None:
         return "retirement_marker", retirement
+
+    # Runs above the `check_dependencies` return, so a stack night's own
+    # order still answers to this precondition (b-e7898b).
+    if (
+        not_shipped := retired_first_refusal(
+            candidate.spec, retired, unreadable_retired
+        )
+    ) is not None:
+        return "depends_on", not_shipped
 
     if not check_dependencies:
         return None
@@ -1249,7 +1295,7 @@ def build_queue(
     ledger could satisfy, which is refused, because no row can say its parent
     merged. `specs/done/` is read either way, and `SA-0020` is why: retirement
     is the operator's assertion, not the ledger's, and a repo with no rows at
-    all is exactly the repo whose work was done by hand.
+    all is exactly the repo whose work was done by hand. `retired_first` reads it too.
 
     `repo_slug` is `owner/repo` for the two refusals that need GitHub's
     state. `None` — the default, and what every caller before `SA-0017`

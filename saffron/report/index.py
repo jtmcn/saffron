@@ -79,9 +79,8 @@ _RANKED_BY_RISK: frozenset[RowState] = frozenset(
 )
 # Where a state in neither set sorts: with the states that need you.
 _UNRANKED = _STATE_RANK["GATE_ERROR"]
-# Level 3 (§6): a sustained blocker — `confirmed` **and** `argued`, never a
-# state in `_STATE_RANK`, so it only pre-empts the elevated/ordinary fallback
-# below and never the states above, which already need you more.
+# Level 3 (§6): a sustained blocker, an unkept fix, or a blocker that is
+# `unread` or `unanswered`. Pre-empts only the fallback below, never a state.
 _SUSTAINED = 3
 _ELEVATED = 4
 _ORDINARY = 5
@@ -112,32 +111,32 @@ class QueueLine:
     # fix it never committed — §6's other level-3 count, ranked with
     # `sustained` but never folded into it: an argument the critic defeated
     # and a promise nobody kept are different failures and get different
-    # words. Placed beside `sustained`, for the same reason it is last.
+    # words. Placed beside `sustained`.
     unkept: int = 0
+    # Item 42: a blocker standing after a turn nobody could read, ranked
+    # level 3 by `sort_key`, beside `sustained` and `unkept`.
+    unread: int = 0
+    # Item 42: a blocker a readable turn left unanswered, ranked level 3 by
+    # `sort_key`, beside `sustained` and `unkept`.
+    unanswered: int = 0
 
 
-def sort_key(line: QueueLine) -> tuple[int, int, int, int, int, str]:
+def sort_key(line: QueueLine) -> tuple[int, int, int, int, int, int, int, str]:
     """§6's order: dismiss in ten seconds, accept in two minutes.
 
-    Skipped repos, then `SCOPE_REVIEW`, then the states that need you: each
-    state `_STATE_RANK` ranks 2, and any state neither map names. Then level
-    3 descending, then elevated risk, then concern count descending. Sorted
-    by state, never grouped by repo.
+    Skipped repos, then `SCOPE_REVIEW`, then the states that need you, ranked
+    2 in `_STATE_RANK` or by `_UNRANKED`. Then level 3, then elevated risk,
+    then concern count descending, never grouped by repo.
 
-    Level 3 is not a state: it pre-empts only the elevated/ordinary fallback
-    below, so a line whose state `_STATE_RANK` names keeps that rank
-    regardless of `sustained` or `unkept`. `REVIEWING`, `QUEUED` and the
-    other in-flight states keep sorting with elevated risk, as they did
-    before this level existed. `sustained` and `unkept` share the bucket —
-    a confirmed blocker answered with either an argument the critic rejected
-    or a fix nobody committed ranks with you either way (§6) — but `unkept`
-    never outranks `sustained` within it: it tiebreaks just below.
+    Level 3 pre-empts only the elevated/ordinary fallback below, not a
+    ranked state. `sustained`, `unkept`, `unread` and `unanswered` share it,
+    and each tiebreaks below the one named before it, in that order.
     """
     if line.state in _STATE_RANK:
         rank = _STATE_RANK[line.state]
     elif line.state not in _RANKED_BY_RISK:
         rank = _UNRANKED
-    elif line.sustained or line.unkept:
+    elif line.sustained or line.unkept or line.unread or line.unanswered:
         rank = _SUSTAINED
     else:
         rank = _ELEVATED if line.risk == "elevated" else _ORDINARY
@@ -145,6 +144,8 @@ def sort_key(line: QueueLine) -> tuple[int, int, int, int, int, str]:
         rank,
         -line.sustained,
         -line.unkept,
+        -line.unread,
+        -line.unanswered,
         -line.concerns,
         -line.attempts,
         line.spec_id,
@@ -234,6 +235,17 @@ def _row(line: QueueLine) -> str:
         if line.unkept
         else ""
     )
+    # Worded distinctly from `sustained` and `unkept` (§6). Empty at zero.
+    unread = (
+        f"{line.unread} unread blocker{'s' if line.unread > 1 else ''}"
+        if line.unread
+        else ""
+    )
+    unanswered = (
+        f"{line.unanswered} unanswered blocker{'s' if line.unanswered > 1 else ''}"
+        if line.unanswered
+        else ""
+    )
     cells = [
         html.escape(line.repo),
         html.escape(line.spec_id),
@@ -242,6 +254,8 @@ def _row(line: QueueLine) -> str:
         cost,
         sustained,
         unkept,
+        unread,
+        unanswered,
         concerns,
         f"+{line.added}/−{line.removed}",
         _link(line.link),

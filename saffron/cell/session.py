@@ -467,6 +467,10 @@ class CellOutcome:
     # A rebuttal test a post-rebuttal probe killed, exempt from `revert`
     # at the re-run and at PACKAGE's re-verification (b-4a63b7).
     revert_exempt: list[str] = field(default_factory=list)
+    # Item 42 (§5.6, §6): REBUT's own `unread` and `unanswered` blockers, set
+    # before a pool cut clears `rebut_result`. Zero with no REBUT.
+    unread: int = 0
+    unanswered: int = 0
 
 
 def repair_decision(
@@ -3419,6 +3423,10 @@ def _drive_cell(
         # Same reasoning as `reviews` above: bound only inside the REBUTTING
         # branch below, and READY_FOR_REVIEW's own outcomes skip it entirely.
         rebut_result: rebut.RebutResult | None = None
+        # Item 42: bound here, not inside the branch, so a task with no REBUT
+        # carries 0 on its `CellOutcome` the same way `rebut_result` does.
+        unread = 0
+        unanswered = 0
         # `_rebut_gates` below writes these (b-4a63b7), bound here so the
         # final `CellOutcome` can read them on every path, not only REBUT's.
         revert_exempt: list[str] = []
@@ -3715,6 +3723,9 @@ def _drive_cell(
             if repair_turn_why is not None:
                 result.why = repair_turn_why
             rebut_result = result
+            # Item 42: read before a pool cut clears `rebut_result` below.
+            unread = rebut.unread_blockers(result, len(blockers))
+            unanswered = rebut.unanswered_blockers(result, len(blockers))
             spent += result.cost_usd
             session_id = repair_session_id or result.rebuttal.session_id or session_id
             (task_dir / "rebuttal.json").write_text(
@@ -3738,11 +3749,15 @@ def _drive_cell(
             judged = {
                 v.finding: v.verdict for lens in result.verdicts for v in lens.verdicts
             }
+            # Item 42: one answer per blocker, read by the ledger below.
+            answers = rebut.blocker_answers(result.rebuttal, len(blockers))
             for n, finding in enumerate(blockers, 1):
                 ledger.record_rebuttal(
                     recorded[id(finding)],
                     verdict=judged.get(n),
                     rebuttal=argued.get(n),
+                    answer=answers.get(n),
+                    error=result.rebuttal.error,
                 )
             outcome, why = result.state, result.why
 
@@ -3796,6 +3811,8 @@ def _drive_cell(
             notes=notes,
             notes_sha256=notes_sha256,
             revert_exempt=sorted(revert_exempt),
+            unread=unread,
+            unanswered=unanswered,
         )
     except RateLimited as stopped:
         # Read back, not reported: `spent` loses the walled turn — the raise
