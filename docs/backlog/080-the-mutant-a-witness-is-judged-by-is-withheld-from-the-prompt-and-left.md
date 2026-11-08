@@ -5,7 +5,7 @@ status: partial
 tier: 1
 filed: 2026-09-06
 specs: [SA-0056, SA-0063, SA-0064, SA-0237, SA-0338, SA-0339]
-prs: [784]
+prs: [784, 1055, 1068]
 commits: []
 cites: [§5.4.1]
 related: [85, 109, 117]
@@ -100,3 +100,6 @@ that must never reach a cell and must be handed to every cloud host.
 - 2026-10-09: `SA-0237` (#784) landed in the spec loop's run 32. The seed
   fetch names `refs/heads/*`, and a cell-marked test proves a ref outside the
   branches never reaches a cell. Moving mutants onto the ref is still open.
+- 2026-11-08: `SA-0338` (#1055) moved each criterion's mutant out of the
+  spec a cell reads. `SA-0339` (#1068) wrote the command that puts them on
+  the ref intake reads. Both landed in the spec loop's run 55.

@@ -85,7 +85,7 @@ batch's spec writer revised a spec no `prose` gate read. The finish wrote it
 back, and re-verification went red.
 
 **Placed 2026-10-19**, from the spec loop's run 44: ~~**b-e40d09**~~, moved up
-from tier 3, then **b-e7898b**. A host-run probe that survived was dropped
+from tier 3, then ~~**b-e7898b**~~. A host-run probe that survived was dropped
 for want of an anchor, so `SA-0288` packaged past its own blocker. A spec
 that added a refusal refused the specs queued below it, and its cell ended
 `EXHAUSTED`.
@@ -108,7 +108,7 @@ stopped it. The overrun stopped its batch after two of four specs.
 ### Tier 2 — the morning after
 
 **Placed 2026-11-07**, in grooming, from three open items no tier named:
-**b-a714d2**, **b-d9ed45**, then **b-2bc0d5**. A second batch stamps a live
+~~**b-a714d2**~~, **b-d9ed45**, then **b-2bc0d5**. A second batch stamps a live
 task `ORPHANED`, because nothing holds one batch at a time. A second run of one
 spec removes the first run's container. Cell images and the build cache are
 never reclaimed, and one host's free disk fell to 16 GB. The first two stand
@@ -143,6 +143,12 @@ later one fits.
 
 **Placed 2026-11-08**, from `SA-0356`'s spec chain: **b-d1c277**. The queue's
 stack thresholds assume every earlier candidate ran.
+
+**Placed 2026-11-08**, from the spec loop's run 55: **b-31e3c8**,
+**b-cbb6e7**, **b-c7858c**, **b-879e72**, then **b-3df181**. REBUT answers
+no concern, so every in-cell concern reached both seats. A finish minted a
+follow-up id `main` already held. `cite` passes a citation whose code moved.
+Three commands take no home lock. An empty rebuttal error reads as no answer.
 
 **Placed 2026-10-17**, from the spec loop's run 43: **b-3a79a0**. The loop's
 driver orders a stack by `depends_on`, not by the stack base a batch built.
@@ -355,6 +361,10 @@ wrong spec at 20 sites.
 
 ### Tier 3 — real, not urgent
 
+**Placed 2026-11-08**, from the spec loop's run 55: **b-86d716**, then
+**b-840763**. cell-watch reads a new task directory as a hand-over. No gate
+avoids "parent" for a retired-first entry.
+
 **Placed 2026-11-07**, in grooming, from six open items no tier named:
 **b-ba0cba**, **b-036cc5**, ~~**b-262df1**~~, **b-4bd68a**, ~~**b-cd4de2**~~, then
 **b-98a3be**. A follower of `events.jsonl` sees no typed spend from IMPLEMENT
@@ -455,7 +465,7 @@ b-7d2acf, filed the same day, is the check that was missing. Nothing
 compares the index to the records in that direction. It ranks here, beside
 128 and 129. ~~**b-61127f**~~, the ADR layer, is done.
 
-**Placed 2026-09-26**, from the spec loop's run 18: **b-615466**, **b-50a704**,
+**Placed 2026-09-26**, from the spec loop's run 18: ~~**b-615466**~~, **b-50a704**,
 ~~**b-17d0d5**~~, then ~~**b-830357**~~. Each is a stack batch seam that review kept
 as written, or a witness too weak at one boundary.
 
