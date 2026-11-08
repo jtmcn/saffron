@@ -1868,7 +1868,8 @@ def _known_specs() -> dict[str, Spec]:
     for directory in (SPECS_DIR / "done", SPECS_DIR):
         if not directory.is_dir():  # a repo with nothing retired yet has no `done/`
             continue
-        specs, _failures = discover_specs(directory)
+        # A retired spec keeps the inline mutants it shipped with (SA-0338).
+        specs, _failures = discover_specs(directory, retired=directory.name == "done")
         found.update({d.spec.id: d.spec for d in specs})
     return found
 
@@ -2242,10 +2243,27 @@ def _is_review_trigger(entry: str) -> bool:
     )
 
 
+def _with_ref_mutants(target: Spec, mirror: Path = REPO) -> Spec | str:
+    """`target` with its mutants read from `refs/saffron/mutants` (SA-0338),
+    unchanged where the ref holds none for it, or why they cannot be read."""
+    from saffron.mutants import MutantsError, attach_mutants, read_mutants, ref_commit
+
+    try:
+        found = read_mutants(mirror, ref_commit(mirror), target.id)
+        return attach_mutants(target, found) if found else target
+    except MutantsError as exc:
+        return f"concern: {target.id}'s mutants on the ref cannot be read: {exc}"
+
+
 def _subject_concerns(target: Spec) -> list[str]:
     """b-000d04: `revert` sets aside a witness whose mutant's file the diff
     never touches, unless the criterion declares a `subject:` it does."""
     from saffron.gates.core.scope import matches
+
+    filled = _with_ref_mutants(target)
+    if isinstance(filled, str):
+        return [filled]
+    target = filled
 
     return [
         f"concern: criterion {n}'s mutant edits {c.mutant.file}, outside "
