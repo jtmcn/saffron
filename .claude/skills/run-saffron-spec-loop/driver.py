@@ -1136,11 +1136,32 @@ def _review_lenses_line(spec_id: str) -> str:
 
 
 def cmd_record(args) -> int:
-    """What the cell did, read from the ledger (§4.3)."""
+    """What the cell did, read from the ledger (§4.3). `--all` records each
+    pending spec a task ran for, so a batch takes one call (b-cab612)."""
+    if not args.all:
+        if args.spec_id is None:
+            return _fail("name a spec, or pass --all")
+        code = _record_one(args.spec_id)
+        assert code is not None  # only `--all` asks for `None`
+        return code
+    if args.spec_id is not None:
+        return _fail("pass a spec or --all, not both")
+    pending = [p.spec_id for p in _load() if p.pending]
+    if not pending:
+        return _fail("no pending spec in the order")
+    codes = [_record_one(spec_id, quiet_if_unrun=True) for spec_id in pending]
+    ran = [code for code in codes if code is not None]
+    if not ran:
+        return _fail("no pending spec has a task yet")
+    return 0 if all(code == 0 for code in ran) else 1
+
+
+def _record_one(spec_id: str, *, quiet_if_unrun: bool = False) -> int | None:
+    """One spec's record. `None` means no task ran for it, under `--all`."""
     rows = _load()
-    match = next((p for p in rows if p.spec_id == args.spec_id), None)
+    match = next((p for p in rows if p.spec_id == spec_id), None)
     if match is None:
-        return _fail(f"{args.spec_id} is not in the order")
+        return _fail(f"{spec_id} is not in the order")
 
     from saffron.intake import load_spec
     from saffron.reconcile import IN_FLIGHT_STATES
@@ -1152,10 +1173,13 @@ def cmd_record(args) -> int:
         if repo_id is None:
             return _fail("this repo has no ledger row yet")
         _spec, spec_sha = load_spec(REPO / match.path)
-        tasks = ledger.tasks_by_spec(repo_id).get((args.spec_id, spec_sha), [])
+        tasks = ledger.tasks_by_spec(repo_id).get((spec_id, spec_sha), [])
         if not tasks:
+            if quiet_if_unrun:
+                print(f"{spec_id}  not run")
+                return None
             return _fail(
-                f"no task for {args.spec_id} at {spec_sha[:12]} — did the cell run?"
+                f"no task for {spec_id} at {spec_sha[:12]} — did the cell run?"
             )
         # Not `tasks[-1]`: a later orphaned or unfinished row must not hide the
         # one that opened a pull request (SA-0013 holds ten rows at one sha).
@@ -1181,7 +1205,7 @@ def cmd_record(args) -> int:
             match.state = None
             match.pr = pr or match.pr
             match.last_state = state
-            running = state in IN_FLIGHT_STATES and _cell_running(args.spec_id)
+            running = state in IN_FLIGHT_STATES and _cell_running(spec_id)
             if not running:
                 match.undecided_cells += 1
             pushed = line["pushed_sha"] or ""
@@ -1206,7 +1230,7 @@ def cmd_record(args) -> int:
         else:
             why = "nothing was decided; `next` moves on to the next untouched spec"
         print(f"left pending: {why}.", file=sys.stderr)
-    print(_review_lenses_line(args.spec_id))
+    print(_review_lenses_line(spec_id))
     return 0 if state == "READY_FOR_REVIEW" else 1
 
 
@@ -3021,7 +3045,10 @@ def main() -> int:
     p.set_defaults(func=cmd_next)
 
     p = sub.add_parser("record", help="read the ledger for what a cell did")
-    p.add_argument("spec_id")
+    p.add_argument("spec_id", nargs="?")
+    p.add_argument(
+        "--all", action="store_true", help="every pending spec a task ran for"
+    )
     p.set_defaults(func=cmd_record)
 
     p = sub.add_parser("drop", help="take a spec out of the loop")

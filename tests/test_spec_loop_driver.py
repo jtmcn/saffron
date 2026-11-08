@@ -880,12 +880,48 @@ def test_record_keeps_what_package_pushed_and_says_what_the_cell_spent(
     )
     monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (ledger, repo_id, "url"))
 
-    assert driver.cmd_record(argparse.Namespace(spec_id=spec_id)) == 0
+    assert driver.cmd_record(argparse.Namespace(spec_id=spec_id, all=False)) == 0
     assert driver._load()[0].pushed_sha == "p" * 40
     assert capsys.readouterr().out == (
         f"{spec_id}  READY_FOR_REVIEW  #247  $7.55 of $6.00\n"
         "lenses: none recorded for this spec's latest run\n"
     )
+
+
+def test_record_all_records_every_pending_spec_a_batch_ran(loop, monkeypatch, capsys):
+    # b-cab612: a batch decided four tasks and `stack` saw one reviewable pull
+    # request until the delegate ran `record` for each by hand.
+    from saffron.ledger import Ledger
+
+    driver._save([loop.row(0), loop.row(1), loop.row(2)])
+    rows = driver._load()
+    path = loop.root / "ledger.db"
+    ledger = Ledger(path)
+    repo_id = ledger.upsert_repo("r", "git@github.com:o/r.git", "/mirror", "policy")
+    run_id = ledger.create_run(repo_id, "b" * 40)
+    for i, number in ((0, 247), (1, 248)):
+        task_id = ledger.create_task(
+            run_id, rows[i].spec_id, rows[i].spec_sha, "saffron/X", budget_usd=6.0
+        )
+        ledger.set_task_state(task_id, "PACKAGE")
+        ledger.set_task_package(
+            task_id,
+            "READY_FOR_REVIEW",
+            "saffron/X",
+            "p" * 40,
+            f"https://github.com/o/r/pull/{number}",
+        )
+    ledger.close()
+    monkeypatch.setattr(
+        driver, "_ledger_and_repo", lambda: (Ledger(path), repo_id, "url")
+    )
+
+    assert driver.cmd_record(argparse.Namespace(spec_id=None, all=True)) == 0
+    recorded = {p.spec_id: p for p in driver._load()}
+    assert recorded[rows[0].spec_id].pr == 247
+    assert recorded[rows[1].spec_id].pr == 248
+    assert recorded[rows[2].spec_id].pending
+    assert f"{rows[2].spec_id}  not run" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("running", [False, True])
@@ -910,7 +946,7 @@ def test_record_calls_an_in_flight_state_a_halt_once_the_cell_has_exited(
     monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (ledger, repo_id, "url"))
     monkeypatch.setattr(driver, "_cell_running", lambda _spec_id: running)
 
-    assert driver.cmd_record(argparse.Namespace(spec_id=spec_id)) == 1
+    assert driver.cmd_record(argparse.Namespace(spec_id=spec_id, all=False)) == 1
     row = driver._load()[0]
     err = capsys.readouterr().err
     assert row.state is None and row.last_state == "REBUTTING"
@@ -983,7 +1019,7 @@ def test_record_names_the_lenses_the_specs_latest_review_ran(loop, monkeypatch, 
     none_recorded = "lenses: none recorded for this spec's latest run\n"
 
     def record():
-        status = driver.cmd_record(argparse.Namespace(spec_id=spec_id))
+        status = driver.cmd_record(argparse.Namespace(spec_id=spec_id, all=False))
         return status, capsys.readouterr().out
 
     # 1. the only file, latest by default.

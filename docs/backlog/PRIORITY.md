@@ -76,10 +76,6 @@ went green died seeding its gate cell on a transient `Permission denied`. It
 was recorded `ORPHANED`, and nothing resumes its patch, so the re-run paid
 again.
 
-**Placed 2026-10-07**, at the operator's request in the spec loop's run 30:
-**b-cab612**. The operator made `saffron batch` the loop's default. The skill
-now starts one batch, and recording each task and restacking stay by hand.
-
 **Placed 2026-10-12**, from the spec loop's run 36: **b-1c59c3**. A spec
 removed a name whose reader sat outside its `touches`, so its cell could not
 pass both `scope` and `tests`. It ended `EXHAUSTED` at $41.03.
@@ -107,7 +103,7 @@ stopped it. The overrun stopped its batch after two of four specs.
 - ~~**83**~~, ~~**84**~~, ~~**85**~~, ~~**88**~~, ~~**89**~~, ~~**94**~~, ~~**95**~~, ~~**97**~~, ~~**102**~~, ~~**109**~~, ~~**112**~~, ~~**114**~~, ~~**115**~~, ~~**117**~~, ~~**118**~~, ~~**120**~~, ~~**136**~~, ~~**137**~~, ~~**140**~~, ~~**141**~~.
 - ~~**143**~~, ~~**145**~~, ~~**154**~~, ~~**173**~~, ~~**b-36b551**~~, ~~**b-408cf5**~~, ~~**b-a8270f**~~, ~~**b-a4df62**~~, ~~**b-fd1468**~~, ~~**b-89ec93**~~, ~~**b-032c3e**~~, ~~**b-149df3**~~, ~~**b-4a63b7**~~, ~~**b-19b255**~~, ~~**b-792ab2**~~, ~~**b-8487de**~~, ~~**b-a7e5f3**~~, ~~**b-e471bd**~~, ~~**b-76f08d**~~, ~~**b-43a061**~~.
 - ~~**b-877e93**~~, ~~**b-bf0c91**~~, ~~**b-efdf1f**~~, ~~**b-8170eb**~~, ~~**b-a6bfb0**~~, ~~**b-038aef**~~, ~~**b-4c5dc7**~~, ~~**b-d4e015**~~, ~~**b-031ac2**~~, ~~**b-7251b5**~~, ~~**b-34d743**~~, ~~**b-3c7ce9**~~, ~~**b-60a399**~~, ~~**b-032c61**~~, ~~**b-3bba0f**~~, ~~**b-6cd3c2**~~, ~~**b-883f74**~~, ~~**b-a04cc8**~~, ~~**b-f8fa24**~~, ~~**b-6b06e1**~~.
-- ~~**b-af24d1**~~, ~~**b-02d328**~~, ~~**b-1c20da**~~, ~~**b-4eaaa4**~~, ~~**b-6677b6**~~, ~~**b-d4b847**~~, ~~**b-e773d9**~~, ~~**b-000d04**~~, ~~**b-4901d2**~~, ~~**b-b24cf7**~~, ~~**b-78a590**~~, ~~**b-9c7001**~~, ~~**b-8f6568**~~.
+- ~~**b-af24d1**~~, ~~**b-02d328**~~, ~~**b-1c20da**~~, ~~**b-4eaaa4**~~, ~~**b-6677b6**~~, ~~**b-d4b847**~~, ~~**b-e773d9**~~, ~~**b-000d04**~~, ~~**b-4901d2**~~, ~~**b-b24cf7**~~, ~~**b-78a590**~~, ~~**b-9c7001**~~, ~~**b-8f6568**~~, ~~**b-cab612**~~.
 
 ### Tier 2 — the morning after
 
