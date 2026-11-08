@@ -27,8 +27,8 @@ async function batches($: EngineInterface): Promise<string> {
   return `${(await $.env.get('HOME')) ?? ''}/.saffron/batches/v0`
 }
 
-// `saffron batch` moves from spec to spec, so follow mode takes the newest-written log.
-async function newestSpec($: EngineInterface): Promise<string> {
+// `saffron batch` moves from spec to spec, so follow mode takes the newest log written since it began.
+async function newestSpec($: EngineInterface, since: number): Promise<string> {
   const root = await batches($)
   const window = `-${WINDOW_HOURS * 60}`
   const found = await $.process.run(['find', root, '-maxdepth', '2', '-name', 'events.jsonl', '-mmin', window])
@@ -37,7 +37,7 @@ async function newestSpec($: EngineInterface): Promise<string> {
     const spec = path.split('/').at(-2) ?? ''
     if (!SPEC.test(spec)) continue
     const stat = await $.fs.stat(path).catch(() => undefined)
-    if (stat && stat.mtimeMs > best.mtime) best = { spec, mtime: stat.mtimeMs }
+    if (stat && stat.mtimeMs >= since && stat.mtimeMs > best.mtime) best = { spec, mtime: stat.mtimeMs }
   }
   return best.spec
 }
@@ -54,7 +54,7 @@ async function events($: EngineInterface, spec: string): Promise<CellEvent[] | u
 async function check($: EngineInterface, announce: boolean): Promise<string[]> {
   const w: Watch = await read($, watch)
   const prev: View = await read($, view)
-  const spec = w.follow ? await newestSpec($) : w.spec
+  const spec = w.follow ? await newestSpec($, w.since ?? 0) : w.spec
   if (!spec) {
     await update($, view, () => NO_VIEW)
     $.ui.status(undefined)
@@ -127,12 +127,15 @@ async function halt($: EngineInterface): Promise<string> {
 
 async function begin($: EngineInterface, { spec, quiet, pane }: Start): Promise<string> {
   await idle()
-  await update($, watch, () => ({ spec, follow: spec === '', wake: !quiet }))
+  const since = await $.clock.now()
+  await update($, watch, () => ({ spec, follow: spec === '', wake: !quiet, since }))
+  // The last watch's task is no hand-over to this one (b-2d2014).
+  await update($, view, () => NO_VIEW)
   const already = await poll($, false)
   arm($)
   if (pane) void $.ui.open({ id: PANE, title: 'Cell watch' })
   const v = await read($, view)
-  const target = spec || `the newest task (${v.spec || `none in the last ${WINDOW_HOURS} h`})`
+  const target = spec || `the newest task (${v.spec || 'none written since this watch began, waiting'})`
   const held = already.length ? ` Already in the log: ${already.join('; ')}.` : ''
   return `Watching ${target}: ${v.status || 'no log yet'}.${held}`
 }
@@ -178,7 +181,8 @@ export const register: Register = on => {
   // The delegate is the model, and the model cannot type a slash command.
   on('tool.call', { tool: TOOL }, async ($, e) => {
     const input = (e.input ?? {}) as { spec?: unknown; stop?: unknown }
-    if (input.stop === true) return { result: await halt($) }
+    // A model can send the boolean as a string, and "true" then read as follow mode.
+    if (input.stop === true || input.stop === 'true') return { result: await halt($) }
     const spec = typeof input.spec === 'string' ? input.spec : ''
     if (spec && !SPEC.test(spec)) return { deny: `cell-watch: ${spec} is not an SA-NNNN id.` }
     return { result: await begin($, { spec, quiet: false, pane: false }) }

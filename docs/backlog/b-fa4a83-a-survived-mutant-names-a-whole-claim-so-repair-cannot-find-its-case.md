@@ -4,7 +4,7 @@ title: A survived mutant reaches REPAIR as a whole claim, so the repair turn can
 status: open
 tier: 1
 filed: 2026-11-04
-specs: []
+specs: [SA-0355]
 prs: []
 commits: []
 cites: [§5.4.1]

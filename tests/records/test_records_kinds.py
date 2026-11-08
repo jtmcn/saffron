@@ -5,7 +5,7 @@ import re
 import pytest
 from pydantic import ValidationError
 
-from records.kinds import KINDS, Appendix, BacklogItem, Identified, new_id
+from records.kinds import KINDS, Appendix, BacklogItem, Identified, Kind, new_id
 
 MINIMAL = {"id": 7, "title": "Seven", "status": "open"}
 
@@ -181,3 +181,13 @@ def test_the_appendix_kind_is_registered():
     match = re.match(kind.pattern, "AA-a-slug.md")
     assert match and match.group(1) == "AA"
     assert re.match(kind.pattern, "a-lower.md") is None
+
+
+def test_a_kind_requiring_a_heading_it_does_not_allow_is_refused():
+    with pytest.raises(ValueError, match=r"\['Notes'\] not in sections"):
+        Kind("k", "d", "p", Identified, sections=("Problem",), required=("Notes",))
+
+
+def test_a_kind_requiring_headings_with_no_sections_is_refused():
+    with pytest.raises(ValueError, match="no sections"):
+        Kind("k", "d", "p", Identified, required=("Problem",))

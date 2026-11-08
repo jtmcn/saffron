@@ -10,7 +10,9 @@ type Log = { text: string; mtimeMs: number }
 
 function world(on: On, logs: Map<string, Log>) {
   const woken: string[] = []
-  const clock = mock.clock(on)
+  const statuses: (string | undefined)[] = []
+  // The watch starts at 10, so a log last written at 1 predates it.
+  const clock = mock.clock(on, { now: 10 })
   mock.env(on, { HOME: '/home/op' })
   on('process.run', async (_$, e) => {
     const [cmd, ...rest] = e.argv
@@ -28,9 +30,12 @@ function world(on: On, logs: Map<string, Log>) {
     woken.push(e.text)
     return { text: e.text }
   })
-  on('ui.status', async () => ({ value: undefined }))
+  on('ui.status', async (_$, e) => {
+    statuses.push(e.text)
+    return { value: undefined }
+  })
   on('ui.toast', async () => ({ value: undefined }))
-  return { woken, clock }
+  return { woken, clock, statuses }
 }
 
 const opened = (spec: string, t: number) =>
@@ -65,10 +70,10 @@ test('a pinned watch wakes the delegate on an outcome, and not for what the log 
 })
 
 test('following a batch wakes the delegate when the next task starts, since the last one packaged', async ($, on) => {
-  const logs = new Map([['SA-0001', { text: opened('SA-0001', 1), mtimeMs: 1 }]])
+  const logs = new Map([['SA-0001', { text: opened('SA-0001', 1), mtimeMs: 12 }]])
   const { woken, clock } = world(on, logs)
   await $.tool.call({ tool: TOOL, input: {} })
-  logs.set('SA-0002', { text: opened('SA-0002', 5), mtimeMs: 5 })
+  logs.set('SA-0002', { text: opened('SA-0002', 5), mtimeMs: 20 })
   await clock.advance(3000)
   expect(woken.length).toBe(1)
   expect(woken[0]).toContain('SA-0001 has packaged, and SA-0002 started')
@@ -79,4 +84,40 @@ test('a stray word to /cell-watch is refused rather than read as follow mode', a
   on('command.run', async () => ({ value: { text: 'unreached' } }))
   const out = await $.command.run({ command: 'cell-watch', args: 'SA-12x' })
   expect(JSON.stringify(out)).toContain('neither an SA-NNNN id nor a flag')
+})
+
+// b-2d2014: run 47 followed run 46's SA-0305 before SA-0311 wrote its log.
+test('following a batch waits for a log written after the watch began', async ($, on) => {
+  const logs = new Map([['SA-0305', { text: opened('SA-0305', 1), mtimeMs: 1 }]])
+  const { woken, clock, statuses } = world(on, logs)
+  const out = await $.tool.call({ tool: TOOL, input: {} })
+  expect(out.result).not.toContain('SA-0305')
+  logs.set('SA-0311', { text: opened('SA-0311', 12), mtimeMs: 12 })
+  await clock.advance(3000)
+  expect(statuses.at(-1)).toContain('SA-0311')
+  expect(woken).toEqual([])
+})
+
+// b-2d2014, run 48: each new watch first reported the last watch's task as packaged.
+test('a new watch does not report the task the last watch followed as packaged', async ($, on) => {
+  const logs = new Map([['SA-0305', { text: opened('SA-0305', 1), mtimeMs: 1 }]])
+  const { woken, clock } = world(on, logs)
+  await $.tool.call({ tool: TOOL, input: { spec: 'SA-0305' } })
+  logs.set('SA-0311', { text: opened('SA-0311', 12), mtimeMs: 12 })
+  const out = await $.tool.call({ tool: TOOL, input: {} })
+  expect(out.result).not.toContain('has packaged')
+  await clock.advance(3000)
+  expect(woken).toEqual([])
+})
+
+// b-2d2014: a stop answered "Watching the newest task" and the watch ran on.
+test('a stop spelled as a string ends a running watch', async ($, on) => {
+  const logs = new Map([['SA-0001', { text: opened('SA-0001', 1), mtimeMs: 12 }]])
+  const { woken, clock } = world(on, logs)
+  await $.tool.call({ tool: TOOL, input: {} })
+  const out = await $.tool.call({ tool: TOOL, input: { stop: 'true' } })
+  expect(out.result).toBe('cell-watch stopped.')
+  logs.set('SA-0002', { text: opened('SA-0002', 5), mtimeMs: 20 })
+  await clock.advance(3000)
+  expect(woken).toEqual([])
 })

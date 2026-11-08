@@ -1,11 +1,13 @@
 ---
 id: b-262df1
 title: Record helpers sit under tests/ because only tests ran them, and a tool now imports three of them
-status: open
+status: done
 tier: 3
 filed: 2026-09-20
+closed: 2026-11-08
+by_hand: true
 specs: []
-prs: []
+prs: [1071]
 commits: []
 cites: []
 related: [b-7d3810, b-990bd9]
@@ -55,3 +57,4 @@ command printed from.
   record is the debt, and it closes when the move happens.
 - 2026-09-20: counted the cross-import from `SA-0116`'s second review. It is
   three names, not one, and this record named one of the three.
+- 2026-11-08: done by hand in #1071.

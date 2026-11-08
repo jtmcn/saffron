@@ -1,12 +1,13 @@
 ---
 id: b-206d2c
 title: The `history` rule takes a runaway row as a spec's budget floor
-status: open
+status: done
 tier: 3
 filed: 2026-10-20
+closed: 2026-11-08
 by_hand: true
 specs: []
-prs: []
+prs: [1072]
 commits: []
 cites: []
 related: [b-41664e]
@@ -36,3 +37,4 @@ does. A runaway ended over its size ceiling or on a turn or budget ceiling.
 - 2026-10-20: filed from the spec chain that wrote `SA-0300` to `SA-0306`.
 - 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
   `.claude/`, and `SA-0279` refuses any spec that touches that path.
+- 2026-11-08: done by hand in #1072.

@@ -415,17 +415,28 @@ def _pr_state(number: int) -> str | None:
     return _gh_pr_field(number, "state")
 
 
+def _on_disk_sha(path: Path) -> tuple[str | None, str | None]:
+    """A spec's sha, or why it will not parse. An edit saved half-done is a
+    fact about its row, not a traceback under `status` (item 151)."""
+    from saffron.intake import SpecError, load_spec
+
+    try:
+        return load_spec(path)[1], None
+    except SpecError as exc:
+        return None, str(exc)
+
+
 def _stale_reasons(
     p: OrderRow, pr_state: Callable[[int], str | None] = _pr_state
 ) -> list[str]:
-    from saffron.intake import load_spec
-
     path = REPO / p.path
     if not path.is_file():
         return [f"{p.spec_id}: {p.path} is gone"]
     reasons = []
-    on_disk = load_spec(path)[1]
-    if p.spec_sha and on_disk != p.spec_sha and on_disk != p.edited_sha:
+    on_disk, unreadable = _on_disk_sha(path)
+    if unreadable:
+        reasons.append(f"{p.spec_id}: {p.path} does not parse: {unreadable}")
+    elif p.spec_sha and on_disk != p.spec_sha and on_disk != p.edited_sha:
         reasons.append(f"{p.spec_id}: the spec changed after the snapshot")
     if p.pr and (state := pr_state(p.pr)) in {"MERGED", "CLOSED"}:
         reasons.append(f"{p.spec_id}: #{p.pr} is {state}")
@@ -454,16 +465,14 @@ def _edit_traps(
     later omits its pull request. The bare "the spec changed" line above says
     none of that, and an operator reading a review is exactly who edits one
     (item 137). Two pull requests, 2026-09-16."""
-    from saffron.intake import load_spec
-
     edited: list[OrderRow] = []
     for p in rows:
         path = REPO / p.path
         if not path.is_file() or not p.spec_sha:
             continue
-        on_disk = load_spec(path)[1]
-        if on_disk == p.spec_sha or on_disk == p.edited_sha:
-            continue  # unedited, or edited and already kept by a re-snapshot
+        on_disk, unreadable = _on_disk_sha(path)
+        if unreadable or on_disk == p.spec_sha or on_disk == p.edited_sha:
+            continue  # an unreadable spec is its own stale reason
         if p.pr and pr_state(p.pr) not in {"MERGED", "CLOSED"}:
             edited.append(p)
     if not edited:
@@ -521,8 +530,6 @@ def _carried(previous: list[OrderRow]) -> tuple[list[OrderRow], dict[str, str]]:
     the specs it holds out, with why. `build_queue` passes over a spec with a
     finished task, so an order rebuilt from the scan alone dropped every
     reviewable PR; and it hands back a spec edited while its PR is open as new."""
-    from saffron.intake import load_spec
-
     kept, held = [], {}
     for p in previous:
         if not (p.state or p.dropped or p.last_state):
@@ -540,8 +547,8 @@ def _carried(previous: list[OrderRow]) -> tuple[list[OrderRow], dict[str, str]]:
             # its account, and its recorded state keeps `next` from re-running
             # it while the pull request is open (item 137).
             path = REPO / p.path
-            if path.is_file():
-                p.edited_sha = load_spec(path)[1]
+            if path.is_file() and (on_disk := _on_disk_sha(path)[0]):
+                p.edited_sha = on_disk
             kept.append(p)
     return kept, held
 
@@ -2044,7 +2051,14 @@ def cmd_status(args) -> int:
         print("\nstale — `snapshot --force` before the next cell:")
         for reason in reasons:
             print(f"  {reason}")
+    if unparsed := [p.spec_id for p in rows if _unparsed(p)]:
+        return _fail(f"{', '.join(unparsed)} will not parse; fix the spec file")
     return 0
+
+
+def _unparsed(p: OrderRow) -> bool:
+    path = REPO / p.path
+    return path.is_file() and _on_disk_sha(path)[1] is not None
 
 
 def _common_git_dir(cwd: Path) -> Path:
@@ -2237,6 +2251,28 @@ def _cut_off_at_turn_ceiling(attempt) -> bool:
     )
 
 
+def _cut_off_at_budget_cap(attempt) -> bool:
+    """`saffron.cell.session.cut_off_at_budget_cap`'s rule over a ledger row."""
+    return attempt["terminal_reason"] == "budget_exhausted" or (
+        attempt["subtype"] == "error_max_budget_usd"
+    )
+
+
+def _runaway(attempts: list, sizes: list) -> str:
+    """Why a cell's pre-review spend measures a runaway rather than its shape,
+    or "" (b-206d2c). Only the phases that total counts can run it away."""
+    if sizes and sizes[-1].status == "fail":
+        return "over its size ceiling"
+    for a in attempts:
+        if a["phase"] not in ("IMPLEMENTING", "REPAIRING"):
+            continue
+        if _cut_off_at_turn_ceiling(a):
+            return "cut off at its turn ceiling"
+        if _cut_off_at_budget_cap(a):
+            return "cut off at its budget ceiling"
+    return ""
+
+
 @dataclass
 class PastCell:
     """One past cell's spend by phase, for a spec review's ceilings and size checks."""
@@ -2263,6 +2299,7 @@ class PastCell:
     # `error_max_turns` attempt ran 41, and calling 45 a turn floor is false.
     peak_cut_off: bool
     size: str | None  # the last `size` gate summary, verbatim: it names the ceiling
+    runaway: str = ""  # why its pre-review total is no budget floor, if it is not
 
 
 def _known_specs() -> dict[str, Spec]:
@@ -2381,11 +2418,7 @@ def _past_cells(
                 continue
             implementing = [a for a in attempts if a["phase"] == "IMPLEMENTING"]
             checkpoint = implementing[0] if implementing else None
-            sizes = [
-                r.summary
-                for r in ledger.task_results(row["task_id"])
-                if r.gate == "size"
-            ]
+            sizes = [r for r in ledger.task_results(row["task_id"]) if r.gate == "size"]
             bounded = [a for a in attempts if a["phase"] in _MAX_TURNS_PHASES]
             peak_attempt = max(bounded, key=lambda a: a["num_turns"] or 0, default=None)
             cells.append(
@@ -2418,7 +2451,8 @@ def _past_cells(
                         if a["subtype"] not in (None, "success")
                         or (a["terminal_reason"] or "completed") != "completed"
                     ],
-                    size=sizes[-1] if sizes else None,
+                    size=sizes[-1].summary if sizes else None,
+                    runaway=_runaway(attempts, sizes),
                 )
             )
     return cells
@@ -2442,6 +2476,12 @@ def _pre_review_total(c: PastCell) -> float:
     """Plan + implement + repair: what a cell spent before REVIEW touched it,
     and so what the budget must have covered before that (item 123)."""
     return (c.plan.usd if c.plan else 0.0) + c.implement.usd + c.repair.usd
+
+
+def _budget_row(rows: list[PastCell]) -> PastCell:
+    """The highest pre-review total among rows that did not run away, else
+    among all of them: a runaway measures its ceiling, not its shape (b-206d2c)."""
+    return max([c for c in rows if not c.runaway] or rows, key=_pre_review_total)
 
 
 def _ceilings_line(target: Spec, rows: list[PastCell]) -> str:
@@ -2469,14 +2509,22 @@ def _ceilings_line(target: Spec, rows: list[PastCell]) -> str:
         f"{turns_row.peak_turns}t ({turns_label}), {turns_gap}"
     )
 
-    budget_row = max(rows, key=_pre_review_total)
+    budget_row = _budget_row(rows)
     budget_total = _pre_review_total(budget_row)
     budget_diff = target.budget_usd - budget_total
     budget_word = "above" if budget_diff >= 0 else "below"
+    floor = f" (a runaway, {budget_row.runaway})" if budget_row.runaway else ""
     budget_part = (
         f"budget_usd={target.budget_usd} vs {budget_row.spec_id}'s pre-review "
-        f"total ${budget_total:.2f}, {budget_word} by ${abs(budget_diff):.2f}"
+        f"total ${budget_total:.2f}{floor}, {budget_word} by ${abs(budget_diff):.2f}"
     )
+    past = [c for c in rows if c.runaway and _pre_review_total(c) > budget_total]
+    if past:
+        top = max(past, key=_pre_review_total)
+        budget_part += (
+            f", past {top.spec_id}'s runaway ${_pre_review_total(top):.2f} "
+            f"({top.runaway})"
+        )
 
     return f"ceilings: {turns_part}; {budget_part}"
 
@@ -2533,7 +2581,7 @@ def _turns_blocker(target: Spec, rows: list[PastCell]) -> str | None:
 def _budget_blocker(target: Spec, rows: list[PastCell]) -> str | None:
     """Check 4's budget rule: a blocker only when `budget_usd` is strictly
     below the highest pre-review total among `rows` — equality is headroom."""
-    row = max(rows, key=_pre_review_total)
+    row = _budget_row(rows)
     total = _pre_review_total(row)
     if target.budget_usd < total:
         return (
@@ -2548,7 +2596,7 @@ def _review_rebut_concern(target: Spec, rows: list[PastCell]) -> str | None:
     `_budget_blocker` names, against the highest REVIEW+REBUT sum on one row —
     not two rows' maxima added, and not a mean. A row whose REBUT never ran
     contributes its REVIEW cost alone."""
-    remainder = target.budget_usd - _pre_review_total(max(rows, key=_pre_review_total))
+    remainder = target.budget_usd - _pre_review_total(_budget_row(rows))
     worst = max(rows, key=lambda c: c.review_usd + c.rebut_usd)
     worst_cost = worst.review_usd + worst.rebut_usd
     if remainder < worst_cost:
@@ -3398,8 +3446,8 @@ def cmd_bookkeeping(args) -> int:
     """
     from records.kinds import KINDS
     from records.load import RecordError, load
+    from records.rules import context_section, first_cited_item, spec_files
     from saffron.intake import SpecError, load_spec
-    from tests.records.check import _context_section, first_cited_item, spec_files
 
     files = spec_files(REPO)
     path = files.get(args.spec_id)
@@ -3415,7 +3463,7 @@ def cmd_bookkeeping(args) -> int:
         return _fail(str(exc))
 
     by_id = {r.model.id: r for r in records}
-    item_id = first_cited_item(_context_section(path.read_text()))
+    item_id = first_cited_item(context_section(path.read_text()))
     block1 = _block1_lines(item_id, by_id, args.spec_id)
 
     candidates, refusals = _queue(REPO)

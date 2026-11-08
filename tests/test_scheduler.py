@@ -3337,7 +3337,7 @@ def test_a_stack_order_stacks_on_one_earlier_pull_request_and_refuses_a_spec_nam
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-11-07 for SA-0338 to SA-0343 and SA-0350 to SA-0354:
+    """Re-measured 2026-11-08 for SA-0338 to SA-0343 and SA-0350 to SA-0355:
     SA-0338 a candidate, each later one refused on its parent. The
     candidates and the refusals are the two lists below, in scan order.
 
@@ -4053,6 +4053,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0352",
         "SA-0353",
         "SA-0354",
+        "SA-0355",
     }
     directory = tmp_path / "specs"
     _arrange_measured_queue(REAL_SPECS, directory, measured)
@@ -4193,6 +4194,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0352",
         "SA-0353",
         "SA-0354",
+        "SA-0355",
     ]
     # A precondition, not the glob check: `done/` holds far more specs than the
     # queue above, so that exact list is a check rather than a scan of nothing.

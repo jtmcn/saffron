@@ -353,7 +353,7 @@ wrong spec at 20 sites.
 ### Tier 3 — real, not urgent
 
 **Placed 2026-11-07**, in grooming, from six open items no tier named:
-**b-ba0cba**, **b-036cc5**, **b-262df1**, **b-4bd68a**, ~~**b-cd4de2**~~, then
+**b-ba0cba**, **b-036cc5**, ~~**b-262df1**~~, **b-4bd68a**, ~~**b-cd4de2**~~, then
 **b-98a3be**. A follower of `events.jsonl` sees no typed spend from IMPLEMENT
 to the outcome. `saffron watch` has no typed output for a follower outside
 Python. Record helpers sit under `tests/`, and the loop's driver imports them.
@@ -387,7 +387,7 @@ defines a Refusal as before any cell starts, and `ready_task` refuses after one.
 modules each split a `consumes` or `removes` entry at its colon.
 
 **Placed 2026-10-20**, from the spec chain for `SA-0300` to `SA-0306`:
-~~**b-a64578**~~, **b-206d2c**. The view's spend after a resume, and a runaway
+~~**b-a64578**~~, ~~**b-206d2c**~~. The view's spend after a resume, and a runaway
 row setting a budget floor.
 
 **Placed 2026-10-23**, from the spec loop's run 46: **b-30cbb8**,
@@ -396,7 +396,7 @@ seat or the run found and the stack left alone.
 
 **Placed 2026-10-24**, from the spec loop's run 47: **b-0c5afc**,
 **b-fa014a**, **b-22ed54**, **b-c3688d**, **b-7fa522**, **b-54c8b4**,
-**b-7655f9** and **b-2d2014**. Each is a gap a seat or the run found and the
+**b-7655f9** and ~~**b-2d2014**~~. Each is a gap a seat or the run found and the
 stack left alone.
 
 **Placed 2026-10-24**, from ADR 11 and the controlled vocabulary review:
@@ -423,10 +423,10 @@ Each line keeps the order it was filed in.
 - From the first sort: **31**, **20**, **53**, ~~**54**~~, ~~**55**~~, **75**, **76**,
   **77**, **90**, **92**, **96**, **100**, **101** and **108**.
 - Filed 2026-09-12 to 2026-09-19: **116**, **121**, **122**, **130**, **134**,
-  ~~**150**~~, **151**, **155**, **156**, **174** and **b-d6bff7**.
+  ~~**150**~~, ~~**151**~~, **155**, **156**, **174** and **b-d6bff7**.
 - From spec loop runs 7 to 10: **b-990bd9**, **b-7431a2**, **b-9eceda**, **b-bc9951**,
   **b-0281e4**, **b-e9db0e**, **b-397edd**, **b-0e20e9**, **b-98dc4d**,
-  **b-27b9db**, ~~**b-bbf663**~~ and ~~**b-6a9707**~~.
+  ~~**b-27b9db**~~, ~~**b-bbf663**~~ and ~~**b-6a9707**~~.
 - From the reviews of #393 and `SA-0120`, and spec loop runs 13 and 14: **b-d5d290**,
   **b-9ed36d**, **b-b431c1**, ~~**b-ac2f02**~~ and **b-49329e**.
 - From ADR 4's review and the superpowers comparison: ~~**b-07f694**~~,
@@ -441,8 +441,8 @@ Each line keeps the order it was filed in.
   **b-7f105f** and ~~**b-8c17dc**~~.
 - From item 52's review: ~~**b-cec9a7**~~.
 
-**Placed 2026-09-20**: **161**, **162**, **163**, **126**, **128** and **129**,
-then **b-7d2acf**. The first three are what PR #317 left on the `prose` gate. A
+**Placed 2026-09-20**: **161**, **162**, **163**, **126**, **128** and ~~**129**~~,
+then ~~**b-7d2acf**~~. The first three are what PR #317 left on the `prose` gate. A
 prompt written as a Python string is invisible to it. Its rules read register
 and not instruction form, and its sentence limit fights §8's line budget. 126 is
 a cache write the REVIEW lenses pay for three times, at the cost of plan

@@ -175,6 +175,26 @@ def test_a_record_with_no_problem_section_is_refused():
         parse(text, BACKLOG)
 
 
+@pytest.mark.parametrize("status", ["open", "partial", "done", "superseded"])
+def test_an_empty_problem_section_is_refused_for_every_status(status):
+    closing = {
+        "done": "closed: 2026-09-02\nprs: [1]\n",
+        "superseded": "closed: 2026-09-02\nprs: [1]\nsuperseded_by: 2\n",
+    }.get(status, "")
+    text = (
+        f"---\nid: 1\ntitle: T\nstatus: {status}\n{closing}---\n\n"
+        "## Problem\n\n## Done looks like\n\ny\n\n## Record\n\n- 2026-09-01: x\n"
+    )
+    with pytest.raises(RecordError, match=r"\['Problem'\] are empty"):
+        parse(text, BACKLOG)
+
+
+def test_an_empty_required_adr_section_is_refused():
+    front = "---\nid: 1\ntitle: T\nstatus: accepted\ndate: 2026-09-01\n---\n"
+    with pytest.raises(RecordError, match=r"\['Decision'\] are empty"):
+        parse(front + _ADR_BODY.replace("\ny\n", "\n"), _adr_kind())
+
+
 def test_prose_before_the_first_heading_is_refused(tmp_path):
     item = tmp_path / "docs" / "backlog" / "001-x.md"
     item.parent.mkdir(parents=True)

@@ -1,12 +1,13 @@
 ---
 id: 151
 title: A spec the order names that no longer parses takes out status, next and snapshot with a traceback
-status: open
+status: done
 tier: 3
 filed: 2026-09-16
+closed: 2026-11-08
 by_hand: true
 specs: []
-prs: []
+prs: [1072]
 commits: []
 cites: []
 related: [137]
@@ -63,3 +64,4 @@ raising.
 
 - 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
   `.claude/`, and `SA-0279` refuses any spec that touches that path.
+- 2026-11-08: done by hand in #1072.
