@@ -183,7 +183,7 @@ command, because a repository can hold none (`saffron/record/refs.py:21-23`).
 `_git_bytes` passes no environment unless its caller gives one
 (`saffron/record/refs.py:51-56`). Backlog item b-0add4c records that gap.
 `saffron/repos/mirror.py`'s `_run` passes no environment either
-(`saffron/repos/mirror.py:52-55`).
+(`saffron/repos/mirror.py:54-59`).
 
 **The CLI.** A command that opens no ledger is dispatched before the home
 `Ledger` is built, and an exception there exits 2

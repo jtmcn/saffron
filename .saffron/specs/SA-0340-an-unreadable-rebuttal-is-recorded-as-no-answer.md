@@ -51,9 +51,9 @@ forbidden:
   - saffron/report/pr_body.py
   - tests/test_scheduler.py
   - tests/test_queued_specs.py
-budget_usd: 66
+budget_usd: 72
 max_attempts: 3
-max_turns: 270
+max_turns: 330
 risk: elevated
 acceptance:
   - claim: >-
