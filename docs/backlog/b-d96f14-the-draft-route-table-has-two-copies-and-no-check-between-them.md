@@ -1,9 +1,11 @@
 ---
 id: b-d96f14
 title: "`tests/test_draft.py` and `saffron/draft.py` hold two copies of the route-to-state table, and nothing compares them"
-status: open
+status: done
 tier: 3
 filed: 2026-10-09
+closed: 2026-11-08
+by_hand: true
 specs: []
 prs: [781, 789]
 commits: []
@@ -31,3 +33,4 @@ stays the oracle. A changed entry in `saffron/draft.py` fails it.
 ## Record
 
 - 2026-10-09: filed from the spec loop's run 32.
+- 2026-11-08: done by hand.
