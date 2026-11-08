@@ -43,7 +43,7 @@ forbidden:
   - tests/test_report.py
   - tests/test_ledger.py
   - tests/test_scheduler.py
-budget_usd: 38
+budget_usd: 42
 max_attempts: 3
 max_turns: 210
 risk: standard
@@ -104,13 +104,16 @@ acceptance:
       the pool holds after the first extraction. With nothing left the pool
       refuses it and it never starts. The task then ends `EXHAUSTED` with the
       extraction's reserve line, and `rebuttal.json` carries the pool's
-      refusal as the error. A re-prompt that fails having spent the rest ends
-      the same way, naming its own error. The witness drives all three.
+      refusal as the error. The re-prompt's line, which says it is
+      re-prompting once, comes before the line naming that refusal. A
+      re-prompt that fails having spent the rest ends the same way, naming its
+      own error. The witness drives all three.
     witness: tests/test_session.py::test_the_extraction_re_prompt_draws_on_the_extraction_reserve_and_one_it_cannot_cover_does_not_start
     wrong_versions:
       - The re-prompt opens the extraction's pool again, so it gets a fresh $4.00 reserve.
       - The pool's refusal of the re-prompt is caught and the first answer's schema error kept, so `rebuttal.json` names no refusal.
       - The verdict pool is opened before the re-prompt, so the re-prompt draws on the verdicts' reserve.
+      - The re-prompt line is emitted only once the call returns, so a refused re-prompt logs none.
   - claim: >-
       The re-prompt is visible in `events.jsonl` and in `rebuttal.json`. The
       witness drives three cells through the real event log. A first answer
@@ -187,12 +190,14 @@ emits the lens's line (`saffron/phases/review.py:328-337`).
    `rebuttal.reprompt_error`, always, null when no re-prompt ran.
 3. **The line.** Before the re-prompt's call, emit one `PhaseStart` with
    `phase="REBUT"` and `label="REBUT"`. Its detail says the extraction was not
-   the schema and is re-prompted once, and quotes the error. `run_rebuttal`
+   the schema, says `re-prompting once` as intent, and quotes the error. The
+   pool can still refuse the call after it, as at the plan checkpoint. `run_rebuttal`
    takes a required `spec_id` for it, and `run_rebut` passes its own.
 4. **The table.** Add one `_Family` row for the line to `FAMILIES` in
    `saffron/events.py`, citing `phases/rebut.py:run_rebuttal`. Move the count in
-   `tests/test_events.py:1397-1398` from 72 to 73, and add `SA-0341` to that
-   docstring's list.
+   `tests/test_events.py:1397-1398` from 72 to 73. Name `SA-0341` on the last
+   line of the docstring at `tests/test_events.py:1387-1396`. That docstring is
+   at the `prose` gate's limit of ten lines, so a new line fails it.
 
 ## Out of scope
 
@@ -216,8 +221,13 @@ emits the lens's line (`saffron/phases/review.py:328-337`).
 also assumes `saffron/cell/session.py:222-229` and `:2903-2908` stay as they
 are. Lines cited here were read before it, so find each by its text.
 
-**Edit or new.** The re-prompt, the field and the line are new code. So no
-criterion declares a mutant, and `witness` reports an honest `skip` on each.
+**Edit or new.** The re-prompt, the field and the line are new code. So
+criteria 1, 2, 4 and 5 declare no mutant, and `witness` reports an honest
+`skip` on each. Criterion 3 is partly an edit. Its failed fix turn and failed
+first extraction are existing branches (`saffron/phases/rebut.py:248-253`,
+`:266-270`). Their return text occurs twice, so a `find` cannot match once,
+and criterion 3 declares no mutant either. Its witness still fails at base, on
+the new `spec_id` argument and on the failed re-prompt case.
 
 **Comments that turn false.** Replace the comment at
 `saffron/phases/rebut.py:274-276`. The docstring at `:233-238` says two turns.
@@ -238,13 +248,19 @@ Keep each comment at two lines or fewer.
   and `_drive`, with a `budget_usd` far above the spend. Find the re-prompt in
   `cell.turns` as a prompt that ends with `EXTRACT_PROMPT` and is not equal to it.
   With a $6.00 fix turn and a $2.50 extraction, the re-prompt's cap is $5.50. An
-  $8.00 extraction leaves nothing. `_rebuttal_log` reads the real `events.jsonl`.
+  $8.00 extraction leaves nothing. In that refused cell, assert the re-prompt's
+  line comes before the REBUT line naming the refusal. `_rebuttal_log` reads the
+  real `events.jsonl`.
 
 **Existing tests this changes.** `_agent` in `tests/test_rebut.py` scripts a bare
 string as a turn with no structured output. So a test whose extraction is
-unreadable now feeds its next scripted turn to the re-prompt. A full suite run
-over a prototype of this change failed four tests, all in that file. Give each
-a second unreadable answer right after its first, and change no other line.
+unreadable now feeds its next scripted turn to the re-prompt. The stub in
+`tests/test_session.py` hands a re-prompt its next scripted turn, or a default
+one (`tests/test_session.py:1624`). So the rule covers any test that scripts an
+unreadable extraction with more turns after it, `SA-0340`'s included. Give
+each such test a second unreadable answer right after its first. Make no other
+edit, save the one count named below. A full suite run over a prototype of this change, without
+`SA-0340`'s code, failed four tests, all in `tests/test_rebut.py`.
 
 - `test_a_rebuttal_that_neither_moved_nor_argued_ends_rebuttal_unjudged`, its
   `outside_schema` case.
