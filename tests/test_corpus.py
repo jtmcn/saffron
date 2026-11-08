@@ -283,6 +283,52 @@ def test_pinned_diff_survives_a_hostile_git_config(tmp_path, monkeypatch):
     assert bare != fixture.diff
 
 
+def test_pinned_diff_reads_hunks_under_a_global_attr_tree(tmp_path, monkeypatch):
+    """A global `attr.tree` naming a tree whose `.gitattributes` marks every
+    path binary prints a bare diff as `Binary files differ` (b-9ead75)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    # GIT_CONFIG_GLOBAL alone, so no other host config reaches this repo.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+    git("init", "-q")
+    git("config", "user.email", "t@localhost")
+    git("config", "user.name", "t")
+    (repo / "a.txt").write_text("one\n")
+    git("add", "a.txt")
+    git("commit", "-qm", "base")
+    base = git("rev-parse", "HEAD")
+    (repo / "a.txt").write_text("two\n")
+    git("commit", "-qam", "head")
+    head = git("rev-parse", "HEAD")
+    blob = subprocess.run(
+        ["git", "-C", str(repo), "hash-object", "-w", "--stdin"],
+        input="* binary\n",
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    tree = subprocess.run(
+        ["git", "-C", str(repo), "mktree"],
+        input=f"100644 blob {blob}\t.gitattributes\n",
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    git("config", "--global", "attr.tree", tree)
+    assert "Binary files" in git("diff", f"{base}..{head}")
+
+    pinned = recovery.pinned_diff(repo, base, head)
+    assert "Binary files" not in pinned
+    assert "-one" in pinned and "+two" in pinned
+
+
 def test_every_shipped_fixture_s_spec_body_and_context_reproduce_from_git():
     """Hermetic reproduction of three more frozen inputs, the same way the diff
     is reproduced above: `spec_body.md` via `recovery.spec_body_at` (base
