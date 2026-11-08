@@ -4,7 +4,7 @@ title: A declared mutant whose find matches other than once counts toward nothin
 type: bug
 priority: 2
 depends_on: [SA-0342]
-estimated_lines: 85
+estimated_lines: 90
 touches:
   - saffron/gates/core/witness.py
   - saffron/gates/runner.py
@@ -54,7 +54,7 @@ acceptance:
       `mutant-find-repeated` for two or more. Its message ends with the
       criterion's claim, and the rest of it carries the count as its only
       number. The summary says how many of the declared mutants did not match
-      once. A mutant that matches once beside them is still applied and run.
+      once, and it names no survival when no witness survived. A mutant that matches once beside them is still applied and run.
       The witness drives the counts 0, 1, 2 and 3 in one call through
       `tests.mutation.host_mutator`. It then drives the counts 0, 2 and 3 as a
       criterion probe and as a wrong version, and each of those is still
@@ -70,6 +70,7 @@ acceptance:
       - A criterion probe or a wrong version whose find does not match once fails too, so REVIEW files it as a survivor.
       - The failures are recorded and the status stays `skip`.
       - The summary keeps the base wording and does not say how many mutants did not match once.
+      - The new failures join the survivors, so the summary says they survived.
   - claim: >-
       A failure for a find that did not match once withholds the edit
       (§5.4.1). Neither the `find` nor the `replace` text appears in the
@@ -88,7 +89,8 @@ acceptance:
       when the base run found the find absent. It cancels it when the base
       run reported the find matching two or three times. Every result is
       built by `witness_gate` through `host_mutator`, over one criterion
-      whose witness and claim do not change between base and head.
+      whose witness, claim and mutant file do not change between base and
+      head. The witness rewrites that one file's contents before each run.
     witness: tests/test_witness_gate.py::test_a_find_count_failure_is_new_unless_the_base_reported_its_own
     wrong_versions:
       - A find-count failure is never subtracted, as a `survived-mutant` failure is not, so a base that reported the same failure still leaves it new.
@@ -119,6 +121,18 @@ acceptance:
       - Only `tests.mutation.host_mutator` reports its count, so a cell's gate still reads `skip`.
       - "`source_mutated` reports a count only for two or more, so a find absent in a cell stays unproven."
       - "`source_mutated` writes the first match before it yields the count."
+  - claim: >-
+      A find-count failure is a new failure and never drift. A `fail` that
+      carries only find-count failures names the head `tests` result's tool,
+      which `run_witness` already holds. The witness runs `GateSuite.baseline`
+      then `GateSuite.against` over a real git tree and a real `tests` gate,
+      with one `preserves` criterion and its declared mutant. At the tree
+      base the find matches once and the witness dies. At head the same file
+      holds the find twice. The comparison has no drift and exactly one new
+      failure, the witness gate's `mutant-find-repeated` on that criterion.
+    witness: tests/test_constant_mutants.py::test_a_find_repeated_at_head_is_one_new_failure_and_no_drift
+    wrong_versions:
+      - A `fail` holding only find-count failures carries `tool=None`, so `suite_drift` reads a tool change and the attempt ends `GATE_ERROR`.
 ---
 
 ## Context
@@ -165,6 +179,17 @@ code and that message (`saffron/gates/contract.py:114-125`). Only a
 (`saffron/gates/baseline.py:24-32`). So one code for every count would let a
 base whose find was absent cancel a head whose find matches twice.
 
+**Drift.** `suite_drift` compares each gate's `tool` when the gate reported
+`pass` or `fail` on both sides (`saffron/gates/baseline.py:101-106`). A
+drifted comparison ends the attempt `GATE_ERROR`
+(`saffron/cell/session.py:865-871`). `witness_gate` sets its `tool` only from
+a subset run that died or survived (`saffron/gates/core/witness.py:258`,
+`:273`). A `fail` built from find-count failures alone would carry `None`
+against a base whose witness died. On a prototype that left it `None`,
+criterion 6's arrangement reported `witness: tool 'pytest 9.1.1' -> None`.
+`run_witness` holds the head `tests` result as `tests_result`
+(`saffron/gates/runner.py:180`).
+
 **`DESIGN.md` §5.4.1.** Amended by hand at this spec's base, in the paragraph
 that starts "A declared mutant that does not apply fails".
 
@@ -182,8 +207,11 @@ that starts "A declared mutant that does not apply fails".
    `mutant-find-repeated` for more. Its message names `mutant.file` and the
    count, and ends with the claim, as the `survived-mutant` message does
    (`saffron/gates/core/witness.py:263-272`). Any such failure makes the
-   status `fail`, beside any survivor. With none, every summary keeps its
-   base wording.
+   status `fail`, beside any survivor. The summary counts these failures
+   apart from the survivors, and names no survival when none survived. With
+   none, every summary keeps its base wording. A `fail` whose subset runs set
+   no tool carries the head `tests` result's tool, which `run_witness` hands
+   the gate.
 3. **Everything else stays unproven.** A criterion probe, a wrong version and
    a constant mutant keep the base behaviour. `GateSuite._run` hands the
    constant mutants to the gate apart from `spec.acceptance`, through
@@ -204,8 +232,11 @@ that starts "A declared mutant that does not apply fails".
   tree. It stays unproven. Only the find count fails.
 - Exempting the new failures from subtraction. A base run that reports the
   same failure cancels it, since the diff did not cause it.
-- A base whose find was absent and a head whose find is absent too. They
-  cancel, so the gate still says nothing there.
+- A witness collected at base whose find is absent at base and at head. The
+  two failures cancel, so the gate still says nothing there. A witness new at
+  head is unproven at base, before `mutate`
+  (`saffron/gates/core/witness.py:163-165`). So its head failure is always
+  new.
 - An inner `error` after a find-count failure. It ends the gate as `error`
   and drops the failure, as it drops a survivor today
   (`saffron/gates/core/witness.py:244-255`).
@@ -217,8 +248,16 @@ that starts "A declared mutant that does not apply fails".
 **`SA-0342`, the parent.** It edits `revert_gate`'s call in
 `saffron/gates/suite.py:180-200`. This spec edits the `run_suite` call before
 it (`saffron/gates/suite.py:170-176`). Find each line by its text, not
-its number. `SA-0338`, earlier in the chain, moves a criterion's mutant onto
+its number. `SA-0338`, `SA-0340` and `SA-0341` edit `tests/test_session.py`,
+and `SA-0338` edits `tests/test_worktree.py`. Find every line this spec cites
+in those two files by its text too. `SA-0338`, earlier in the chain, moves a criterion's mutant onto
 `refs/saffron/mutants`. `witness_gate` still reads it from `Criterion.mutant`.
+
+**A find absent at head fails, by intent.** A witness new at head never
+reaches `mutate` at base, so its head failure is always new. That holds for a
+find absent at head as well. With `SA-0338`, a mutant on the ref is written
+against what the diff writes. So a find absent at head means the claim's code
+is not where the spec says it is, and the cell is told so.
 
 **Edit or new.** The failure branch, the count's carrier and the separate
 constant-mutant argument are new code. So no criterion declares a mutant,
@@ -231,30 +270,38 @@ imported it, and nothing that passes a reason through needed an edit.
 `saffron/cell/worktree.py` importing `saffron.gates.core.witness` made no
 cycle. The gate counted a failure only for a criterion from `acceptance`
 under `edit_noun == "mutant"`. It took constant mutants in a new
-keyword-only `derived` argument, `()` by default.
+keyword-only `derived` argument, `()` by default. It took the head tool in a
+keyword-only `tests_tool`, which `run_witness` filled from `tests_result`.
 
 **The witnesses.** Plain `def`s, never a parametrised test.
 
 - In `tests/test_witness_gate.py`, write four files whose one find occurs 0,
   1, 2 and 3 times, each with a line of padding. Give each criterion a claim
   holding no digit, so the count is the message's only number once the claim
-  is removed. Criterion 3 builds base and head with one witness and claim,
-  pointing the mutant at files of different counts.
+  is removed. Criterion 3 keeps one criterion and one mutant file, and
+  rewrites that file with the base's count, then the head's, before each run.
+  Distinct file names would normalise alike and hide a wrong version.
 - In `tests/test_constant_mutants.py`, follow
   `test_a_witness_reading_its_constant_back_survives_a_constant_mutant`
   (`tests/test_constant_mutants.py:132`). A head file of `LIMIT = 3` twice,
   then a function returning `LIMIT`, gives a constant mutant whose find
   matches twice. A witness reading `LIMIT` back is the constant mutant's. A
   second witness asserting the literal carries the declared mutant.
+- Criterion 6 uses the same harness. Commit the tree base, set `diff_base` to
+  it, and run `suite.baseline`. Then commit the head and run
+  `suite.against(tree, baseline)`. Mark the criterion `preserves`, since its
+  witness exists and passes at base. Give the policy no `witness:` patterns,
+  so no constant mutant joins it.
 - In `tests/test_worktree.py`, use `_repo_with_a_file` and `_commit`
   (`tests/test_worktree.py:1397`, `:1136`). Pass
   `partial(worktree.source_mutated, "c")` as `mutate`.
 - Import any name this spec adds inside the test body. A module-scope import
   makes `revert`'s reverted run a collection error.
 
-**Every new test fails with the source reverted.** On the prototype, all five
-witnesses failed with `saffron/` and `tests/mutation.py` reverted. Each
-asserts a `fail` the base gate reports as `skip`.
+**Every new test fails with the source reverted.** On the prototype, all six
+witnesses failed with `saffron/` and `tests/mutation.py` reverted. Five
+assert a `fail` the base gate reports as `skip`. At base, criterion 6's
+comparison drifts as `witness: pass at baseline, skip at head`.
 
 **Existing tests this changes.** A full suite run over the prototype failed
 five, beside one `format` failure from its own unformatted tests. Two drive a
@@ -283,8 +330,8 @@ passed on the prototype.
 (`tests/test_witness_gate.py:196-204`). It asserts only the bytes, so it
 still passes.
 
-**Size.** The prototype measured 274 changed tokens by `size_gate`, against
+**Size.** The prototype measured 290 changed tokens by `size_gate`, against
 the `bug` ceiling of 1300, without the `worktree.py` and `runner.py`
-docstring edits. It measured 589 more under the test paths.
+docstring edits. It measured 782 more under the test paths.
 `estimated_lines` adds about 60 tokens for those docstrings to the measured
 figure, over four.
