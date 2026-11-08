@@ -545,7 +545,7 @@ which the glossary keeps for the breaker. A probe's reason is called a
 refusal. The glob characters are spelled in two modules.
 
 **Placed 2026-10-05**, from stage 2's stack batches: ~~**b-937778**~~,
-**b-050733**, then **b-0efc31**. The loop driver's `history` counts every
+~~**b-050733**~~, then **b-0efc31**. The loop driver's `history` counts every
 phase's turns against `max_turns`. Specs use bare "run" for a turn. Nothing
 compares the host's usage keys to the runner's.
 
