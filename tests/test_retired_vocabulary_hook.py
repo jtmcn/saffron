@@ -5,11 +5,6 @@ matches one line at a time, and every prose file the hook covers is
 hard-wrapped, so a retired two-word term split across a line break was
 invisible to it. These tests exercise the replacement script directly.
 
-Every test always imports (or execs) the script *inside* a test function,
-never at module scope: the `revert` gate re-runs each new witness with the
-script deleted, and a module-scope import would turn that run into a
-collection error, which reads as `skip` rather than a real failure.
-
 The hook runs over this file too, so no test input spells the retired term as
 a literal phrase — each is assembled from independently-named word fragments
 at runtime instead.

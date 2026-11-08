@@ -1,9 +1,11 @@
 ---
 id: b-a99c76
 title: "`tests/test_terms_hook.py` restates four helpers and a reason from its two sibling hook tests"
-status: open
+status: done
 tier: 3
 filed: 2026-10-09
+closed: 2026-11-08
+by_hand: true
 specs: []
 prs: [790]
 commits: []
@@ -33,3 +35,4 @@ carries the stale `revert` reason.
 ## Record
 
 - 2026-10-09: filed from the spec loop's run 32.
+- 2026-11-08: done by hand.

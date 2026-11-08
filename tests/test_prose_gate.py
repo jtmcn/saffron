@@ -1,12 +1,10 @@
 """The `prose` gate (docs/superpowers/specs/2026-09-16-prose-ratchet-design.md).
 
-The script is loaded inside each test, never at module scope: the `revert`
-gate re-runs a new witness with the script deleted.
+The script is loaded inside each test, never at module scope.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import re
 import shutil
 import subprocess
@@ -14,6 +12,8 @@ import sys
 from pathlib import Path
 
 import pytest
+
+from tests.hook_helpers import load_script, tracked
 
 REPO = Path(__file__).resolve().parent.parent
 GATES = REPO / ".saffron" / "gates"
@@ -23,13 +23,7 @@ LONG_B = "beta " * 30 + "end."
 
 
 def _prose():
-    spec = importlib.util.spec_from_file_location("saffron_prose_gate", SCRIPT)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    # Registered first: `Hit` is a dataclass under postponed annotations.
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    return load_script(SCRIPT, "saffron_prose_gate")
 
 
 def _codes(text: str, path: str = "README.md", root: Path = REPO) -> list[str]:
@@ -428,15 +422,9 @@ def test_a_comment_split_by_a_blank_line_is_one_block():
     assert _python_codes(apart) == []
 
 
-def _tracked() -> list[str]:
-    return subprocess.run(
-        ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
-    ).stdout.splitlines()
-
-
 def test_scope_reaches_every_place_it_names():
     prose = _prose()
-    listed = _tracked()
+    listed = tracked()
     for name in prose.ROOT_FILES:
         assert name in listed and prose.in_scope(name), name
     for directory in prose.INCLUDED_DIRS:
@@ -450,7 +438,7 @@ def test_scope_reaches_the_prompts_a_cell_reads():
     # Measured: with the `INCLUDED_DIRS` entry removed this fails and
     # `every_place_it_names` passes, which asks a weaker question.
     prose = _prose()
-    listed = _tracked()
+    listed = tracked()
     for path in (
         "saffron/agents/prompts/implement.md",
         "saffron/agents/prompts/turns/plan.md",
@@ -724,7 +712,7 @@ def test_a_hash_in_a_yaml_value_or_block_scalar_is_not_a_comment():
 
 def test_scope_reaches_the_yaml_a_cell_or_a_person_writes():
     prose = _prose()
-    listed = _tracked()
+    listed = tracked()
     for path in (
         ".saffron/policy.yaml",
         ".saffron/sgconfig.yml",
