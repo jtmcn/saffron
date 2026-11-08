@@ -1,11 +1,12 @@
 ---
 id: b-e4ab6f
 title: The code and its tests call the subnet pool a bare pool, which CONTEXT.md keeps for a batch's concurrency pool
-status: open
+status: partial
+by_hand: true
 tier: 3
 filed: 2026-10-13
 specs: [SA-0271]
-prs: [868]
+prs: [868, 1065]
 commits: []
 cites: [§5.1]
 related: [b-1c4a14]
@@ -31,3 +32,8 @@ the two senses another way. The tests' docstrings follow.
 ## Record
 
 - 2026-10-13: filed from the spec loop's run 37.
+- 2026-11-08: partial by hand. `runtime.py`'s comments, docstring, local and
+  error text, and the docstrings in `test_runtime.py`, `test_proxy.py` and
+  `conftest.py`, now say "subnet pool". Left: the `SUBNETS["pool"]` key and
+  the docstrings in `test_session.py`, `test_package.py` and `test_events.py`.
+  Queued specs touch those three tests, and a key rename edits all of them.

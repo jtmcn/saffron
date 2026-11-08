@@ -1,12 +1,13 @@
 ---
 id: b-6a9707
 title: The spec loop's driver calls a gate result and a probe outcome a verdict
-status: open
+status: done
 tier: 3
 filed: 2026-09-19
+closed: 2026-11-08
 by_hand: true
 specs: []
-prs: []
+prs: [1064]
 commits: []
 cites: []
 related: [b-281f0a]
@@ -48,3 +49,4 @@ next one is caught rather than reviewed.
 - 2026-11-07: marked by hand in grooming. The rename is in the spec loop's driver under
   `.claude/`, which `SA-0279` refuses. The `terms` half edits `.saffron/gates/`,
   which `.saffron/policy.yaml` protects.
+- 2026-11-08: done by hand. The `size` docstring says gate result, and `probe` prints an outcome. `_size_verdict` is `_size_estimate_priced`. A test in `tests/test_spec_loop_driver.py` now fails on any other "verdict" in the driver. The `terms` gate still skips `.py` under `.claude/`.

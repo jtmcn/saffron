@@ -114,7 +114,7 @@ spec removes the first run's container. Cell images and the build cache are
 never reclaimed, and one host's free disk fell to 16 GB. The first two stand
 between ADR 10's sequence and two cells on one host.
 
-**Raised 2026-11-07 from tier 3**, in grooming: **b-719346**. `driver.py record`
+**Raised 2026-11-07 from tier 3**, in grooming: ~~**b-719346**~~. `driver.py record`
 refuses a finish's follow-up as not in the order. It took the rank of
 ~~**b-25f2b2**~~, the tier 2 item grooming folded into it.
 
@@ -151,13 +151,13 @@ failed state, so its children stay refused. A spec named a module its own
 Redaction misses the files beside `events.jsonl`. The driver and two ADRs
 name the old halts.
 
-**Placed 2026-10-12**, from writing `SA-0290`: **b-f5ceaf**, by hand now that
+**Placed 2026-10-12**, from writing `SA-0290`: ~~**b-f5ceaf**~~, by hand now that
 `SA-0290` merged (#919). `CONTEXT.md` has no entry for a removed name.
 
 **Placed 2026-11-07**, from writing `SA-0350`: ~~**b-7c118b**~~, done by hand in
 the spec's own pull request.
 
-**Placed 2026-10-13**, from writing `SA-0291`: **b-cd1566**, by hand now that
+**Placed 2026-10-13**, from writing `SA-0291`: ~~**b-cd1566**~~, by hand now that
 `SA-0291` merged (#920). `CONTEXT.md` has no entry for a criterion's subject.
 
 **Placed 2026-10-06**, from ADR 10, in this order toward a night on GCP. The
@@ -200,7 +200,7 @@ reproducing every gate by hand. The second is a witness that fails once three
 local branches are pruned. The third opens when item b-b5f379 bumps the cell's
 git.
 
-**Placed 2026-09-23**, from writing `SA-0142`: **b-466005**. It is the
+**Placed 2026-09-23**, from writing `SA-0142`: ~~**b-466005**~~. It is the
 glossary entry for a stack batch, its order and a predecessor, which a cell
 cannot write.
 
@@ -231,7 +231,7 @@ its budget.
 `prose` with a false sentence. The last two are the loop's tools. One blocked a
 measured estimate, and the other takes a `drop` per spec to scope a loop.
 
-**Placed 2026-09-28**, after run 20: **b-2e7c4d**. The loop's `stack` check
+**Placed 2026-09-28**, after run 20: ~~**b-2e7c4d**~~. The loop's `stack` check
 merges adjacent pairs, and a sibling cut from `main` hid a conflict below it.
 
 **Placed 2026-09-28**, by hand: **b-12ffc3**. `cell_down` deletes the cell's
@@ -252,7 +252,7 @@ failures.
 `error`. A second `depends_on` entry carries no code into the cell.
 
 **Placed 2026-10-05**, from the spec loop's run 28: ~~**b-8e30bd**~~,
-**b-2247dd**, then ~~**b-708c8a**~~. A merged draft leaves its task `EXHAUSTED`
+~~**b-2247dd**~~, then ~~**b-708c8a**~~. A merged draft leaves its task `EXHAUSTED`
 and its dependents refused. The loop driver refuses an `EXHAUSTED` layer.
 REVIEW's re-prompt is written twice.
 
@@ -361,8 +361,8 @@ A lens can search code only as text. The spec loop numbers its passes as runs,
 which is a ledger term. The spec chain records no cost per escaped defect, so
 no step can be cut on evidence.
 
-**Moved 2026-11-07 from tier 2**, on the operator's ruling: **b-dc5212** and
-**b-4589be**. Each bites only on the driver's attended path, which is now the
+**Moved 2026-11-07 from tier 2**, on the operator's ruling: ~~**b-dc5212**~~ and
+~~**b-4589be**~~. Each bites only on the driver's attended path, which is now the
 fallback.
 
 **Placed 2026-11-06**, from the spec loop's run 54: **b-25c0f5**, then
@@ -376,7 +376,7 @@ wrong first line.
 **Placed 2026-10-17**, from the spec loop's run 43: ~~**b-74a122**~~.
 `CONTEXT.md`'s Refusal entry lacks the citation cause.
 
-**Placed 2026-11-02**, from the spec loop's run 52: **b-e4cb58**. `CONTEXT.md`
+**Placed 2026-11-02**, from the spec loop's run 52: ~~**b-e4cb58**~~. `CONTEXT.md`
 defines a Refusal as before any cell starts, and `ready_task` refuses after one.
 
 **Placed 2026-10-19**, from the spec loop's run 44: **b-b8f0d9**, **b-e9cd43**,
@@ -406,11 +406,11 @@ stack left alone.
 in `policy.yaml`. **b-2227b0**, closed as parked, records a draft ADR.
 
 **Placed 2026-10-25**, from the spec loop's run 48: ~~**b-9c5b11**~~,
-~~**b-01c53d**~~, **b-92fdbe**, **b-d3f977**, **b-f0e351** and **b-87001a**.
+~~**b-01c53d**~~, ~~**b-92fdbe**~~, ~~**b-d3f977**~~, ~~**b-f0e351**~~ and **b-87001a**.
 Each is a gap a seat, a finish or the run found and the stack left alone.
 
 **Placed 2026-10-27**, from the spec loop's run 49:
-**b-1b8b1e**, **b-92c92a**, **b-2a03c2**, **b-d2afe3**, ~~**b-1ff5a3**~~ and
+**b-1b8b1e**, **b-92c92a**, **b-2a03c2**, ~~**b-d2afe3**~~, ~~**b-1ff5a3**~~ and
 **b-3a0789**. Each is a gap a seat, a finish or the run found and the stack
 left alone.
 
@@ -426,7 +426,7 @@ Each line keeps the order it was filed in.
   ~~**150**~~, **151**, **155**, **156**, **174** and **b-d6bff7**.
 - From spec loop runs 7 to 10: **b-990bd9**, **b-7431a2**, **b-9eceda**, **b-bc9951**,
   **b-0281e4**, **b-e9db0e**, **b-397edd**, **b-0e20e9**, **b-98dc4d**,
-  **b-27b9db**, ~~**b-bbf663**~~ and **b-6a9707**.
+  **b-27b9db**, ~~**b-bbf663**~~ and ~~**b-6a9707**~~.
 - From the reviews of #393 and `SA-0120`, and spec loop runs 13 and 14: **b-d5d290**,
   **b-9ed36d**, **b-b431c1**, ~~**b-ac2f02**~~ and **b-49329e**.
 - From ADR 4's review and the superpowers comparison: ~~**b-07f694**~~,
@@ -434,12 +434,12 @@ Each line keeps the order it was filed in.
 - From spec loop runs 15 to 17 and `SA-0135`'s review: **b-f30189**, **b-a90136**,
   **b-e06dbc**, **b-32f492**, **b-8fb227**, **b-79d951**, **b-9ead75** and
   ~~**b-04d4c2**~~.
-- From the stack batch's spec reviews: ~~**b-2d9ae9**~~, **b-223244**,
+- From the stack batch's spec reviews: ~~**b-2d9ae9**~~, ~~**b-223244**~~,
   **b-acee54**, **b-6518ba**, **b-6a101f**, **b-7eb5f5** and **b-22ff3f**.
 - From the 2026-09-27 size pricing and spec loop run 32: **b-41664e**, **b-4b386f**,
-  **b-d96f14**, **b-9b94c9**, **b-ff3141**, **b-a99c76**, **b-3a8504**,
+  **b-d96f14**, ~~**b-9b94c9**~~, **b-ff3141**, **b-a99c76**, **b-3a8504**,
   **b-7f105f** and **b-8c17dc**.
-- From item 52's review: **b-cec9a7**.
+- From item 52's review: ~~**b-cec9a7**~~.
 
 **Placed 2026-09-20**: **161**, **162**, **163**, **126**, **128** and **129**,
 then **b-7d2acf**. The first three are what PR #317 left on the `prose` gate. A
@@ -474,10 +474,10 @@ other is a fixture field under `docs/**` that no cell could add.
 uid 0 in every cell, and `--cap-drop ALL` makes the read they test fail.
 
 **Placed 2026-09-29**, from the spec loop's run 22: **b-695234**,
-**b-12e717**, **b-2dd65f**, **b-b1a7d4**, then **b-1f1188**.
+**b-12e717**, **b-2dd65f**, ~~**b-b1a7d4**~~, then **b-1f1188**.
 The first three are defects in REVIEW and REBUT that the run's seats found.
 The last two are gaps in the spec chain's own tools. **b-9529e9** and
-**b-91ead2** came from closing the run. The scoring driver cannot reach a
+~~**b-91ead2**~~ came from closing the run. The scoring driver cannot reach a
 fixture head or clean up after a kill, and `labels` reads no cell round.
 
 **Placed 2026-09-30**, from the spec loop's run 23: **b-a09d30**,
@@ -490,7 +490,7 @@ Preflight names a listener's address but not its process.
 revised spec gets no task state.
 
 **Placed 2026-10-02**, from the spec loop's run 25: **b-006372**,
-**b-7430c1**, **b-1068ea**, ~~**b-8a6f43**~~, then **b-a7e315**. The finish is
+**b-7430c1**, **b-1068ea**, ~~**b-8a6f43**~~, then ~~**b-a7e315**~~. The finish is
 judged at the pinned base. One escalation hides a leftover worktree. A
 child's tree carries an older spec than it runs. `snapshot --force` drops
 holds, and `status` has no one-line form.
@@ -539,12 +539,12 @@ History run's snapshot ignores `--home`.
 **b-e4ab6f**. §5.5 lists lens #1 without the failure path. The code calls the
 subnet pool a bare pool.
 
-**Placed 2026-10-11**, from the spec loop's run 34: **b-5a69db**,
+**Placed 2026-10-11**, from the spec loop's run 34: ~~**b-5a69db**~~,
 **b-c86c4b**, then **b-54fee5**. A stopped night closes `INFRASTRUCTURE`,
 which the glossary keeps for the breaker. A probe's reason is called a
 refusal. The glob characters are spelled in two modules.
 
-**Placed 2026-10-05**, from stage 2's stack batches: **b-937778**,
+**Placed 2026-10-05**, from stage 2's stack batches: ~~**b-937778**~~,
 **b-050733**, then **b-0efc31**. The loop driver's `history` counts every
 phase's turns against `max_turns`. Specs use bare "run" for a turn. Nothing
 compares the host's usage keys to the runner's.

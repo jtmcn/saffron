@@ -160,9 +160,9 @@ def probe() -> str | None:
 
 
 # Every subnet Saffron allocates. Every task network claims one /24
-# of "pool" (item 143).
+# of the subnet pool, keyed "pool" (item 143).
 SUBNETS: dict[str, str] = {
-    "pool": "10.200.0.0/16",  # every internal network, one /24 each
+    "pool": "10.200.0.0/16",  # the subnet pool: every internal network, one /24 each
     "egress": "10.89.0.0/24",  # saffron-egress, the proxy's network
 }
 
@@ -367,7 +367,7 @@ def networks_on_subnet(subnet: str, exclude: str = "") -> list[str]:
 
 
 def allocate_network(name: str) -> str:
-    """Claim one /24 of the pool for `name`, by creating it there.
+    """Claim one /24 of the subnet pool for `name`, by creating it there.
 
     `_admit()` runs once, ahead of the walk, so a host refusal raises as
     itself rather than reading as an ordinary collision below. The walk
@@ -378,10 +378,10 @@ def allocate_network(name: str) -> str:
     that hangs raises at once. Exhaustion carries the last refusal's text.
     """
     _admit()
-    pool = ipaddress.ip_network(SUBNETS["pool"])
+    subnet_pool = ipaddress.ip_network(SUBNETS["pool"])
     holders: list[str] = []
     last_detail = ""
-    for candidate in pool.subnets(new_prefix=24):
+    for candidate in subnet_pool.subnets(new_prefix=24):
         subnet = str(candidate)
         try:
             create_network(name, subnet=subnet)
@@ -400,7 +400,7 @@ def allocate_network(name: str) -> str:
         return subnet
     held = f"held: {', '.join(holders)}" if holders else "refused, and none is held"
     raise CellRuntimeError(
-        f"every /24 of the pool is {held}. The last refusal: {last_detail}"
+        f"every /24 of the subnet pool is {held}. The last refusal: {last_detail}"
     )
 
 

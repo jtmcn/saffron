@@ -134,8 +134,9 @@ class ProbeResult:
     uncounted: tuple[str, ...] = ()
     """Every new failure's `code` whose test was not in `counted`, recognised
     by the probed run's own `collected` or not. Never what decides the verdict
-    alone. A `killed` result carries none of these codes. A `survived` or
-    `unproven` one can carry every new failure's (b-19b255)."""
+    alone. A `killed` result carries the new failures beside its kill that no
+    counted test names. A `survived` or `unproven` one can carry every new
+    failure's (b-19b255)."""
 
 
 def _repo_relative(file: str) -> str | None:

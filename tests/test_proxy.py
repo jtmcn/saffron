@@ -402,7 +402,7 @@ def test_start_proxy_reads_its_address_on_the_subnet_it_is_given(monkeypatch):
     assert sig.parameters["subnet"].default is inspect.Parameter.empty
 
     pool = ipaddress.ip_network(runtime.SUBNETS["pool"])
-    # The pool's second /24, never its first, so a version that ignores
+    # The subnet pool's second /24, never its first, so a version that ignores
     # `subnet` and reads the first one anyway still has to be caught.
     given_subnet = str(list(pool.subnets(new_prefix=24))[1])
     given_prefix = runtime.subnet_prefix(given_subnet)

@@ -1,12 +1,13 @@
 ---
 id: b-b1a7d4
 title: '`driver.py cite` takes a path, not an id, and flags correct citations'
-status: partial
+status: done
 tier: 3
 filed: 2026-09-29
+closed: 2026-11-08
 by_hand: true
 specs: [SA-0152, SA-0167]
-prs: [956]
+prs: [956, 1064]
 commits: []
 cites: []
 related: []
@@ -36,3 +37,4 @@ symbol alone.
 - 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
   `.claude/`, and `SA-0279` refuses any spec that touches that path.
 - 2026-11-07: groomed. Its second half landed under b-2da959. `cite` now calls core's checker in `saffron/spec_citations.py`, which judges a range by the construct its clause names (`SA-0314`, #956). Left: `cite` still takes a path and not a spec id. Its count of false warnings predates that checker and needs a new measurement.
+- 2026-11-08: done by hand. `cite` takes a spec id, queued or retired. Each spec read at its last edit draws no warning: `SA-0152` checks 40 citations at `a003daed` and `SA-0167` checks 64 at `71d824c9`.

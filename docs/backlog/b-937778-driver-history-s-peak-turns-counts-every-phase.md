@@ -1,12 +1,13 @@
 ---
 id: b-937778
 title: "The loop driver's `history` takes peak turns over every phase's attempts and compares them to `max_turns`"
-status: open
+status: done
 tier: 3
 filed: 2026-10-05
+closed: 2026-11-08
 by_hand: true
 specs: []
-prs: []
+prs: [1064]
 commits: []
 cites: []
 related: [b-60ff2e]
@@ -35,3 +36,4 @@ each phase beside its peak.
 - 2026-10-05: filed from stage 2 of the delegate-loop plan (the first live stack batches, batches 13 and 14).
 - 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
   `.claude/`, and `SA-0279` refuses any spec that touches that path.
+- 2026-11-08: done by hand in #1064.

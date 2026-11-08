@@ -1,11 +1,13 @@
 ---
 id: b-d2afe3
 title: "`ProbeResult.uncounted`'s docstring says a `killed` result carries none, and `check_probe` returns one that does"
-status: open
+status: done
+closed: 2026-11-08
+by_hand: true
 tier: 3
 filed: 2026-10-27
 specs: []
-prs: []
+prs: [1065]
 commits: []
 cites: []
 related: []
@@ -27,3 +29,4 @@ The docstring states that a `killed` result can carry uncounted failures.
 ## Record
 
 - 2026-10-27: filed from the spec loop's run 49.
+- 2026-11-08: done by hand in #1065.

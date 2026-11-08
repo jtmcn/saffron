@@ -1,15 +1,17 @@
 ---
 id: b-dc5212
 title: driver.py next holds back a child whose EXHAUSTED parent's code is already on main
-status: open
+status: superseded
 tier: 3
 filed: 2026-10-01
+closed: 2026-11-08
 by_hand: true
 specs: [SA-0151, SA-0174]
 prs: [626, 628]
 commits: []
 cites: []
 related: [b-038aef]
+superseded_by: b-038aef
 ---
 
 ## Problem
@@ -33,3 +35,4 @@ task's terminal state, and names the child.
 - 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
   `.claude/`, and `SA-0279` refuses any spec that touches that path.
 - 2026-11-07: moved to tier 3 in grooming on the operator's ruling of 2026-11-07. It bites only on the driver's attended path, which is now the fallback.
+- 2026-11-08: superseded by b-038aef. Since `SA-0204` (#678), PACKAGE opens a draft for an `EXHAUSTED` task with green gates, and `record` stores its number. A merged parent then makes the order stale, so `next` refuses until a re-snapshot. `_carried` drops a merged row, and the child no longer waits on it.

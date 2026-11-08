@@ -1,11 +1,13 @@
 ---
 id: b-f0e351
 title: "qualify.py cites task.py:165-166 by line, and those lines now hold an unrelated docstring"
-status: open
+status: done
+closed: 2026-11-08
+by_hand: true
 tier: 3
 filed: 2026-10-25
 specs: []
-prs: []
+prs: [1065]
 commits: []
 cites: []
 related: []
@@ -26,3 +28,4 @@ The comment names the function or constant it means, not a line range.
 ## Record
 
 - 2026-10-25: filed from the spec loop's run 48.
+- 2026-11-08: done by hand in #1065.

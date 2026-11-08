@@ -1,6 +1,6 @@
 """Qualifying an end review's findings into follow-up groups (ADR 7, step 4
-of backlog item b-792ab2). `saffron/task.py:165-166` is what makes the tree
-this reads stacked. This module never writes one.
+of backlog item b-792ab2). `task.Handoff`, which a stack batch hands each
+task, is what makes the tree this reads stacked. This module never writes one.
 
 The host decides, never the model. Each finding is anchored against its own
 range's diff, probed if it carries a probe, and filed as `qualified`,

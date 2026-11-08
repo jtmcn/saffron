@@ -114,8 +114,10 @@ local commits, and restack the layers above once the batch drains.
 `driver.py rebase --execute` moves each layer onto the one below, as step 4
 says. Then push each layer and run `saffron finish <batch id> --repo .`
 with the token as in (a). The batch's deferral line names the id. The finish
-reads each branch at origin, so it grades only pushed commits. Record each
-follow-up it runs with `driver.py record`, and read
+reads each branch at origin, so it grades only pushed commits. Run
+`driver.py snapshot --force` after it. The snapshot takes in each follow-up the
+batch ran, with its branch, its pull request and its parent (b-719346). Then
+record each follow-up with `driver.py record`, and read
 `~/.saffron/batches/v0/finish/<batch id>/findings.json` for step 5. The attended path below is the fallback, and taking it is the
 operator's call.
 
@@ -125,7 +127,7 @@ spec, or exits 1 saying why none is left.
 **One cell at a time, reviewing while the next runs.** A cell's worktree is cut
 from the remote, not the checkout, so PR N can be reviewed on its branch while
 cell N+1 runs. A spec with `depends_on` has its worktree cut from its parent's
-branch, so it starts after the parent's review commits are pushed: until then
+branch, so it starts after `reviewed` marks the parent's review ended: until then
 `next` names it as waiting and hands back the next spec that can start. Within
 a priority, the order puts the parent with most descendants first, so its
 children have something to run beside its review. `next` holds back a child
@@ -189,7 +191,8 @@ to the operator (GOTCHAS, Recording). `record` also prints the lenses the
 REVIEW ran. Put that line in the seats' `{KNOWN}` (step 2c).
 
 Then score the cell's own REVIEW the same way, with `--kind cell` and no
-`--report` or `--commit`. A non-zero exit is noted and the loop carries on.
+`--report` or `--commit`. Its round is saved under `cell/` beside the
+other kinds. A non-zero exit is noted and the loop carries on.
 
 `drop SA-NNNN --why "…"` takes a spec out of the loop, and `undrop SA-NNNN`
 puts it back.
@@ -243,6 +246,10 @@ puts it back.
    uv run .claude/skills/run-saffron-spec-loop/driver.py stack             # dry run
    ```
 
+   Read `driver.py status` before the push. A `hold any push to` warning names
+   a layer that a running cell or batch builds on. Hold that push until the
+   child's process exits (b-3a79a0).
+
    `size` measures what was pushed, so it runs after the push. A branch over
    its ceiling is usually yours to accept: note the overrun in the PR body and
    carry on. The operator set this on 2026-10-14, in spec loop run 39. Ask only when the
@@ -254,7 +261,8 @@ needs two reviewable PRs, so it errors after the first.
 finding is fixed, answered, or kept. Every witness the review added fails at
 the spec's base with its imports inside the test. `size` reports the branch
 within its ceiling, or the PR body notes the overrun. `make check` echoes
-`make exit: 0`, and the commit is pushed.
+`make exit: 0`, and the commit is pushed. Then `driver.py reviewed SA-NNNN`
+marks the review ended at the pushed head, and `next` can name its children.
 
 ## 3. Stack the pull requests
 
@@ -264,10 +272,10 @@ uv run .claude/skills/run-saffron-spec-loop/driver.py stack --execute   # gh sta
 ```
 
 The stack order is the loop's order rearranged so each child sits directly above
-its parent. The dry run prints it, runs `git merge-tree` on every adjacent pair,
-and shows the `gh stack link` command. `link` retargets each PR onto the one
+its parent. The dry run prints it, merges each layer onto every layer below it
+with `git merge-tree`, and shows the `gh stack link` command. `link` retargets each PR onto the one
 below; its diff stays right and only what merging it would do changes. A
-`CONFLICT` between neighbours, and a child whose parent is not in the stack,
+`CONFLICT` with any lower layer, and a child whose parent is not in the stack,
 go to the operator before linking (GOTCHAS, Stacking). PACKAGE opens each PR
 as a draft (§5.7). A reviewed, linked stack is the operator's to merge, so once
 every base reads back, `--execute` marks each PR ready. A base that reads back

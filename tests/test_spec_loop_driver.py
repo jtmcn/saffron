@@ -132,6 +132,13 @@ def _commit(cwd, name, text):
     return _git(cwd, "rev-parse", "HEAD")
 
 
+@pytest.fixture(autouse=True)
+def _off_a_loop_branch(monkeypatch):
+    """A cell checks out `saffron/SA-NNNN`, so the item 157 guard would refuse
+    every command these tests drive. Its own test sets the branch."""
+    monkeypatch.setattr(driver, "_on_loop_branch", lambda: None)
+
+
 @pytest.fixture
 def empty_repo(tmp_path, monkeypatch):
     """A git repo on `main` with no commits, blind to the host's git config."""
@@ -330,6 +337,41 @@ def test_neighbours_that_both_append_to_one_file_are_reported_as_a_conflict(repo
     assert "base.txt" in conflicts[0]
 
 
+def test_stack_names_a_top_layer_that_conflicts_only_with_the_bottom_one(
+    repo, monkeypatch, capsys
+):
+    # b-2e7c4d: SA-0185 and SA-0150 each merged cleanly with their neighbour
+    # off `main`, and the rebase onto SA-0164 below them then conflicted.
+    cwd, tips = repo
+    for branch, name, text in (
+        ("x", "base.txt", "base\nx\n"),
+        ("y", "y.txt", "y\n"),
+        ("z", "base.txt", "base\nz\n"),
+    ):
+        _git(cwd, "checkout", "-q", "-b", f"saffron/{branch}", tips["M0"])
+        tip = _commit(cwd, name, text)
+        _git(cwd, "update-ref", f"refs/remotes/origin/saffron/{branch}", tip)
+    _git(cwd, "checkout", "-q", "main")
+    rows = [_row("x", pr=10), _row("y", pr=11), _row("z", pr=12)]
+    monkeypatch.setattr(driver, "REPO", cwd)
+    monkeypatch.setattr(driver, "_load", lambda: rows)
+    # The default `cwd` is bound at import, so every merge is sent to this repo.
+    merge = driver._merge_conflicts
+    monkeypatch.setattr(
+        driver, "_merge_conflicts", lambda a, b, _cwd=None: merge(a, b, cwd)
+    )
+
+    assert driver.cmd_stack(argparse.Namespace(execute=False, top=None)) == 0
+
+    out = capsys.readouterr().out
+    assert (
+        "saffron/z does not merge cleanly onto the layers below it, first at saffron/x:"
+        in out
+    )
+    assert "saffron/y does not merge cleanly" not in out
+    assert "every layer merges cleanly" not in out
+
+
 def test_a_gone_spec_an_edited_spec_and_a_merged_or_closed_pr_make_the_order_stale(
     tmp_path,
 ):
@@ -516,45 +558,65 @@ def test_the_driver_reads_every_terminal_state_from_the_ontology():
     assert sorted(driver.terminal_states()) == sorted(TERMINAL_STATES)
 
 
-def test_next_says_when_the_spec_it_names_is_cut_from_a_reviewable_parent():
+def test_next_says_when_the_spec_it_names_is_cut_from_a_reviewed_parent():
     parent = _row("A", pr=10)
+    parent.reviewed_sha = "r" * 40
     child = _row("B", 2, ["A"], pr=None, state=None)
     sibling = _row("C", 2, pr=None, state=None)
+    heads = {"saffron/A": "r" * 40}
 
-    chosen, note = driver._next_spec([parent, child, sibling], again=False)
+    chosen, note = driver._next_spec(
+        [parent, child, sibling], again=False, head_of=heads.get
+    )
     assert chosen is child
-    assert note == "B is cut from A: push its review commits first"
+    assert note == "B is cut from A at rrrrrrrr, whose review ended there"
 
     chosen, note = driver._next_spec([parent, sibling], again=False)
     assert chosen is sibling
     assert note is None
 
 
-def test_next_passes_over_a_child_until_its_parents_review_commits_are_pushed():
-    # Stack #251: `next` named SA-0083 while SA-0082's review was unpushed, and
-    # exit 0 with a spec id reads as "start this".
+def test_next_passes_over_a_child_until_its_parents_review_is_marked_ended():
+    # Stack #251 named a child before its parent's review was pushed. Run 8
+    # (b-4589be) named SA-0102 after some of SA-0101's review commits were pushed.
     parent = _row("A", pr=10)
     parent.pushed_sha = "p" * 40
     child = _row("B", 2, ["A"], pr=None, state=None)
     sibling = _row("C", 2, pr=None, state=None)
-    heads = {"saffron/A": "p" * 40}
+    heads = {"saffron/A": "r" * 40}
+    waits = "B waits on A's review: `reviewed A` marks it ended after its last push"
 
     chosen, note = driver._next_spec(
         [parent, child, sibling], again=False, head_of=heads.get
     )
-    assert chosen is sibling
-    assert note == "B waits on A's review commits: none are pushed yet"
+    assert (chosen, note) == (sibling, waits)
+    chosen, note = driver._next_spec([parent, child], again=False, head_of=heads.get)
+    assert (chosen, note) == (None, waits)
 
+    parent.reviewed_sha = "r" * 40
+    heads["saffron/A"] = "s" * 40
     chosen, note = driver._next_spec([parent, child], again=False, head_of=heads.get)
     assert chosen is None
-    assert note == "B waits on A's review commits: none are pushed yet"
+    assert note == (
+        "B waits on A: its branch is not at the reviewed rrrrrrrr, "
+        "so `reviewed A` again"
+    )
 
     heads["saffron/A"] = "r" * 40
-    chosen, note = driver._next_spec(
-        [parent, child, sibling], again=False, head_of=heads.get
-    )
+    chosen, _note = driver._next_spec([parent, child], again=False, head_of=heads.get)
     assert chosen is child
-    assert note == "B is cut from A, whose review commits are pushed (rrrrrrrr)"
+
+
+def test_reviewed_marks_the_pushed_head_a_child_is_cut_from(loop, monkeypatch, capsys):
+    first, second, *_ = loop.ids
+    driver._save([loop.row(0, state="READY_FOR_REVIEW", pr=10), loop.row(1)])
+    monkeypatch.setattr(driver, "_origin_head", lambda branch: "r" * 40)
+
+    assert driver.cmd_reviewed(argparse.Namespace(spec_id=first)) == 0
+    assert driver._load()[0].reviewed_sha == "r" * 40
+    assert "review ended at rrrrrrrr" in capsys.readouterr().out
+    assert driver.cmd_reviewed(argparse.Namespace(spec_id=second)) == 1
+    assert "no reviewable pull request" in capsys.readouterr().err
 
 
 def test_next_says_a_waiting_child_is_all_that_is_left(monkeypatch, capsys):
@@ -567,7 +629,7 @@ def test_next_says_a_waiting_child_is_all_that_is_left(monkeypatch, capsys):
 
     assert driver.cmd_next(argparse.Namespace(again=False)) == 1
     err = capsys.readouterr().err
-    assert "B waits on A's review commits" in err
+    assert "B waits on A's review" in err
     assert "nothing untouched left" not in err
 
 
@@ -634,6 +696,15 @@ def _no_reconcile(monkeypatch):
     """`next` and `snapshot` reconcile the host's own ledger first, which a
     unit test must never read or write."""
     monkeypatch.setattr(driver, "_reconcile_first", lambda: None)
+    # `snapshot` reads the host's ledger for follow-ups, unless a test points it elsewhere.
+    monkeypatch.setattr(driver, "_follow_up_rows", lambda _known: [], raising=False)
+    monkeypatch.setattr(
+        driver, "_recorded_predecessors", lambda _ids: {}, raising=False
+    )
+
+
+_FOLLOW_UP_ROWS = getattr(driver, "_follow_up_rows", None)
+_RECORDED_PREDECESSORS = getattr(driver, "_recorded_predecessors", None)
 
 
 @pytest.fixture
@@ -972,19 +1043,53 @@ def test_record_calls_an_in_flight_state_a_halt_once_the_cell_has_exited(
     ledger.set_task_state(task_id, "REBUTTING")
     ledger.record_push(task_id, "p" * 40)
     monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (ledger, repo_id, "url"))
-    monkeypatch.setattr(driver, "_cell_running", lambda _spec_id: running)
+    owners = ["4242 saffron cell x.md"] if running else []
+    monkeypatch.setattr(driver, "_owners_running", lambda _spec_id: owners)
 
     assert driver.cmd_record(argparse.Namespace(spec_id=spec_id, all=False)) == 1
     row = driver._load()[0]
     err = capsys.readouterr().err
-    assert row.state is None and row.last_state == "REBUTTING"
+    assert row.undecided_cells == 0 if running else row.undecided_cells == 1
     if running:
-        assert "still running" in err
-        assert row.undecided_cells == 0
+        assert "still run" in err and "4242 saffron cell x.md" in err
+        assert row.last_state is None
     else:
+        assert row.state is None and row.last_state == "REBUTTING"
         assert "halted at REBUTTING" in err and "p" * 12 in err
-        assert "still running" not in err
-        assert row.undecided_cells == 1
+        assert "still run" not in err
+
+
+@pytest.mark.skipif(shutil.which("pgrep") is None, reason="needs pgrep")
+def test_record_refuses_a_task_mid_package_while_its_batch_still_runs(
+    loop, monkeypatch, capsys
+):
+    # b-92fdbe: run 48 recorded SA-0316 mid-PACKAGE as "halted at REBUTTING".
+    # A batch's command line names no spec, so the cell check missed it.
+    from saffron.ledger import Ledger
+
+    spec_id = loop.ids[0]
+    driver._save([loop.row(0)])
+    sha = driver._load()[0].spec_sha
+    ledger = Ledger(loop.root / "ledger.db")
+    repo_id = ledger.upsert_repo("r", "git@github.com:o/r.git", "/mirror", "policy")
+    task_id = ledger.create_task(
+        ledger.create_run(repo_id, "b" * 40), spec_id, sha, "saffron/X", budget_usd=14.0
+    )
+    ledger.set_task_state(task_id, "REBUTTING")
+    monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (ledger, repo_id, "url"))
+    sleep = "import time; time.sleep(30)"
+    batch = [sys.executable, "-c", sleep, "saffron", "batch", "--repo", "."]
+    probe = subprocess.Popen(batch)
+    try:
+        status = driver.cmd_record(argparse.Namespace(spec_id=spec_id, all=False))
+    finally:
+        probe.kill()
+        probe.wait()
+    err = capsys.readouterr().err
+    assert status == 1
+    assert "halted" not in err and f"{probe.pid} " in err
+    row = driver._load()[0]
+    assert row.last_state is None and row.undecided_cells == 0
 
 
 def test_record_names_the_lenses_the_specs_latest_review_ran(loop, monkeypatch, capsys):
@@ -1117,7 +1222,7 @@ def test_record_names_the_lenses_the_specs_latest_review_ran(loop, monkeypatch, 
     fresh = Ledger(loop.root / "ledger.db")
     fresh.set_task_state(task_id, "REBUTTING")
     fresh.close()
-    monkeypatch.setattr(driver, "_cell_running", lambda _spec_id: False)
+    monkeypatch.setattr(driver, "_owners_running", lambda _spec_id: [])
     status, out = record()
     assert status == 1
     assert out.splitlines()[-1] == named.rstrip("\n")
@@ -1125,6 +1230,7 @@ def test_record_names_the_lenses_the_specs_latest_review_ran(loop, monkeypatch, 
 
 @pytest.mark.skipif(shutil.which("pgrep") is None, reason="needs pgrep")
 def test_a_live_saffron_cell_is_found_by_its_spec_id():
+    # Only the probe's own pid is asserted: a live host batch matches every spec.
     probe = subprocess.Popen(
         [
             sys.executable,
@@ -1135,13 +1241,172 @@ def test_a_live_saffron_cell_is_found_by_its_spec_id():
             ".saffron/specs/SA-9999-probe.md",
         ]
     )
+    mine = f"{probe.pid} "
     try:
-        assert driver._cell_running("SA-9999")
-        assert not driver._cell_running("SA-9998")
+        assert any(o.startswith(mine) for o in driver._owners_running("SA-9999"))
+        assert not any(o.startswith(mine) for o in driver._owners_running("SA-9998"))
     finally:
         probe.kill()
         probe.wait()
-    assert not driver._cell_running("SA-9999")
+    assert not any(o.startswith(mine) for o in driver._owners_running("SA-9999"))
+
+
+def test_a_resnapshot_takes_in_a_follow_up_a_finish_ran_and_record_reads_it(
+    loop, monkeypatch, capsys
+):
+    # b-719346: `saffron finish 58` opened #982 for `SA-0323`. `record` said it
+    # was not in the order, and `--add` said it was not new.
+    import hashlib
+
+    from saffron.ledger import Ledger
+
+    parent, follow_up = loop.ids[0], loop.ids[3]
+    source = next((loop.root / ".saffron" / "specs").glob(f"{follow_up}-*.md"))
+    text = source.read_text()
+    source.unlink()  # a finish writes a ran follow-up's text outside the tree
+    driver._save([loop.row(0, state="READY_FOR_REVIEW", pr=10)])
+    loop.scan_returns()
+
+    path = loop.root / "ledger.db"
+    ledger = Ledger(path)
+    repo_id = ledger.upsert_repo("r", "git@github.com:o/r.git", "/mirror", "policy")
+    batch_id = ledger.create_batch(50.0)
+    tasks = {}
+    for spec_id, sha, number in (
+        (parent, driver._load()[0].spec_sha, 10),
+        (follow_up, hashlib.sha256(text.encode()).hexdigest(), 982),
+    ):
+        run_id = ledger.create_run(repo_id, "b" * 40, batch_id)
+        tasks[spec_id] = ledger.create_task(run_id, spec_id, sha, f"saffron/{spec_id}")
+        ledger.set_task_state(tasks[spec_id], "PACKAGE")
+        ledger.set_task_package(
+            tasks[spec_id],
+            "READY_FOR_REVIEW",
+            f"saffron/{spec_id}",
+            "p" * 40,
+            f"https://github.com/o/r/pull/{number}",
+        )
+    ledger.record_spec_text(
+        tasks[follow_up],
+        origin="follow_up",
+        spec_id=follow_up,
+        path=f".saffron/specs/{source.name}",
+        text=text,
+    )
+    ledger.record_stack_layer(
+        tasks[parent], position=1, predecessor_task_id=None, generation=0
+    )
+    ledger.record_stack_layer(
+        tasks[follow_up], position=2, predecessor_task_id=tasks[parent], generation=1
+    )
+    ledger.close()
+    monkeypatch.setattr(
+        driver, "_ledger_and_repo", lambda: (Ledger(path), repo_id, "url")
+    )
+    monkeypatch.setattr(driver, "_follow_up_rows", _FOLLOW_UP_ROWS, raising=False)
+
+    assert driver.cmd_snapshot(argparse.Namespace(force=True, new=False, add=None)) == 0
+    rows = {p.spec_id: p for p in driver._load()}
+    assert (rows[follow_up].branch, rows[follow_up].pr) == (f"saffron/{follow_up}", 982)
+    assert rows[follow_up].depends_on == [parent]
+    capsys.readouterr()
+
+    assert driver.cmd_record(argparse.Namespace(spec_id=follow_up, all=False)) == 0
+    assert capsys.readouterr().out.startswith(f"{follow_up}  READY_FOR_REVIEW  #982")
+
+
+def _stack_batch_ledger(tmp_path, monkeypatch, chain, *, outside=None):
+    """A real ledger holding one stack batch whose layers run in `chain` order.
+    `outside` names an attended cell the batch took as its stack base."""
+    from saffron.ledger import Ledger
+
+    path = tmp_path / "stack-ledger.db"
+    ledger = Ledger(path)
+    repo_id = ledger.upsert_repo("r", "git@github.com:o/r.git", "/mirror", "policy")
+    predecessor = None
+    if outside is not None:
+        run_id = ledger.create_run(repo_id, "b" * 40)
+        predecessor = ledger.create_task(
+            run_id, outside, "s" * 64, f"saffron/{outside}"
+        )
+    batch_id = ledger.create_batch(50.0)
+    for position, spec_id in enumerate(chain, 1):
+        run_id = ledger.create_run(repo_id, "b" * 40, batch_id)
+        task_id = ledger.create_task(run_id, spec_id, "s" * 64, f"saffron/{spec_id}")
+        ledger.record_stack_layer(
+            task_id, position=position, predecessor_task_id=predecessor, generation=0
+        )
+        predecessor = task_id
+    ledger.close()
+    monkeypatch.setattr(
+        driver, "_ledger_and_repo", lambda: (Ledger(path), repo_id, "url")
+    )
+    monkeypatch.setattr(
+        driver, "_recorded_predecessors", _RECORDED_PREDECESSORS, raising=False
+    )
+
+
+def test_stack_follows_the_chain_a_stack_batch_cut_when_depends_on_names_none(
+    tmp_path, monkeypatch
+):
+    # b-f10412: batch 24 cut SA-0261 below SA-0264, against the snapshot's order.
+    _stack_batch_ledger(tmp_path, monkeypatch, ["C", "A", "B"])
+    rows = [_row("A", pr=10), _row("B", pr=11), _row("C", pr=12)]
+
+    order, warnings = driver._stack_order(rows)
+    assert [p.spec_id for p in order] == ["C", "A", "B"]
+    assert warnings == []
+
+
+def test_stack_puts_a_batch_layer_above_the_attended_pull_request_it_stacked_on(
+    tmp_path, monkeypatch
+):
+    # b-3a79a0: the batch stacked SA-0284 on #898, and `stack` put #899 below it.
+    _stack_batch_ledger(tmp_path, monkeypatch, ["SA-0284"], outside="SA-0294")
+    rows = [_row("SA-0284", pr=899), _row("SA-0294", pr=898)]
+
+    order, warnings = driver._stack_order(rows)
+    assert [p.pr for p in order] == [898, 899]
+    assert warnings == []
+
+
+def test_stack_names_a_recorded_predecessor_that_disagrees_with_depends_on(
+    tmp_path, monkeypatch
+):
+    _stack_batch_ledger(tmp_path, monkeypatch, ["A", "C", "B"])
+    rows = [_row("A", pr=10), _row("B", 2, ["A"], pr=11), _row("C", pr=12)]
+
+    order, warnings = driver._stack_order(rows)
+    assert [p.spec_id for p in order] == ["A", "C", "B"]
+    assert warnings == [
+        "B was cut from C, not its `depends_on` parent A; the stack follows the batch"
+    ]
+
+
+@pytest.mark.parametrize("recorded", [False, True])
+def test_status_warns_against_a_push_to_a_layer_a_running_child_builds_on(
+    recorded, tmp_path, monkeypatch, capsys
+):
+    # b-3a79a0: #898's review commits were pushed while SA-0284's cell ran on it.
+    lower = _row("A", pr=10)
+    child = _row("B", 2, [] if recorded else ["A"], pr=None, state=None)
+    idle = _row("C", 2, ["A"], pr=None, state=None)
+    if recorded:
+        _stack_batch_ledger(tmp_path, monkeypatch, ["A", "B"])
+    (order := tmp_path / "order.json").write_text("[]")
+    monkeypatch.setattr(driver, "ORDER", order)
+    monkeypatch.setattr(driver, "_load", lambda: [lower, child, idle])
+    monkeypatch.setattr(driver, "_stale", lambda rows: [])
+    monkeypatch.setattr(driver, "_pr_state", lambda _number: "OPEN")
+    running = {"B": ["4242 saffron batch --repo . --stack"]}
+    monkeypatch.setattr(driver, "_owners_running", lambda s: running.get(s, []))
+
+    assert driver.cmd_status(argparse.Namespace()) == 0
+    warnings = [x for x in capsys.readouterr().out.splitlines() if "warning" in x]
+    assert warnings == [
+        "warning: hold any push to saffron/A (#10): B runs on its packaged head "
+        "(4242 saffron batch --repo . --stack)"
+    ]
 
 
 def test_a_resnapshot_keeps_what_the_loop_recorded(loop):
@@ -1597,6 +1862,27 @@ def test_an_abnormal_ending_reaches_the_row_however_its_subtype_was_spelled(
     ledger.close()
 
     assert "REVIEWING success (api_error)" in cell.endings
+
+
+@pytest.mark.parametrize("phase", ["SPEC_REVIEW", "SPEC_WRITING"])
+def test_history_peak_reads_only_the_attempts_max_turns_bounds(tmp_path, phase):
+    # b-937778: a 150-turn spec review read as the cell's peak, though the
+    # spec's `max_turns` never bounds it. b-60ff2e fixed the stack page.
+    ledger, repo_id = _ledger_with_one_cell(tmp_path)
+    task_id = ledger.tasks_by_spec_id(repo_id, "SA-0001")[-1]["task_id"]
+    ledger.close_attempt(
+        ledger.open_attempt(task_id, phase),
+        session_id=None,
+        subtype="error_max_turns",
+        terminal_reason="max_turns",
+        num_turns=150,
+        cost_usd_est=2.0,
+    )
+    (cell,) = driver._past_cells(ledger, repo_id, {"SA-0001": _spec("SA-0001")})
+    ledger.close()
+
+    assert cell.peak_turns == 45
+    assert cell.peak_cut_off is False
 
 
 def test_a_peak_that_stopped_on_budget_is_not_called_a_turn_floor(tmp_path):
@@ -2203,7 +2489,7 @@ def test_a_linked_stack_is_marked_ready_only_once_every_base_reads_back(
     ran = []
     monkeypatch.setattr(driver, "_load", lambda: rows)
     monkeypatch.setattr(driver, "_stack_order", lambda _rows: (rows, []))
-    monkeypatch.setattr(driver, "_merge_conflicts", lambda _a, _b: [])
+    monkeypatch.setattr(driver, "_stack_conflicts", lambda _heads, **_k: [])
     monkeypatch.setattr(driver, "_trunk", lambda: "origin/main")
     monkeypatch.setattr(
         driver.subprocess,
@@ -2235,7 +2521,7 @@ def test_the_step_5_pull_request_is_linked_on_top_and_marked_ready(loop, monkeyp
     ran = []
     monkeypatch.setattr(driver, "_load", lambda: rows)
     monkeypatch.setattr(driver, "_stack_order", lambda _rows: (rows, []))
-    monkeypatch.setattr(driver, "_merge_conflicts", lambda _a, _b: [])
+    monkeypatch.setattr(driver, "_stack_conflicts", lambda _heads, **_k: [])
     monkeypatch.setattr(driver, "_trunk", lambda: "origin/main")
     monkeypatch.setattr(
         driver.subprocess,
@@ -2258,6 +2544,62 @@ def test_the_step_5_pull_request_is_linked_on_top_and_marked_ready(loop, monkeyp
     fields[(12, "baseRefName")] = "main"
     assert driver.cmd_stack(argparse.Namespace(execute=True, top=12)) == 1
     assert not [c for c in ran if c[:3] == ["gh", "pr", "ready"]]
+
+
+def test_an_exhausted_task_with_a_pull_request_is_a_layer_in_the_middle(
+    loop, monkeypatch, capsys
+):
+    # b-2247dd: SA-0204 ended `EXHAUSTED` with draft #678, and `stack`, `size`
+    # and `rebase` each left it out, so the delegate linked and measured it by hand.
+    bottom, middle, top = loop.ids[:3]
+    driver._save(
+        [
+            loop.row(0, state="READY_FOR_REVIEW", pr=10),
+            loop.row(1, state="EXHAUSTED", pr=11, depends_on=[bottom]),
+            loop.row(2, state="READY_FOR_REVIEW", pr=12, depends_on=[middle]),
+        ]
+    )
+    order, warnings = driver._stack_order(driver._load())
+    assert [p.spec_id for p in order] == [bottom, middle, top]
+    assert warnings == []
+
+    from saffron.repos import policy
+
+    measured = {}
+    monkeypatch.setattr(driver, "_known_specs", lambda: {})
+    monkeypatch.setattr(driver, "_trunk", lambda: "origin/main")
+    monkeypatch.setattr(
+        driver,
+        "_own_base",
+        lambda upper, below, _trunk: measured.setdefault(upper, below)[0],
+    )
+    monkeypatch.setattr(
+        policy,
+        "load_policy",
+        lambda _root: (SimpleNamespace(integrity=SimpleNamespace(test_paths=[])), "s"),
+    )
+    monkeypatch.setattr(
+        driver, "_size", lambda *_a, **_k: SimpleNamespace(status="pass", summary="ok")
+    )
+    for spec_id in (middle, top):
+        assert driver.cmd_size(argparse.Namespace(spec_id=spec_id)) == 0
+    assert measured[f"origin/saffron/{top}"] == [
+        f"origin/saffron/{bottom}",
+        f"origin/saffron/{middle}",
+    ]
+
+    chained = []
+    monkeypatch.setattr(
+        driver,
+        "_layers",
+        lambda branches, _trunk: (
+            chained.extend(branches)
+            or [driver.Layer(b, "t", "f", "o") for b in branches]
+        ),
+    )
+    monkeypatch.setattr(driver, "_git", lambda *_a, **_k: "not the fork")
+    assert driver.cmd_rebase(argparse.Namespace(execute=False)) == 0
+    assert chained == [f"saffron/{s}" for s in (bottom, middle, top)]
 
 
 def test_a_held_spec_is_passed_over_until_released(loop):
@@ -2616,6 +2958,24 @@ def _cite_tree(monkeypatch, root):
     spec = specs_dir / "SA-0001-s.md"
     spec.write_text("Reads `mod.py:2`.\n")
     return spec
+
+
+@pytest.mark.parametrize("retired", [False, True])
+def test_cite_takes_a_spec_id_as_well_as_a_path(monkeypatch, tmp_path, capsys, retired):
+    # b-b1a7d4: `driver.py cite SA-0152` failed with "no such spec".
+    spec = _cite_tree(monkeypatch, tmp_path)
+    if retired:
+        (spec.parent / "done").mkdir()
+        spec = spec.rename(spec.parent / "done" / spec.name)
+    seen = []
+    monkeypatch.setattr(
+        driver, "_cite_defects", lambda path, ref: seen.append((path, ref)) or (1, [])
+    )
+
+    assert driver.cmd_cite(SimpleNamespace(spec_path="SA-0001", base="b")) == 0
+    assert seen == [(spec, "b")]
+    assert driver.cmd_cite(SimpleNamespace(spec_path="SA-0002", base="b")) == 1
+    assert "no such spec: SA-0002" in capsys.readouterr().err
 
 
 def test_cite_and_check_report_what_the_batchs_citation_check_reports(
@@ -3799,3 +4159,109 @@ def test_subject_concerns_read_a_mutant_from_the_ref_not_the_spec(tmp_path):
     assert filled.acceptance[0].mutant.file == "elsewhere.py"
     other = _spec("SA-0010")
     assert driver._with_ref_mutants(other, mirror) is other
+
+
+def test_a_ref_mutant_a_claim_discloses_is_a_concern_not_a_raise(tmp_path):
+    # `attach_mutants` refuses a disclosed mutant with `DisclosedMutantError`,
+    # a `SpecError` that is no `MutantsError`, so `check` raised.
+    from saffron.intake import Criterion
+    from tests.test_mutants import _bare, _commit
+
+    mirror = _bare(tmp_path)
+    mutants = "t.py::t: {file: f0.py, find: return early, replace: pass}\n"
+    commit = _commit(mirror, {"SA-0009.yaml": mutants}, "mutants")
+    subprocess.run(
+        ["git", "-C", str(mirror), "update-ref", "refs/saffron/mutants", commit],
+        check=True,
+    )
+    target = _spec("SA-0009")
+    target.acceptance_criteria = []
+    target.acceptance = [Criterion(claim="it must return early", witness="t.py::t")]
+
+    filled = driver._with_ref_mutants(target, mirror)
+    assert isinstance(filled, str), filled
+    assert filled.startswith("concern: SA-0009's mutants on the ref cannot be read")
+
+
+def test_the_driver_says_verdict_only_for_a_verdict_it_names_the_owner_of():
+    # b-6a9707: CONTEXT.md keeps "verdict" for the critic's answer at REBUT, and
+    # no gate scans this file's vocabulary. A gate result or probe outcome fails here.
+    owned = ("turns/verdict.md", "REBUT's verdict", "grade.verdict")
+    text = (REPO / ".claude/skills/run-saffron-spec-loop/driver.py").read_text()
+    stray = [
+        f"driver.py:{n}: {line.strip()}"
+        for n, line in enumerate(text.splitlines(), 1)
+        if "verdict" in line.lower() and not any(o in line for o in owned)
+    ]
+    assert stray == []
+
+
+def test_status_line_prints_the_queue_on_one_line_without_github(
+    tmp_path, monkeypatch, capsys
+):
+    # b-a7e315: the operator's status bar parsed the status table, and a column change broke it.
+    from saffron.events import EventLog, PhaseStart
+
+    ready, running, quiet = _row("A", pr=10), _row("B", pr=None, state=None), _row("C")
+    quiet.state, quiet.pr = None, None
+    held = _row("D", pr=None, state=None)
+    held.held = "#99"
+    (order := tmp_path / "order.json").write_text("[]")
+    monkeypatch.setattr(driver, "ORDER", order)
+    monkeypatch.setattr(driver, "JEV_ROOT", tmp_path)
+    monkeypatch.setattr(driver, "_load", lambda: [ready, running, quiet, held])
+    monkeypatch.setattr(driver, "_pr_state", lambda _n: pytest.fail("read GitHub"))
+    EventLog(tmp_path / "v0" / "B").append(
+        PhaseStart(1.0, "B", "IMPLEMENT", "IMPLEMENT")
+    )
+    EventLog(tmp_path / "v0" / "C").append(PhaseStart(1.0, "C", "REVIEW", "REVIEW"))
+    os.utime(tmp_path / "v0" / "C" / "events.jsonl", (1.0, 1.0))
+
+    assert driver.cmd_status(argparse.Namespace(line=True)) == 0
+    assert capsys.readouterr().out == (
+        "loop: 1/4 reviewable · A READY_FOR_REVIEW #10 · B running IMPLEMENT"
+        " · C pending · 1 held\n"
+    )
+
+
+def test_status_line_prints_nothing_outside_a_loop(tmp_path, monkeypatch, capsys):
+    _no_order(tmp_path, monkeypatch)
+
+    assert driver.cmd_status(argparse.Namespace(line=True)) == 0
+    assert capsys.readouterr() == ("", "")
+
+
+def test_stack_names_a_leftover_gh_stack_rebase_and_its_age_before_linking(
+    loop, monkeypatch, capsys
+):
+    # b-d3f977: run 19's rebase state made run 48's `gh stack link` exit 7 with no cause named.
+    rows = [
+        loop.row(0, state="READY_FOR_REVIEW", pr=10),
+        loop.row(1, state="READY_FOR_REVIEW", pr=11),
+    ]
+    ran = []
+    monkeypatch.setattr(driver, "_load", lambda: rows)
+    monkeypatch.setattr(driver, "_stack_order", lambda _rows: (rows, []))
+    monkeypatch.setattr(driver, "_stack_conflicts", lambda _heads, **_k: [])
+    monkeypatch.setattr(
+        driver.subprocess,
+        "run",
+        lambda cmd, **_k: ran.append(cmd) or subprocess.CompletedProcess(cmd, 0),
+    )
+    # A worktree's `.git` is a file, and the state sits in the shared git directory.
+    common = loop.root / "main-checkout" / ".git"
+    own = common / "worktrees" / "wt"
+    own.mkdir(parents=True)
+    (own / "commondir").write_text("../..\n")
+    (loop.root / ".git").write_text(f"gitdir: {own}\n")
+    state = common / "gh-stack-rebase-state"
+    state.write_text("{}")
+    os.utime(state, (1_790_000_000, 1_790_000_000))
+
+    assert driver.cmd_stack(argparse.Namespace(execute=False, top=None)) == 0
+    assert "warning: " in capsys.readouterr().out
+    assert driver.cmd_stack(argparse.Namespace(execute=True, top=None)) == 1
+    err = capsys.readouterr().err
+    assert f"{state.resolve()} is a gh stack rebase left on 2026-09-21" in err
+    assert "day(s) old" in err
+    assert not [c for c in ran if c[:3] == ["gh", "stack", "link"]]
