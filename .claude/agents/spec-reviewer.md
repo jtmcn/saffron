@@ -145,6 +145,10 @@ trivial.
    tools (git 2.39.5 in `saffron/cell-base:python` on 2026-09-18). The host
    runs its own. Say where the spec measured it.
 
+   Every symbol the spec names must exist at `base`, such as a helper it tells
+   the cell to reuse. Find each one with `git grep` at `base`. A missing one is
+   a `build` blocker (b-cd41ac).
+
 ## Report
 
 1. **Findings**, most severe first, one bullet each: severity; file:line; the

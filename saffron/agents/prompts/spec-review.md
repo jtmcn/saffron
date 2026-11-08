@@ -38,6 +38,8 @@ measured carries `witness`.
   named below.
 - Is every sentence the spec states about the current code true at this
   snapshot.
+- Does every function, test helper or other name the spec tells the cell
+  to reuse exist at this snapshot. A missing one is a `build` blocker.
 
 ## What the repo declares
 

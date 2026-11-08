@@ -565,7 +565,7 @@ sorts a reviewer's notes, and its stop signal adds nothing over a blocker count.
 **b-817ef7**, **b-80cad7**, **b-37de22**, **b-c962c7**, **b-30fed0**, then
 **b-e8f092**. Each clears one area's hits, and together they bring the gate to zero.
 
-**Placed 2026-10-07**, from the spec loop's run 30: **b-cd41ac**, **b-7338e7**,
+**Placed 2026-10-07**, from the spec loop's run 30: ~~**b-cd41ac**~~, **b-7338e7**,
 then ~~**b-d22c5a**~~. A spec named helpers absent at its base. Two repo rows on one
 mirror prune each other. The docs name no `saffron migrate`.
 
