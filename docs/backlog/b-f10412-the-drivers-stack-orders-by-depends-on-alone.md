@@ -1,9 +1,10 @@
 ---
 id: b-f10412
 title: "The loop driver's `stack` orders layers by `depends_on` alone, so it misreads a stack batch's chain"
-status: open
+status: done
 tier: 2
 filed: 2026-10-09
+closed: 2026-11-08
 by_hand: true
 specs: []
 prs: [780, 788, 790]
@@ -46,3 +47,4 @@ batch whose `depends_on` names none of its predecessors.
   batch's own bases.
 - 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
   `.claude/`, and `SA-0279` refuses any spec that touches that path.
+- 2026-11-08: done by hand.

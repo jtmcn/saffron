@@ -246,6 +246,10 @@ puts it back.
    uv run .claude/skills/run-saffron-spec-loop/driver.py stack             # dry run
    ```
 
+   Read `driver.py status` before the push. A `hold any push to` warning names
+   a layer that a running cell or batch builds on. Hold that push until the
+   child's process exits (b-3a79a0).
+
    `size` measures what was pushed, so it runs after the push. A branch over
    its ceiling is usually yours to accept: note the overrun in the PR body and
    carry on. The operator set this on 2026-10-14, in spec loop run 39. Ask only when the
