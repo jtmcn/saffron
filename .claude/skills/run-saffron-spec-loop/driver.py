@@ -607,12 +607,15 @@ def _follow_up_rows(known: set[str]) -> list[OrderRow]:
     return list(found.values())
 
 
-def _follow_up_parent(task_id: int, layers: Sequence) -> str | None:
+def _follow_up_parent(
+    task_id: int, layers: Sequence, keys: dict[str, str] | None = None
+) -> str | None:
     """The layer a follow-up was cut from: its recorded predecessor when it
-    became a layer, else the top layer recorded before it ran."""
+    became a layer, else the top layer recorded before it ran. `keys` names
+    tasks outside the batch, such as a stack base."""
     own = next((x for x in layers if x["task_id"] == task_id), None)
     if own is not None:
-        keys = {x["task_key"]: x["spec_id"] for x in layers}
+        keys = (keys or {}) | {x["task_key"]: x["spec_id"] for x in layers}
         return keys.get(own["predecessor_key"])
     # Follow-ups run in task order, after every layer of the order's own pass.
     below = [x for x in layers if x["generation"] == 0 or x["task_id"] < task_id]
@@ -622,18 +625,51 @@ def _follow_up_parent(task_id: int, layers: Sequence) -> str | None:
 # ------------------------------------------------------------ the stack
 
 
+def _recorded_predecessors(ids: set[str]) -> dict[str, str | None]:
+    """Each of `ids` a stack batch recorded as a layer, mapped to the spec its
+    cell was cut from, or None for the trunk. The newest batch wins (b-f10412)."""
+    ledger, repo_id, _url = _ledger_and_repo()
+    found: dict[str, str | None] = {}
+    try:
+        if repo_id is None:
+            return {}
+        keys = {
+            key: spec_id
+            for spec_id in ids
+            for t in ledger.tasks_by_spec_id(repo_id, spec_id)
+            if (key := ledger.record_key(t["task_id"]))
+        }
+        for batch_id in range(1, ledger.latest_batch_id() + 1):
+            layers = ledger.stack_layers(batch_id)
+            for x in layers:
+                if x["spec_id"] in ids:
+                    found[x["spec_id"]] = _follow_up_parent(x["task_id"], layers, keys)
+    finally:
+        ledger.close()
+    return found
+
+
 def _stack_order(rows: list[OrderRow]) -> tuple[list[OrderRow], list[str]]:
     """The stack's pull requests, bottom to top, each child directly above
     its parent. Snapshot order alone put a child above an unrelated sibling,
-    and the child's PR then showed its parent's changes. A stack is a line, so
+    and the child's PR then showed its parent's changes. A parent is the layer
+    a batch cut the child from, else its `depends_on`. A stack is a line, so
     a parent with two children, or a child whose parent is not in it, is said
     rather than hidden."""
     ready = [p for p in rows if p.layer]
     ids = {p.spec_id for p in ready}
     by_id = {p.spec_id: p for p in rows}
+    recorded = _recorded_predecessors(ids)
+
+    def declared(p: OrderRow) -> str | None:
+        return next((d for d in p.depends_on if d in ids), None)
 
     def parent(p: OrderRow) -> str | None:
-        return next((d for d in p.depends_on if d in ids), None)
+        # The branch a batch cut a layer from outranks what its spec declares.
+        if p.spec_id in recorded:
+            pred = recorded[p.spec_id]
+            return pred if pred in ids else None
+        return declared(p)
 
     order: list[OrderRow] = []
     seen: set[str] = set()
@@ -654,6 +690,14 @@ def _stack_order(rows: list[OrderRow]) -> tuple[list[OrderRow], list[str]]:
         visit(p)
 
     warnings = []
+    for p in order:
+        want = declared(p)
+        if p.spec_id in recorded and want is not None and want != parent(p):
+            cut = parent(p) or "the trunk"
+            warnings.append(
+                f"{p.spec_id} was cut from {cut}, not its `depends_on` parent "
+                f"{want}; the stack follows the batch"
+            )
     for lower, upper in zip(order, order[1:], strict=False):
         want = parent(upper)
         if want is not None and want != lower.spec_id:
@@ -666,7 +710,7 @@ def _stack_order(rows: list[OrderRow]) -> tuple[list[OrderRow], list[str]]:
             )
     for i, p in enumerate(order):
         below = order[i - 1].branch if i else "the trunk"
-        for dep in p.depends_on:
+        for dep in [] if p.spec_id in recorded else p.depends_on:
             if dep in by_id and dep not in ids:
                 warnings.append(
                     f"{p.spec_id}'s parent {dep} is not in the stack; `link` "
@@ -1899,6 +1943,30 @@ def _live_phase(spec_id: str) -> str | None:
     return phase
 
 
+def _push_holds(rows: list[OrderRow]) -> list[str]:
+    """Each layer a live cell or batch builds on, which a push must wait for
+    (b-3a79a0). The child's base is its recorded predecessor, else `depends_on`."""
+    layers = {p.spec_id: p for p in rows if p.layer}
+    pending = [p for p in rows if p.pending]
+    if not layers or not pending:
+        return []
+    recorded = _recorded_predecessors({p.spec_id for p in pending})
+    holds = []
+    for child in pending:
+        base = (
+            recorded[child.spec_id]
+            if child.spec_id in recorded
+            else next((d for d in child.depends_on if d in layers), None)
+        )
+        if base in layers and (owners := _owners_running(child.spec_id)):
+            lower = layers[base]
+            holds.append(
+                f"hold any push to {lower.branch} (#{lower.pr}): {child.spec_id} "
+                f"runs on its packaged head ({owners[0]})"
+            )
+    return holds
+
+
 def _status_line(rows: list[OrderRow]) -> str:
     """One line for a status bar. It reads no GitHub and no git, so it stays fast."""
     parts = [f"{sum(p.reviewable for p in rows)}/{len(rows)} reviewable"]
@@ -1970,6 +2038,8 @@ def cmd_status(args) -> int:
                 f"  {p.spec_id}: {pr} stays in the stack; it is not re-run until "
                 "the pull request closes or the edit is reverted"
             )
+    for hold in _push_holds(rows):
+        print(f"\nwarning: {hold}")
     if reasons := _stale(rows):
         print("\nstale — `snapshot --force` before the next cell:")
         for reason in reasons:

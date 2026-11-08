@@ -698,9 +698,13 @@ def _no_reconcile(monkeypatch):
     monkeypatch.setattr(driver, "_reconcile_first", lambda: None)
     # `snapshot` reads the host's ledger for follow-ups, unless a test points it elsewhere.
     monkeypatch.setattr(driver, "_follow_up_rows", lambda _known: [], raising=False)
+    monkeypatch.setattr(
+        driver, "_recorded_predecessors", lambda _ids: {}, raising=False
+    )
 
 
 _FOLLOW_UP_ROWS = getattr(driver, "_follow_up_rows", None)
+_RECORDED_PREDECESSORS = getattr(driver, "_recorded_predecessors", None)
 
 
 @pytest.fixture
@@ -1309,6 +1313,100 @@ def test_a_resnapshot_takes_in_a_follow_up_a_finish_ran_and_record_reads_it(
 
     assert driver.cmd_record(argparse.Namespace(spec_id=follow_up, all=False)) == 0
     assert capsys.readouterr().out.startswith(f"{follow_up}  READY_FOR_REVIEW  #982")
+
+
+def _stack_batch_ledger(tmp_path, monkeypatch, chain, *, outside=None):
+    """A real ledger holding one stack batch whose layers run in `chain` order.
+    `outside` names an attended cell the batch took as its stack base."""
+    from saffron.ledger import Ledger
+
+    path = tmp_path / "stack-ledger.db"
+    ledger = Ledger(path)
+    repo_id = ledger.upsert_repo("r", "git@github.com:o/r.git", "/mirror", "policy")
+    predecessor = None
+    if outside is not None:
+        run_id = ledger.create_run(repo_id, "b" * 40)
+        predecessor = ledger.create_task(
+            run_id, outside, "s" * 64, f"saffron/{outside}"
+        )
+    batch_id = ledger.create_batch(50.0)
+    for position, spec_id in enumerate(chain, 1):
+        run_id = ledger.create_run(repo_id, "b" * 40, batch_id)
+        task_id = ledger.create_task(run_id, spec_id, "s" * 64, f"saffron/{spec_id}")
+        ledger.record_stack_layer(
+            task_id, position=position, predecessor_task_id=predecessor, generation=0
+        )
+        predecessor = task_id
+    ledger.close()
+    monkeypatch.setattr(
+        driver, "_ledger_and_repo", lambda: (Ledger(path), repo_id, "url")
+    )
+    monkeypatch.setattr(
+        driver, "_recorded_predecessors", _RECORDED_PREDECESSORS, raising=False
+    )
+
+
+def test_stack_follows_the_chain_a_stack_batch_cut_when_depends_on_names_none(
+    tmp_path, monkeypatch
+):
+    # b-f10412: batch 24 cut SA-0261 below SA-0264, against the snapshot's order.
+    _stack_batch_ledger(tmp_path, monkeypatch, ["C", "A", "B"])
+    rows = [_row("A", pr=10), _row("B", pr=11), _row("C", pr=12)]
+
+    order, warnings = driver._stack_order(rows)
+    assert [p.spec_id for p in order] == ["C", "A", "B"]
+    assert warnings == []
+
+
+def test_stack_puts_a_batch_layer_above_the_attended_pull_request_it_stacked_on(
+    tmp_path, monkeypatch
+):
+    # b-3a79a0: the batch stacked SA-0284 on #898, and `stack` put #899 below it.
+    _stack_batch_ledger(tmp_path, monkeypatch, ["SA-0284"], outside="SA-0294")
+    rows = [_row("SA-0284", pr=899), _row("SA-0294", pr=898)]
+
+    order, warnings = driver._stack_order(rows)
+    assert [p.pr for p in order] == [898, 899]
+    assert warnings == []
+
+
+def test_stack_names_a_recorded_predecessor_that_disagrees_with_depends_on(
+    tmp_path, monkeypatch
+):
+    _stack_batch_ledger(tmp_path, monkeypatch, ["A", "C", "B"])
+    rows = [_row("A", pr=10), _row("B", 2, ["A"], pr=11), _row("C", pr=12)]
+
+    order, warnings = driver._stack_order(rows)
+    assert [p.spec_id for p in order] == ["A", "C", "B"]
+    assert warnings == [
+        "B was cut from C, not its `depends_on` parent A; the stack follows the batch"
+    ]
+
+
+@pytest.mark.parametrize("recorded", [False, True])
+def test_status_warns_against_a_push_to_a_layer_a_running_child_builds_on(
+    recorded, tmp_path, monkeypatch, capsys
+):
+    # b-3a79a0: #898's review commits were pushed while SA-0284's cell ran on it.
+    lower = _row("A", pr=10)
+    child = _row("B", 2, [] if recorded else ["A"], pr=None, state=None)
+    idle = _row("C", 2, ["A"], pr=None, state=None)
+    if recorded:
+        _stack_batch_ledger(tmp_path, monkeypatch, ["A", "B"])
+    (order := tmp_path / "order.json").write_text("[]")
+    monkeypatch.setattr(driver, "ORDER", order)
+    monkeypatch.setattr(driver, "_load", lambda: [lower, child, idle])
+    monkeypatch.setattr(driver, "_stale", lambda rows: [])
+    monkeypatch.setattr(driver, "_pr_state", lambda _number: "OPEN")
+    running = {"B": ["4242 saffron batch --repo . --stack"]}
+    monkeypatch.setattr(driver, "_owners_running", lambda s: running.get(s, []))
+
+    assert driver.cmd_status(argparse.Namespace()) == 0
+    warnings = [x for x in capsys.readouterr().out.splitlines() if "warning" in x]
+    assert warnings == [
+        "warning: hold any push to saffron/A (#10): B runs on its packaged head "
+        "(4242 saffron batch --repo . --stack)"
+    ]
 
 
 def test_a_resnapshot_keeps_what_the_loop_recorded(loop):
