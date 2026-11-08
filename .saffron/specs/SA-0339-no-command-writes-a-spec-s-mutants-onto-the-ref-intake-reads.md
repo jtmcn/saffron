@@ -204,7 +204,8 @@ Build `saffron mutant <spec id> --from <file.yaml> [--repo <path>]`:
    to equal the argument. Read the `--from` file's bytes. Parse its text
    with `parse_mutants`, `where` naming the `--from` path. Each mutant's `find` must occur exactly once in its
    `file` as committed at `HEAD`. Then call `attach_mutants` on the spec and
-   the parsed mutants, so the command refuses what `run_task` refuses.
+   the parsed mutants, and `refuse_inline_mutants` on the spec, so the
+   command refuses what `run_task` refuses.
 2. **Fetch, then write.** Run `git fetch --prune origin` with the refspec
    `+refs/saffron/mutants*:refs/saffron/mutants*`. Origin's copy then
    replaces the local one, and a local copy origin lacks is deleted. Read
@@ -219,7 +220,8 @@ Build `saffron mutant <spec id> --from <file.yaml> [--repo <path>]`:
    with `update-ref -d` given the new one. Print the new commit on success.
 4. **Exit codes.** 0 for a write that reached origin. 1 for every refusal in
    step 1, a lost local swap, or a push origin refuses as a non-fast-forward.
-   2 for any other git failure.
+   2 for any other git failure. A rollback that fails, a lost swap included,
+   exits 2 and names both commits. It is never read as a race.
 5. **No terminal prompt.** Every git process the command starts carries
    `GIT_TERMINAL_PROMPT=0` in its environment. That includes the `HEAD` read.
 6. **Docs.** Add `mutant` to the list in `saffron/cli.py`'s module
@@ -231,8 +233,10 @@ Build `saffron mutant <spec id> --from <file.yaml> [--repo <path>]`:
 - Moving any existing spec's inline mutants onto the ref. That is `SA-0338`'s,
   or the operator's by hand.
 - `GIT_SSH_COMMAND` with `BatchMode`. Item b-0add4c names it as unverified.
-- A failed rollback after a failed push. It exits 2 with git's reason, and
-  no witness drives it.
+- A failed rollback after a failed push. Step 4 gives its exit, and no
+  witness drives it.
+- A local-only ref the fetch's `--prune` deletes. With the rollback in place,
+  only a hand edit leaves one, and origin holds every pushed write.
 - `RefsRecord`, `saffron/repos/` and the rest of `saffron/record/`. Reuse
   their approach, never their functions.
 - `CLAUDE.md`. It runs past its line budget, and `README.md` carries the
@@ -267,13 +271,18 @@ agreed. A lost `update-ref` swap exits 128 with one of three phrases:
 
 A held lock file exits 128 with `Unable to create` and `File exists`. A
 missing object exits 128 with `nonexistent object`. Read those and any other
-`update-ref` failure as exit 2. A non-fast-forward push writes `[rejected]`
+`update-ref` failure as exit 2. A phrase alone does not make a race, since a
+broken loose ref can print `unable to resolve reference` too. After a failed
+`update-ref`, re-read the ref with `git rev-parse --verify -q`. Exit 1 only
+when a phrase matched and the ref now differs from the old value given. A non-fast-forward push writes `[rejected]`
 and exits 1. A fetch of the glob with `--prune` exits 0 when origin lacks the
 ref, and deletes a local copy. Without the `+`, a diverged local copy fails
 that fetch with `[rejected]`. An unreachable or missing origin fails the
 fetch with exit 128.
 
-**The witnesses.** One new file, `tests/test_mutant_command.py`. Drive the
+**The witnesses.** One new file, `tests/test_mutant_command.py`. The prompt
+witness clears any inherited `GIT_TERMINAL_PROMPT` with `monkeypatch.delenv`.
+The lock case creates `.git/refs/saffron/` before it writes the lock file. Drive the
 command through `saffron.cli.main`, with `--home` under `tmp_path`. Import
 anything `SA-0338` or this spec adds inside the test function, never at
 module scope. A module-scope import of a new name makes the reverted run a
