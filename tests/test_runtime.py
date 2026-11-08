@@ -980,11 +980,15 @@ def test_a_listing_that_could_not_be_read_adds_no_detail_and_still_raises(monkey
 
 
 def _alive(pid: int) -> bool:
+    # A cell's PID 1 is `sleep infinity`, which reaps nothing, so a killed child stays a zombie.
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
-    return True
+    stat = subprocess.run(
+        ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True
+    )
+    return not stat.stdout.strip().startswith("Z")
 
 
 def test_a_runtime_that_forks_leaves_no_child_once_its_timeout_fires(tmp_path):
