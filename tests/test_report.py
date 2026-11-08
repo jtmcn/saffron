@@ -769,6 +769,12 @@ def test_unread_and_unanswered_blockers_rank_with_sustained_and_render_apart():
         assert sort_key(unread_line)[0] < sort_key(elevated)[0], state
         assert sort_key(unanswered_line)[0] < sort_key(elevated)[0], state
 
+    # Within level 3 the two tiebreak after `unkept`, `unread` first.
+    assert sort_key(line(spec_id="A", unread=1)) < sort_key(
+        line(spec_id="B", unanswered=1)
+    )
+    assert sort_key(line(spec_id="A", unread=1)) < sort_key(line(spec_id="B"))
+
     # The closing tag pins the cell's exact text, since "1 unread blocker"
     # is itself a substring of the plural "1 unread blockers".
     rendered = render_index([line(unread=1, unanswered=2, concerns=0)], header={})

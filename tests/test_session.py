@@ -10749,6 +10749,15 @@ def test_a_rebut_carries_its_unread_and_unanswered_counts_past_a_pool_cut(
     assert green_outcome.rebut_result is None
     assert (green_outcome.unread, green_outcome.unanswered) == (0, 0)
 
+    # Every early exit builds its outcome naming neither field, so the
+    # dataclass default is what those rows carry.
+    import dataclasses
+
+    from saffron.cell.session import CellOutcome
+
+    defaults = {f.name: f.default for f in dataclasses.fields(CellOutcome)}
+    assert (defaults["unread"], defaults["unanswered"]) == (0, 0)
+
 
 def test_the_verdict_session_carries_claude_md_at_the_base_commit(
     monkeypatch, tmp_path
