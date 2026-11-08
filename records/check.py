@@ -1,7 +1,7 @@
 """One pure function per integrity rule, each returning the violations it
-found. The live test asserts the list is empty; the unit tests assert each
-function finds the one defect its broken fixture plants. A rule a tool outside
-`tests/` also runs lives in `records/rules.py` instead."""
+found. The live test asserts the list is empty. The unit tests assert each
+function finds the one defect its broken fixture plants. A rule the driver also
+runs lives in `records/rules.py` instead."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from records.rules import (
     spec_paths,
 )
 
-# Items 1–177 keep their numbers (`records/kinds.py`); `check_ids` refuses a later number.
+# Items 1–177 keep their numbers (`records/kinds.py`). `check_ids` refuses a later number.
 LAST_NUMBERED = 177
 
 # Where a live `item N` is a promise someone can follow today. Not
@@ -70,7 +70,7 @@ def check_ids(records: list[Record]) -> list[Violation]:
                 )
             )
         if isinstance(r.model.id, str) and as_backlog(r).filed is None:
-            # A random id carries no order; `filed:` is what lists it.
+            # A random id carries no order. `filed:` is what lists it.
             out.append(Violation(r.path, "filed", "a random id needs `filed:`"))
     present = {n for n in counts if isinstance(n, int)}
     if present:
@@ -308,7 +308,7 @@ def check_links(records: list[Record]) -> list[Violation]:
 
 
 def check_spec_ids_unique(root: Path) -> list[Violation]:
-    """`spec_files` keeps one file per id; a second one would vanish from it."""
+    """`spec_files` keeps one file per id. A second one would vanish from it."""
     by_id: dict[str, list[Path]] = {}
     for spec_id, path in spec_paths(root):
         by_id.setdefault(spec_id, []).append(path)
@@ -363,7 +363,7 @@ def _walk(root: Path, surfaces: tuple[str, ...], skip: tuple[Path, ...]) -> list
 
 
 def _citing_files(root: Path) -> list[Path]:
-    # tests/records/ quotes citations as data, not promises — never scanned.
+    # tests/records/ quotes citations as data, not promises, so it is never scanned.
     return _walk(root, CITING, (root / "tests" / "records",))
 
 
@@ -537,7 +537,7 @@ def check_commits_reachable(
 
 
 def check_no_old_path(root: Path) -> list[Violation]:
-    # tests/records/ quotes the old path as data; .saffron/specs/done/ is dated history.
+    # tests/records/ quotes the old path as data. .saffron/specs/done/ is dated history.
     skip = (root / "tests" / "records", root / ".saffron" / "specs" / "done")
     out = [
         Violation(file, "path", f"names {OLD_PATH}, which no longer exists")
