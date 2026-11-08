@@ -29,6 +29,8 @@ def ref_commit(mirror: Path) -> str | None:
     a repository at all. Several callers hand this a scratch path that was
     never a repo, and this is why that costs them nothing.
     """
+    # ponytail: a mirror whose rev-parse fails for any other reason runs with no
+    # mutants and says nothing.
     completed = _run(
         ["git", "-C", str(mirror), "rev-parse", "--verify", "--quiet", MUTANTS_REF]
     )

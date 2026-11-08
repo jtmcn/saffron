@@ -2258,12 +2258,11 @@ def test_a_follow_up_declaring_any_mutant_inline_is_refused():
     origin = parse_spec(
         "---\nid: SA-0100\ntitle: Origin\ntype: feature\nbudget_usd: 20\n---\n\nbody\n"
     )
-    group = FollowUpGroup(task_key="k", file="src/b.py", findings=())
     allowed = {"src/b.py", "tests/test_b.py"}
 
     on_first = parse_spec(_candidate("SA-0108", mutant=("src/b.py", "not_here", "y")))
     reason = follow_up._validate(
-        on_first, candidate_id="SA-0108", origin=origin, _group=group, allowed=allowed
+        on_first, candidate_id="SA-0108", origin=origin, allowed=allowed
     )
     assert reason is not None
     assert "mutant" in reason
@@ -2296,7 +2295,6 @@ def test_a_follow_up_declaring_any_mutant_inline_is_refused():
         on_second,
         candidate_id="SA-0109",
         origin=origin,
-        _group=group,
         allowed=allowed,
     )
     assert reason2 is not None
@@ -2306,7 +2304,7 @@ def test_a_follow_up_declaring_any_mutant_inline_is_refused():
     clean = parse_spec(_candidate("SA-0108"))
     assert (
         follow_up._validate(
-            clean, candidate_id="SA-0108", origin=origin, _group=group, allowed=allowed
+            clean, candidate_id="SA-0108", origin=origin, allowed=allowed
         )
         is None
     )

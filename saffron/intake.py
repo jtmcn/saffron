@@ -495,6 +495,7 @@ class DiscoveryFailure:
 def discover_specs(
     directory: Path,
     *,
+    # Skips `refuse_inline_mutants`, so a `done/` scan keeps a spec as it shipped (item 80).
     retired: bool = False,
 ) -> tuple[list[DiscoveredSpec], list[DiscoveryFailure]]:
     """Parse every spec in `directory`, letting no single file take down the scan.
@@ -502,17 +503,17 @@ def discover_specs(
     Takes a directory, never a repo: resolving `base_sha` and exporting
     `.saffron/specs/` from it is the caller's job, not this one's.
 
-    Ordered by filename — never by `priority`, which the caller may also order by, and never by mtime, which
-    is not stable across a checkout — so that a tie resolves the same way on every machine.
+    Ordered by filename — never by `priority`, which the caller may also
+    order by, and never by mtime, which is not stable across a checkout — so
+    that a tie resolves the same way on every machine.
 
-    `Path.glob` is silent for a missing path and for a path that exists but is not a directory, exactly as
-    it is for a genuinely empty one — so without a check here, an export that produced nothing (a wrong base
-    commit, a repo that never had the directory, a path assembled with the wrong join) reaches the scheduler
-    indistinguishable from a repo with no specs. Only the third case is an ordinary night with no work in
-    it; the first two are faults and are refused rather than answered.
-
-    `retired` skips `refuse_inline_mutants`: a `done/` scan keeps a spec's
-    history as it shipped, inline mutant included (item 80).
+    `Path.glob` is silent for a missing path and for a path that exists but
+    is not a directory, exactly as it is for a genuinely empty one — so
+    without a check here, an export that produced nothing (a wrong base
+    commit, a repo that never had the directory, a path assembled with the
+    wrong join) reaches the scheduler indistinguishable from a repo with no
+    specs. Only the third case is an ordinary night with no work in it; the
+    first two are faults and are refused rather than answered.
     """
     if not directory.exists():
         raise SpecError(f"spec directory {directory} does not exist")

@@ -1505,17 +1505,19 @@ class Ledger:
         policy_sha: str | None = None,
         prompt_sha: str | None = None,
         thread_pool_uncapped: bool | None = None,
+        # The commit `refs/saffron/mutants` was read at, `None` with no such ref.
         mutants_commit: str | None = None,
     ) -> int:
-        """`policy_sha` is the declaration the cell's gates ran under — read from the export at `base_sha`
-        (§5.4). `prompt_sha` is `context.prompt_sha()`, the prompt tree the cell was given. Both default to
-        `None`: every caller that predates the parameter (`saffron/replay.py` included) still records a
-        task, just one that cannot say what it ran under.
+        """`policy_sha` is the declaration the cell's gates ran under — read
+        from the export at `base_sha` (§5.4). `prompt_sha` is
+        `context.prompt_sha()`, the prompt tree the cell was given. Both
+        default to `None`: every caller that predates the parameter
+        (`saffron/replay.py` included) still records a task, just one that
+        cannot say what it ran under.
 
-        `risk=None` means the spec declared no tier; the column still defaults to `standard` because the
-        ledger's consumers read it (item 170), but the fact carries the undeclared `None` rather than that
-        default. `mutants_commit` is the commit `refs/saffron/mutants` was read at, `None` where the mirror
-        held no such ref."""
+        `risk=None` means the spec declared no tier; the column still defaults
+        to `standard` because the ledger's consumers read it (item 170), but
+        the fact carries the undeclared `None` rather than that default."""
         declared_risk = risk
         key = new_task_key()
         envelope = self._db.execute(

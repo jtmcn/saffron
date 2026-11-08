@@ -114,7 +114,7 @@ GitHub issues remain in use only for research/evidence records under
   `docs/backlog/b-xxxxxx-slug.md` record marked `by_hand: true`, in the same commit as the spec.
 
 - **A mutant pins text the existing code already determines; a spec that
-  creates new code declares a witness and no mutant.** A `mutant` names exact
+  creates new code supplies a witness and no mutant on the ref.** A `mutant` names exact
   text and applies only where `find` matches exactly once (§5.4.1), so for code
   that does not exist yet the operator cannot know the spelling the agent will
   produce. There are only two ways out and one of them is barred.
@@ -134,17 +134,17 @@ GitHub issues remain in use only for research/evidence records under
   *That check is a tripwire, not a boundary*, and writing to it as though the
   channel were shut is the mistake it invites. A paraphrase evades it
   entirely: "declare a module-scope constant named CEILING, set to 60"
-  discloses the spelling without containing it. The mutant now lives on a
-  ref the cell's seed never fetches (backlog item 80). It catches the
+  discloses the spelling without containing it. The check catches the
   literal, which is the shape `SA-0063` took; the honest mutant is still
-  the author's job.
+  the author's job. The mutant now lives on a ref the cell's seed never
+  fetches (backlog item 80).
 
   *Pinning what the code determines does work*, and is what `SA-0064` did: a
   field that exists, a parameter that exists, a predicate already written, so
   the natural spelling is close to forced and no disclosure is needed to make
   it match. The verdict then means something.
 
-  So a spec whose change is an **edit** declares a mutant, and one whose change
+  So a spec whose change is an **edit** supplies a mutant on the ref, and one whose change
   is **new** declares a witness alone and accepts that `witness` will report
   `skip`. That is a real limit on the answer item 69 was built to give
   (backlog item 82) rather than a rule of thumb — say which of the two

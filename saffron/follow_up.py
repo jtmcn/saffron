@@ -192,7 +192,6 @@ def _validate(
     *,
     candidate_id: str,
     origin: intake.Spec,
-    _group: FollowUpGroup,
     allowed: set[str],
 ) -> str | None:
     """`None` when `candidate` can become a follow-up. Otherwise the
@@ -417,7 +416,6 @@ def write_follow_ups(
                 candidate_spec,
                 candidate_id=candidate_id,
                 origin=origin,
-                _group=group,
                 allowed=allowed,
             )
             if reason is not None:
