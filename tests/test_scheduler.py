@@ -2063,11 +2063,13 @@ def test_a_spec_whose_retired_first_is_not_retired_is_refused_naming_each(
                 branch="saffron/TE-2",
                 chain_branches=frozenset(),
             )
-        hit = next(r for r in refusals if r.path.name == "candidate.md")
-        assert hit.kind == "depends_on", stack
-        reason = hit.reason
+        hits = [r for r in refusals if r.path.name == "candidate.md"]
+        assert len(hits) == 1, (stack, hits)
+        assert hits[0].kind == "depends_on", stack
+        reason = hits[0].reason
         assert "retired_first" in reason, (stack, reason)
-        assert "done/" in reason, (stack, reason)
+        # The unreadable-file suffix also says done/, so pin the main clause's own.
+        assert "retired to done/ as shipped" in reason, (stack, reason)
         assert "not retired" in reason, (stack, reason)
         assert "depends_on" not in reason, (stack, reason)
         for named in ("TE-1", "TE-2", "TE-3", "TE-5"):
