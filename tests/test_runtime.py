@@ -771,7 +771,7 @@ def test_the_pool_is_declared_once_and_overlaps_no_fixed_subnet():
 
 
 def test_allocate_network_skips_each_held_slash24_whatever_the_refusal_says(
-    monkeypatch,
+    monkeypatch, capsys
 ):
     """A refused create moves the walk on when `networks_on_subnet` names a
     holder. Two different refusal wordings both do this, since the move
@@ -806,25 +806,27 @@ def test_allocate_network_skips_each_held_slash24_whatever_the_refusal_says(
         "10.200.2.0/24",
     ]
 
-    # No holder named for a refused first /24: the create's own error raises
-    # after exactly one attempt, and the walk goes no further.
+    # No holder named for a refused first /24 (b-7c1c99): the walk skips it,
+    # names it on stderr, and claims the next one.
     creates.clear()
 
     def fake_call_no_holder(argv, timeout_s=120):
         if "create" in argv:
             creates.append(list(argv))
-            return runtime.Completed(
-                1, "", "Error: IPv4 subnet overlaps an existing network"
-            )
+            if len(creates) == 1:
+                return runtime.Completed(1, "", "Error: vmnet job exited 1")
+            return runtime.Completed(0, "", "")
         # The network's own row: only `exclude=name` keeps it from reading as a holder.
         return runtime.Completed(
             0, "NETWORK          SUBNET\nsaffron-test-cells 10.200.0.0/24\n", ""
         )
 
     monkeypatch.setattr(runtime, "_call", fake_call_no_holder)
-    with pytest.raises(runtime.CellRuntimeError):
-        runtime.allocate_network("saffron-test-cells")
-    assert len(creates) == 1
+    capsys.readouterr()
+    assert runtime.allocate_network("saffron-test-cells") == "10.200.1.0/24"
+    assert len(creates) == 2
+    err = capsys.readouterr().err
+    assert "10.200.0.0/24" in err and "vmnet job exited 1" in err
 
 
 def test_allocate_network_names_every_holder_once_the_pool_is_exhausted(monkeypatch):
@@ -897,23 +899,45 @@ def test_allocate_network_admits_the_host_before_its_walk_and_names_the_last_ref
     assert f"r{len(subnets)}x" in str(exhausted.value)
     assert "r1x" not in str(exhausted.value)
 
-    # A refusal with no holder named at all raises at once. It is not a
-    # collision the walk skips past.
+    # Every /24 refused with no holder named (b-7c1c99): the walk tries each
+    # one, and the exhaustion carries the last refusal's own text.
     monkeypatch.setattr(runtime, "_admitted", False)
     creates: list[str] = []
 
     def fake_call_no_holder(argv, timeout_s=120):
         if "create" in argv:
             creates.append(argv[argv.index("--subnet") + 1])
-            return runtime.Completed(
-                1, "", "Error: IPv4 subnet overlaps an existing network"
-            )
+            return runtime.Completed(1, "", f"Error: refused {creates[-1]}")
         return runtime.Completed(0, "NETWORK SUBNET\n", "")
 
     monkeypatch.setattr(runtime, "_call", fake_call_no_holder)
-    with pytest.raises(runtime.CellRuntimeError):
+    with pytest.raises(runtime.CellRuntimeError) as unheld:
         runtime.allocate_network("saffron-test-cells")
-    assert len(creates) == 1
+    assert creates == subnets
+    assert f"refused {subnets[-1]}" in str(unheld.value)
+    assert "none is held" in str(unheld.value)
+
+
+def test_a_network_create_past_its_bound_names_the_slash24_and_the_bound(
+    monkeypatch,
+):
+    """A create that hangs is not a refusal (b-7c1c99). It raises at once,
+    naming the /24 and the bound, and the walk tries no other /24."""
+    creates: list[str] = []
+
+    def fake_call(argv, timeout_s=120):
+        if "create" in argv:
+            creates.append(argv[argv.index("--subnet") + 1])
+            return runtime.Completed(124, "", "", timed_out=True, bound="wall")
+        return runtime.Completed(0, "NETWORK SUBNET\n", "")
+
+    monkeypatch.setattr(runtime, "_call", fake_call)
+    with pytest.raises(runtime.CellRuntimeError) as hung:
+        runtime.allocate_network("saffron-test-cells")
+    assert creates == ["10.200.0.0/24"]
+    message = str(hung.value)
+    assert "10.200.0.0/24" in message
+    assert f"{runtime.NETWORK_CREATE_TIMEOUT_S:g}s" in message
 
 
 def test_no_two_declared_subnets_overlap():
