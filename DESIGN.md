@@ -1108,6 +1108,13 @@ spec that still declares a `mutant:` inline is refused, since a cell would read 
 `HEAD`. A spec in `done/` keeps its inline mutants as history and is never run. The cell
 never holds the ref, because the seed fetches `refs/heads/*` alone.
 
+**A mutant can name its case** (`SA-0355`). A mutant on the ref can carry a `case`: one
+sentence naming the part of its claim the witness leaves untested. A survivor's failure
+quotes that sentence after the claim and still withholds `find` and `replace`. So
+REPAIR learns which case to add, and never the edit that would falsify it. The case
+is prompt text, so the disclosure check reads it: a `find` that any criterion's case
+holds is refused, as one a claim holds is.
+
 **What the gate does.** A spec's `acceptance:` already pairs a claim with the
 witness that guards it. Each entry can also have a **mutant** on the ref: the
 smallest edit that breaks the claim while leaving the code syntactically whole.
