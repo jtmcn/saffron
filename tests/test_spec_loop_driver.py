@@ -924,6 +924,33 @@ def test_record_all_records_every_pending_spec_a_batch_ran(loop, monkeypatch, ca
     assert f"{rows[2].spec_id}  not run" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(
+    ("state", "phrase"),
+    [("REBUTTAL_UNJUDGED", "REBUT's verdict"), ("REVIEW_INCOMPLETE", "every lens")],
+)
+def test_record_names_what_each_decided_halt_asks_of_the_operator(
+    loop, monkeypatch, capsys, state, phrase
+):
+    # b-80cc6e: both halts are decided states now, and `record` said nothing.
+    from saffron.ledger import Ledger
+
+    spec_id = loop.ids[0]
+    driver._save([loop.row(0)])
+    sha = driver._load()[0].spec_sha
+    ledger = Ledger(loop.root / "ledger.db")
+    repo_id = ledger.upsert_repo("r", "git@github.com:o/r.git", "/mirror", "policy")
+    task_id = ledger.create_task(
+        ledger.create_run(repo_id, "b" * 40), spec_id, sha, "saffron/X", budget_usd=9.0
+    )
+    ledger.set_task_state(task_id, state)
+    monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (ledger, repo_id, "url"))
+
+    assert driver.cmd_record(argparse.Namespace(spec_id=spec_id, all=False)) == 1
+    err = capsys.readouterr().err
+    assert err.startswith(f"{state}: ") and phrase in err
+    assert driver._load()[0].state == state
+
+
 @pytest.mark.parametrize("running", [False, True])
 def test_record_calls_an_in_flight_state_a_halt_once_the_cell_has_exited(
     loop, monkeypatch, capsys, running

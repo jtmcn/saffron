@@ -1096,8 +1096,8 @@ def cmd_next(args) -> int:
 
 def _cell_running(spec_id: str) -> bool:
     """Whether a `saffron cell` for this spec is still alive. Without one, an
-    in-flight state is a halt: SA-0087's REBUT ran out of budget and the task
-    stayed `REBUTTING` after the process exited (§5.6)."""
+    in-flight state is a halt. Since SA-0276 and SA-0287, REBUT and REVIEW
+    end their halts `REBUTTAL_UNJUDGED` and `REVIEW_INCOMPLETE` (§5.6)."""
     done = subprocess.run(
         ["pgrep", "-f", f"saffron cell .*{spec_id}"], capture_output=True, text=True
     )
@@ -1230,8 +1230,27 @@ def _record_one(spec_id: str, *, quiet_if_unrun: bool = False) -> int | None:
         else:
             why = "nothing was decided; `next` moves on to the next untouched spec"
         print(f"left pending: {why}.", file=sys.stderr)
+    elif state in _HALT_GUIDANCE:
+        print(
+            f"{state}: {_HALT_GUIDANCE[state]} (GOTCHAS, Recording).", file=sys.stderr
+        )
     print(_review_lenses_line(spec_id))
     return 0 if state == "READY_FOR_REVIEW" else 1
+
+
+# The two halts `SA-0276` and `SA-0287` made decided states (b-80cc6e).
+_HALT_GUIDANCE = {
+    "REBUTTAL_UNJUDGED": (
+        "REBUT's verdict was never reached, so the critic's blockers stand "
+        "unanswered. The operator's call: re-run with more budget, take the "
+        "branch by hand, or drop it"
+    ),
+    "REVIEW_INCOMPLETE": (
+        "REVIEW could not start every lens, so no review stands for the head. "
+        "The operator's call: re-run with more budget, review the branch by "
+        "hand, or drop it"
+    ),
+}
 
 
 def _jev_client():

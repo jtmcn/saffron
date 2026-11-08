@@ -145,7 +145,7 @@ later one fits.
 driver orders a stack by `depends_on`, not by the stack base a batch built.
 
 **Placed 2026-10-19**, from the spec loop's run 44: ~~**b-619b7d**~~, **b-71e2df**,
-**b-32b3db**, **b-3a3081**, then **b-80cc6e**. An adopted task keeps its
+**b-32b3db**, **b-3a3081**, then ~~**b-80cc6e**~~. An adopted task keeps its
 failed state, so its children stay refused. A spec named a module its own
 `forbidden` list made impossible. A multi-line constant derives no mutant.
 Redaction misses the files beside `events.jsonl`. The driver and two ADRs

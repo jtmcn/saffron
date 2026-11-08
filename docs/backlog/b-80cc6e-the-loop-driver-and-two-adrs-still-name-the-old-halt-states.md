@@ -1,12 +1,13 @@
 ---
 id: b-80cc6e
 title: "The loop's driver, its `GOTCHAS.md` and ADRs 4 and 8 still name `REBUTTING` and `REVIEWING` as the halts"
-status: open
+status: done
+closed: 2026-11-07
 tier: 2
 filed: 2026-10-19
 by_hand: true
 specs: []
-prs: []
+prs: [1048]
 commits: []
 cites: [§5.5, §5.6]
 related: [120, b-032c3e]
@@ -41,3 +42,4 @@ change dated in each.
 ## Record
 
 - 2026-10-19: filed from the spec loop's run 44.
+- 2026-11-07: done by hand in #1048.
