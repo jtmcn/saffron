@@ -353,7 +353,7 @@ wrong spec at 20 sites.
 ### Tier 3 — real, not urgent
 
 **Placed 2026-11-07**, in grooming, from six open items no tier named:
-**b-ba0cba**, **b-036cc5**, **b-262df1**, **b-4bd68a**, ~~**b-cd4de2**~~, then
+**b-ba0cba**, **b-036cc5**, ~~**b-262df1**~~, **b-4bd68a**, ~~**b-cd4de2**~~, then
 **b-98a3be**. A follower of `events.jsonl` sees no typed spend from IMPLEMENT
 to the outcome. `saffron watch` has no typed output for a follower outside
 Python. Record helpers sit under `tests/`, and the loop's driver imports them.
@@ -426,7 +426,7 @@ Each line keeps the order it was filed in.
   ~~**150**~~, **151**, **155**, **156**, **174** and **b-d6bff7**.
 - From spec loop runs 7 to 10: **b-990bd9**, **b-7431a2**, **b-9eceda**, **b-bc9951**,
   **b-0281e4**, **b-e9db0e**, **b-397edd**, **b-0e20e9**, **b-98dc4d**,
-  **b-27b9db**, ~~**b-bbf663**~~ and ~~**b-6a9707**~~.
+  ~~**b-27b9db**~~, ~~**b-bbf663**~~ and ~~**b-6a9707**~~.
 - From the reviews of #393 and `SA-0120`, and spec loop runs 13 and 14: **b-d5d290**,
   **b-9ed36d**, **b-b431c1**, ~~**b-ac2f02**~~ and **b-49329e**.
 - From ADR 4's review and the superpowers comparison: ~~**b-07f694**~~,
@@ -441,8 +441,8 @@ Each line keeps the order it was filed in.
   **b-7f105f** and **b-8c17dc**.
 - From item 52's review: ~~**b-cec9a7**~~.
 
-**Placed 2026-09-20**: **161**, **162**, **163**, **126**, **128** and **129**,
-then **b-7d2acf**. The first three are what PR #317 left on the `prose` gate. A
+**Placed 2026-09-20**: **161**, **162**, **163**, **126**, **128** and ~~**129**~~,
+then ~~**b-7d2acf**~~. The first three are what PR #317 left on the `prose` gate. A
 prompt written as a Python string is invisible to it. Its rules read register
 and not instruction form, and its sentence limit fights §8's line budget. 126 is
 a cache write the REVIEW lenses pay for three times, at the cost of plan

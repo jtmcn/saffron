@@ -1,11 +1,13 @@
 ---
 id: 129
 title: An empty `## Problem` section passes the loader
-status: open
+status: done
 tier: 3
 filed: 2026-09-15
+closed: 2026-11-08
+by_hand: true
 specs: []
-prs: []
+prs: [1071]
 commits: []
 cites: []
 related: []
@@ -28,3 +30,5 @@ failing against the check that only tests existence.
 ## Record
 
 **Filed 2026-09-15.**
+
+- 2026-11-08: done by hand in #1071.

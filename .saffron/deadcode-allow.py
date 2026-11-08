@@ -32,6 +32,11 @@ _.number_findings  # .claude/skills/run-saffron-spec-loop/driver.py: `jev`, outs
 _.round_notes  # .claude/skills/run-saffron-spec-loop/driver.py: `noise`, outside the scanned roots
 _.grade  # .claude/skills/run-saffron-spec-loop/driver.py: `noise`, outside the scanned roots
 _.counts  # .claude/skills/run-saffron-spec-loop/driver.py: `noise`, outside the scanned roots
+_.spec_files  # records/rules.py: driver.py `bookkeeping` and tests/records/check.py, outside the scanned roots
+_.first_cited_item  # records/rules.py: driver.py `bookkeeping` and tests/records/check.py, outside the scanned roots
+_.context_section  # records/rules.py: driver.py `bookkeeping` and tests/records/check.py, outside the scanned roots
+_.check_priority  # records/rules.py: run by tests/records/check.py's `check_all`, outside the scanned roots
+_.cited_items  # records/rules.py: run by tests/records/check.py's `check_all`, outside the scanned roots
 _.load_corpus  # docs/evidence/scripts/2026-09-08-lens-corpus.py
 _.calibrate_corpus  # docs/evidence/scripts/2026-09-08-lens-corpus.py
 _.graded_per_run  # docs/evidence/scripts/2026-09-08-lens-corpus.py

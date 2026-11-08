@@ -3398,8 +3398,8 @@ def cmd_bookkeeping(args) -> int:
     """
     from records.kinds import KINDS
     from records.load import RecordError, load
+    from records.rules import context_section, first_cited_item, spec_files
     from saffron.intake import SpecError, load_spec
-    from tests.records.check import _context_section, first_cited_item, spec_files
 
     files = spec_files(REPO)
     path = files.get(args.spec_id)
@@ -3415,7 +3415,7 @@ def cmd_bookkeeping(args) -> int:
         return _fail(str(exc))
 
     by_id = {r.model.id: r for r in records}
-    item_id = first_cited_item(_context_section(path.read_text()))
+    item_id = first_cited_item(context_section(path.read_text()))
     block1 = _block1_lines(item_id, by_id, args.spec_id)
 
     candidates, refusals = _queue(REPO)
