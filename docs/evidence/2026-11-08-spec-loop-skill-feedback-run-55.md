@@ -33,7 +33,7 @@ Batch 72 refused seven specs before a cell. `SA-0341`, `SA-0353` and
 3. **A form-gate failure after REBUT ends the task.** `SA-0338`'s REBUT
    fixed nine blockers and added one prose hit, and the task ended
    `EXHAUSTED`. Its five children were refused by reach. The delegate fixed
-   the word and adopted the pull request.
+   the word and adopted the pull request. b-8826cf recurs.
 4. **The finish minted a follow-up id `main` already held.** Finish 72's
    writer named its spec `SA-0356`, which #1085 had merged by hand. Its
    re-verify went red, and the finish pushed nothing. Filed as b-cbb6e7.
@@ -87,8 +87,8 @@ Batch 72 refused seven specs before a cell. `SA-0341`, `SA-0353` and
 2. **A stack batch maps a child's citations through its parent's diff
    (b-c7858c).** A phase change at a layer's start, and a driver change first.
    It refused six specs this run.
-3. **A form-gate failure after REBUT gets one repair turn.** A phase change.
-   One word cost a five-spec chain its batch.
+3. **A form-gate failure after REBUT gets one repair turn (b-8826cf).** A
+   phase change. One word cost a five-spec chain its batch.
 4. **A finish mints follow-up ids against `origin/main` (b-cbb6e7).** A phase
    change in the finish.
 5. **The suite runs once in a cell before a by-hand merge.** A gate change in
