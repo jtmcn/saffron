@@ -1019,19 +1019,53 @@ def test_record_calls_an_in_flight_state_a_halt_once_the_cell_has_exited(
     ledger.set_task_state(task_id, "REBUTTING")
     ledger.record_push(task_id, "p" * 40)
     monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (ledger, repo_id, "url"))
-    monkeypatch.setattr(driver, "_cell_running", lambda _spec_id: running)
+    owners = ["4242 saffron cell x.md"] if running else []
+    monkeypatch.setattr(driver, "_owners_running", lambda _spec_id: owners)
 
     assert driver.cmd_record(argparse.Namespace(spec_id=spec_id, all=False)) == 1
     row = driver._load()[0]
     err = capsys.readouterr().err
-    assert row.state is None and row.last_state == "REBUTTING"
+    assert row.undecided_cells == 0 if running else row.undecided_cells == 1
     if running:
-        assert "still running" in err
-        assert row.undecided_cells == 0
+        assert "still run" in err and "4242 saffron cell x.md" in err
+        assert row.last_state is None
     else:
+        assert row.state is None and row.last_state == "REBUTTING"
         assert "halted at REBUTTING" in err and "p" * 12 in err
-        assert "still running" not in err
-        assert row.undecided_cells == 1
+        assert "still run" not in err
+
+
+@pytest.mark.skipif(shutil.which("pgrep") is None, reason="needs pgrep")
+def test_record_refuses_a_task_mid_package_while_its_batch_still_runs(
+    loop, monkeypatch, capsys
+):
+    # b-92fdbe: run 48 recorded SA-0316 mid-PACKAGE as "halted at REBUTTING".
+    # A batch's command line names no spec, so the cell check missed it.
+    from saffron.ledger import Ledger
+
+    spec_id = loop.ids[0]
+    driver._save([loop.row(0)])
+    sha = driver._load()[0].spec_sha
+    ledger = Ledger(loop.root / "ledger.db")
+    repo_id = ledger.upsert_repo("r", "git@github.com:o/r.git", "/mirror", "policy")
+    task_id = ledger.create_task(
+        ledger.create_run(repo_id, "b" * 40), spec_id, sha, "saffron/X", budget_usd=14.0
+    )
+    ledger.set_task_state(task_id, "REBUTTING")
+    monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (ledger, repo_id, "url"))
+    sleep = "import time; time.sleep(30)"
+    batch = [sys.executable, "-c", sleep, "saffron", "batch", "--repo", "."]
+    probe = subprocess.Popen(batch)
+    try:
+        status = driver.cmd_record(argparse.Namespace(spec_id=spec_id, all=False))
+    finally:
+        probe.kill()
+        probe.wait()
+    err = capsys.readouterr().err
+    assert status == 1
+    assert "halted" not in err and f"{probe.pid} " in err
+    row = driver._load()[0]
+    assert row.last_state is None and row.undecided_cells == 0
 
 
 def test_record_names_the_lenses_the_specs_latest_review_ran(loop, monkeypatch, capsys):
@@ -1164,7 +1198,7 @@ def test_record_names_the_lenses_the_specs_latest_review_ran(loop, monkeypatch, 
     fresh = Ledger(loop.root / "ledger.db")
     fresh.set_task_state(task_id, "REBUTTING")
     fresh.close()
-    monkeypatch.setattr(driver, "_cell_running", lambda _spec_id: False)
+    monkeypatch.setattr(driver, "_owners_running", lambda _spec_id: [])
     status, out = record()
     assert status == 1
     assert out.splitlines()[-1] == named.rstrip("\n")
@@ -1172,6 +1206,7 @@ def test_record_names_the_lenses_the_specs_latest_review_ran(loop, monkeypatch, 
 
 @pytest.mark.skipif(shutil.which("pgrep") is None, reason="needs pgrep")
 def test_a_live_saffron_cell_is_found_by_its_spec_id():
+    # Only the probe's own pid is asserted: a live host batch matches every spec.
     probe = subprocess.Popen(
         [
             sys.executable,
@@ -1182,13 +1217,14 @@ def test_a_live_saffron_cell_is_found_by_its_spec_id():
             ".saffron/specs/SA-9999-probe.md",
         ]
     )
+    mine = f"{probe.pid} "
     try:
-        assert driver._cell_running("SA-9999")
-        assert not driver._cell_running("SA-9998")
+        assert any(o.startswith(mine) for o in driver._owners_running("SA-9999"))
+        assert not any(o.startswith(mine) for o in driver._owners_running("SA-9998"))
     finally:
         probe.kill()
         probe.wait()
-    assert not driver._cell_running("SA-9999")
+    assert not any(o.startswith(mine) for o in driver._owners_running("SA-9999"))
 
 
 def test_a_resnapshot_takes_in_a_follow_up_a_finish_ran_and_record_reads_it(
@@ -1708,6 +1744,27 @@ def test_an_abnormal_ending_reaches_the_row_however_its_subtype_was_spelled(
     ledger.close()
 
     assert "REVIEWING success (api_error)" in cell.endings
+
+
+@pytest.mark.parametrize("phase", ["SPEC_REVIEW", "SPEC_WRITING"])
+def test_history_peak_reads_only_the_attempts_max_turns_bounds(tmp_path, phase):
+    # b-937778: a 150-turn spec review read as the cell's peak, though the
+    # spec's `max_turns` never bounds it. b-60ff2e fixed the stack page.
+    ledger, repo_id = _ledger_with_one_cell(tmp_path)
+    task_id = ledger.tasks_by_spec_id(repo_id, "SA-0001")[-1]["task_id"]
+    ledger.close_attempt(
+        ledger.open_attempt(task_id, phase),
+        session_id=None,
+        subtype="error_max_turns",
+        terminal_reason="max_turns",
+        num_turns=150,
+        cost_usd_est=2.0,
+    )
+    (cell,) = driver._past_cells(ledger, repo_id, {"SA-0001": _spec("SA-0001")})
+    ledger.close()
+
+    assert cell.peak_turns == 45
+    assert cell.peak_cut_off is False
 
 
 def test_a_peak_that_stopped_on_budget_is_not_called_a_turn_floor(tmp_path):
@@ -2783,6 +2840,24 @@ def _cite_tree(monkeypatch, root):
     spec = specs_dir / "SA-0001-s.md"
     spec.write_text("Reads `mod.py:2`.\n")
     return spec
+
+
+@pytest.mark.parametrize("retired", [False, True])
+def test_cite_takes_a_spec_id_as_well_as_a_path(monkeypatch, tmp_path, capsys, retired):
+    # b-b1a7d4: `driver.py cite SA-0152` failed with "no such spec".
+    spec = _cite_tree(monkeypatch, tmp_path)
+    if retired:
+        (spec.parent / "done").mkdir()
+        spec = spec.rename(spec.parent / "done" / spec.name)
+    seen = []
+    monkeypatch.setattr(
+        driver, "_cite_defects", lambda path, ref: seen.append((path, ref)) or (1, [])
+    )
+
+    assert driver.cmd_cite(SimpleNamespace(spec_path="SA-0001", base="b")) == 0
+    assert seen == [(spec, "b")]
+    assert driver.cmd_cite(SimpleNamespace(spec_path="SA-0002", base="b")) == 1
+    assert "no such spec: SA-0002" in capsys.readouterr().err
 
 
 def test_cite_and_check_report_what_the_batchs_citation_check_reports(
@@ -3966,3 +4041,38 @@ def test_subject_concerns_read_a_mutant_from_the_ref_not_the_spec(tmp_path):
     assert filled.acceptance[0].mutant.file == "elsewhere.py"
     other = _spec("SA-0010")
     assert driver._with_ref_mutants(other, mirror) is other
+
+
+def test_a_ref_mutant_a_claim_discloses_is_a_concern_not_a_raise(tmp_path):
+    # `attach_mutants` refuses a disclosed mutant with `DisclosedMutantError`,
+    # a `SpecError` that is no `MutantsError`, so `check` raised.
+    from saffron.intake import Criterion
+    from tests.test_mutants import _bare, _commit
+
+    mirror = _bare(tmp_path)
+    mutants = "t.py::t: {file: f0.py, find: return early, replace: pass}\n"
+    commit = _commit(mirror, {"SA-0009.yaml": mutants}, "mutants")
+    subprocess.run(
+        ["git", "-C", str(mirror), "update-ref", "refs/saffron/mutants", commit],
+        check=True,
+    )
+    target = _spec("SA-0009")
+    target.acceptance_criteria = []
+    target.acceptance = [Criterion(claim="it must return early", witness="t.py::t")]
+
+    filled = driver._with_ref_mutants(target, mirror)
+    assert isinstance(filled, str), filled
+    assert filled.startswith("concern: SA-0009's mutants on the ref cannot be read")
+
+
+def test_the_driver_says_verdict_only_for_a_verdict_it_names_the_owner_of():
+    # b-6a9707: CONTEXT.md keeps "verdict" for the critic's answer at REBUT, and
+    # no gate scans this file's vocabulary. A gate result or probe outcome fails here.
+    owned = ("turns/verdict.md", "REBUT's verdict", "grade.verdict")
+    text = (REPO / ".claude/skills/run-saffron-spec-loop/driver.py").read_text()
+    stray = [
+        f"driver.py:{n}: {line.strip()}"
+        for n, line in enumerate(text.splitlines(), 1)
+        if "verdict" in line.lower() and not any(o in line for o in owned)
+    ]
+    assert stray == []

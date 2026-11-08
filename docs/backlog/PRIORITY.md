@@ -361,7 +361,7 @@ A lens can search code only as text. The spec loop numbers its passes as runs,
 which is a ledger term. The spec chain records no cost per escaped defect, so
 no step can be cut on evidence.
 
-**Moved 2026-11-07 from tier 2**, on the operator's ruling: **b-dc5212** and
+**Moved 2026-11-07 from tier 2**, on the operator's ruling: ~~**b-dc5212**~~ and
 **b-4589be**. Each bites only on the driver's attended path, which is now the
 fallback.
 
@@ -406,7 +406,7 @@ stack left alone.
 in `policy.yaml`. **b-2227b0**, closed as parked, records a draft ADR.
 
 **Placed 2026-10-25**, from the spec loop's run 48: ~~**b-9c5b11**~~,
-~~**b-01c53d**~~, **b-92fdbe**, **b-d3f977**, **b-f0e351** and **b-87001a**.
+~~**b-01c53d**~~, ~~**b-92fdbe**~~, **b-d3f977**, **b-f0e351** and **b-87001a**.
 Each is a gap a seat, a finish or the run found and the stack left alone.
 
 **Placed 2026-10-27**, from the spec loop's run 49:
@@ -426,7 +426,7 @@ Each line keeps the order it was filed in.
   ~~**150**~~, **151**, **155**, **156**, **174** and **b-d6bff7**.
 - From spec loop runs 7 to 10: **b-990bd9**, **b-7431a2**, **b-9eceda**, **b-bc9951**,
   **b-0281e4**, **b-e9db0e**, **b-397edd**, **b-0e20e9**, **b-98dc4d**,
-  **b-27b9db**, ~~**b-bbf663**~~ and **b-6a9707**.
+  **b-27b9db**, ~~**b-bbf663**~~ and ~~**b-6a9707**~~.
 - From the reviews of #393 and `SA-0120`, and spec loop runs 13 and 14: **b-d5d290**,
   **b-9ed36d**, **b-b431c1**, ~~**b-ac2f02**~~ and **b-49329e**.
 - From ADR 4's review and the superpowers comparison: ~~**b-07f694**~~,
@@ -474,7 +474,7 @@ other is a fixture field under `docs/**` that no cell could add.
 uid 0 in every cell, and `--cap-drop ALL` makes the read they test fail.
 
 **Placed 2026-09-29**, from the spec loop's run 22: **b-695234**,
-**b-12e717**, **b-2dd65f**, **b-b1a7d4**, then **b-1f1188**.
+**b-12e717**, **b-2dd65f**, ~~**b-b1a7d4**~~, then **b-1f1188**.
 The first three are defects in REVIEW and REBUT that the run's seats found.
 The last two are gaps in the spec chain's own tools. **b-9529e9** and
 **b-91ead2** came from closing the run. The scoring driver cannot reach a
@@ -544,7 +544,7 @@ subnet pool a bare pool.
 which the glossary keeps for the breaker. A probe's reason is called a
 refusal. The glob characters are spelled in two modules.
 
-**Placed 2026-10-05**, from stage 2's stack batches: **b-937778**,
+**Placed 2026-10-05**, from stage 2's stack batches: ~~**b-937778**~~,
 **b-050733**, then **b-0efc31**. The loop driver's `history` counts every
 phase's turns against `max_turns`. Specs use bare "run" for a turn. Nothing
 compares the host's usage keys to the runner's.

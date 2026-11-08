@@ -741,7 +741,7 @@ def _size(
     test_paths: Sequence[str] = (),
     cwd: Path = REPO,
 ) -> GateResult:
-    """The `size` gate's own verdict from `lower` to `upper`. It runs only in
+    """The `size` gate's own gate result from `lower` to `upper`. It runs only in
     the cell, so review commits can take a branch past it unseen (item 40)."""
     from saffron.cell.worktree import DIFF_FLAGS
     from saffron.gates.core.size import size_gate
@@ -1249,14 +1249,14 @@ def cmd_next(args) -> int:
     return 1
 
 
-def _cell_running(spec_id: str) -> bool:
-    """Whether a `saffron cell` for this spec is still alive. Without one, an
-    in-flight state is a halt. Since SA-0276 and SA-0287, REBUT and REVIEW
+def _owners_running(spec_id: str) -> list[str]:
+    """Each live cell, PACKAGE, batch or finish for this spec, as `pgrep -lf`
+    prints it. A batch's command line names no spec, so any live batch or
+    finish counts (b-92fdbe). Since SA-0276 and SA-0287, REBUT and REVIEW
     end their halts `REBUTTAL_UNJUDGED` and `REVIEW_INCOMPLETE` (§5.6)."""
-    done = subprocess.run(
-        ["pgrep", "-f", f"saffron cell .*{spec_id}"], capture_output=True, text=True
-    )
-    return done.returncode == 0
+    pattern = f"saffron (cell .*{spec_id}|package {spec_id}|batch|finish)([ .-]|$)"
+    found = subprocess.run(["pgrep", "-lf", pattern], capture_output=True, text=True)
+    return [line.strip()[:120] for line in found.stdout.splitlines() if line.strip()]
 
 
 def _review_lenses_line(spec_id: str) -> str:
@@ -1323,7 +1323,7 @@ def _record_one(spec_id: str, *, quiet_if_unrun: bool = False) -> int | None:
     from saffron.scheduler import DONE_STATES
 
     ledger, repo_id, _url = _ledger_and_repo()
-    running, pushed = False, ""
+    pushed = ""
     try:
         if repo_id is None:
             return _fail("this repo has no ledger row yet")
@@ -1351,6 +1351,12 @@ def _record_one(spec_id: str, *, quiet_if_unrun: bool = False) -> int | None:
 
         line = lines[chosen["task_id"]]
         spent, budget = line["spent_usd_est"], line["budget_usd"]
+        if state in IN_FLIGHT_STATES and (owners := _owners_running(spec_id)):
+            listed = "".join(f"\n  {owner}" for owner in owners)
+            return _fail(
+                f"{spec_id} is at {state} and these processes still run. "
+                f"Wait for them to exit, then record again.{listed}"
+            )
         if state in DONE_STATES:
             match.state, match.pr = state, pr
             match.pushed_sha = line["pushed_sha"] or ""
@@ -1360,9 +1366,7 @@ def _record_one(spec_id: str, *, quiet_if_unrun: bool = False) -> int | None:
             match.state = None
             match.pr = pr or match.pr
             match.last_state = state
-            running = state in IN_FLIGHT_STATES and _cell_running(spec_id)
-            if not running:
-                match.undecided_cells += 1
+            match.undecided_cells += 1
             pushed = line["pushed_sha"] or ""
     finally:
         ledger.close()
@@ -1372,9 +1376,7 @@ def _record_one(spec_id: str, *, quiet_if_unrun: bool = False) -> int | None:
     cost = f"  ${spent:.2f} of ${budget:.2f}" if spent is not None and budget else ""
     print(f"{match.spec_id}  {state}  {where}{cost}")
     if match.state is None:
-        if running:
-            why = "the cell is still running — wait for it to exit, then record again"
-        elif state in IN_FLIGHT_STATES:
+        if state in IN_FLIGHT_STATES:
             branch = f", its branch pushed at {pushed[:12]}" if pushed else ""
             why = (
                 f"halted at {state}: the cell has exited and nothing decided the "
@@ -1752,8 +1754,8 @@ def cmd_undrop(args) -> int:
 
 
 # pytest's exit codes: 1 is a failed test; 2-5 are an interrupt, an internal
-# error, a usage error and no tests collected, none of which is a verdict.
-_PYTEST_NOT_A_VERDICT = {2, 3, 4, 5}
+# error, a usage error and no tests collected, none of which is an outcome.
+_PYTEST_NO_OUTCOME = {2, 3, 4, 5}
 _ERROR_KILL = re.compile(r" - (?!AssertionError)\w+Error\b")
 # One space: a captured log line pads its level (`ERROR    root:...`).
 _SUMMARY_ROW = re.compile(r"^(FAILED|ERROR) \S")
@@ -1797,16 +1799,16 @@ def cmd_probe(args) -> int:
     failed = [line for line in output if _SUMMARY_ROW.match(line)]
     is_pytest = any("pytest" in part for part in command)
     if done.returncode == 0:
-        verdict = "survived"
-    elif is_pytest and done.returncode in _PYTEST_NOT_A_VERDICT:
-        verdict = f"no verdict (pytest exited {done.returncode})"
+        outcome = "survived"
+    elif is_pytest and done.returncode in _PYTEST_NO_OUTCOME:
+        outcome = f"no outcome (pytest exited {done.returncode})"
     elif failed and all(_ERROR_KILL.search(line) for line in failed):
         # A mutant that raises is not one a test caught (REVIEW-PROMPT.md).
-        verdict = "killed only by errors, not by an assertion"
+        outcome = "killed only by errors, not by an assertion"
     else:
-        verdict = "killed"
-    # The verdict gets its own line: uv's warning on stderr once shared it (spec loop run 8, #351).
-    print(verdict)
+        outcome = "killed"
+    # The outcome gets its own line: uv's warning on stderr once shared it (spec loop run 8, #351).
+    print(outcome)
     for stream, text in (("stdout", done.stdout), ("stderr", done.stderr)):
         lines = _ANSI.sub("", text).splitlines()
         if lines:
@@ -2063,7 +2065,7 @@ class PastCell:
     plan: Spend | None
     implement: Spend  # every other IMPLEMENTING attempt
     repair: Spend
-    peak_turns: int  # the largest single attempt of any phase; max_turns bounds each
+    peak_turns: int  # the largest single attempt of a phase `max_turns` bounds
     review_usd: float
     rebut_usd: float
     endings: list[str]  # "<phase> <subtype>" for every attempt that did not succeed
@@ -2165,6 +2167,11 @@ def _commit_time(commit: str, cwd: Path = REPO) -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(epoch))
 
 
+# The phases a spec's `max_turns` bounds, as `saffron/report/stack.py` lists
+# them. A spec review or writing attempt has its own bound (b-937778).
+_MAX_TURNS_PHASES = frozenset({"IMPLEMENTING", "REPAIRING", "REVIEWING", "REBUTTING"})
+
+
 def _past_cells(
     ledger,
     repo_id: int,
@@ -2192,7 +2199,8 @@ def _past_cells(
                 for r in ledger.task_results(row["task_id"])
                 if r.gate == "size"
             ]
-            peak_attempt = max(attempts, key=lambda a: a["num_turns"] or 0)
+            bounded = [a for a in attempts if a["phase"] in _MAX_TURNS_PHASES]
+            peak_attempt = max(bounded, key=lambda a: a["num_turns"] or 0, default=None)
             cells.append(
                 PastCell(
                     spec_id=spec_id,
@@ -2207,8 +2215,9 @@ def _past_cells(
                     else None,
                     implement=_spend(implementing[1:], "IMPLEMENTING"),
                     repair=_spend(attempts, "REPAIRING"),
-                    peak_turns=peak_attempt["num_turns"] or 0,
-                    peak_cut_off=_cut_off_at_turn_ceiling(peak_attempt),
+                    peak_turns=(peak_attempt["num_turns"] or 0) if peak_attempt else 0,
+                    peak_cut_off=peak_attempt is not None
+                    and _cut_off_at_turn_ceiling(peak_attempt),
                     review_usd=_spend(attempts, "REVIEWING").usd,
                     rebut_usd=_spend(attempts, "REBUTTING").usd,
                     endings=[
@@ -2410,7 +2419,7 @@ def _overrun(ledger, repo_id: int, specs: dict[str, Spec]) -> tuple[float, str]:
     return ratio, f"the median over {len(newest)} landed specs that declared one"
 
 
-def _size_verdict(
+def _size_estimate_priced(
     target: Spec, ratio: float, basis: str, elevate_on: list[str]
 ) -> tuple[str | None, str | None]:
     """How `estimated_lines`, times the overrun, prices against the `size`
@@ -2463,12 +2472,13 @@ def _is_review_trigger(entry: str) -> bool:
 def _with_ref_mutants(target: Spec, mirror: Path = REPO) -> Spec | str:
     """`target` with its mutants read from `refs/saffron/mutants` (SA-0338),
     unchanged where the ref holds none for it, or why they cannot be read."""
-    from saffron.mutants import MutantsError, attach_mutants, read_mutants, ref_commit
+    from saffron.intake import SpecError
+    from saffron.mutants import attach_mutants, read_mutants, ref_commit
 
     try:
         found = read_mutants(mirror, ref_commit(mirror), target.id)
         return attach_mutants(target, found) if found else target
-    except MutantsError as exc:
+    except SpecError as exc:  # a disclosed mutant raises no `MutantsError`
         return f"concern: {target.id}'s mutants on the ref cannot be read: {exc}"
 
 
@@ -2562,7 +2572,9 @@ def cmd_check(args) -> int:
         ledger.close()
     rows = _select_rows(target, cells)
     print(_ceilings_line(target, rows))
-    size_blocker, size_concern = _size_verdict(target, ratio, basis, _elevate_on())
+    size_blocker, size_concern = _size_estimate_priced(
+        target, ratio, basis, _elevate_on()
+    )
     if size_concern:
         print(f"concern: {size_concern}")
     for line in _review_change_lines(target, specs) + _subject_concerns(target):
@@ -2695,7 +2707,13 @@ def cmd_cite(args) -> int:
     and frontmatter plays no part in resolving one."""
     spec_path = Path(args.spec_path)
     if not spec_path.is_file():
-        return _fail(f"no such spec: {spec_path}")
+        # A bare id names a queued or retired spec (b-b1a7d4).
+        found = sorted(SPECS_DIR.glob(f"{args.spec_path}-*.md")) or sorted(
+            (SPECS_DIR / "done").glob(f"{args.spec_path}-*.md")
+        )
+        if len(found) != 1:
+            return _fail(f"no such spec: {spec_path}")
+        spec_path = found[0]
     try:
         count, defects = _cite_defects(spec_path, args.base)
     except GitError as err:
@@ -3343,7 +3361,7 @@ def main() -> int:
     p = sub.add_parser(
         "cite", help="check a spec's file:line citations resolve at --base"
     )
-    p.add_argument("spec_path")
+    p.add_argument("spec_path", metavar="spec", help="a spec's id or its path")
     p.add_argument("--base", default="origin/main")
     p.set_defaults(func=cmd_cite)
 
