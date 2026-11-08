@@ -1,7 +1,7 @@
 ---
 id: 92
 title: Three things the corpus's probe path ships knowing, recorded only in scratch
-status: open
+status: partial
 tier: 3
 specs: []
 prs: []
@@ -42,3 +42,7 @@ was the whole one.
 ## Done looks like
 
 _Not stated in the original item._
+
+## Record
+
+- 2026-11-08: partial, by hand. Point 3 is done. The corpus driver reads `test_paths` from the policy at each fixture's head, and `TEST_PATHS` is gone. Point 1 is left, since it needs a cell and a batch held the host. Point 2 is left. A new test file starts the `prose` ratchet at zero, and the moved driver tests carry 59 hits.

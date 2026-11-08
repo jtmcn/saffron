@@ -485,16 +485,6 @@ def _load_driver():
     return module
 
 
-def test_the_driver_passes_check_probe_this_repos_declared_globs():
-    """`TEST_PATHS` is this repo's own declared `integrity.test_paths` globs,
-    because `check_probe` matches globs (backlog b-461729)."""
-    from saffron.repos.policy import load_policy
-
-    driver = _load_driver()
-    policy, _sha = load_policy(REPO)
-    assert list(driver.TEST_PATHS) == policy.integrity.test_paths
-
-
 PROBE = Mutant(file="saffron/gates/core/scope.py", find="== 0", replace="== 1")
 # A second, distinct probe on a second file. Distinct on all three fields so
 # `_distinct` cannot collapse the pair into one.
@@ -983,6 +973,41 @@ def test_a_raise_stops_that_fixture_rather_than_probing_a_tree_it_cannot_trust(
     assert "unknown state" in recorded[1]["reason"]
     assert "0 of 0" in pass_.table
     assert "2 unproven" in pass_.table
+
+
+def _saffron_dir_declaring_test_paths(root, globs):
+    """A `.saffron/` export with a `tests` gate and its own `test_paths`."""
+    gates = root / ".saffron" / "gates"
+    gates.mkdir(parents=True, exist_ok=True)
+    (root / ".saffron" / "policy.yaml").write_text(
+        "gates:\n  tests: { blocking: true }\n"
+        f"integrity:\n  test_paths: {json.dumps(globs)}\n"
+    )
+    (gates / "tests").write_text("#!/bin/sh\nexit 0\n")
+    (gates / "tests").chmod(0o755)
+    return root
+
+
+def test_a_probe_is_refused_on_the_fixture_heads_own_declared_test_paths(
+    tmp_path, monkeypatch
+):
+    """The test-path globs come from the policy at the fixture's head, as its
+    gates do. A repo that keeps its tests outside `tests/` stays guarded."""
+    pass_ = _drive(
+        tmp_path,
+        monkeypatch,
+        saffron_dir=_saffron_dir_declaring_test_paths(
+            tmp_path / "other-layout", ["saffron/gates/core/**"]
+        ),
+    )
+
+    recorded = json.loads((pass_.out / "SA-0045" / "probes.json").read_text())
+    assert [entry["verdict"] for entry in recorded] == ["unproven"]
+    assert (
+        recorded[0]["reason"]
+        == "saffron/gates/core/scope.py is a test; a probe must target source"
+    )
+    assert pass_.mutated == []
 
 
 def test_a_head_declaring_no_tests_gate_is_unproven_and_not_an_abort(
