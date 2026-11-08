@@ -125,8 +125,8 @@ def attach_mutants(spec: Spec, found: dict[str, Mutant]) -> Spec:
 
 
 class MutantWriteRefused(Exception):
-    """A write that stopped before reaching origin: a validation failure
-    from step 1, or a lost race, local or at origin, that leaves the
+    """A write that stopped before reaching origin: a validation failure,
+    or a lost race, local or at origin, that leaves the
     previous winner in place (item 80). It is never a `SpecError`.
     `cli` catches this and every `SpecError` the same way, as exit 1.
     The two come from different halves of the command. Parsing raises
@@ -140,7 +140,7 @@ class MutantGitError(RuntimeError):
     failed (item 80)."""
 
 
-# Identity flags on every call, as `saffron/record/refs.py:23` does: a
+# Identity flags on every call, as `saffron.record.refs._IDENT` does: a
 # checkout under test inherits none, so `commit-tree` would otherwise fail.
 _IDENT = ("-c", "user.email=saffron@localhost", "-c", "user.name=Saffron")
 
@@ -166,8 +166,7 @@ def _git_run(
 ) -> subprocess.CompletedProcess[bytes]:
     """The one call every git process the writer starts goes through: an
     explicit argv and `env=` on every call, never `saffron/repos/mirror.py`'s
-    helpers. The race and prompt witnesses replace `subprocess.run` with a
-    wrapper that acts on the call whose argv holds `update-ref` or `push`."""
+    helpers."""
     return subprocess.run(
         ["git", "-C", str(repo), *_IDENT, *args],
         input=input_bytes,
@@ -198,8 +197,7 @@ def _git(
 def _resolve(repo: Path, ref: str, env: dict[str, str]) -> str | None:
     """`ref`'s commit in `repo`, or `None` where it is absent. Any other
     `rev-parse` failure also reads as absent, the same forgiving rule
-    `saffron/repos/mirror.py`'s `ref_commit` applies to the reader's own
-    mirror: harmless here, since every check downstream still runs against
+    `ref_commit` above applies to the reader's own mirror: harmless here, since every check downstream still runs against
     the git this `repo` has."""
     completed = _git_run(repo, ["rev-parse", "--verify", "-q", ref], env)
     return completed.stdout.decode().strip() if completed.returncode == 0 else None
