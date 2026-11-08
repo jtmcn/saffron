@@ -1,0 +1,17 @@
+id: prompt-is-a-file
+valid:
+  - 'PLAN_PROMPT = context.turn_prompt("plan")'
+  - 'EXTRACTION_PROMPT = turn_prompt("extraction")'
+  - 'SPEC_REVIEW_PROMPT = "spec-review.md"'
+  - 'VERDICT_PROMPT_FILE = "rebut-verdict.md"'
+  - 'SYSTEM_PROMPT = build_system_prompt(phase, root)'
+  - 'GIT_TERMINAL_PROMPT = os.environ.get'
+  - 'prompt = f"{exc}\n\n{EXTRACTION_PROMPT}"'
+invalid:
+  - 'PLAN_PROMPT = "Write a plan for the spec."'
+  - 'PLAN_PROMPT: str = "Write a plan for the spec."'
+  - 'PLAN_PROMPT = """Write a plan.\nThen stop."""'
+  - 'PLAN_PROMPT = f"Write a plan for {spec}."'
+  - 'PLAN_PROMPT = ("Write a plan " "for the spec.")'
+  - 'PLAN_PROMPT = textwrap.dedent("""Write a plan.""")'
+  - 'PLAN_PROMPT = "Write a plan. " + FOOTER'
