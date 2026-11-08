@@ -32,3 +32,8 @@ Adding a fixture means pushing its two refs at the same time. The recovery scrip
 the ledger and the batch tree; it does not push refs, and nothing yet checks that
 a fixture's refs exist. That gap is worth closing the first time someone adds a
 ninth fixture and CI goes red for a reason the error message does not name.
+
+Each `fixture.toml` also declares `recorded_lenses`, the lens set its recorded
+scoring run held. `calibrate` refuses a `recorded-findings.json` that holds any
+other set. Without it, a recorded run that lost a lens reads like one made
+before that lens existed.

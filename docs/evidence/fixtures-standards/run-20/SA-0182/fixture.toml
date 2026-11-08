@@ -8,6 +8,8 @@ head_sha = "1a3796e801bbb5c5ed7d040891d3172c523f1188"
 source = "backlog item b-abeb74, run 20 Standards seat, SA-0191 measurement plan"
 recorded_seen = 0
 recorded_graded = 0
+# The lens set the recorded scoring run held. `calibrate` refuses any other.
+recorded_lenses = ["correctness", "contract", "adequacy"]
 
 [[defects]]
 id = "restated-record-key-lookup"

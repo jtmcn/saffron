@@ -20,6 +20,8 @@ source = "docs/BACKLOG.md item 69: reflow one SCHEMA line — both migration gua
 # Neither review lens filed anything in this range; the recorded run is 0/0.
 recorded_seen = 0
 recorded_graded = 0
+# The lens set the recorded scoring run held. `calibrate` refuses any other.
+recorded_lenses = ["correctness", "contract", "adequacy"]
 
 [[defects]]
 id = "reflow-defeats-guard"

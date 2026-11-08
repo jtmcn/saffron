@@ -127,7 +127,7 @@ load a spec without the ref's mutants, so a regate can judge a witness the cell
 set aside.
 
 **Placed 2026-11-06**, from the spec loop's run 54: **b-fe3488**, **b-ffb930**,
-**b-0add4c**, then **b-71f95f**. A stack batch starts an order its budget
+~~**b-0add4c**~~, then **b-71f95f**. A stack batch starts an order its budget
 cannot run. The follow-up writer's first draft never parses. The record's
 git calls can prompt and drop git's reason. A cell makes CONNECTs no git
 call explains.

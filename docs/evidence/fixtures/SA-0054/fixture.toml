@@ -29,6 +29,8 @@ source = "docs/BACKLOG.md item 69: `parent_branch=None`; 76/76 green — every s
 # recorded_graded are 0/0, and `calibrate` confirms it.
 recorded_seen = 0
 recorded_graded = 0
+# The lens set the recorded scoring run held. `calibrate` refuses any other.
+recorded_lenses = ["correctness", "contract", "adequacy"]
 
 [[defects]]
 id = "parent-branch-unpinned"
