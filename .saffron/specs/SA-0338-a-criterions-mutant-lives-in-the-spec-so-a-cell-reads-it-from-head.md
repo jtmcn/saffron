@@ -385,7 +385,7 @@ is already credited there. It keeps that function's comment at
   the scan prints at your head. Leave its docstring and `measured` set
   alone.
 - `test_no_real_spec_is_refused_on_its_own_acceptance_criteria`
-  (`tests/test_scheduler.py:4738`) names ten `.claude/` refusals. `SA-0282`
+  (`tests/test_scheduler.py:4748`) names ten `.claude/` refusals. `SA-0282`
   now refuses earlier for its inline mutant, so drop it from that list.
   Assert the inline refusals are exactly the promoted specs that declare a
   mutant, `SA-0063` aside, and that they number more than 30. Measured, they
