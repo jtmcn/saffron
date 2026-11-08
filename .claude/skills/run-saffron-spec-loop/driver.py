@@ -1834,9 +1834,58 @@ def cmd_hold(args) -> int:
     return 0
 
 
-def cmd_status(_args) -> int:
+# A cell log quiet this long is no longer running (the status line's own bound).
+_LIVE_S = 600
+
+
+def _live_phase(spec_id: str) -> str | None:
+    """The phase a running cell of this spec is in, from its `events.jsonl`."""
+    from saffron import events
+
+    task_dir = JEV_ROOT / "v0" / spec_id
+    log = task_dir / "events.jsonl"
+    if not log.is_file() or time.time() - log.stat().st_mtime > _LIVE_S:
+        return None
+    phase = None
+    for event in events.read_log(task_dir):
+        if isinstance(event, events.PhaseStart):
+            phase = event.phase
+            # PLAN reports its acceptance under its own label. The work after it is the phase.
+            if event.label != event.phase and not event.detail.startswith("accepted"):
+                phase = f"{event.phase}/{event.label}"
+        elif isinstance(event, events.GateResult):
+            phase = "GATE"
+        elif isinstance(event, events.Teardown):
+            phase = "teardown"
+    return phase
+
+
+def _status_line(rows: list[OrderRow]) -> str:
+    """One line for a status bar. It reads no GitHub and no git, so it stays fast."""
+    parts = [f"{sum(p.reviewable for p in rows)}/{len(rows)} reviewable"]
+    held = 0
+    for p in rows:
+        if p.held and p.pending:
+            held += 1
+            continue
+        state = "dropped" if p.dropped else p.state or "pending"
+        text = f"{p.spec_id} {state}"
+        if p.pending and (phase := _live_phase(p.spec_id)):
+            text = f"{p.spec_id} running {phase}"
+        parts.append(f"{text} #{p.pr}" if p.pr else text)
+    if held:
+        parts.append(f"{held} held")
+    return "loop: " + " · ".join(parts)
+
+
+def cmd_status(args) -> int:
     if (refused := _refuse_on_loop_branch("status")) is not None:
         return refused
+    if getattr(args, "line", False):
+        # A status bar shows nothing outside a loop, so this form prints nothing.
+        if ORDER.is_file():
+            print(_status_line(_load()))
+        return 0
     # The state dir is ignored by git, so every new worktree opens with no order.
     if not ORDER.is_file() and not LEGACY_PLAN.is_file():
         print(
@@ -3316,6 +3365,9 @@ def main() -> int:
     p.set_defaults(func=cmd_probe, run=[])
 
     p = sub.add_parser("status", help="show the order, what has run, and staleness")
+    p.add_argument(
+        "--line", action="store_true", help="one line for a status bar, offline"
+    )
     p.set_defaults(func=cmd_status)
 
     p = sub.add_parser("stack", help="link the reviewable PRs into one GitHub stack")

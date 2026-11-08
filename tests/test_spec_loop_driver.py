@@ -4076,3 +4076,38 @@ def test_the_driver_says_verdict_only_for_a_verdict_it_names_the_owner_of():
         if "verdict" in line.lower() and not any(o in line for o in owned)
     ]
     assert stray == []
+
+
+def test_status_line_prints_the_queue_on_one_line_without_github(
+    tmp_path, monkeypatch, capsys
+):
+    # b-a7e315: the operator's status bar parsed the status table, and a column change broke it.
+    from saffron.events import EventLog, PhaseStart
+
+    ready, running, quiet = _row("A", pr=10), _row("B", pr=None, state=None), _row("C")
+    quiet.state, quiet.pr = None, None
+    held = _row("D", pr=None, state=None)
+    held.held = "#99"
+    (order := tmp_path / "order.json").write_text("[]")
+    monkeypatch.setattr(driver, "ORDER", order)
+    monkeypatch.setattr(driver, "JEV_ROOT", tmp_path)
+    monkeypatch.setattr(driver, "_load", lambda: [ready, running, quiet, held])
+    monkeypatch.setattr(driver, "_pr_state", lambda _n: pytest.fail("read GitHub"))
+    EventLog(tmp_path / "v0" / "B").append(
+        PhaseStart(1.0, "B", "IMPLEMENT", "IMPLEMENT")
+    )
+    EventLog(tmp_path / "v0" / "C").append(PhaseStart(1.0, "C", "REVIEW", "REVIEW"))
+    os.utime(tmp_path / "v0" / "C" / "events.jsonl", (1.0, 1.0))
+
+    assert driver.cmd_status(argparse.Namespace(line=True)) == 0
+    assert capsys.readouterr().out == (
+        "loop: 1/4 reviewable · A READY_FOR_REVIEW #10 · B running IMPLEMENT"
+        " · C pending · 1 held\n"
+    )
+
+
+def test_status_line_prints_nothing_outside_a_loop(tmp_path, monkeypatch, capsys):
+    _no_order(tmp_path, monkeypatch)
+
+    assert driver.cmd_status(argparse.Namespace(line=True)) == 0
+    assert capsys.readouterr() == ("", "")
