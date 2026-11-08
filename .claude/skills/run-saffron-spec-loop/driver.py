@@ -148,6 +148,8 @@ class OrderRow:
     # Why `next` passes over this spec: its edit is open as a pull request, so
     # a cell would run the old text. A re-snapshot releases it.
     held: str | None = None
+    # The branch head `reviewed` saw once the review's last fix was pushed. A child waits for it.
+    reviewed_sha: str = ""
 
     title: str = ""
     budget_usd: float = 0.0
@@ -1153,10 +1155,10 @@ def _next_spec(
     head_of: Callable[[str], str | None] | None = None,
 ) -> tuple[OrderRow | None, str | None]:
     """The first pending spec no cell has answered, and a note when its parent
-    is reviewable: a child's worktree is cut from the parent's branch, so the
-    parent's review commits have to be pushed first. A child whose parent in
-    the order has no reviewable branch is held back: `saffron cell` does not
-    refuse it, and would cut its worktree from main."""
+    is reviewable. A child's worktree is cut from the parent's branch, so it
+    waits until `reviewed` marks the parent's review ended at its branch head.
+    A child whose parent in the order has no reviewable branch is held back:
+    `saffron cell` does not refuse it, and would cut its worktree from main."""
     by_id = {p.spec_id: p for p in rows}
     notes = []
     for p in rows:
@@ -1183,27 +1185,25 @@ def _next_spec(
             )
             continue
         parents = [by_id[d] for d in p.depends_on if d in by_id]
-        names = ", ".join(q.spec_id for q in parents)
-        if parents and all(q.pushed_sha for q in parents):
-            head_of = head_of or _origin_head
-            heads = {q.spec_id: head_of(q.branch) for q in parents}
-            unpushed = [q for q in parents if heads[q.spec_id] in (None, q.pushed_sha)]
-            if unpushed:
+        if parents:
+            # Pushed review commits are no ended review: run 8 named SA-0102 mid-review.
+            if unreviewed := [q for q in parents if not q.reviewed_sha]:
+                q = unreviewed[0]
                 notes.append(
-                    f"{p.spec_id} waits on {unpushed[0].spec_id}'s review commits: "
-                    "none are pushed yet"
+                    f"{p.spec_id} waits on {q.spec_id}'s review: "
+                    f"`reviewed {q.spec_id}` marks it ended after its last push"
                 )
                 continue
-            pushed = ", ".join((heads[q.spec_id] or "")[:8] for q in parents)
-            notes.append(
-                f"{p.spec_id} is cut from {names}, whose review commits are pushed "
-                f"({pushed})"
-            )
-        elif parents:  # an order `record` wrote before it stored `pushed_sha`
-            notes.append(
-                f"{p.spec_id} is cut from {names}: push "
-                f"{'their' if len(parents) > 1 else 'its'} review commits first"
-            )
+            head_of = head_of or _origin_head
+            if moved := [q for q in parents if head_of(q.branch) != q.reviewed_sha]:
+                q = moved[0]
+                notes.append(
+                    f"{p.spec_id} waits on {q.spec_id}: its branch is not at the "
+                    f"reviewed {q.reviewed_sha[:8]}, so `reviewed {q.spec_id}` again"
+                )
+                continue
+            names = ", ".join(f"{q.spec_id} at {q.reviewed_sha[:8]}" for q in parents)
+            notes.append(f"{p.spec_id} is cut from {names}, whose review ended there")
         return p, "; ".join(notes) or None
     return None, "; ".join(notes) or None
 
@@ -1529,7 +1529,8 @@ def _label_gaps(directory: Path, kind: str) -> list[str]:
     followed = doc.get("blocker_followed")
     if not isinstance(followed, dict) or any(k not in followed for k in LABEL_FOLLOWED):
         gaps.append(f"blocker_followed needs {', '.join(LABEL_FOLLOWED)}")
-    if doc.get("schema") == 2 and isinstance(followed, dict):
+    # A cell round has no later review round of its own kind to check.
+    if doc.get("schema") == 2 and isinstance(followed, dict) and kind in LABEL_LATER:
         key = LABEL_LATER[kind]
         later = int(directory.name.removeprefix("round-")) + 1
         ran = (directory.parent / f"round-{later}" / "round.json").is_file()
@@ -1559,7 +1560,7 @@ def cmd_labels(args) -> int:
     bad = 0
     scored = 0
     for spec_id in specs:
-        for kind in ("spec-review", "pr-review"):
+        for kind in ("spec-review", "pr-review", "cell"):
             base = JEV_ROOT / "spec-loop" / spec_id / kind
             for directory in sorted(base.glob("round-*")):
                 if not (directory / "jev.ttl").is_file():
@@ -1719,11 +1720,35 @@ def _jev_cell(
         and (directory / "findings.json").stat().st_mtime < baseline.stat().st_mtime
     ):
         return _fail(f"{directory}'s REVIEW predates its latest run, so no score")
-    findings = jev_observe.lens_findings(lenses)
-    pairs = jev_observe.number_findings("cell", spec_id, 1, findings)
-    return directory, jev_observe.ReviewRound(
-        "cell", spec_id, 1, commit, spec_text, criteria, pairs, [], diff
+    # Saved beside the other kinds, so `labels` finds the round its labels grade (b-91ead2).
+    base = JEV_ROOT / "spec-loop" / spec_id / "cell"
+    rounds = sorted(
+        (int(p.name.removeprefix("round-")), p)
+        for p in base.glob("round-*")
+        if p.name.removeprefix("round-").isdigit()
     )
+    # A rescore of the same head keeps its review round. A re-run cell takes the next one.
+    number = next(
+        (n for n, p in rounds if _saved_commit(p) == commit),
+        (rounds[-1][0] if rounds else 0) + 1,
+    )
+    findings = jev_observe.lens_findings(lenses)
+    pairs = jev_observe.number_findings("cell", spec_id, number, findings)
+    saved = base / f"round-{number}"
+    saved.mkdir(parents=True, exist_ok=True)
+    (saved / "spec.md").write_text(spec_text)
+    (saved / "round.json").write_text(json.dumps({"commit": commit}) + "\n")
+    (saved / "findings.json").write_text(jev_observe.dump_findings(pairs))
+    return saved, jev_observe.ReviewRound(
+        "cell", spec_id, number, commit, spec_text, criteria, pairs, [], diff
+    )
+
+
+def _saved_commit(directory: Path) -> str | None:
+    try:
+        return json.loads((directory / "round.json").read_text()).get("commit")
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return None
 
 
 def cmd_drop(args) -> int:
@@ -1820,6 +1845,20 @@ def cmd_probe(args) -> int:
     return 0
 
 
+def cmd_reviewed(args) -> int:
+    """Mark a reviewable spec's review ended at its branch head on origin."""
+    rows = _load()
+    match = next((p for p in rows if p.spec_id == args.spec_id), None)
+    if match is None or not match.reviewable:
+        return _fail(f"{args.spec_id} has no reviewable pull request in the order")
+    if (head := _origin_head(match.branch)) is None:
+        return _fail(f"no origin/{match.branch} to mark; push the review's fixes first")
+    match.reviewed_sha = head
+    _save(rows)
+    print(f"{match.spec_id}  review ended at {head[:8]}; its children can start")
+    return 0
+
+
 def cmd_hold(args) -> int:
     """Keep `next` off a spec whose edit is still an open pull request."""
     rows = _load()
@@ -1834,9 +1873,58 @@ def cmd_hold(args) -> int:
     return 0
 
 
-def cmd_status(_args) -> int:
+# A cell log quiet this long is no longer running (the status line's own bound).
+_LIVE_S = 600
+
+
+def _live_phase(spec_id: str) -> str | None:
+    """The phase a running cell of this spec is in, from its `events.jsonl`."""
+    from saffron import events
+
+    task_dir = JEV_ROOT / "v0" / spec_id
+    log = task_dir / "events.jsonl"
+    if not log.is_file() or time.time() - log.stat().st_mtime > _LIVE_S:
+        return None
+    phase = None
+    for event in events.read_log(task_dir):
+        if isinstance(event, events.PhaseStart):
+            phase = event.phase
+            # PLAN reports its acceptance under its own label. The work after it is the phase.
+            if event.label != event.phase and not event.detail.startswith("accepted"):
+                phase = f"{event.phase}/{event.label}"
+        elif isinstance(event, events.GateResult):
+            phase = "GATE"
+        elif isinstance(event, events.Teardown):
+            phase = "teardown"
+    return phase
+
+
+def _status_line(rows: list[OrderRow]) -> str:
+    """One line for a status bar. It reads no GitHub and no git, so it stays fast."""
+    parts = [f"{sum(p.reviewable for p in rows)}/{len(rows)} reviewable"]
+    held = 0
+    for p in rows:
+        if p.held and p.pending:
+            held += 1
+            continue
+        state = "dropped" if p.dropped else p.state or "pending"
+        text = f"{p.spec_id} {state}"
+        if p.pending and (phase := _live_phase(p.spec_id)):
+            text = f"{p.spec_id} running {phase}"
+        parts.append(f"{text} #{p.pr}" if p.pr else text)
+    if held:
+        parts.append(f"{held} held")
+    return "loop: " + " · ".join(parts)
+
+
+def cmd_status(args) -> int:
     if (refused := _refuse_on_loop_branch("status")) is not None:
         return refused
+    if getattr(args, "line", False):
+        # A status bar shows nothing outside a loop, so this form prints nothing.
+        if ORDER.is_file():
+            print(_status_line(_load()))
+        return 0
     # The state dir is ignored by git, so every new worktree opens with no order.
     if not ORDER.is_file() and not LEGACY_PLAN.is_file():
         print(
@@ -1889,6 +1977,30 @@ def cmd_status(_args) -> int:
     return 0
 
 
+def _common_git_dir(cwd: Path) -> Path:
+    """The repository's shared git directory, read without git, from a worktree too."""
+    dot = cwd / ".git"
+    if not dot.is_file():
+        return dot
+    own = Path(dot.read_text().removeprefix("gitdir:").strip())
+    common = own / "commondir"
+    return (own / common.read_text().strip()).resolve() if common.is_file() else own
+
+
+def _leftover_rebase() -> str | None:
+    """A gh-stack rebase state on disk, named with its age (b-d3f977)."""
+    state = _common_git_dir(REPO) / "gh-stack-rebase-state"
+    if not state.exists():
+        return None
+    written = dt.datetime.fromtimestamp(state.stat().st_mtime, dt.UTC)
+    days = (dt.datetime.now(dt.UTC) - written).days
+    return (
+        f"{state} is a gh stack rebase left on {written:%Y-%m-%d} ({days} day(s) old). "
+        "`gh stack link` refuses while it exists, and `gh stack rebase --abort` "
+        "resets the branches it names. Move it aside once no rebase is running."
+    )
+
+
 def cmd_stack(args) -> int:
     order, warnings = _stack_order(_load())
     if len(order) < 2:
@@ -1931,9 +2043,14 @@ def cmd_stack(args) -> int:
     print(
         "\nPACKAGE opens drafts (§5.7); --execute marks each ready once its base reads back."
     )
+    leftover = _leftover_rebase()
     if not args.execute:
+        if leftover:
+            print(f"\nwarning: {leftover}")
         print("\n(dry run — pass --execute to link)")
         return 0
+    if leftover:
+        return _fail(leftover)
 
     done = subprocess.run(command, cwd=REPO, text=True)
     if done.returncode != 0:
@@ -3298,6 +3415,10 @@ def main() -> int:
     p.add_argument("spec_id")
     p.set_defaults(func=cmd_undrop)
 
+    p = sub.add_parser("reviewed", help="mark a spec's review ended at its pushed head")
+    p.add_argument("spec_id")
+    p.set_defaults(func=cmd_reviewed)
+
     p = sub.add_parser("hold", help="keep next off a spec whose edit is still open")
     p.add_argument("spec_id")
     p.add_argument("--why", help="the pull request the edit is waiting in")
@@ -3316,6 +3437,9 @@ def main() -> int:
     p.set_defaults(func=cmd_probe, run=[])
 
     p = sub.add_parser("status", help="show the order, what has run, and staleness")
+    p.add_argument(
+        "--line", action="store_true", help="one line for a status bar, offline"
+    )
     p.set_defaults(func=cmd_status)
 
     p = sub.add_parser("stack", help="link the reviewable PRs into one GitHub stack")

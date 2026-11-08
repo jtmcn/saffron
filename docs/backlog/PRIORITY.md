@@ -362,7 +362,7 @@ which is a ledger term. The spec chain records no cost per escaped defect, so
 no step can be cut on evidence.
 
 **Moved 2026-11-07 from tier 2**, on the operator's ruling: ~~**b-dc5212**~~ and
-**b-4589be**. Each bites only on the driver's attended path, which is now the
+~~**b-4589be**~~. Each bites only on the driver's attended path, which is now the
 fallback.
 
 **Placed 2026-11-06**, from the spec loop's run 54: **b-25c0f5**, then
@@ -406,7 +406,7 @@ stack left alone.
 in `policy.yaml`. **b-2227b0**, closed as parked, records a draft ADR.
 
 **Placed 2026-10-25**, from the spec loop's run 48: ~~**b-9c5b11**~~,
-~~**b-01c53d**~~, ~~**b-92fdbe**~~, **b-d3f977**, ~~**b-f0e351**~~ and **b-87001a**.
+~~**b-01c53d**~~, ~~**b-92fdbe**~~, ~~**b-d3f977**~~, ~~**b-f0e351**~~ and **b-87001a**.
 Each is a gap a seat, a finish or the run found and the stack left alone.
 
 **Placed 2026-10-27**, from the spec loop's run 49:
@@ -477,7 +477,7 @@ uid 0 in every cell, and `--cap-drop ALL` makes the read they test fail.
 **b-12e717**, **b-2dd65f**, ~~**b-b1a7d4**~~, then **b-1f1188**.
 The first three are defects in REVIEW and REBUT that the run's seats found.
 The last two are gaps in the spec chain's own tools. **b-9529e9** and
-**b-91ead2** came from closing the run. The scoring driver cannot reach a
+~~**b-91ead2**~~ came from closing the run. The scoring driver cannot reach a
 fixture head or clean up after a kill, and `labels` reads no cell round.
 
 **Placed 2026-09-30**, from the spec loop's run 23: **b-a09d30**,
@@ -490,7 +490,7 @@ Preflight names a listener's address but not its process.
 revised spec gets no task state.
 
 **Placed 2026-10-02**, from the spec loop's run 25: **b-006372**,
-**b-7430c1**, **b-1068ea**, ~~**b-8a6f43**~~, then **b-a7e315**. The finish is
+**b-7430c1**, **b-1068ea**, ~~**b-8a6f43**~~, then ~~**b-a7e315**~~. The finish is
 judged at the pinned base. One escalation hides a leftover worktree. A
 child's tree carries an older spec than it runs. `snapshot --force` drops
 holds, and `status` has no one-line form.

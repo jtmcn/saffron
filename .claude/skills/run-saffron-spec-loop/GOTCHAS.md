@@ -162,7 +162,7 @@ and trades the review commits for an end review and follow-up specs.
 | `CLAUDE_CODE_OAUTH_TOKEN is unset` | Scope it to the `saffron cell` invocation (Starting cells); refresh with `claude setup-token`. |
 | Cell exits 2 | Read the last lines first: `rate limit: rejected` means wait for the window. Otherwise `container system start`, then `container image list`. |
 | Preflight fails naming host ports | The allowlist variable is missing from the invocation (Starting cells). |
-| `next`: `B waits on A's review commits: none are pushed yet` | Finish A's review and push it; `next` hands B back once A's branch moves past what PACKAGE pushed. |
+| `next`: `B waits on A's review` | Finish A's review, push it, then `driver.py reviewed A`. Pushed review commits alone do not end it (b-4589be). |
 | `next`: `nothing untouched left` | Every pending spec already had a cell that decided nothing. `next --again` after a reopened rate-limit window; `drop` otherwise. |
 | `rebase` refuses: local branch differs from origin | Push or reset the local branch first; the rebase starts from what is on GitHub. |
 | `rebase` refuses: `<branch> is checked out in <path>` | A step 2c review worktree still holds it. `git -C <path> switch --detach`, or remove that worktree, then run `rebase` again. |

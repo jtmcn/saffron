@@ -1,12 +1,13 @@
 ---
 id: b-a7e315
 title: '`driver.py status` has no one-line form, so the operator''s status line parses its table'
-status: open
+status: done
 tier: 3
 filed: 2026-10-02
+closed: 2026-11-08
 by_hand: true
 specs: []
-prs: []
+prs: [1066]
 commits: []
 cites: []
 related: []
@@ -31,3 +32,4 @@ and pull request, the running cell's phase and the held count, on one line.
 - 2026-10-02: filed from the spec loop's run 25.
 - 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
   `.claude/`, and `SA-0279` refuses any spec that touches that path.
+- 2026-11-08: done by hand in #1066.

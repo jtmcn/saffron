@@ -331,7 +331,10 @@ def test_a_rerun_cell_clears_a_stale_ttl_before_scoring_again(monkeypatch, loop)
     )
     (cell / "patch.json").write_text(json.dumps({"head_sha": "feedbeef"}))
     (cell / "patch.diff").write_text("diff --git a/t.py b/t.py\n")
-    (cell / "jev.ttl").write_text("stale")
+    saved = loop.batches / "spec-loop" / "SA-0901" / "cell" / "round-1"
+    saved.mkdir(parents=True)
+    (saved / "round.json").write_text(json.dumps({"commit": "feedbeef"}))
+    (saved / "jev.ttl").write_text("stale")
 
     class Down:
         def system_one(self, *args, **kwargs):
@@ -350,7 +353,7 @@ def test_a_rerun_cell_clears_a_stale_ttl_before_scoring_again(monkeypatch, loop)
         )
         == 2
     )
-    assert not (cell / "jev.ttl").exists()
+    assert not (saved / "jev.ttl").exists()
 
 
 def test_a_cell_is_scored_from_its_batch_directory(monkeypatch, loop):
@@ -380,7 +383,8 @@ def test_a_cell_is_scored_from_its_batch_directory(monkeypatch, loop):
         )
         == 0
     )
-    assert '"feedbeef"' in (cell / "jev.ttl").read_text()
+    saved = loop.batches / "spec-loop" / "SA-0901" / "cell" / "round-1"
+    assert '"feedbeef"' in (saved / "jev.ttl").read_text()
     assert {k.split("_", 1)[0] for k in loop.client.questions} == {
         "Q1",
         "Q2",
@@ -647,3 +651,37 @@ def test_a_review_round_records_when_it_was_saved_and_a_rescore_keeps_it(
     saved.write_text(json.dumps({**doc, "saved_at": STARTED}))
     assert _review(monkeypatch, loop, "--round", "1") == 0
     assert json.loads(saved.read_text())["saved_at"] == STARTED
+
+
+def _scored_cell(monkeypatch, loop, head: str) -> int:
+    cell = loop.batches / "v0" / "SA-0901"
+    cell.mkdir(parents=True, exist_ok=True)
+    lens = {"lens": "adequacy", "severity": "note", "file": "t.py", "line": 5}
+    (cell / "findings.json").write_text(
+        json.dumps([{"lens": "adequacy", "findings": [{**lens, "claim": "weak"}]}])
+    )
+    (cell / "patch.json").write_text(json.dumps({"head_sha": head}))
+    (cell / "patch.diff").write_text("diff --git a/t.py b/t.py\n")
+    spec = str(loop.root / "spec.md")
+    return _run(monkeypatch, "jev", "SA-0901", "--kind", "cell", "--spec", spec)
+
+
+def test_labels_reads_a_scored_cell_round_saved_beside_the_other_kinds(
+    monkeypatch, loop, capsys
+):
+    # b-91ead2: the cell round sat under `v0/`, and its labels landed where nothing read them.
+    base = loop.batches / "spec-loop" / "SA-0901" / "cell"
+    assert _scored_cell(monkeypatch, loop, "feedbeef") == 0
+    assert (base / "round-1" / "jev.ttl").is_file()
+    assert not (loop.batches / "v0" / "SA-0901" / "jev.ttl").exists()
+    capsys.readouterr()
+    assert _run(monkeypatch, "labels", "SA-0901") == 1
+    assert "SA-0901  cell round-1  no labels.json" in capsys.readouterr().out
+
+    _label_all(base / "round-1")
+    _follow(base / "round-1", 2, cell_review=True)
+    assert _run(monkeypatch, "labels", "SA-0901") == 0
+    # A rescore keeps its review round, and a re-run cell takes the next one.
+    assert _scored_cell(monkeypatch, loop, "feedbeef") == 0
+    assert _scored_cell(monkeypatch, loop, "cafebabe") == 0
+    assert sorted(p.name for p in base.iterdir()) == ["round-1", "round-2"]
