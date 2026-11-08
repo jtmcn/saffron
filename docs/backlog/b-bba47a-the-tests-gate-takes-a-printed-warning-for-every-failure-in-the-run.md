@@ -1,7 +1,8 @@
 ---
 id: b-bba47a
 title: The `tests` gate takes an unindented warning a test prints for every failure in the run, and two comments say that is its common path
-status: open
+status: partial
+by_hand: true
 tier: 2
 filed: 2026-10-15
 specs: [SA-0273]
@@ -43,3 +44,7 @@ whatever else the output holds. The two comments say what was measured.
 ## Record
 
 - 2026-10-15: filed from the spec loop's run 40.
+- 2026-11-08: partial by hand. The `tests` gate keys `failures[].code` on node
+  ids from `FAILED` and `ERROR` lines, and no regex reads captured output.
+  `criteria._side` and `DESIGN.md` §5.4 say what was measured. Left: the
+  comment in `saffron/gates/core/revert.py`, which a queued spec touches.

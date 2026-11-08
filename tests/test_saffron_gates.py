@@ -301,6 +301,41 @@ def test_a_red_test_that_prints_a_usage_error_is_a_failure_not_an_error(tmp_path
     assert result.failures
 
 
+def test_a_warning_a_failing_test_prints_leaves_every_failure_keyed_on_its_node_id(
+    tmp_path,
+):
+    """A subprocess's warning prints an unindented `file:line: Type: msg` line.
+    A regex over the whole output read it as the run's only failure, and both
+    node ids were lost (b-bba47a). A setup error keys on its node id too."""
+    (tmp_path / "test_red.py").write_text(
+        "import pytest\n"
+        "def test_warns():\n"
+        "    print('<string>:1: UserWarning: from a subprocess')\n"
+        "    assert False\n"
+        "def test_plain():\n"
+        "    assert False\n"
+        "@pytest.fixture\n"
+        "def broken():\n"
+        "    raise RuntimeError('setup')\n"
+        "def test_setup(broken):\n"
+        "    pass\n"
+    )
+    done = subprocess.run(
+        [str(GATES / "tests")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="tests")
+    assert result.status == "fail", result.summary
+    assert sorted(f.code for f in result.failures) == [
+        "test_red.py::test_plain",
+        "test_red.py::test_setup",
+        "test_red.py::test_warns",
+    ]
+
+
 def test_a_flag_pytest_itself_rejects_is_an_error(tmp_path):
     """The mechanism breaking is `error`, charged to nobody (§5.4). The summary
     names it, where the later no-parsed-failures branch would not."""
