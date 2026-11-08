@@ -40,6 +40,8 @@ model decides when to spawn a subagent. A lens that runs only when the model
 thinks it relevant is a suggestion. Every declared lens runs on every
 reviewed diff, at every risk tier. A lens that errors stops the task at
 `REVIEWING`, so an unrun lens never reads as a clean review.
+Amended 2026-11-07, by hand for b-80cc6e: since `SA-0287` that stop ends
+`REVIEW_INCOMPLETE`, a decided state, and the task is not left at `REVIEWING`.
 
 Each lens runs in a critic cell. The cell is a new container whose tree is the
 base with the exported patch applied, so a lens reads the patch that ships.
@@ -95,6 +97,9 @@ session answers the host's blockers too. Each session also reads the diff
 REVIEW saw, because a blocker's line number was filed against that tree. A
 verdict set that leaves a blocker unanswered is an error, never a withdrawal. A
 verdict session that errors halts the task at `REBUTTING`.
+Amended 2026-11-07, by hand for b-80cc6e: since `SA-0276` each halt this
+paragraph names ends `REBUTTAL_UNJUDGED`, a decided state, and the task is not
+left at `REBUTTING`.
 
 Any confirmed blocker reaches `READY_FOR_REVIEW`, whether the implementer
 argued against it or fixed it and stayed green. So do a withdrawn set and a

@@ -1171,9 +1171,9 @@ def test_an_adequacy_finding_without_a_probe_is_not_the_schema():
 
 
 def test_a_correctness_finding_carries_no_probe_field_at_all():
-    """Only adequacy's defect class is expressible as an edit that keeps the
-    suite green. A timezone bug is not, so requiring one there would push the
-    lens toward manufacturing it — which its own prompt forbids."""
+    """Adequacy and the end review's Spec lens file an edit that keeps the
+    suite green. A correctness bug such as a timezone slip is not one, so
+    requiring a probe there would push the lens to manufacture it."""
     reported = {"file": "a.py", "line": 1, "severity": "concern", "claim": "c"}
     assert review.reported_model("correctness").model_validate(reported)
     with pytest.raises(ValidationError):

@@ -3626,6 +3626,25 @@ def test_a_stack_batch_runs_a_spec_only_when_its_own_review_routes_it_to_run(
     assert set(unreviewed) == {"TE-7", "TE-8"}
     assert "review session failed" in unreviewed["TE-7"]
 
+    # b-5abe53: a review routed `run` prints its own line, as the others do.
+    reviewed = {
+        line[:10].strip(): line
+        for line in lines
+        if line[10:].startswith(" reviewed  run")
+    }
+    assert set(reviewed) == {
+        "TE-1",
+        "TE-6",
+        "TE-12",
+        "TE-16",
+        "TE-14",
+        "TE-17",
+        "TE-18",
+        "TE-15",
+    }
+    assert reviewed["TE-6"].strip().endswith("2 finding(s)")
+    assert reviewed["TE-1"].strip().endswith("0 finding(s)")
+
     refused = {line.split()[0]: line for line in lines if " refused  " in line}
     assert set(refused) == {"TE-9", "TE-10", "TE-11", "TE-13"}
     assert "TE-2" in refused["TE-9"] and "TE-2" in refused["TE-10"]
@@ -6816,7 +6835,7 @@ def test_the_finish_runs_once_after_the_follow_ups_while_the_batch_row_is_open(
 
 class RaisingStackDoubles(StackDoubles):
     """`StackDoubles`, with a queue of exceptions per `(seat, spec id)`, where
-    `seat` is `review` or `runner`. Each call first pops and raises that
+    `seat` is `review`, `revise` or `runner`. Each call first pops and raises that
     key's next queued exception, recorded the same way `StackDoubles` would.
     Otherwise it falls back to `StackDoubles` (b-60a399)."""
 
@@ -6848,6 +6867,15 @@ class RaisingStackDoubles(StackDoubles):
             self.order.append(f"review:{spec_id}")
             raise queued.pop(0)
         return super().review(candidate, predecessor, **kw)
+
+    def revise(self, candidate: Candidate, predecessor, spec_text, review_text):
+        spec_id = candidate.spec.id
+        queued = self.raises.get(("revise", spec_id))
+        if queued:
+            self.revise_calls.append(spec_id)
+            self.order.append(f"revise:{spec_id}")
+            raise queued.pop(0)
+        return super().revise(candidate, predecessor, spec_text, review_text)
 
     def runner(self, candidate: Candidate, predecessor: Candidate | None = None):
         spec_id = candidate.spec.id
@@ -6933,6 +6961,57 @@ def test_a_cell_runtime_failure_in_a_stack_batch_is_offered_again_not_missed(
         f"{'TE-7':<10} refused  reaches TE-6",
     ]
     assert _task_routes(ledger, doubles.tasks["TE-1"]) == ["error", "run"]
+
+
+def test_a_revisions_cell_runtime_failure_is_offered_again_not_missed(ledger, repo_id):
+    """A revision that raises `CellRuntimeError` leaves its spec queued, as
+    one from `review` does (b-a33889). The spec is reviewed again at once,
+    and its dependent runs. A plain `RuntimeError` from a revision is a miss,
+    and its dependent is refused."""
+    from saffron.batch import run_stack_batch
+
+    order = [
+        _candidate("TE-1"),
+        _candidate("TE-2", depends_on=["TE-1"]),
+        _candidate("TE-3"),
+        _candidate("TE-4", depends_on=["TE-3"]),
+    ]
+    doubles = RaisingStackDoubles(
+        ledger,
+        repo_id,
+        {"TE-1": {"route": ["revise", "run"]}, "TE-3": {"route": ["revise"]}},
+        {
+            ("revise", "TE-1"): [CellRuntimeError("seeding the worktree failed")],
+            ("revise", "TE-3"): [RuntimeError("boom")],
+        },
+    )
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        100.0,
+        None,
+        doubles.runner,
+        readiness_check=_ready,
+        review=doubles.review,
+        revise=doubles.revise,
+        mint=doubles.mint,
+        sleep=_fail_sleep,
+        emit=lines.append,
+    )
+
+    assert reason == "DRAINED"
+    assert [call[0] for call in doubles.review_calls] == [
+        "TE-1",
+        "TE-1",
+        "TE-2",
+        "TE-3",
+    ]
+    assert [call[0] for call in doubles.runner_calls] == ["TE-1", "TE-2"]
+    assert [line for line in lines if " refused " in line] == [
+        f"{'TE-4':<10} refused  reaches TE-3"
+    ]
 
 
 def test_a_follow_ups_cell_runtime_failure_is_offered_again(ledger, repo_id):

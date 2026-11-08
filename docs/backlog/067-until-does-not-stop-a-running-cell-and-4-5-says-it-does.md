@@ -1,10 +1,12 @@
 ---
 id: 67
 title: '`--until` does not stop a running cell, and §4.5 says it does'
-status: open
+status: done
+closed: 2026-11-07
+by_hand: true
 tier: 2
 specs: []
-prs: []
+prs: [1041]
 commits: []
 cites: [§4.5]
 related: []
@@ -35,3 +37,9 @@ either the supervisor gains a deadline and stamps `ORPHANED` when it passes, and
 budget is named as the ceiling that actually holds unattended. The second is
 cheaper and defensible — a killed cell mid-REBUT wastes everything it spent —
 but it should be a decision, not a drift.
+
+## Record
+
+- 2026-11-07: closed by the second arm. `DESIGN.md` §4.5 now says `--until`
+  is checked between tasks and stamps nothing. `CLAUDE.md` and
+  `docs/HOST-HARDENING.md` §4a already said so.

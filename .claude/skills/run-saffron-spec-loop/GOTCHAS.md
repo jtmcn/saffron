@@ -66,13 +66,13 @@ do; the measurement behind it follows.
   - `NOT_IMPLEMENTED` after `budget: … no room left to salvage`. The plan
     checkpoint had spent 45% of the budget. Since SA-0126 only a second cut
     at one `spec_sha` ends here (`DESIGN.md` §4.5).
-  - `REBUTTING` after the process exited. REBUT gets only what the budget has
-    left (backlog item 120), and a rebuttal that runs out halts there by design
-    (§5.6), with its branch pushed and no PR.
+  - `REBUTTAL_UNJUDGED`. REBUT never reached its verdict, so the critic's
+    blockers stand unanswered (`SA-0276`, §5.6).
+  - `REVIEW_INCOMPLETE`. REVIEW could not start every lens, so no review
+    stands for the head (`SA-0287`). `record` prints what each asks.
 
-  A child cannot stack on either (`scheduler.DEPENDENCY_WAITING_STATES`), so
-  `next` holds it back. Ask whether to raise the spec's ceilings and re-run,
-  take a `REBUTTING` branch by hand, or drop the chain. A re-run is a spec edit
+  `next` holds a child back unless its parent is `READY_FOR_REVIEW`. Ask whether to raise the spec's ceilings and re-run,
+  take the branch by hand, or drop the chain. A re-run is a spec edit
   merged to main, then `snapshot --force`: it re-queues the spec at its new
   `spec_sha` and keeps every other recorded outcome (#256).
 
@@ -156,7 +156,7 @@ and trades the review commits for an end review and follow-up specs.
 | `snapshot --force`: `held out … #N is still open` | The spec was edited after its PR was packaged. Close #N to run the edited spec, or revert the edit to keep #N in the stack. |
 | `next`: `held back SA-NNNN: its parent … so a cell would cut it from main` | The parent has no reviewable branch. `next --again` once a rate-limited parent's window reopens; `drop` the child otherwise. |
 | `snapshot` prints `nothing to run: no candidate specs` | Every spec is done at its current `spec_sha`, or refused; the refusals are printed. |
-| `record`: `halted at REBUTTING` | The cell ran out of budget in REBUT. It goes to the operator (Recording). |
+| `record`: `REBUTTAL_UNJUDGED` or `REVIEW_INCOMPLETE` | REBUT or REVIEW halted. It goes to the operator (Recording). |
 | `record`: `no task for SA-NNNN at <sha>` | The spec was edited after its cell ran. Re-run the cell, or revert the edit. |
 | `CLAUDE_CODE_OAUTH_TOKEN is unset` | Scope it to the `saffron cell` invocation (Starting cells); refresh with `claude setup-token`. |
 | Cell exits 2 | Read the last lines first: `rate limit: rejected` means wait for the window. Otherwise `container system start`, then `container image list`. |
