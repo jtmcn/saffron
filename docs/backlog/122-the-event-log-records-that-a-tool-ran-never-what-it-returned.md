@@ -7,7 +7,7 @@ by_hand: true
 tier: 3
 filed: 2026-09-14
 specs: [SA-0087]
-prs: []
+prs: [1079]
 commits: []
 cites: []
 related: []
@@ -30,4 +30,4 @@ same bound agent text has.
 
 ## Record
 
-- 2026-11-08: done by hand.
+- 2026-11-08: done by hand in #1079.
