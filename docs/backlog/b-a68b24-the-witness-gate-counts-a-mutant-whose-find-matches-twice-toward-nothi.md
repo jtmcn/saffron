@@ -4,7 +4,7 @@ title: The witness gate counts a mutant whose find matches twice toward nothing,
 status: open
 tier: 2
 filed: 2026-10-24
-specs: []
+specs: [SA-0351]
 prs: []
 commits: []
 cites: [§5.4]

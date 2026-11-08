@@ -1178,9 +1178,14 @@ goes unmeasured. All nine of the above live below hunk granularity. **`revert`
 asks whether the tests test anything. `adequacy` asks whether they test each
 thing and cannot run. This asks the same question and can.**
 
-**A mutant that does not apply is named, never silently skipped**. The gate
-reports `skip` for a criterion whose `find` text is absent or matches more than
-once. The result *names* every such criterion. A check that buys
+**A declared mutant that does not apply fails, and any other edit that does not
+apply is named** (b-a68b24, `SA-0351`). A mutant the spec declared fails the gate
+when its `find` text is absent or matches more than once. The diff moved that
+text, so the repo's code is wrong and not the gate. The failure names the
+criterion's witness and the count, and never the edit. A base run that reports
+the same failure cancels it, as with any failure the diff did not cause. A
+constant mutant, a criterion probe or a wrong version that does not apply is
+still `skip` for its criterion. The result *names* every such criterion. A check that buys
 nothing without saying so is the defect one level up, and it is the failure mode Appendix I is
 about.
 
