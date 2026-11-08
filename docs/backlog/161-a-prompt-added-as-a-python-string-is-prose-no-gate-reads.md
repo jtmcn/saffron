@@ -7,7 +7,7 @@ filed: 2026-09-17
 closed: 2026-11-08
 by_hand: true
 specs: []
-prs: [312, 313, 317]
+prs: [312, 313, 317, 1074]
 commits: []
 cites: [§5.3, §5.4]
 related: []
@@ -53,4 +53,4 @@ are measurement code, outside what a cell reads.
 ## Record
 
 **Filed 2026-09-17** while stacking PRs #312 and #313.
-- 2026-11-08: done by hand.
+- 2026-11-08: done by hand in #1074.
