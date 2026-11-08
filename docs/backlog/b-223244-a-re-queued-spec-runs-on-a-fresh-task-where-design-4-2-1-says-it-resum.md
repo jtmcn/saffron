@@ -7,7 +7,7 @@ by_hand: true
 tier: 3
 filed: 2026-09-25
 specs: []
-prs: []
+prs: [1065]
 commits: []
 cites: [§4.2.1]
 related: [b-792ab2]
@@ -32,4 +32,4 @@ tonight's batch, so its spend and layers read exactly.
 ## Record
 
 - 2026-09-25: filed from the spec reviews of `b-792ab2`'s last build specs.
-- 2026-11-08: done by hand.
+- 2026-11-08: done by hand in #1065.

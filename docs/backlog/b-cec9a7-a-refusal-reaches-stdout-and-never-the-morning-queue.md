@@ -7,7 +7,7 @@ by_hand: true
 tier: 3
 filed: 2026-09-29
 specs: []
-prs: []
+prs: [1065]
 commits: []
 cites: [§4.2, §6]
 related: [52]
@@ -38,4 +38,4 @@ state exists.
 ## Record
 
 - 2026-09-29: filed from item 52's review.
-- 2026-11-08: done by hand.
+- 2026-11-08: done by hand in #1065.

@@ -6,7 +6,7 @@ by_hand: true
 tier: 3
 filed: 2026-10-13
 specs: [SA-0271]
-prs: [868]
+prs: [868, 1065]
 commits: []
 cites: [§5.1]
 related: [b-1c4a14]

@@ -7,7 +7,7 @@ by_hand: true
 tier: 3
 filed: 2026-10-25
 specs: []
-prs: []
+prs: [1065]
 commits: []
 cites: []
 related: []
@@ -28,4 +28,4 @@ The comment names the function or constant it means, not a line range.
 ## Record
 
 - 2026-10-25: filed from the spec loop's run 48.
-- 2026-11-08: done by hand.
+- 2026-11-08: done by hand in #1065.
