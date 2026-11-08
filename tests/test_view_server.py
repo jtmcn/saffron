@@ -1156,6 +1156,38 @@ def test_the_index_rounds_each_batchs_budget_and_spend_to_cents(
     assert "51.9525" not in body
 
 
+def test_a_resumed_batchs_spend_is_labelled_as_the_nights_own(
+    tmp_path: Path,
+) -> None:
+    """A follow-up attached after the close adds a task and a cost the row's
+    snapshot never saw, so the column names the close (b-a64578)."""
+    ledger, repo_id, spares = _ledger(tmp_path)
+    batch_id = ledger.create_batch(5.0)
+    night_run = ledger.create_run(repo_id, "night", batch_id=batch_id)
+    night_task = ledger.create_task(night_run, "SA-NIGHT", "sn", "bn")
+    _set_attempt(
+        ledger, ledger.open_attempt(night_task, "IMPLEMENTING"), cost_usd_est=2.0
+    )
+    ledger.close_batch(batch_id, "UNTIL")
+    tail_run = ledger.create_run(repo_id, "tail", batch_id=batch_id)
+    tail_task = ledger.create_task(tail_run, "SA-TAIL", "st", "bt")
+    _set_attempt(
+        ledger, ledger.open_attempt(tail_task, "IMPLEMENTING"), cost_usd_est=3.0
+    )
+    for task_id in (night_task, tail_task):
+        _set_task(ledger, task_id, state="READY_FOR_REVIEW")
+    _close(ledger, spares)
+
+    with _running(tmp_path / "ledger.db") as base:
+        status, body = _get(base, "/")
+    assert status == 200
+    page = _parse(body)
+    assert page.header_rows["batches"][5] == "spent at close"
+    [row] = page.tables["batches"]
+    assert row[5] == "2.00"
+    assert row[6] == "2"
+
+
 def test_a_post_with_a_negative_length_is_405_without_a_read(tmp_path: Path) -> None:
     ledger, _repo_id, spares = _ledger(tmp_path)
     _close(ledger, spares)
@@ -2379,7 +2411,7 @@ def test_every_table_on_every_page_has_a_header_row_naming_its_columns(
                 "ended",
                 "ended because",
                 "budget",
-                "spent",
+                "spent at close",
                 "tasks",
             ],
             "no-batch": ["task", "spec", "state", "risk"],

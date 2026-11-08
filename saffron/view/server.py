@@ -418,7 +418,8 @@ _BATCH_COLUMNS = [
     "ended",
     "ended because",
     "budget",
-    "spent",
+    # A resume writes no batch row, so a tail's spend is not in it (b-a64578).
+    "spent at close",
     "tasks",
 ]
 _LEFT_OUT_COLUMNS = ["task", "spec", "reason"]

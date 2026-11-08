@@ -387,7 +387,7 @@ defines a Refusal as before any cell starts, and `ready_task` refuses after one.
 modules each split a `consumes` or `removes` entry at its colon.
 
 **Placed 2026-10-20**, from the spec chain for `SA-0300` to `SA-0306`:
-**b-a64578**, **b-206d2c**. The view's spend after a resume, and a runaway
+~~**b-a64578**~~, **b-206d2c**. The view's spend after a resume, and a runaway
 row setting a budget floor.
 
 **Placed 2026-10-23**, from the spec loop's run 46: **b-30cbb8**,

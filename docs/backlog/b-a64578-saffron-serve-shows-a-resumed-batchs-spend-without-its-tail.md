@@ -1,7 +1,9 @@
 ---
 id: b-a64578
 title: "`saffron serve` will show a resumed batch's spend without its tail"
-status: open
+status: done
+closed: 2026-11-08
+by_hand: true
 tier: 3
 filed: 2026-10-20
 specs: []
@@ -34,3 +36,4 @@ column is the night's alone. A test drives a batch with a resumed tail.
 ## Record
 
 - 2026-10-20: filed from the spec chain that wrote `SA-0300` to `SA-0306`.
+- 2026-11-08: done by hand.
