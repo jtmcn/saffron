@@ -6,7 +6,6 @@ Standard library only, git by `subprocess`, as `saffron/cell/worktree.py` does.
 
 from __future__ import annotations
 
-import contextlib
 import os
 import subprocess
 from pathlib import Path
@@ -21,6 +20,16 @@ from saffron.record.contract import (
 # On the command, as `phases/package.py` does and for its reason: a mirror
 # inherits no identity, so `commit-tree` fell to whatever the host had.
 _IDENT = ("-c", "user.email=saffron@localhost", "-c", "user.name=Saffron")
+
+
+# ponytail: this overrides a host's `core.sshCommand` and `GIT_SSH`, keeping only `GIT_SSH_COMMAND`.
+def _no_prompt() -> dict[str, str]:
+    """The host's environment, with neither git nor ssh able to ask for a credential."""
+    out = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    ssh = out.get("GIT_SSH_COMMAND") or "ssh"
+    out["GIT_SSH_COMMAND"] = f"{ssh} -o BatchMode=yes"
+    return out
+
 
 TASKS = "refs/saffron/tasks"
 VALUES = "refs/saffron/values"
@@ -46,13 +55,12 @@ class RefsRecord:
         self,
         *args: str,
         stdin: bytes | None = None,
-        env: dict[str, str] | None = None,
     ) -> bytes:
         done = subprocess.run(
             ["git", "-C", str(self._repo), *_IDENT, *args],
             input=stdin,
             capture_output=True,
-            env=env,
+            env=_no_prompt(),
         )
         if done.returncode != 0:
             # `check=True` would raise a `CalledProcessError` that names the
@@ -103,23 +111,24 @@ class RefsRecord:
         `task_created`.
         """
         source = self._remote or self._origin
+        fetched: RecordError | None = None
         if source:
-            with contextlib.suppress(RecordError):
+            try:
                 self._fetch_one(source, ref)
+            except RecordError as exc:
+                fetched = exc
             parent = self._resolve(ref)
             if parent is not None:
                 return parent
+        reason = f". The fetch from {source} said: {fetched}" if fetched else ""
         raise RecordError(
             f"{ref} is absent here, and the fact is not task_created: "
-            "a later fact needs a ref that already opens on task_created"
-        )
+            f"a later fact needs a ref that already opens on task_created{reason}"
+        ) from fetched
 
     def _fetch_one(self, remote: str, ref: str) -> None:
-        """Fetch exactly `ref` from `remote` into the same name. No
-        terminal credential prompt: a remote that wants one fails at once,
-        reading the same as a remote that lacks `ref`."""
-        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
-        self._git_bytes("fetch", remote, f"{ref}:{ref}", env=env)
+        """Fetch exactly `ref` from `remote` into the same name."""
+        self._git_bytes("fetch", remote, f"{ref}:{ref}")
 
     def _tree_with(self, blobs: list[tuple[int, str]]) -> str:
         # `git mktree` refuses a slash in an entry's name, so the "facts/NNNN.json"

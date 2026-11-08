@@ -405,3 +405,40 @@ def test_a_fact_cannot_be_filed_under_another_task(repo):
     with pytest.raises(ValueError, match="filed under"):
         record.append("b" * 32, a_fact())
     assert record.task_keys() == []
+
+
+def test_every_network_git_call_asks_for_no_credential(tmp_path, repo, monkeypatch):
+    """Each fetch and push reaches an ssh origin through a stand-in ssh. It logs
+    what it was handed and fails as an origin that wants a passphrase."""
+    log = tmp_path / "ssh.log"
+    ssh = tmp_path / "ssh"
+    ssh.write_text(
+        "#!/bin/sh\n"
+        f'echo "prompt=$GIT_TERMINAL_PROMPT $*" >> {log}\n'
+        'echo "would prompt for a passphrase" >&2\n'
+        "exit 255\n"
+    )
+    ssh.chmod(0o755)
+    monkeypatch.setenv("GIT_SSH_COMMAND", str(ssh))
+    # conftest allows only `file`, and this origin must reach the stand-in ssh.
+    monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "file:ssh")
+    monkeypatch.delenv("GIT_TERMINAL_PROMPT", raising=False)
+    origin = "ssh://origin.invalid/saffron.git"
+    created = a_fact()
+    RefsRecord(repo).append(created.task_key, created)
+    later = a_fact(kind="task_state", task_key="d" * 32, payload={"state": "MERGED"})
+
+    with pytest.raises(RecordError):
+        RefsRecord(repo).fetch(origin)
+    with pytest.raises(RecordError):
+        RefsRecord(repo).push(created.task_key, origin)
+    with pytest.raises(RecordError) as refused:
+        RefsRecord(repo, origin=origin).append(later.task_key, later)
+
+    calls = log.read_text().splitlines()
+    assert len(calls) == 3
+    for call in calls:
+        assert call.startswith("prompt=0 -o BatchMode=yes"), call
+    # The refusal names git's reason rather than reading as a lacking origin.
+    assert "would prompt for a passphrase" in str(refused.value)
+    assert isinstance(refused.value.__cause__, RecordError)
