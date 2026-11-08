@@ -396,7 +396,7 @@ seat or the run found and the stack left alone.
 
 **Placed 2026-10-24**, from the spec loop's run 47: **b-0c5afc**,
 **b-fa014a**, **b-22ed54**, **b-c3688d**, **b-7fa522**, **b-54c8b4**,
-**b-7655f9** and **b-2d2014**. Each is a gap a seat or the run found and the
+**b-7655f9** and ~~**b-2d2014**~~. Each is a gap a seat or the run found and the
 stack left alone.
 
 **Placed 2026-10-24**, from ADR 11 and the controlled vocabulary review:
