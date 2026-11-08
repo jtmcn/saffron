@@ -168,7 +168,7 @@ First **170**, then **b-2e0b97**, then **108** and ~~**b-ca3bc6**~~. Then
 **Placed 2026-10-11**, from reviewing `SA-0282`: **b-e9153f**, after b-0569f7.
 A task a `--stack` batch mints never records whether its thread pool was uncapped.
 
-**Placed 2026-10-10**, from writing `SA-0245` and `SA-0258`: **b-52e670**. A
+**Placed 2026-10-10**, from writing `SA-0245` and `SA-0258`: ~~**b-52e670**~~. A
 SIGTERM during a silent agent turn waits for the turn to end, because the
 unwind closes a pipe a reader thread holds.
 

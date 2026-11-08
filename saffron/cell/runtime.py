@@ -563,6 +563,10 @@ def reap_cell(container: str, timeout_s: float = 60) -> Completed:
     return _call([dialect().binary, "exec", container, "sh", "-c", _REAP], timeout_s)
 
 
+# Reasoned: the bound a stop's unwind waits for the reader once the exec is killed.
+STOP_UNWIND_S = 5.0
+
+
 def exec_stream(
     container: str,
     command: Sequence[str],
@@ -636,27 +640,33 @@ def exec_stream(
             # wait §4.3's five bounds exist to prevent.
             completion_until = 0.0
             signalled = False
-            while True:
-                now = time.monotonic()
-                if signalled:
-                    bound, until = "completion", completion_until
-                elif wall - now <= idle_s:
-                    bound, until = "wall", wall
-                else:
-                    bound, until = "idle", now + idle_s
-                try:
-                    line = lines.get(timeout=max(0.0, until - now))
-                except queue.Empty:
-                    proc.kill()
-                    break
-                if line is None:
-                    bound = ""
-                    break
-                if not signalled and on_line(line):
-                    signalled, completion_until = True, time.monotonic() + completion_s
-            # Drain before the with-block closes stdout underneath the reader.
-            # The kill above, or EOF, has already ended it.
-            reader.join(timeout=5)
+            try:
+                while True:
+                    now = time.monotonic()
+                    if signalled:
+                        bound, until = "completion", completion_until
+                    elif wall - now <= idle_s:
+                        bound, until = "wall", wall
+                    else:
+                        bound, until = "idle", now + idle_s
+                    try:
+                        line = lines.get(timeout=max(0.0, until - now))
+                    except queue.Empty:
+                        proc.kill()
+                        break
+                    if line is None:
+                        bound = ""
+                        break
+                    if not signalled and on_line(line):
+                        signalled = True
+                        completion_until = time.monotonic() + completion_s
+            except BaseException:
+                # A stop ends the exec first, or closing stdout waits on the reader (b-52e670).
+                proc.kill()
+                raise
+            finally:
+                # Drain before the with-block closes stdout underneath the reader.
+                reader.join(timeout=STOP_UNWIND_S)
         errors.seek(0)
         return Completed(
             # A finished turn whose child held the pipe is a finished turn: the

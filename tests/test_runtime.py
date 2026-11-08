@@ -1037,3 +1037,23 @@ def test_a_child_that_leaves_the_group_cannot_hold_the_call_past_its_reap_bound(
         assert elapsed < 3.0, elapsed
     finally:
         os.kill(child, signal.SIGKILL)
+
+
+def test_a_stop_during_a_silent_turn_unwinds_without_waiting_for_the_turn(
+    monkeypatch,
+):
+    """b-52e670: a `KeyboardInterrupt` while the exec prints nothing ends
+    the exec before stdout is closed, so the unwind outruns the child."""
+    import threading
+
+    _script(monkeypatch, "import time; time.sleep(8)")
+    main = threading.get_ident()
+    threading.Timer(0.3, signal.pthread_kill, (main, signal.SIGINT)).start()
+
+    started = time.monotonic()
+    with pytest.raises(KeyboardInterrupt):
+        runtime.exec_stream(
+            "cell", ["runner"], stdin_data="{}", on_line=lambda _line: None
+        )
+    elapsed = time.monotonic() - started
+    assert elapsed < runtime.STOP_UNWIND_S, elapsed
