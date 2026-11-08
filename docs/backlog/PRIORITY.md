@@ -477,7 +477,7 @@ uid 0 in every cell, and `--cap-drop ALL` makes the read they test fail.
 **b-12e717**, **b-2dd65f**, ~~**b-b1a7d4**~~, then **b-1f1188**.
 The first three are defects in REVIEW and REBUT that the run's seats found.
 The last two are gaps in the spec chain's own tools. **b-9529e9** and
-**b-91ead2** came from closing the run. The scoring driver cannot reach a
+~~**b-91ead2**~~ came from closing the run. The scoring driver cannot reach a
 fixture head or clean up after a kill, and `labels` reads no cell round.
 
 **Placed 2026-09-30**, from the spec loop's run 23: **b-a09d30**,

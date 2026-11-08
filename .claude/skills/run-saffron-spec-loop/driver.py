@@ -1529,7 +1529,8 @@ def _label_gaps(directory: Path, kind: str) -> list[str]:
     followed = doc.get("blocker_followed")
     if not isinstance(followed, dict) or any(k not in followed for k in LABEL_FOLLOWED):
         gaps.append(f"blocker_followed needs {', '.join(LABEL_FOLLOWED)}")
-    if doc.get("schema") == 2 and isinstance(followed, dict):
+    # A cell round has no later review round of its own kind to check.
+    if doc.get("schema") == 2 and isinstance(followed, dict) and kind in LABEL_LATER:
         key = LABEL_LATER[kind]
         later = int(directory.name.removeprefix("round-")) + 1
         ran = (directory.parent / f"round-{later}" / "round.json").is_file()
@@ -1559,7 +1560,7 @@ def cmd_labels(args) -> int:
     bad = 0
     scored = 0
     for spec_id in specs:
-        for kind in ("spec-review", "pr-review"):
+        for kind in ("spec-review", "pr-review", "cell"):
             base = JEV_ROOT / "spec-loop" / spec_id / kind
             for directory in sorted(base.glob("round-*")):
                 if not (directory / "jev.ttl").is_file():
@@ -1719,11 +1720,35 @@ def _jev_cell(
         and (directory / "findings.json").stat().st_mtime < baseline.stat().st_mtime
     ):
         return _fail(f"{directory}'s REVIEW predates its latest run, so no score")
-    findings = jev_observe.lens_findings(lenses)
-    pairs = jev_observe.number_findings("cell", spec_id, 1, findings)
-    return directory, jev_observe.ReviewRound(
-        "cell", spec_id, 1, commit, spec_text, criteria, pairs, [], diff
+    # Saved beside the other kinds, so `labels` finds the round its labels grade (b-91ead2).
+    base = JEV_ROOT / "spec-loop" / spec_id / "cell"
+    rounds = sorted(
+        (int(p.name.removeprefix("round-")), p)
+        for p in base.glob("round-*")
+        if p.name.removeprefix("round-").isdigit()
     )
+    # A rescore of the same head keeps its review round. A re-run cell takes the next one.
+    number = next(
+        (n for n, p in rounds if _saved_commit(p) == commit),
+        (rounds[-1][0] if rounds else 0) + 1,
+    )
+    findings = jev_observe.lens_findings(lenses)
+    pairs = jev_observe.number_findings("cell", spec_id, number, findings)
+    saved = base / f"round-{number}"
+    saved.mkdir(parents=True, exist_ok=True)
+    (saved / "spec.md").write_text(spec_text)
+    (saved / "round.json").write_text(json.dumps({"commit": commit}) + "\n")
+    (saved / "findings.json").write_text(jev_observe.dump_findings(pairs))
+    return saved, jev_observe.ReviewRound(
+        "cell", spec_id, number, commit, spec_text, criteria, pairs, [], diff
+    )
+
+
+def _saved_commit(directory: Path) -> str | None:
+    try:
+        return json.loads((directory / "round.json").read_text()).get("commit")
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return None
 
 
 def cmd_drop(args) -> int:
