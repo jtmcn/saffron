@@ -7,7 +7,7 @@ filed: 2026-09-29
 closed: 2026-11-08
 by_hand: true
 specs: []
-prs: []
+prs: [1066]
 commits: []
 cites: []
 related: []
@@ -34,4 +34,4 @@ exits 1 on a scored cell round with no `labels.json`.
 - 2026-09-29: filed from the spec loop's run 22.
 - 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
   `.claude/`, and `SA-0279` refuses any spec that touches that path.
-- 2026-11-08: done by hand.
+- 2026-11-08: done by hand in #1066.

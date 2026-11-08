@@ -7,7 +7,7 @@ filed: 2026-09-19
 closed: 2026-11-08
 by_hand: true
 specs: []
-prs: []
+prs: [1066]
 commits: [5106d0a1]
 cites: []
 related: [157, 158, b-36b551, b-65e7e2, b-792ab2]
@@ -70,4 +70,4 @@ no commits and a bound in its terminal a halt. `hold` takes several ids or
   review commits as an ended review. `driver.py reviewed SA-NNNN` now marks the
   review ended at the pushed head, and `next` waits for that mark. The `hold`
   bullet is superseded. #748 removed step 1b, so no review round edits five specs.
-- 2026-11-08: done by hand.
+- 2026-11-08: done by hand in #1066.
