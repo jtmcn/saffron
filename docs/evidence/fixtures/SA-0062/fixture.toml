@@ -51,6 +51,8 @@ source = "docs/BACKLOG.md item 78, missed by REVIEW per item 79"
 # answer to may not be trusted with a run we do not.
 recorded_seen = 0
 recorded_graded = 0
+# The lens set the recorded scoring run held. `calibrate` refuses any other.
+recorded_lenses = ["correctness", "contract", "adequacy"]
 
 [[defects]]
 id = "dirty-restore"

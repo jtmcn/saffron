@@ -402,6 +402,33 @@ def test_the_predicate_reproduces_every_fixture_s_recorded_answer():
     corpus.calibrate_corpus(corpus.load_corpus(FIXTURES))
 
 
+STANDARDS = REPO / "docs" / "evidence" / "fixtures-standards" / "run-20"
+
+
+def test_every_shipped_fixture_declares_the_lens_set_its_recorded_run_held():
+    """Without the declaration a recorded run that lost a lens reads the same as
+    one made before that lens existed (b-6d43da)."""
+    for fixture in corpus.load_corpus(FIXTURES) + corpus.load_corpus(STANDARDS):
+        assert fixture.recorded_lenses is not None, fixture.spec_id
+        held = {r.lens for r in fixture.recorded_reviews()}
+        assert held == set(fixture.recorded_lenses), fixture.spec_id
+
+
+def test_calibrate_refuses_a_recorded_run_that_lost_a_declared_lens(tmp_path):
+    """An adequacy-only recorded run against a three-lens declaration."""
+    shutil.copytree(FIXTURES / "SA-0062", tmp_path, dirs_exist_ok=True)
+    recorded = tmp_path / "recorded-findings.json"
+    rows = [r for r in json.loads(recorded.read_text()) if r["lens"] == "adequacy"]
+    recorded.write_text(json.dumps(rows))
+    fixture = lens_scoring.load_fixture(tmp_path)
+    with pytest.raises(lens_scoring.FixtureError) as raised:
+        lens_scoring.calibrate(fixture)
+    assert str(raised.value) == (
+        "SA-0062: the recorded scoring run holds adequacy, but fixture.toml "
+        "declares adequacy, contract, correctness"
+    )
+
+
 def test_the_second_number_counts_probes_not_findings():
     """A finding with no probe is not a probe that failed — it is a finding
     from a lens that was never asked for one. Contract and correctness

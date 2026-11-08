@@ -128,6 +128,9 @@ class Fixture:
     recorded_seen: int
     recorded_graded: int
     defects: tuple[Defect, ...]
+    recorded_lenses: tuple[str, ...] | None = None
+    """The lenses the recorded scoring run held. `calibrate` refuses a recorded
+    run that holds any other set, so a lost lens cannot read as an older run."""
 
     def _frozen(self, name: str) -> str:
         path = self.root / FROZEN[name]
@@ -217,6 +220,15 @@ def _required(table: dict, key: str, where: str):
     if key not in table:
         raise FixtureError(f"{where}: no {key}")
     return table[key]
+
+
+def _lens_set(raw: dict, where: str) -> tuple[str, ...] | None:
+    if "recorded_lenses" not in raw:
+        return None
+    lenses = raw["recorded_lenses"]
+    if not lenses or not all(isinstance(lens, str) for lens in lenses):
+        raise FixtureError(f"{where}: recorded_lenses must name at least one lens")
+    return tuple(lenses)
 
 
 def load_fixture(root: Path) -> Fixture:
@@ -321,6 +333,7 @@ def load_fixture(root: Path) -> Fixture:
         recorded_seen=_required(raw, "recorded_seen", where),
         recorded_graded=_required(raw, "recorded_graded", where),
         defects=tuple(defects),
+        recorded_lenses=_lens_set(raw, where),
     )
 
 
@@ -449,6 +462,13 @@ def calibrate(fixture: Fixture) -> None:
     if not reviews:
         raise LensErrored(
             f"{fixture.spec_id}: the recorded scoring run carries no lens"
+        )
+    held = sorted({r.lens for r in reviews})
+    declared = fixture.recorded_lenses
+    if declared is not None and held != sorted(declared):
+        raise FixtureError(
+            f"{fixture.spec_id}: the recorded scoring run holds {', '.join(held)}, "
+            f"but fixture.toml declares {', '.join(sorted(declared))}"
         )
     # Score against the lenses this recorded scoring run carried, not today's.
     scored = score_run(fixture, reviews, expect={r.lens for r in reviews})

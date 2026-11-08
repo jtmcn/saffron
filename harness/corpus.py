@@ -1,10 +1,10 @@
-"""A corpus of fixtures, and the one number a pass reports.
+"""A corpus of fixtures, and the one number a scoring pass reports.
 
-`lens_scoring` answers a question about one run and one defect. This composes
-it across fixtures, because a prompt change cannot be read through one
+`lens_scoring` answers a question about one scoring run and one defect. This
+composes it across fixtures, because a prompt change cannot be read through one
 fixture's noise (`docs/evidence/2026-09-08-lens-scoring-second-pass.md`: the
-per-defect scores moved by a third between two passes that changed nothing
-relevant, while the blocker count stayed identical).
+per-defect scores moved by a third between two scoring passes that changed
+nothing relevant, while the blocker count stayed identical).
 """
 
 from __future__ import annotations

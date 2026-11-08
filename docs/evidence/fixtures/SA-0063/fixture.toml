@@ -33,6 +33,8 @@ source = "docs/BACKLOG.md item 86: the notes channel's two rendering-side safety
 # `render_pr_body` at all — a different, undeclared defect, out of scope here.)
 recorded_seen = 0
 recorded_graded = 0
+# The lens set the recorded scoring run held. `calibrate` refuses any other.
+recorded_lenses = ["correctness", "contract", "adequacy"]
 
 # The two defects used to share one range — `_notes`, lines 377-395 — leaving
 # position zero no discriminating power, and their phrases ("empty"/"heading"
