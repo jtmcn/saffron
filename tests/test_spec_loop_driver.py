@@ -2260,6 +2260,62 @@ def test_the_step_5_pull_request_is_linked_on_top_and_marked_ready(loop, monkeyp
     assert not [c for c in ran if c[:3] == ["gh", "pr", "ready"]]
 
 
+def test_an_exhausted_task_with_a_pull_request_is_a_layer_in_the_middle(
+    loop, monkeypatch, capsys
+):
+    # b-2247dd: SA-0204 ended `EXHAUSTED` with draft #678, and `stack`, `size`
+    # and `rebase` each left it out, so the delegate linked and measured it by hand.
+    bottom, middle, top = loop.ids[:3]
+    driver._save(
+        [
+            loop.row(0, state="READY_FOR_REVIEW", pr=10),
+            loop.row(1, state="EXHAUSTED", pr=11, depends_on=[bottom]),
+            loop.row(2, state="READY_FOR_REVIEW", pr=12, depends_on=[middle]),
+        ]
+    )
+    order, warnings = driver._stack_order(driver._load())
+    assert [p.spec_id for p in order] == [bottom, middle, top]
+    assert warnings == []
+
+    from saffron.repos import policy
+
+    measured = {}
+    monkeypatch.setattr(driver, "_known_specs", lambda: {})
+    monkeypatch.setattr(driver, "_trunk", lambda: "origin/main")
+    monkeypatch.setattr(
+        driver,
+        "_own_base",
+        lambda upper, below, _trunk: measured.setdefault(upper, below)[0],
+    )
+    monkeypatch.setattr(
+        policy,
+        "load_policy",
+        lambda _root: (SimpleNamespace(integrity=SimpleNamespace(test_paths=[])), "s"),
+    )
+    monkeypatch.setattr(
+        driver, "_size", lambda *_a, **_k: SimpleNamespace(status="pass", summary="ok")
+    )
+    for spec_id in (middle, top):
+        assert driver.cmd_size(argparse.Namespace(spec_id=spec_id)) == 0
+    assert measured[f"origin/saffron/{top}"] == [
+        f"origin/saffron/{bottom}",
+        f"origin/saffron/{middle}",
+    ]
+
+    chained = []
+    monkeypatch.setattr(
+        driver,
+        "_layers",
+        lambda branches, _trunk: (
+            chained.extend(branches)
+            or [driver.Layer(b, "t", "f", "o") for b in branches]
+        ),
+    )
+    monkeypatch.setattr(driver, "_git", lambda *_a, **_k: "not the fork")
+    assert driver.cmd_rebase(argparse.Namespace(execute=False)) == 0
+    assert chained == [f"saffron/{s}" for s in (bottom, middle, top)]
+
+
 def test_a_held_spec_is_passed_over_until_released(loop):
     # Run 7: `next` named SA-0100 while its edit sat in an open pull request,
     # and a cell started then would have run the old text.

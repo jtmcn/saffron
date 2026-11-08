@@ -252,7 +252,7 @@ failures.
 `error`. A second `depends_on` entry carries no code into the cell.
 
 **Placed 2026-10-05**, from the spec loop's run 28: ~~**b-8e30bd**~~,
-**b-2247dd**, then ~~**b-708c8a**~~. A merged draft leaves its task `EXHAUSTED`
+~~**b-2247dd**~~, then ~~**b-708c8a**~~. A merged draft leaves its task `EXHAUSTED`
 and its dependents refused. The loop driver refuses an `EXHAUSTED` layer.
 REVIEW's re-prompt is written twice.
 

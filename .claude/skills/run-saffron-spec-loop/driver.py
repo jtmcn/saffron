@@ -118,6 +118,9 @@ def _git(*args: str, cwd: Path = REPO) -> str:
 # --------------------------------------------------------------- the order
 
 
+_LAYER_STATES = frozenset({"READY_FOR_REVIEW", "EXHAUSTED"})
+
+
 @dataclass
 class OrderRow:
     spec_id: str
@@ -157,6 +160,12 @@ class OrderRow:
     @property
     def reviewable(self) -> bool:
         return self.state == "READY_FOR_REVIEW" and self.pr is not None
+
+    @property
+    def layer(self) -> bool:
+        """A pull request the stack carries. PACKAGE opens a draft for an
+        `EXHAUSTED` task whose gates went green (b-2247dd)."""
+        return self.state in _LAYER_STATES and self.pr is not None
 
 
 def _ledger_and_repo():
@@ -539,12 +548,12 @@ def _carried(previous: list[OrderRow]) -> tuple[list[OrderRow], dict[str, str]]:
 
 
 def _stack_order(rows: list[OrderRow]) -> tuple[list[OrderRow], list[str]]:
-    """The reviewable pull requests, bottom to top, each child directly above
+    """The stack's pull requests, bottom to top, each child directly above
     its parent. Snapshot order alone put a child above an unrelated sibling,
     and the child's PR then showed its parent's changes. A stack is a line, so
     a parent with two children, or a child whose parent is not in it, is said
     rather than hidden."""
-    ready = [p for p in rows if p.reviewable]
+    ready = [p for p in rows if p.layer]
     ids = {p.spec_id for p in ready}
     by_id = {p.spec_id: p for p in rows}
 
@@ -1883,8 +1892,8 @@ def cmd_size(args) -> int:
     match = next((p for p in rows if p.spec_id == args.spec_id), None)
     if match is None:
         return _fail(f"{args.spec_id} is not in the order")
-    if not match.reviewable:
-        return _fail(f"{match.spec_id} is not reviewable, so it has no stack to sit in")
+    if not match.layer:
+        return _fail(f"{match.spec_id} has no pull request in the stack to measure")
     spec, _sha = load_spec(REPO / match.path)
     subprocess.run(["git", "fetch", "-q", "origin"], cwd=REPO)
     upper = f"origin/{match.branch}"

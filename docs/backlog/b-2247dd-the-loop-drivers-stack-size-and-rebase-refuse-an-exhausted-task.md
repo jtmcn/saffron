@@ -1,12 +1,13 @@
 ---
 id: b-2247dd
 title: The loop driver's `stack`, `size` and `rebase` refuse an `EXHAUSTED` task with a draft pull request
-status: open
+status: done
 tier: 2
 filed: 2026-10-05
+closed: 2026-11-08
 by_hand: true
 specs: [SA-0204]
-prs: [678]
+prs: []
 commits: []
 cites: [§5.7]
 related: [b-038aef, b-8e30bd, b-d5db52]
@@ -42,3 +43,4 @@ An `EXHAUSTED` task with a pull request counts as a stack layer in `stack`,
   `reviewable` still requires `READY_FOR_REVIEW` (`driver.py:159`).
 - 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
   `.claude/`, and `SA-0279` refuses any spec that touches that path.
+- 2026-11-08: done by hand.
