@@ -4,7 +4,7 @@ title: A spec whose own new refusal refuses specs still queued at its base is ad
 type: feature
 priority: 2
 depends_on: [SA-0339]
-estimated_lines: 300
+estimated_lines: 350
 touches:
   - saffron/intake.py
   - saffron/scheduler.py
@@ -60,16 +60,23 @@ acceptance:
       `depends_on` kind, in one refusal row. The witness drives each mode,
       with and without `stack=True`. In each mode it drives five named ids
       in one candidate's list. One is queued with no task. One is queued
-      with a task at `READY_FOR_REVIEW`. One is queued with a `MERGED`
-      task. One is declared by no spec anywhere. One is retired to `done/`.
-      The reason names each of the first four and never names the retired
-      one. It names `done/` and never holds the text `depends_on`. A
-      candidate whose `retired_first` names only the retired id is a
-      candidate in both modes.
+      with a task at `READY_FOR_REVIEW` that records a branch, a pushed sha
+      and a pull request URL, and the candidate's `depends_on` names it, so
+      under `stack=True` it qualifies as the order's stack base. One is
+      queued with a `MERGED` task. One is declared by no spec anywhere. One
+      is retired to `done/`. The reason names each of the first four and
+      never names the retired one. It names `retired_first` and `done/`,
+      and never holds the text `depends_on`. A candidate whose
+      `retired_first` names only the retired id is a candidate in both
+      modes. With one more file in `done/` that does not parse, the reason
+      also carries the text `could not be read as a spec`, the suffix
+      `_dependency_refusal` appends for the same blindness.
     witness: tests/test_scheduler.py::test_a_spec_whose_retired_first_is_not_retired_is_refused_naming_each
     wrong_versions:
       - The check made only where `_refuse` checks `depends_on`, which `stack=True` skips, so a stack night admits the candidate.
       - The id read through `_dependency_refusal`, so the parent waiting at `READY_FOR_REVIEW` is credited.
+      - The order's stack base credited, so under `stack=True` the parent at `READY_FOR_REVIEW` is credited.
+      - A reason with no suffix for an unreadable `done/` file, so a spec sitting in `done/` is reported as not retired.
       - A `MERGED` task credited, as `merged_anywhere` or `on_default_branch` is, so a merged parent whose spec still sits queued is credited.
       - A reason that names only the first id not retired.
       - A reason that lists every `retired_first` entry, the retired one included.
@@ -94,12 +101,17 @@ acceptance:
       says `refused` and names the queued id. The working copy has that
       spec moved to `done/`, uncommitted. The same spec, with that id
       retired at `base_sha` and queued again in the working copy, reaches
-      the cell.
+      the cell. On a repo with no `.saffron` at `base_sha`, where the export
+      raises `GitError`, the same spec exits 1 with no task row and no cell.
+      Its one line starts with the spec id, names the failed read of
+      `done/` at `base_sha`, and never says `not retired`.
     witness: tests/test_cli.py::test_a_spec_whose_retired_first_is_queued_at_base_refuses_before_the_cell_starts
     wrong_versions:
       - The check added to the queue scan's `_refuse` alone, so `saffron cell` starts the cell.
       - Retired ids read from the working copy, `repo`, rather than the export at `base_sha`.
       - Any non-empty `retired_first` refused, so the spec whose id is retired at `base_sha` never reaches the cell.
+      - The `GitError` swallowed as `_protected_paths_at` does, so the line reports the id as not retired.
+      - The `GitError` left to propagate, so `saffron cell` exits 2 with no refused line.
   - claim: >-
       This repo's measured queue is unchanged. No queued spec declares
       `retired_first`.
@@ -112,6 +124,12 @@ acceptance:
 Backlog item **b-e7898b**, filed from the spec loop's run 44. It cites
 `DESIGN.md` §4.2.1. Every line number below was read at `747cdc8f`.
 
+**Cited lines move on the cell's base**. The cell is cut from
+`SA-0339`'s branch. `SA-0338` and `SA-0339` edit `saffron/intake.py`,
+`saffron/scheduler.py`, `saffron/cli.py` and the matching test files, so
+their cited line numbers move there. Find each by the function or text
+named beside it.
+
 **What happened**. `SA-0279` made `protected_touch_refusal` refuse a
 `touches` entry with a `.claude` component
 (`saffron/scheduler.py:451-488`). `SA-0280`, `SA-0282` and `SA-0283`
@@ -119,8 +137,9 @@ touch `.claude/` and sat below it in the same stack, still queued.
 `test_no_queued_spec_is_refused_on_its_own_text` calls that function on
 every queued spec (`tests/test_queued_specs.py:95-101`). So the new rule
 failed it three times. Its spec's `forbidden` list barred that test
-and `.saffron/**`. The task ended `EXHAUSTED` at $17.26 of $22, by the item's
-record.
+and `.saffron/**`. The task ended `EXHAUSTED`, by the item's record. The ledger
+holds task 314 at $17.26 spent of a $22 budget, now `MERGED` after the
+delegate adopted it.
 
 **The precondition was prose**. `SA-0279`'s spec said it waits for its
 three parents to be merged and retired to `done/` on its base
@@ -169,11 +188,15 @@ spec whose own change would refuse specs still queued declares them
 here. The field makes `SA-0279`'s prose precondition a fact the host
 checks.
 
-Add one function to `saffron/scheduler.py` that takes a spec and the set
-of retired ids, and returns a reason or `None`. It names every
-`retired_first` id not in that set, in declared order. Credit nothing
-else: not a `MERGED` task, not a waiting task, not a place in the stack
-order.
+Add one function to `saffron/scheduler.py` that takes a spec, the set
+of retired ids and the count of unreadable `done/` files. It returns a
+reason or `None`. The reason names `retired_first` and every id not in
+that set, in declared order. Credit nothing else: not a `MERGED` task,
+not a waiting task, not a place in the stack order, not the stack base.
+When the count is not zero, end the reason with the suffix
+`_dependency_refusal` appends (`saffron/scheduler.py:699-709`). Pass the
+count, or move that suffix into a helper both call. `_refuse` already
+receives `unreadable_retired`.
 
 Call it from `_refuse`, above the `check_dependencies` return, so both
 modes run it. Return its reason under the `depends_on` kind. Raise the
@@ -182,9 +205,23 @@ new site to its comment.
 
 Call it from `_run_cell` after the retirement-marker refusal. Read the
 retired ids from `.saffron/specs/done/` as exported at `base_sha`, never
-from the working copy. A repo with no `.saffron` at `base_sha` retires
-nothing, so a declared id is refused there. Print the line the other two
-refusals print, and return 1.
+from the working copy. Pass the count of `done/` files that did not
+parse. Print the line the other two refusals print, and return 1. The
+export raises `GitError` when `base_sha` holds no `.saffron` or the
+mirror cannot be read, and the two look alike
+(`saffron/cli.py:519-531`). Then print one line starting with the spec
+id that names the failed read of `done/` at `base_sha`. Never say
+`not retired` there, and return 1. Skip the export and the line for a
+spec that declares no `retired_first`.
+
+`test_no_real_spec_is_refused_on_its_own_acceptance_criteria` promotes
+every retired spec to the top level, then asserts each refusal outside
+two named shapes holds `depends_on` (`tests/test_scheduler.py:4769-4795`).
+The first retired spec that declares `retired_first` would fail it. Add
+the new reason there as a third named shape, beside `disclosed` and
+`claude_touching`, selected by the text `retired_first`. Assert its ids
+as a literal list, empty at your base, and leave the shape out of the
+`depends_on` assert.
 
 Add a sentence on the field to the module docstring of
 `saffron/scheduler.py`, beside the paragraph on b-e773d9, and one to
@@ -239,7 +276,12 @@ A retired spec goes in `directory / "done"`. Tasks come from `_task_at`
 with `_sha` of the file. Map each refusal to its spec by reading the
 refused file with `load_spec`, as the removed-name tests do. Use ids no
 one of which holds another as a substring, such as `TE-1` to `TE-5` and
-`TE-9`. Assert `"depends_on" not in reason`. Of the waiting states the
+`TE-9`. Assert `"depends_on" not in reason`. Give the `READY_FOR_REVIEW`
+parent its branch, a 40-character pushed sha and a pull request URL with
+`set_task_package` (`tests/test_scheduler.py:58`). Without all three it
+never qualifies as a stack base (`saffron/scheduler.py:1033-1060`), and
+a check that credits the stack base passes. The unreadable file is a
+`done/broken.md` with no frontmatter. Of the waiting states the
 witness drives `READY_FOR_REVIEW` alone. The new function reads no task
 state at all, so the other four waiting states are left to that design.
 
@@ -253,7 +295,11 @@ in `tests/test_cli.py`. `_repo_with_spec` commits `extra_specs` into
 `.saffron/specs/` before it cuts the bare clone. It does not create a
 `done/` directory, so make one or extend the helper. Move the file in
 the working copy after the clone. For the admitted half,
-`_capture_cell_spec` reaches the stubbed `run_one_cell`.
+`_capture_cell_spec` reaches the stubbed `run_one_cell`. For the
+`GitError` half, `_local_origin` (`tests/test_cli.py:491`) commits no
+`.saffron`. Many existing tests run `_run_cell` on such a repo with specs
+that declare no `retired_first`, which is why that case skips the
+export.
 
 **The `prose` gate** counts each new comment and docstring. Write none
 with an em dash, a semicolon, a contraction, the perfect tense or a
@@ -261,5 +307,6 @@ sentence over 25 words.
 
 **Size**. `SA-0290` added `removes` and its scan refusal. It landed at
 184 changed lines outside `tests/` and 520 under it. This change has a
-smaller refusal and one more call site. The estimate is 60 lines of
-source and 240 of tests, with no overrun added.
+smaller refusal and one more call site. The estimate is 70 lines of
+source and 280 of tests, with no overrun added. That covers the
+unreadable suffix, the `GitError` line and the corpus test's third shape.
