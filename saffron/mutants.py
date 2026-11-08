@@ -316,7 +316,13 @@ def write_mutants(repo: Path, spec_id: str, from_path: Path) -> str:
         raise MutantWriteRefused(
             f"--from file {from_path} could not be read: {exc}"
         ) from exc
-    found = parse_mutants(raw.decode(), str(from_path))
+    try:
+        text = raw.decode()
+    except UnicodeDecodeError as exc:
+        raise MutantWriteRefused(
+            f"--from file {from_path} is not UTF-8: {exc}"
+        ) from exc
+    found = parse_mutants(text, str(from_path))
     for witness, mutant in found.items():
         count = _occurrences_at_head(repo, mutant.file, mutant.find.encode(), env)
         if count != 1:

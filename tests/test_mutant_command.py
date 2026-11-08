@@ -839,6 +839,29 @@ def test_a_broken_origin_or_ref_exits_2(tmp_path, monkeypatch, capsys):
     assert_broken(_run_mutant(home, repo, "TE-53", f4))
     monkeypatch.setattr(subprocess, "run", real_run)
 
+    # (5) a broken loose ref matches a race phrase, but the ref reads as unchanged.
+    broken = saffron_refs / "mutants"
+    subprocess.run(
+        ["git", "-C", str(repo), "remote", "set-url", "origin", str(origin)],
+        check=True,
+        capture_output=True,
+    )
+
+    def is_update_ref(args):
+        return str(repo) in args and "update-ref" in args
+
+    _write_spec(repo, "TE-54")
+    f5 = tmp_path / "TE-54.yaml"
+    _write_mutants_file(f5, "TE-54")
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        once_on_push(is_update_ref, lambda: broken.write_text("garbage\n")),
+    )
+    assert_broken(_run_mutant(home, repo, "TE-54", f5))
+    monkeypatch.setattr(subprocess, "run", real_run)
+    broken.unlink(missing_ok=True)
+
 
 def test_every_git_call_runs_with_no_terminal_prompt(tmp_path, monkeypatch, capsys):
     """Criterion 6: every git process the command starts carries
@@ -873,6 +896,22 @@ def test_every_git_call_runs_with_no_terminal_prompt(tmp_path, monkeypatch, caps
     updates = matching(lambda a: "update-ref" in a)
     pushes = matching(lambda a: "push" in a)
     assert head_reads and fetches and updates and pushes
-    for group in (head_reads, fetches, updates, pushes):
-        for _, env in group:
-            assert env.get("GIT_TERMINAL_PROMPT") == "0"
+    for args, env in calls:
+        assert env.get("GIT_TERMINAL_PROMPT") == "0", args
+
+
+def test_a_from_file_that_is_not_utf8_is_refused(tmp_path, monkeypatch, capsys):
+    """A `--from` file whose bytes do not decode is a refusal, exit 1, and
+    writes neither ref."""
+    _isolate_git(tmp_path, monkeypatch)
+    home = tmp_path / "home"
+    origin = _bare(tmp_path)
+    repo = _source_repo(tmp_path, "repo", origin)
+    _write_spec(repo, "TE-70")
+    bad = tmp_path / "TE-70.yaml"
+    bad.write_bytes(b"tests/test_a.py::test_add: {file: a.py, find: \xff}\n")
+
+    assert _run_mutant(home, repo, "TE-70", bad) == 1
+    assert "not UTF-8" in capsys.readouterr().out
+    assert _rev_parse(repo) is None
+    assert _rev_parse(origin) is None
