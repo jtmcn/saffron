@@ -69,7 +69,7 @@ def _drive(monkeypatch, capsys, spec_type: str, *, row: bool) -> None:
     from the size module as it stands when `check` runs."""
     from saffron.gates.core import size
 
-    ceiling = size._CEILINGS.get(spec_type, size._DEFAULT_CEILING)
+    ceiling = size.ceiling_for(spec_type)
     rate = size._TOKENS_PER_LINE
     boundary = _boundary(ceiling, rate)
     rows = [_cell("SA-2000", spec_type, 2, 3)] if row else []
@@ -159,7 +159,7 @@ def test_check_prints_a_size_blocker_beside_a_ceilings_blocker(monkeypatch, caps
     from saffron.gates.core import size
 
     assert "estimated_lines" in Spec.model_fields
-    ceiling = size._CEILINGS.get("bug", size._DEFAULT_CEILING)
+    ceiling = size.ceiling_for("bug")
     boundary = _boundary(ceiling, size._TOKENS_PER_LINE)
     rows = [_cell("SA-2000", "bug", 2, 3)]  # peak 41
     for estimate, sized in ((boundary, True), (boundary - 1, False)):

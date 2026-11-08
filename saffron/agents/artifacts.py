@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from saffron.agents import context
 from saffron.gates.core.scope import matches
-from saffron.gates.core.size import _CEILINGS, _DEFAULT_CEILING, _TOKENS_PER_LINE
+from saffron.gates.core.size import _TOKENS_PER_LINE, ceiling_for
 from saffron.gates.suite import size_blocks
 from saffron.repos.policy import effective_risk
 
@@ -326,7 +326,7 @@ def judge_estimate(
     advisory: returns the sentence the checkpoint emits instead of rejecting.
     Test lines are left out only where `test_paths` are declared, as `size` does.
     """
-    ceiling = _CEILINGS.get(spec_type, _DEFAULT_CEILING)
+    ceiling = ceiling_for(spec_type)
     left_out = plan.estimated_test_lines if test_paths else 0
     priced = (plan.estimated_lines - left_out) * _TOKENS_PER_LINE
     if priced <= ceiling:

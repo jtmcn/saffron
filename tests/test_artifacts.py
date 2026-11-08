@@ -622,3 +622,21 @@ def test_a_root_cause_of_one_token_is_refused():
     sentence."""
     with pytest.raises(ScopeProposalRefused, match="root cause"):
         validate_scope_proposal(_proposal(root_cause="x"), touches=TOUCHES)
+
+
+def test_judge_estimate_reads_the_ceiling_size_holds_when_it_runs(monkeypatch):
+    """b-8fb227: `artifacts` bound its own copy of the default ceiling at import."""
+    from saffron.agents.artifacts import Plan, judge_estimate
+    from saffron.gates.core import size
+
+    monkeypatch.setattr(size, "_DEFAULT_CEILING", 1)
+    plan = Plan(
+        understanding="u",
+        approach="a",
+        files_to_change=["src/x.py"],
+        test_strategy="t",
+        estimated_lines=1,
+        estimated_test_lines=0,
+    )
+    assert size.ceiling_for("docs") == 1
+    assert judge_estimate(plan, "docs", "standard", [], []) is not None

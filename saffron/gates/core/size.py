@@ -36,6 +36,12 @@ _CEILINGS = {"bug": 1300, "feature": 3000, "refactor": 4200}
 # median default is stricter than `refactor` for the types §5.4 never sized.
 _DEFAULT_CEILING = _CEILINGS["refactor"]
 
+
+def ceiling_for(spec_type: str) -> int:
+    """The `size` ceiling for `spec_type`, read when called so a patch reaches every caller."""
+    return _CEILINGS.get(spec_type, _DEFAULT_CEILING)
+
+
 # Tokens per changed line, from 97 past diffs: aggregate 4.19, rounded down
 # so a plan's own estimate errs toward acceptance. `artifacts.py` imports it.
 _TOKENS_PER_LINE = 4
@@ -270,7 +276,7 @@ def size_gate(
             ),
         )
 
-    ceiling = _CEILINGS.get(spec_type, _DEFAULT_CEILING)
+    ceiling = ceiling_for(spec_type)
     counts = _token_counts(diff)
     # A block under a declared test path adds nothing to the counted total.
     excluded_tokens = sum(
