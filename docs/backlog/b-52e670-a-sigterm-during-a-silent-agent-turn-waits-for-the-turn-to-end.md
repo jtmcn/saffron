@@ -1,11 +1,13 @@
 ---
 id: b-52e670
 title: "A SIGTERM during a silent agent turn waits for the turn to end"
-status: open
+status: done
 tier: 2
 filed: 2026-10-10
+closed: 2026-11-08
+by_hand: true
 specs: []
-prs: []
+prs: [1076]
 commits: []
 cites: [§4.3]
 related: [b-5df2a7]
@@ -48,3 +50,4 @@ drives a piped child that prints nothing and outlives the bound.
 
 - 2026-10-10: filed from writing `SA-0245` and `SA-0258`, which name it out of
   scope.
+- 2026-11-08: done by hand. A raise during the read loop kills the exec before `Popen.__exit__` closes stdout, and the reader join waits at most `STOP_UNWIND_S`. The witness unwound in 0.35 seconds against 8.0 unfixed, on macOS.

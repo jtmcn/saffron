@@ -636,9 +636,9 @@ def run_stack_batch(
         original = candidate
         is_follow_up = generation == 1
 
-        # Asked only with no predecessor yet, and never for a follow-up (ADR 7).
+        # Asked only with no predecessor yet, a follow-up's too (ADR 7, b-7ee599).
         # `stack_base_gone` keeps the refusal reason once the branch is gone.
-        if not is_follow_up and pred is None and stack_base is not None:
+        if pred is None and stack_base is not None:
             if (
                 stack_base_gone is None
                 and stack_base_alive is not None
@@ -651,8 +651,9 @@ def run_stack_batch(
                 )
             if stack_base_gone is not None:
                 emit(f"{candidate.spec.id:<10} refused  {stack_base_gone}")
-                missed[candidate.spec.id] = frozenset({candidate.spec.id})
-                remaining.remove(original)
+                if not is_follow_up:
+                    missed[candidate.spec.id] = frozenset({candidate.spec.id})
+                    remaining.remove(original)
                 return Refused(reason=stack_base_gone)
 
         if review is not None:

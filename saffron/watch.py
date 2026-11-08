@@ -30,8 +30,10 @@ log holds.
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable, Iterator
+from dataclasses import asdict
 from pathlib import Path
 
 from saffron.events import Agent, Ceilings, Event, describe, read_log_since
@@ -115,6 +117,21 @@ def render_line(event: Event, *, verbose: bool = False) -> str | None:
     return describe(event) or None
 
 
+def _json_line(event: Event, line: str, *, task: str | None = None) -> str:
+    """One event as a JSON object for a follower outside Python (b-036cc5).
+
+    `event` carries the shape `EventLog` writes, and `line` the text
+    `describe` rendered. `task` names the task directory, when following many.
+    """
+    shaped: dict[str, object] = {
+        "event": {"kind": type(event).__name__, **asdict(event)},
+        "line": line,
+    }
+    if task is not None:
+        shaped["task"] = task
+    return json.dumps(shaped)
+
+
 def _since_newest_task(events: list[Event]) -> list[Event]:
     """`events`, cut to the suffix that starts at the last `Ceilings` among
     them — the newest task's own boundary, since `run_task` writes one
@@ -174,6 +191,7 @@ def follow(
     *,
     verbose: bool = False,
     whole_log: bool = False,
+    as_json: bool = False,
     interval: float = 1.0,
     sleep: Callable[[float], bool] = _sleep_and_continue,
 ) -> Iterator[str]:
@@ -218,7 +236,7 @@ def follow(
         for event in events:
             line = render_line(event, verbose=verbose)
             if line is not None:
-                yield line
+                yield _json_line(event, line) if as_json else line
         if not sleep(interval):
             return
 
@@ -237,6 +255,7 @@ def follow_every_task(
     root: Path,
     *,
     verbose: bool = False,
+    as_json: bool = False,
     interval: float = 1.0,
     sleep: Callable[[float], bool] = _sleep_and_continue,
 ) -> Iterator[str]:
@@ -262,7 +281,10 @@ def follow_every_task(
             events, offsets[name] = read_log_since(root / name, offsets[name])
             for event in events:
                 line = render_line(event, verbose=verbose)
-                if line is not None:
-                    yield f"{name} {line}"
+                if line is None:
+                    continue
+                yield (
+                    _json_line(event, line, task=name) if as_json else f"{name} {line}"
+                )
         if not sleep(interval):
             return

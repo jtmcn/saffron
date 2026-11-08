@@ -15,10 +15,12 @@ from the host is the proper noun standing in for a decision all over again
 
 from __future__ import annotations
 
+import contextlib
 import ipaddress
 import os
 import queue
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -259,26 +261,56 @@ def _decode(data: bytes | None) -> str:
     return "" if data is None else data.decode("utf-8", errors="replace")
 
 
+# Reasoned: a killed group closes its pipes at once, so this bounds only a
+# child that left the group and kept a pipe open.
+_REAP_S = 5.0
+
+
 def _call(argv: Sequence[str], timeout_s: float) -> Completed:
     # Bytes, not text=True: Python's universal-newline translation silently
     # rewrites a bare "\r" a cell emits (e.g. inside a diff) into "\n" before
     # any caller sees it, and a gate reading that diff must see what git
     # actually wrote.
     try:
-        proc = subprocess.run(list(argv), capture_output=True, timeout=timeout_s)
-    except subprocess.TimeoutExpired as exc:
-        return Completed(
-            returncode=124,
-            stdout=_decode(exc.stdout),
-            stderr=_decode(exc.stderr),
-            timed_out=True,
-            bound="wall",
+        proc = subprocess.Popen(
+            list(argv),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            # Its own group, so a timeout kills what the runtime forked (item 116).
+            process_group=0,
         )
     except OSError as exc:
         raise CellRuntimeError(
             f"{dialect().binary} could not be executed: {exc}"
         ) from exc
-    return Completed(proc.returncode, _decode(proc.stdout), _decode(proc.stderr))
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        _kill_group(proc)
+        try:
+            stdout, stderr = proc.communicate(timeout=_REAP_S)
+        except subprocess.TimeoutExpired as late:
+            # A child outside the group still holds a pipe, so keep what was read.
+            stdout, stderr = late.stdout, late.stderr
+            proc.wait()
+        return Completed(
+            returncode=124,
+            stdout=_decode(stdout),
+            stderr=_decode(stderr),
+            timed_out=True,
+            bound="wall",
+        )
+    except BaseException:
+        _kill_group(proc)
+        proc.wait()
+        raise
+    return Completed(proc.returncode, _decode(stdout), _decode(stderr))
+
+
+def _kill_group(proc: subprocess.Popen) -> None:
+    # Measured on macOS: a group left holding only a zombie answers EPERM, not ESRCH.
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(proc.pid, signal.SIGKILL)
 
 
 def call(argv: Sequence[str], timeout_s: float = 120) -> Completed:
@@ -531,6 +563,10 @@ def reap_cell(container: str, timeout_s: float = 60) -> Completed:
     return _call([dialect().binary, "exec", container, "sh", "-c", _REAP], timeout_s)
 
 
+# Reasoned: the bound a stop's unwind waits for the reader once the exec is killed.
+STOP_UNWIND_S = 5.0
+
+
 def exec_stream(
     container: str,
     command: Sequence[str],
@@ -604,27 +640,33 @@ def exec_stream(
             # wait §4.3's five bounds exist to prevent.
             completion_until = 0.0
             signalled = False
-            while True:
-                now = time.monotonic()
-                if signalled:
-                    bound, until = "completion", completion_until
-                elif wall - now <= idle_s:
-                    bound, until = "wall", wall
-                else:
-                    bound, until = "idle", now + idle_s
-                try:
-                    line = lines.get(timeout=max(0.0, until - now))
-                except queue.Empty:
-                    proc.kill()
-                    break
-                if line is None:
-                    bound = ""
-                    break
-                if not signalled and on_line(line):
-                    signalled, completion_until = True, time.monotonic() + completion_s
-            # Drain before the with-block closes stdout underneath the reader.
-            # The kill above, or EOF, has already ended it.
-            reader.join(timeout=5)
+            try:
+                while True:
+                    now = time.monotonic()
+                    if signalled:
+                        bound, until = "completion", completion_until
+                    elif wall - now <= idle_s:
+                        bound, until = "wall", wall
+                    else:
+                        bound, until = "idle", now + idle_s
+                    try:
+                        line = lines.get(timeout=max(0.0, until - now))
+                    except queue.Empty:
+                        proc.kill()
+                        break
+                    if line is None:
+                        bound = ""
+                        break
+                    if not signalled and on_line(line):
+                        signalled = True
+                        completion_until = time.monotonic() + completion_s
+            except BaseException:
+                # A stop ends the exec first, or closing stdout waits on the reader (b-52e670).
+                proc.kill()
+                raise
+            finally:
+                # Drain before the with-block closes stdout underneath the reader.
+                reader.join(timeout=STOP_UNWIND_S)
         errors.seek(0)
         return Completed(
             # A finished turn whose child held the pipe is a finished turn: the

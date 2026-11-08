@@ -504,7 +504,12 @@ def publish_finish(
                 "SELECT branch FROM tasks WHERE record_key = ?",
                 (layer["predecessor_key"],),
             ).fetchone()
-            wanted = row["branch"] if row is not None else default
+            if row is None:
+                return [
+                    f"{ESCALATE}{layer['spec_id']}'s stack base task "
+                    f"{layer['predecessor_key']} has no row"
+                ]
+            wanted = row["branch"]
         else:
             wanted = default
         view = gh(
@@ -529,31 +534,55 @@ def publish_finish(
 
     branch = f"saffron/batch-{batch_id}-finish"
     git_mirror.add_worktree(mirror, sha, workdir)
-    worktree_error: git_mirror.GitError | None = None
     try:
-        try:
-            package_phase.push_with_lease(workdir, url=url, branch=branch, expect="")
-        except package_phase.LeaseRejected:
-            return [f"{ESCALATE}{branch} already exists"]
-        ledger.record_stack_finish(batch_id, branch=branch, head_sha=sha)
-        body_path = workdir.parent / "pr-body.md"
-        body_path.write_text(f"Batch {batch_id}'s finishing layer.\n")
-        pr_url = package_phase.open_draft_pr(
-            slug=slug,
-            branch=branch,
-            base=top["branch"],
-            title=f"saffron batch {batch_id}: finishing layer",
-            body_path=body_path,
-            gh=gh,
+        lines = _push_and_open(
+            ledger, batch_id, sha, url, slug, gh, workdir, branch, top
         )
-        ledger.record_stack_finish(batch_id, branch=branch, head_sha=sha, pr_url=pr_url)
-    finally:
-        try:
-            git_mirror.remove_worktree(mirror, workdir)
-        except git_mirror.GitError as exc:
-            worktree_error = exc
-
-    lines = [f"{PUSHED}{sha[:12]} to {branch}, draft pull request {pr_url}"]
-    if worktree_error is not None:
-        lines.append(f"worktree left at {workdir}: GitError: {worktree_error}")
+    except BaseException as exc:
+        left = _remove_worktree(mirror, workdir)
+        if left is not None:
+            exc.add_note(left)
+        raise
+    left = _remove_worktree(mirror, workdir)
+    if left is not None:
+        lines.append(left)
     return lines
+
+
+def _push_and_open(
+    ledger: Ledger,
+    batch_id: int,
+    sha: str,
+    url: str,
+    slug: str,
+    gh: package_phase.GhRunner,
+    workdir: Path,
+    branch: str,
+    top,
+) -> list[str]:
+    try:
+        package_phase.push_with_lease(workdir, url=url, branch=branch, expect="")
+    except package_phase.LeaseRejected:
+        return [f"{ESCALATE}{branch} already exists"]
+    ledger.record_stack_finish(batch_id, branch=branch, head_sha=sha)
+    body_path = workdir.parent / "pr-body.md"
+    body_path.write_text(f"Batch {batch_id}'s finishing layer.\n")
+    pr_url = package_phase.open_draft_pr(
+        slug=slug,
+        branch=branch,
+        base=top["branch"],
+        title=f"saffron batch {batch_id}: finishing layer",
+        body_path=body_path,
+        gh=gh,
+    )
+    ledger.record_stack_finish(batch_id, branch=branch, head_sha=sha, pr_url=pr_url)
+    return [f"{PUSHED}{sha[:12]} to {branch}, draft pull request {pr_url}"]
+
+
+def _remove_worktree(mirror: Path, workdir: Path) -> str | None:
+    """Remove the finish's worktree, or return the line that names it left."""
+    try:
+        git_mirror.remove_worktree(mirror, workdir)
+    except git_mirror.GitError as exc:
+        return f"worktree left at {workdir}: GitError: {exc}"
+    return None

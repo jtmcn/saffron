@@ -1,11 +1,12 @@
 ---
 id: b-036cc5
 title: "`saffron watch` has no typed output, so a follower outside Python parses `events.jsonl` a second time"
-status: open
+status: partial
 tier: 3
 filed: 2026-10-07
+by_hand: true
 specs: []
-prs: []
+prs: [1076]
 commits: []
 cites: []
 related: [b-2d09de, b-4e1b6d, b-ba0cba]
@@ -36,3 +37,4 @@ drops `hooks/progress.ts`'s parser.
 ## Record
 
 - 2026-10-07: filed from the `cell-watch` mod spike.
+- 2026-11-08: partial by hand. `follow` and `follow_every_task` take `as_json`, and each yields one object per event with its `event` and `line`. Left: the `--json` flag in `saffron/cli.py`, which a queued spec touches, and the `cell-watch` mod reading that stream in place of its own parser.

@@ -168,7 +168,7 @@ First **170**, then **b-2e0b97**, then **108** and ~~**b-ca3bc6**~~. Then
 **Placed 2026-10-11**, from reviewing `SA-0282`: **b-e9153f**, after b-0569f7.
 A task a `--stack` batch mints never records whether its thread pool was uncapped.
 
-**Placed 2026-10-10**, from writing `SA-0245` and `SA-0258`: **b-52e670**. A
+**Placed 2026-10-10**, from writing `SA-0245` and `SA-0258`: ~~**b-52e670**~~. A
 SIGTERM during a silent agent turn waits for the turn to end, because the
 unwind closes a pipe a reader thread holds.
 
@@ -293,7 +293,7 @@ exists leaves no row. A stack batch at a threshold spends into its shares.
 `watch` cannot follow the follow-up writer or the end review.
 
 **Placed 2026-10-12**, from the spec loop's run 35: **b-714ccd**,
-**b-aff9ea**, **b-54ad4f**, **b-7ee599**, then **b-82cf2e**. A witness on a
+**b-aff9ea**, **b-54ad4f**, ~~**b-7ee599**~~, then **b-82cf2e**. A witness on a
 default value passes REBUT. A spec can prescribe a false line. No gate
 resolves a citation. A stack batch's follow-up guard has no witness. `migrate`
 writes a false package fact for an adopted row.
@@ -422,7 +422,7 @@ Each line keeps the order it was filed in.
 
 - From the first sort: **31**, **20**, **53**, ~~**54**~~, ~~**55**~~, **75**, **76**,
   **77**, **90**, **92**, **96**, **100**, **101** and **108**.
-- Filed 2026-09-12 to 2026-09-19: **116**, **121**, **122**, **130**, **134**,
+- Filed 2026-09-12 to 2026-09-19: ~~**116**~~, **121**, **122**, **130**, **134**,
   ~~**150**~~, ~~**151**~~, **155**, **156**, **174** and **b-d6bff7**.
 - From spec loop runs 7 to 10: **b-990bd9**, **b-7431a2**, **b-9eceda**, **b-bc9951**,
   **b-0281e4**, **b-e9db0e**, **b-397edd**, **b-0e20e9**, **b-98dc4d**,
@@ -490,7 +490,7 @@ Preflight names a listener's address but not its process.
 revised spec gets no task state.
 
 **Placed 2026-10-02**, from the spec loop's run 25: **b-006372**,
-**b-7430c1**, **b-1068ea**, ~~**b-8a6f43**~~, then ~~**b-a7e315**~~. The finish is
+~~**b-7430c1**~~, **b-1068ea**, ~~**b-8a6f43**~~, then ~~**b-a7e315**~~. The finish is
 judged at the pinned base. One escalation hides a leftover worktree. A
 child's tree carries an older spec than it runs. `snapshot --force` drops
 holds, and `status` has no one-line form.
