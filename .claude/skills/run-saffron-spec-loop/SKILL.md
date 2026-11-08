@@ -264,10 +264,10 @@ uv run .claude/skills/run-saffron-spec-loop/driver.py stack --execute   # gh sta
 ```
 
 The stack order is the loop's order rearranged so each child sits directly above
-its parent. The dry run prints it, runs `git merge-tree` on every adjacent pair,
-and shows the `gh stack link` command. `link` retargets each PR onto the one
+its parent. The dry run prints it, merges each layer onto every layer below it
+with `git merge-tree`, and shows the `gh stack link` command. `link` retargets each PR onto the one
 below; its diff stays right and only what merging it would do changes. A
-`CONFLICT` between neighbours, and a child whose parent is not in the stack,
+`CONFLICT` with any lower layer, and a child whose parent is not in the stack,
 go to the operator before linking (GOTCHAS, Stacking). PACKAGE opens each PR
 as a draft (§5.7). A reviewed, linked stack is the operator's to merge, so once
 every base reads back, `--execute` marks each PR ready. A base that reads back

@@ -694,6 +694,44 @@ def _merge_conflicts(lower: str, upper: str, cwd: Path = REPO) -> list[str]:
     return conflicts or [f"merge-tree exited {done.returncode}: {done.stderr.strip()}"]
 
 
+def _merge_commit(lower: str, upper: str, cwd: Path) -> str:
+    """A commit of `lower` and `upper` merged, made in the object store alone."""
+    tree = _git("merge-tree", "--write-tree", lower, upper, cwd=cwd).splitlines()[0]
+    who = {"GIT_AUTHOR_NAME": "driver", "GIT_AUTHOR_EMAIL": "driver@localhost"}
+    who |= {"GIT_COMMITTER_NAME": "driver", "GIT_COMMITTER_EMAIL": "driver@localhost"}
+    done = subprocess.run(
+        ["git", "commit-tree", tree, "-p", lower, "-p", upper, "-m", "stack check"],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        env={**os.environ, **who},
+    )
+    if done.returncode != 0:
+        raise GitError(f"git commit-tree: {done.stderr.strip()}")
+    return done.stdout.strip()
+
+
+def _stack_conflicts(
+    branches: Sequence[str], cwd: Path = REPO
+) -> list[tuple[str, str, list[str]]]:
+    """Each layer merged onto every layer below it, bottom up, as the operator
+    merges the stack. A conflict names the lowest layer that brings it on.
+    Adjacent pairs alone missed a sibling's conflict with the chain (b-2e7c4d)."""
+    found: list[tuple[str, str, list[str]]] = []
+    merged = list(branches[:1])  # merged[j]: every clean layer up to j, merged
+    for upper in branches[1:]:
+        if conflicts := _merge_conflicts(merged[-1], upper, cwd):
+            lowest = next(
+                (j for j, m in enumerate(merged) if _merge_conflicts(m, upper, cwd)),
+                len(merged) - 1,
+            )
+            found.append((branches[lowest], upper, conflicts))
+            merged.append(merged[-1])  # a conflicted layer cannot merge, so skip it
+        else:
+            merged.append(_merge_commit(merged[-1], upper, cwd))
+    return found
+
+
 # ----------------------------------------------------------- the rebase
 
 
@@ -1779,29 +1817,29 @@ def cmd_stack(args) -> int:
         print(f"  #{p.pr}  {p.spec_id}  ({p.branch})")
     for warning in warnings:
         print(f"\nwarning: {warning}")
-    clean = True
-    for lower, upper in zip(order, order[1:], strict=False):
-        conflicts = _merge_conflicts(f"origin/{lower.branch}", f"origin/{upper.branch}")
-        if conflicts:
-            clean = False
-            print(f"\n{lower.branch} and {upper.branch} do not merge cleanly:")
-            for line in conflicts:
-                print(f"  {line}")
     # Step 5's pull request opens after the layers are linked, so it joins here.
     top = getattr(args, "top", None)
     prs = [p.pr for p in order] + ([top] if top else [])
     wants = [p.branch for p in order]
+    heads = [p.branch for p in order]
     if top:
-        head = _gh_pr_field(top, "headRefName")
-        conflicts = _merge_conflicts(f"origin/{order[-1].branch}", f"origin/{head}")
-        if conflicts:
-            clean = False
-            print(f"\n{order[-1].branch} and {head} do not merge cleanly:")
-            for line in conflicts:
-                print(f"  {line}")
-        print(f"  #{top}  step 5  ({head})")
-    if clean:
-        print("\nevery adjacent pair merges cleanly (git merge-tree)")
+        if (head := _gh_pr_field(top, "headRefName")) is None:
+            return _fail(f"gh could not read #{top}'s branch")
+        heads.append(head)
+        print(f"  #{top}  step 5  ({heads[-1]})")
+    try:
+        found = _stack_conflicts([f"origin/{h}" for h in heads], cwd=REPO)
+    except GitError as err:
+        return _fail(str(err))
+    for lower, upper, conflicts in found:
+        print(
+            f"\n{upper.removeprefix('origin/')} does not merge cleanly onto the "
+            f"layers below it, first at {lower.removeprefix('origin/')}:"
+        )
+        for line in conflicts:
+            print(f"  {line}")
+    if not found:
+        print("\nevery layer merges cleanly onto the layers below it (git merge-tree)")
 
     command = ["gh", "stack", "link", *(str(n) for n in prs)]
     print(f"\n  {' '.join(command)}")

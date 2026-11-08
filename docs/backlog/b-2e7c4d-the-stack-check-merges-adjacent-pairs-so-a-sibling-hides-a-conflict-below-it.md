@@ -1,11 +1,11 @@
 ---
 id: b-2e7c4d
 title: The stack check merges adjacent pairs, so a sibling cut from main hides a conflict below it
-status: open
+status: done
 tier: 2
 filed: 2026-09-28
+closed: 2026-11-08
 by_hand: true
-closed:
 specs: []
 prs: []
 commits: []
@@ -42,3 +42,4 @@ conflicts with the bottom one only.
 - 2026-09-28: filed after the spec loop's run 20, at the operator's request.
 - 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
   `.claude/`, and `SA-0279` refuses any spec that touches that path.
+- 2026-11-08: done by hand.

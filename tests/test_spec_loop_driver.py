@@ -330,6 +330,41 @@ def test_neighbours_that_both_append_to_one_file_are_reported_as_a_conflict(repo
     assert "base.txt" in conflicts[0]
 
 
+def test_stack_names_a_top_layer_that_conflicts_only_with_the_bottom_one(
+    repo, monkeypatch, capsys
+):
+    # b-2e7c4d: SA-0185 and SA-0150 each merged cleanly with their neighbour
+    # off `main`, and the rebase onto SA-0164 below them then conflicted.
+    cwd, tips = repo
+    for branch, name, text in (
+        ("x", "base.txt", "base\nx\n"),
+        ("y", "y.txt", "y\n"),
+        ("z", "base.txt", "base\nz\n"),
+    ):
+        _git(cwd, "checkout", "-q", "-b", f"saffron/{branch}", tips["M0"])
+        tip = _commit(cwd, name, text)
+        _git(cwd, "update-ref", f"refs/remotes/origin/saffron/{branch}", tip)
+    _git(cwd, "checkout", "-q", "main")
+    rows = [_row("x", pr=10), _row("y", pr=11), _row("z", pr=12)]
+    monkeypatch.setattr(driver, "REPO", cwd)
+    monkeypatch.setattr(driver, "_load", lambda: rows)
+    # The default `cwd` is bound at import, so every merge is sent to this repo.
+    merge = driver._merge_conflicts
+    monkeypatch.setattr(
+        driver, "_merge_conflicts", lambda a, b, _cwd=None: merge(a, b, cwd)
+    )
+
+    assert driver.cmd_stack(argparse.Namespace(execute=False, top=None)) == 0
+
+    out = capsys.readouterr().out
+    assert (
+        "saffron/z does not merge cleanly onto the layers below it, first at saffron/x:"
+        in out
+    )
+    assert "saffron/y does not merge cleanly" not in out
+    assert "every layer merges cleanly" not in out
+
+
 def test_a_gone_spec_an_edited_spec_and_a_merged_or_closed_pr_make_the_order_stale(
     tmp_path,
 ):
@@ -2203,7 +2238,7 @@ def test_a_linked_stack_is_marked_ready_only_once_every_base_reads_back(
     ran = []
     monkeypatch.setattr(driver, "_load", lambda: rows)
     monkeypatch.setattr(driver, "_stack_order", lambda _rows: (rows, []))
-    monkeypatch.setattr(driver, "_merge_conflicts", lambda _a, _b: [])
+    monkeypatch.setattr(driver, "_stack_conflicts", lambda _heads, **_k: [])
     monkeypatch.setattr(driver, "_trunk", lambda: "origin/main")
     monkeypatch.setattr(
         driver.subprocess,
@@ -2235,7 +2270,7 @@ def test_the_step_5_pull_request_is_linked_on_top_and_marked_ready(loop, monkeyp
     ran = []
     monkeypatch.setattr(driver, "_load", lambda: rows)
     monkeypatch.setattr(driver, "_stack_order", lambda _rows: (rows, []))
-    monkeypatch.setattr(driver, "_merge_conflicts", lambda _a, _b: [])
+    monkeypatch.setattr(driver, "_stack_conflicts", lambda _heads, **_k: [])
     monkeypatch.setattr(driver, "_trunk", lambda: "origin/main")
     monkeypatch.setattr(
         driver.subprocess,

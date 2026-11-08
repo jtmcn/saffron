@@ -231,7 +231,7 @@ its budget.
 `prose` with a false sentence. The last two are the loop's tools. One blocked a
 measured estimate, and the other takes a `drop` per spec to scope a loop.
 
-**Placed 2026-09-28**, after run 20: **b-2e7c4d**. The loop's `stack` check
+**Placed 2026-09-28**, after run 20: ~~**b-2e7c4d**~~. The loop's `stack` check
 merges adjacent pairs, and a sibling cut from `main` hid a conflict below it.
 
 **Placed 2026-09-28**, by hand: **b-12ffc3**. `cell_down` deletes the cell's
