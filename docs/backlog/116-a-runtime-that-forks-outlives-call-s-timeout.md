@@ -1,9 +1,11 @@
 ---
 id: 116
 title: A runtime that forks outlives `_call`'s timeout
-status: open
+status: done
 tier: 3
 filed: 2026-09-14
+closed: 2026-11-08
+by_hand: true
 specs: [SA-0079]
 prs: [245]
 commits: []
@@ -26,3 +28,7 @@ running on the host. Unverified against a real runtime.
 `_call` starting the runtime in its own process group and
 killing the group on timeout, with a witness whose stub forks and whose child is
 gone once `_call` returns.
+
+## Record
+
+- 2026-11-08: done by hand. `_call` starts the runtime in its own process group and kills the group on a timeout. A child that leaves the group holds the call at most `_REAP_S`.

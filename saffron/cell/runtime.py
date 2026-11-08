@@ -15,10 +15,12 @@ from the host is the proper noun standing in for a decision all over again
 
 from __future__ import annotations
 
+import contextlib
 import ipaddress
 import os
 import queue
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -259,26 +261,56 @@ def _decode(data: bytes | None) -> str:
     return "" if data is None else data.decode("utf-8", errors="replace")
 
 
+# Reasoned: a killed group closes its pipes at once, so this bounds only a
+# child that left the group and kept a pipe open.
+_REAP_S = 5.0
+
+
 def _call(argv: Sequence[str], timeout_s: float) -> Completed:
     # Bytes, not text=True: Python's universal-newline translation silently
     # rewrites a bare "\r" a cell emits (e.g. inside a diff) into "\n" before
     # any caller sees it, and a gate reading that diff must see what git
     # actually wrote.
     try:
-        proc = subprocess.run(list(argv), capture_output=True, timeout=timeout_s)
-    except subprocess.TimeoutExpired as exc:
-        return Completed(
-            returncode=124,
-            stdout=_decode(exc.stdout),
-            stderr=_decode(exc.stderr),
-            timed_out=True,
-            bound="wall",
+        proc = subprocess.Popen(
+            list(argv),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            # Its own group, so a timeout kills what the runtime forked (item 116).
+            process_group=0,
         )
     except OSError as exc:
         raise CellRuntimeError(
             f"{dialect().binary} could not be executed: {exc}"
         ) from exc
-    return Completed(proc.returncode, _decode(proc.stdout), _decode(proc.stderr))
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        _kill_group(proc)
+        try:
+            stdout, stderr = proc.communicate(timeout=_REAP_S)
+        except subprocess.TimeoutExpired as late:
+            # A child outside the group still holds a pipe, so keep what was read.
+            stdout, stderr = late.stdout, late.stderr
+            proc.wait()
+        return Completed(
+            returncode=124,
+            stdout=_decode(stdout),
+            stderr=_decode(stderr),
+            timed_out=True,
+            bound="wall",
+        )
+    except BaseException:
+        _kill_group(proc)
+        proc.wait()
+        raise
+    return Completed(proc.returncode, _decode(stdout), _decode(stderr))
+
+
+def _kill_group(proc: subprocess.Popen) -> None:
+    # Measured on macOS: a group left holding only a zombie answers EPERM, not ESRCH.
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(proc.pid, signal.SIGKILL)
 
 
 def call(argv: Sequence[str], timeout_s: float = 120) -> Completed:

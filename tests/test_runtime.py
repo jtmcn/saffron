@@ -6,6 +6,7 @@ from __future__ import annotations
 import ipaddress
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -976,3 +977,63 @@ def test_a_listing_that_could_not_be_read_adds_no_detail_and_still_raises(monkey
         assert "overlaps" in str(exc)
     else:
         raise AssertionError("an overlapping subnet must raise")
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def test_a_runtime_that_forks_leaves_no_child_once_its_timeout_fires(tmp_path):
+    """Item 116: `_call` ends the runtime's whole process group on a timeout.
+    The stub forks a sleep and waits, as `container` and conmon fork."""
+    pid_file = tmp_path / "child.pid"
+    forking = tmp_path / "a-forking-runtime"
+    forking.write_text(f"#!/bin/sh\nsleep 300 &\necho $! > {pid_file}\nwait\n")
+    forking.chmod(0o755)
+
+    done = runtime.call([str(forking)], timeout_s=0.5)
+    child = int(pid_file.read_text())
+    try:
+        assert done.timed_out is True
+        deadline = time.monotonic() + 2.0
+        while _alive(child) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not _alive(child)
+    finally:
+        if _alive(child):
+            os.kill(child, signal.SIGKILL)
+
+
+def test_a_child_that_leaves_the_group_cannot_hold_the_call_past_its_reap_bound(
+    tmp_path, monkeypatch
+):
+    """Item 116: a child in its own session keeps the pipe open after the
+    group is killed. `_call` still returns, with what it read."""
+    pid_file = tmp_path / "child.pid"
+    escaping = tmp_path / "an-escaping-runtime"
+    escaping.write_text(
+        "#!/bin/sh\necho started\n"
+        f"{sys.executable} -c 'import os, time; os.setsid(); "
+        f'open("{pid_file}", "w").write(str(os.getpid())); time.sleep(300)\' &\n'
+        "wait\n"
+    )
+    escaping.chmod(0o755)
+    monkeypatch.setattr(runtime, "_REAP_S", 0.3)
+
+    started = time.monotonic()
+    done = runtime.call([str(escaping)], timeout_s=0.5)
+    elapsed = time.monotonic() - started
+    deadline = time.monotonic() + 2.0
+    while not pid_file.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    child = int(pid_file.read_text())
+    try:
+        assert done.timed_out is True
+        assert done.stdout == "started\n"
+        assert elapsed < 3.0, elapsed
+    finally:
+        os.kill(child, signal.SIGKILL)
