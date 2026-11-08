@@ -482,8 +482,8 @@ that it fails on its criterion's mutant. An ordinary test that happens to cover
 the claim is not one.
 _Avoid_: "the test for it".
 
-**Mutant**: A find-and-replace edit a criterion declares against its own subject,
-which its witness must fail on (`DESIGN.md` §5.4.1). Applied by the `witness` gate
+**Mutant**: A find-and-replace edit kept for a criterion on `refs/saffron/mutants`,
+against its own subject, which its witness must fail on (`DESIGN.md` §5.4.1). Applied by the `witness` gate
 to ask whether the tests would notice the claim being broken. Withheld from the
 implementer's prompt on purpose: a mutant a cell chooses is a mutant chosen to be
 killed.
