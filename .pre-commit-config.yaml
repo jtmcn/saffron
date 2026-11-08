@@ -73,7 +73,7 @@ repos:
           --globs "!.venv/**" --globs "!.claude/worktrees/**"
           --globs "!**/__pycache__/**"'
         pass_filenames: false
-        files: ^(.*\.py|\.saffron/(sgconfig\.yml|rules/.*|rule-tests/.*))$
+        files: ^(.*\.py|\.saffron/(sgconfig\.yml|rules/.*|rule-tests/.*|gates/[^/.]+))$
 
   # A retired term, not the whole `_Avoid_` list: most of those words are ordinary
   # English elsewhere. Only a word a settled decision killed outright is decidable

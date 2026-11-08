@@ -258,6 +258,25 @@ def test_the_fast_gates_name_their_tool_and_pass_on_a_clean_tree(name):
     assert result.tool and result.tool.startswith("ruff")
 
 
+@pytest.mark.parametrize("name", ["format", "lint"])
+def test_a_gitignore_cannot_hide_a_tracked_file_from_ruff(tmp_path, name):
+    """ruff skips a gitignored file that git still tracks (backlog item 76).
+    The `.git` directory is load-bearing: ruff reads `.gitignore` only in a repository."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    (tmp_path / "bad.py").write_text("import os\nx=1\n")
+    (tmp_path / ".gitignore").write_text("bad.py\n.gitignore\n")
+    worktree = tmp_path / ".claude" / "worktrees" / "w"
+    worktree.mkdir(parents=True)
+    (worktree / "other.py").write_text("import os\nx=1\n")
+    done = subprocess.run(
+        [str(GATES / name)], cwd=tmp_path, capture_output=True, text=True, timeout=120
+    )
+    result = parse_gate_json(done.stdout, expected_gate=name)
+    assert result.status == "fail", result.summary
+    assert {Path(f.file).name for f in result.failures} == {"bad.py"}
+
+
 def test_a_red_run_is_a_failure_even_when_a_test_is_named_for_a_crash(tmp_path):
     """`-q` echoes node ids in its FAILED lines, so keying the worker-crash
     check on "worker" and "crashed" anywhere in the output turned every red run
@@ -706,6 +725,7 @@ def test_a_rules_exemptions_are_the_named_files():
         "podman-runtime-is-runtime-only": ["saffron/cell/runtimes/podman.py"],
         "agent-sdk-import-is-runner-only": ["images/agent_runner.py"],
         "gate-tool-must-be-executed": ["tests/**"],
+        "shell-gate-tool-must-be-executed": None,
         "no-alias-in-package-init": None,
         "no-reexport": None,
         "one-task-driver": ["saffron/task.py"],
@@ -782,7 +802,8 @@ def test_every_rules_path_scope_still_reaches_a_file(tmp_path):
     dead = []
     for rule_file in _rule_files():
         rule = yaml.safe_load(rule_file.read_text())
-        assert rule["language"] == "python", (
+        scopes = [g for k in ("files", "ignores") for g in rule.get(k) or []]
+        assert not scopes or rule["language"] == "python", (
             f"{rule_file.name} is not Python; `_covers` probes with `kind: module`, "
             "which is Python's root node — give it the new language's root first"
         )
@@ -967,6 +988,27 @@ def test_structure_fails_on_code_its_rules_reject(tmp_path):
     # ast-grep counts lines from zero and every other gate here reports them from
     # one, so an unconverted line reads as the line above the defect.
     assert result.failures[0].line == 1
+
+
+def test_structure_fails_a_shell_gate_that_writes_its_tool_as_a_literal(tmp_path):
+    """`format` builds its contract in `sh`, which a Python rule never reads (item 77)."""
+    gate = _rules_tree(tmp_path)
+    fmt = tmp_path / ".saffron" / "gates" / "format"
+    fmt.write_text(
+        re.sub(r"^tool=.*$", 'tool="ruff 0.16.3"', fmt.read_text(), flags=re.M)
+    )
+    done = subprocess.run(
+        [str(gate)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    result = parse_gate_json(done.stdout, expected_gate="structure")
+    assert result.status == "fail", result.summary
+    assert [(f.file, f.code) for f in result.failures] == [
+        (".saffron/gates/format", "shell-gate-tool-must-be-executed")
+    ]
 
 
 def test_structure_fails_a_skip_bound_to_a_name(tmp_path):

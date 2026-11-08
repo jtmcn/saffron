@@ -242,7 +242,27 @@ factory:RebuttalShape a sh:NodeShape ;
         sh:qualifiedValueShape [
             sh:property [ sh:path prov:hadRole ;
                 sh:in ( factory:confirms factory:withdraws ) ; sh:minCount 1 ] ;
-            sh:property [ sh:path prov:agent ; sh:class factory:CriticLens ] ] ] .
+            sh:property [ sh:path prov:agent ; sh:class factory:CriticLens ] ] ] ;
+    # The third position is the operator's, even when a delegate typed it.
+    sh:property [ sh:path prov:qualifiedAssociation ;
+        sh:qualifiedMaxCount 1 ;
+        sh:qualifiedValueShape [
+            sh:property [ sh:path prov:hadRole ;
+                sh:in ( factory:agrees factory:disagrees ) ; sh:minCount 1 ] ] ] ;
+    sh:property [ sh:path prov:qualifiedAssociation ;
+        sh:or (
+            [ sh:not [ sh:property [ sh:path prov:hadRole ;
+                sh:in ( factory:agrees factory:disagrees ) ; sh:minCount 1 ] ] ]
+            [ sh:property [ sh:path prov:agent ; sh:minCount 1 ; sh:maxCount 1 ;
+                sh:class factory:Operator ] ] ) ] .
+
+# A manual assertion is the operator's judgement, as a ratification is.
+factory:ManualAssertionShape a sh:NodeShape ;
+    sh:targetSubjectsOf earl:mode ;
+    sh:or (
+        [ sh:not [ sh:property [ sh:path earl:mode ; sh:hasValue earl:manual ] ] ]
+        [ sh:property [ sh:path earl:assertedBy ; sh:minCount 1 ; sh:maxCount 1 ;
+            sh:class factory:Operator ] ] ) .
 
 # Touches is ratified by the operator before it binds (§3). The proposal is not
 # the ratified set, and only the ratified set feeds the `scope` gate.

@@ -5,7 +5,8 @@ set -u
 tool="ruff $(ruff --version 2>/dev/null | awk '{print $2}')"
 case "$tool" in "ruff ") echo '{"gate":"format","status":"error","summary":"ruff not on PATH"}'; exit 0;; esac
 
-out=$(ruff format --check . 2>&1); rc=$?
+# `lint.py` says why the gitignore is refused and the worktrees named (item 76).
+out=$(ruff format --check --no-respect-gitignore --extend-exclude .claude/worktrees . 2>&1); rc=$?
 # ruff 0.16 reports each hunk as "  --> path:line:col"; a file may recur once
 # per hunk, so dedupe while preserving order.
 files=$(printf '%s\n' "$out" | sed -n 's/^[[:space:]]*--> \(.*\):[0-9][0-9]*:[0-9][0-9]*$/\1/p' | awk '!seen[$0]++')

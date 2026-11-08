@@ -19,8 +19,19 @@ if version.returncode != 0:
     emit({"gate": "lint", "status": "error", "summary": "ruff not on PATH"})
 tool = version.stdout.strip()
 
+# A gitignore entry can hide a tracked file, so the gate names its own exclusion (item 76).
+# ruff's default `exclude` already holds `.venv`, so that is the one left to name.
 proc = subprocess.run(
-    ["ruff", "check", "--output-format", "json", "."],
+    [
+        "ruff",
+        "check",
+        "--no-respect-gitignore",
+        "--extend-exclude",
+        ".claude/worktrees",
+        "--output-format",
+        "json",
+        ".",
+    ],
     capture_output=True,
     text=True,
 )

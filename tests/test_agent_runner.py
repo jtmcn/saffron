@@ -80,7 +80,23 @@ def test_tool_results_come_back_as_tool_results():
     block = SimpleNamespace(tool_use_id="t1", content="ok", is_error=False)
     user = SimpleNamespace(content=[block])
     (event,) = runner.events(user)
-    assert event == {"type": "tool_result", "tool_use_id": "t1", "is_error": False}
+    assert event == {
+        "type": "tool_result",
+        "tool_use_id": "t1",
+        "is_error": False,
+        "tail": "ok",
+    }
+
+
+def test_a_tool_result_carries_the_clipped_tail_of_what_it_returned():
+    """A post-mortem needs what the agent learned, which sits at the end."""
+    text = "x" * 500 + "lines: 412"
+    block = SimpleNamespace(
+        tool_use_id="t1", content=[{"type": "text", "text": text}], is_error=False
+    )
+    (event,) = runner.events(SimpleNamespace(content=[block]))
+    assert event["tail"].endswith("lines: 412")
+    assert len(event["tail"]) < 300
 
 
 def test_the_result_event_carries_what_the_supervisor_bounds_on():

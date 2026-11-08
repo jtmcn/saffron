@@ -1,10 +1,12 @@
 ---
 id: 76
 title: A gitignore entry removes a tracked file from `lint` and `format`
-status: open
+status: done
+closed: 2026-11-08
+by_hand: true
 tier: 3
 specs: []
-prs: [145]
+prs: [145, 1079]
 commits: []
 cites: []
 related: []
@@ -45,3 +47,7 @@ that violates, an ignore file naming it, and the gate still reporting `fail`. Th
 `.git` directory in that fixture is load-bearing — the walker honours a
 `.gitignore` only in a tree that looks like a repository, so without one the test
 passes against the unfixed gate.
+
+## Record
+
+- 2026-11-08: done by hand. `lint` and `format` pass `--no-respect-gitignore` and name `.claude/worktrees` themselves. Measured on the main checkout: 233 files scanned either way, and 665 with the gitignore refused alone. Measured too: the `tests` gate still reports a gitignored tracked test, since pytest reads no gitignore.

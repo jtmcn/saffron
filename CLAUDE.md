@@ -180,7 +180,7 @@ means a rule ships with the failing snippet that proves it fires. Read
 
 - **The `tool` field** separates a gate that ran and passed from one that never ran. It must be
   obtained *by executing* the tool, never a string literal (§5.4, Appendix H). **(gated over
-  Python; `.saffron/gates/format` builds its contract in `sh`, which no rule reads — item 77)**
+  Python and over the shell gates in `.saffron/gates/`)**
 - **A skip, or a type, is spelled in full where it is used.** `integrity` reads `.saffron/policy.yaml`'s
   suppression tokens as *text*. One bound to a name, imported, or named by string spells none of
   them, so every later use passes (item 112). An unannotated identity hides a value's type from

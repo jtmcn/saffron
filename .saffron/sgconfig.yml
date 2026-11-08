@@ -15,5 +15,9 @@
 ruleDirs:
   - rules
 
+# Matched on the file's basename (measured). These gates have no extension.
+languageGlobs:
+  bash: [dead, format, lint, prose, shacl, structure, terms, tests, types]
+
 testConfigs:
   - testDir: rule-tests
