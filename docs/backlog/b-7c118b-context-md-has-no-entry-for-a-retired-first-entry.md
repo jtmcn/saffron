@@ -6,7 +6,7 @@ closed: 2026-11-07
 tier: 2
 by_hand: true
 filed: 2026-11-07
-specs: [SA-0350]
+specs: []
 prs: [1042]
 commits: []
 cites: [§4.2.1]
