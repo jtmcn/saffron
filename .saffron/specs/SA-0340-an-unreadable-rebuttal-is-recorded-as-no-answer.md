@@ -242,7 +242,7 @@ standing blocker that a readable turn skipped. A blocker a verdict withdrew coun
 - The pull request body. `saffron/report/pr_body.py:311-329` already renders a
   turn with an error apart (`SA-0071`).
 - `CONTEXT.md` and the ontology. The answer values stay a `Literal` in code.
-  The glossary entry is backlog item b-bbf705, by hand.
+  The glossary's **Rebuttal** entry is amended by hand in this spec's pull request.
 - A REBUT a pool cut short. `saffron/cell/session.py:3759-3761` sets
   `rebut_result` to `None` there, after the ledger write. So the ledger records
   its answers and its queue line counts none. Its state is `EXHAUSTED`, which
