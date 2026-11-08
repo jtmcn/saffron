@@ -3626,6 +3626,25 @@ def test_a_stack_batch_runs_a_spec_only_when_its_own_review_routes_it_to_run(
     assert set(unreviewed) == {"TE-7", "TE-8"}
     assert "review session failed" in unreviewed["TE-7"]
 
+    # b-5abe53: a review routed `run` prints its own line, as the others do.
+    reviewed = {
+        line[:10].strip(): line
+        for line in lines
+        if line[10:].startswith(" reviewed  run")
+    }
+    assert set(reviewed) == {
+        "TE-1",
+        "TE-6",
+        "TE-12",
+        "TE-16",
+        "TE-14",
+        "TE-17",
+        "TE-18",
+        "TE-15",
+    }
+    assert reviewed["TE-6"].strip().endswith("2 finding(s)")
+    assert reviewed["TE-1"].strip().endswith("0 finding(s)")
+
     refused = {line.split()[0]: line for line in lines if " refused  " in line}
     assert set(refused) == {"TE-9", "TE-10", "TE-11", "TE-13"}
     assert "TE-2" in refused["TE-9"] and "TE-2" in refused["TE-10"]

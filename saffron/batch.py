@@ -806,6 +806,10 @@ def run_stack_batch(
                         )
                     if route == "run":
                         reviewed.add(candidate.spec.id)
+                        emit(
+                            f"{candidate.spec.id:<10} reviewed  run  "
+                            f"{len(read.findings)} finding(s)"
+                        )
                         # Gate 0's open-pull-request refusals again, on a revised
                         # spec of the order only, never a follow-up's own first text.
                         if not is_follow_up and open_prs is not None:
