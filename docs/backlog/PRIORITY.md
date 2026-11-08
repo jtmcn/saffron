@@ -518,7 +518,7 @@ before a REBUT that runs. Three sentences lag the stack.
 regular-file git modes are spelled in three modules.
 
 **Placed 2026-10-10**, from the spec loop's run 33: **b-97357c**,
-**b-55186d**, **b-b94076**, then **b-dcf1ec**. Two of `SA-0243`'s witnesses
+**b-55186d**, **b-b94076**, then ~~**b-dcf1ec**~~. Two of `SA-0243`'s witnesses
 leave a side untested. The fold writes its spend rollup twice. A closed
 `EXHAUSTED` draft reports `head_moved` on every scan. A preflight hit with
 no socket list names no process.

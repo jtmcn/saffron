@@ -214,9 +214,14 @@ def probe_host_bindings(
     return [hit for hit in done.stdout.strip().split("|") if hit]
 
 
-def _named_hits(hits: list[str], sockets: Sequence[tuple[str, int]]) -> list[str]:
+def _named_hits(
+    hits: list[str], sockets: Sequence[tuple[str, int]] | None
+) -> list[str]:
     """Each `address:port` hit, followed by the commands `host_probe_ports`'s
-    one enumeration found on that port, in the order it returned them."""
+    one enumeration found on that port, in the order it returned them. With
+    no enumeration at all (`None`), each hit says that no list was read."""
+    if sockets is None:
+        return [f"{hit} (no socket list read)" for hit in hits]
     by_port: dict[int, list[str]] = {}
     for command, port in sockets:
         by_port.setdefault(port, []).append(command)
@@ -233,7 +238,7 @@ def assert_host_is_unreachable(
     network: str,
     gateway: str,
     ports: list[int] | None = None,
-    sockets: Sequence[tuple[str, int]] = (),
+    sockets: Sequence[tuple[str, int]] | None = None,
 ) -> None:
     reachable = probe_host_bindings(image_tag, network, gateway, ports)
     if reachable:
