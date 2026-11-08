@@ -155,8 +155,9 @@ the gap left (`saffron/reconcile.py:15-20`).
 `cli.main` in a child process from a script that replaces `cli`'s functions
 first. `tests/test_sigterm.py:344-405` waits on a marker file and signals that
 child. `tests/test_cli.py:3598-3628` holds `_seed_repo`, `_seed_task` and
-`_task_state`, and `tests/test_cli.py:6855-6871` holds
-`_fake_batch_resolution`. `tests/test_consumes.py:35` imports from
+`_task_state`.
+`_fake_batch_resolution` sits at `tests/test_cli.py:6855-6871`.
+`tests/test_consumes.py:35` imports from
 `tests.test_cli`.
 
 ## Problem
