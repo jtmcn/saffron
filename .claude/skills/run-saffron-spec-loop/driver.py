@@ -1249,14 +1249,14 @@ def cmd_next(args) -> int:
     return 1
 
 
-def _cell_running(spec_id: str) -> bool:
-    """Whether a `saffron cell` for this spec is still alive. Without one, an
-    in-flight state is a halt. Since SA-0276 and SA-0287, REBUT and REVIEW
+def _owners_running(spec_id: str) -> list[str]:
+    """Each live cell, PACKAGE, batch or finish for this spec, as `pgrep -lf`
+    prints it. A batch's command line names no spec, so any live batch or
+    finish counts (b-92fdbe). Since SA-0276 and SA-0287, REBUT and REVIEW
     end their halts `REBUTTAL_UNJUDGED` and `REVIEW_INCOMPLETE` (§5.6)."""
-    done = subprocess.run(
-        ["pgrep", "-f", f"saffron cell .*{spec_id}"], capture_output=True, text=True
-    )
-    return done.returncode == 0
+    pattern = f"saffron (cell .*{spec_id}|package {spec_id}|batch|finish)([ .-]|$)"
+    found = subprocess.run(["pgrep", "-lf", pattern], capture_output=True, text=True)
+    return [line.strip()[:120] for line in found.stdout.splitlines() if line.strip()]
 
 
 def _review_lenses_line(spec_id: str) -> str:
@@ -1323,7 +1323,7 @@ def _record_one(spec_id: str, *, quiet_if_unrun: bool = False) -> int | None:
     from saffron.scheduler import DONE_STATES
 
     ledger, repo_id, _url = _ledger_and_repo()
-    running, pushed = False, ""
+    pushed = ""
     try:
         if repo_id is None:
             return _fail("this repo has no ledger row yet")
@@ -1351,6 +1351,12 @@ def _record_one(spec_id: str, *, quiet_if_unrun: bool = False) -> int | None:
 
         line = lines[chosen["task_id"]]
         spent, budget = line["spent_usd_est"], line["budget_usd"]
+        if state in IN_FLIGHT_STATES and (owners := _owners_running(spec_id)):
+            listed = "".join(f"\n  {owner}" for owner in owners)
+            return _fail(
+                f"{spec_id} is at {state} and these processes still run. "
+                f"Wait for them to exit, then record again.{listed}"
+            )
         if state in DONE_STATES:
             match.state, match.pr = state, pr
             match.pushed_sha = line["pushed_sha"] or ""
@@ -1360,9 +1366,7 @@ def _record_one(spec_id: str, *, quiet_if_unrun: bool = False) -> int | None:
             match.state = None
             match.pr = pr or match.pr
             match.last_state = state
-            running = state in IN_FLIGHT_STATES and _cell_running(spec_id)
-            if not running:
-                match.undecided_cells += 1
+            match.undecided_cells += 1
             pushed = line["pushed_sha"] or ""
     finally:
         ledger.close()
@@ -1372,9 +1376,7 @@ def _record_one(spec_id: str, *, quiet_if_unrun: bool = False) -> int | None:
     cost = f"  ${spent:.2f} of ${budget:.2f}" if spent is not None and budget else ""
     print(f"{match.spec_id}  {state}  {where}{cost}")
     if match.state is None:
-        if running:
-            why = "the cell is still running — wait for it to exit, then record again"
-        elif state in IN_FLIGHT_STATES:
+        if state in IN_FLIGHT_STATES:
             branch = f", its branch pushed at {pushed[:12]}" if pushed else ""
             why = (
                 f"halted at {state}: the cell has exited and nothing decided the "

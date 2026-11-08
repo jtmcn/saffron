@@ -1019,19 +1019,53 @@ def test_record_calls_an_in_flight_state_a_halt_once_the_cell_has_exited(
     ledger.set_task_state(task_id, "REBUTTING")
     ledger.record_push(task_id, "p" * 40)
     monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (ledger, repo_id, "url"))
-    monkeypatch.setattr(driver, "_cell_running", lambda _spec_id: running)
+    owners = ["4242 saffron cell x.md"] if running else []
+    monkeypatch.setattr(driver, "_owners_running", lambda _spec_id: owners)
 
     assert driver.cmd_record(argparse.Namespace(spec_id=spec_id, all=False)) == 1
     row = driver._load()[0]
     err = capsys.readouterr().err
-    assert row.state is None and row.last_state == "REBUTTING"
+    assert row.undecided_cells == 0 if running else row.undecided_cells == 1
     if running:
-        assert "still running" in err
-        assert row.undecided_cells == 0
+        assert "still run" in err and "4242 saffron cell x.md" in err
+        assert row.last_state is None
     else:
+        assert row.state is None and row.last_state == "REBUTTING"
         assert "halted at REBUTTING" in err and "p" * 12 in err
-        assert "still running" not in err
-        assert row.undecided_cells == 1
+        assert "still run" not in err
+
+
+@pytest.mark.skipif(shutil.which("pgrep") is None, reason="needs pgrep")
+def test_record_refuses_a_task_mid_package_while_its_batch_still_runs(
+    loop, monkeypatch, capsys
+):
+    # b-92fdbe: run 48 recorded SA-0316 mid-PACKAGE as "halted at REBUTTING".
+    # A batch's command line names no spec, so the cell check missed it.
+    from saffron.ledger import Ledger
+
+    spec_id = loop.ids[0]
+    driver._save([loop.row(0)])
+    sha = driver._load()[0].spec_sha
+    ledger = Ledger(loop.root / "ledger.db")
+    repo_id = ledger.upsert_repo("r", "git@github.com:o/r.git", "/mirror", "policy")
+    task_id = ledger.create_task(
+        ledger.create_run(repo_id, "b" * 40), spec_id, sha, "saffron/X", budget_usd=14.0
+    )
+    ledger.set_task_state(task_id, "REBUTTING")
+    monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (ledger, repo_id, "url"))
+    sleep = "import time; time.sleep(30)"
+    batch = [sys.executable, "-c", sleep, "saffron", "batch", "--repo", "."]
+    probe = subprocess.Popen(batch)
+    try:
+        status = driver.cmd_record(argparse.Namespace(spec_id=spec_id, all=False))
+    finally:
+        probe.kill()
+        probe.wait()
+    err = capsys.readouterr().err
+    assert status == 1
+    assert "halted" not in err and f"{probe.pid} " in err
+    row = driver._load()[0]
+    assert row.last_state is None and row.undecided_cells == 0
 
 
 def test_record_names_the_lenses_the_specs_latest_review_ran(loop, monkeypatch, capsys):
@@ -1164,7 +1198,7 @@ def test_record_names_the_lenses_the_specs_latest_review_ran(loop, monkeypatch, 
     fresh = Ledger(loop.root / "ledger.db")
     fresh.set_task_state(task_id, "REBUTTING")
     fresh.close()
-    monkeypatch.setattr(driver, "_cell_running", lambda _spec_id: False)
+    monkeypatch.setattr(driver, "_owners_running", lambda _spec_id: [])
     status, out = record()
     assert status == 1
     assert out.splitlines()[-1] == named.rstrip("\n")
@@ -1172,6 +1206,7 @@ def test_record_names_the_lenses_the_specs_latest_review_ran(loop, monkeypatch, 
 
 @pytest.mark.skipif(shutil.which("pgrep") is None, reason="needs pgrep")
 def test_a_live_saffron_cell_is_found_by_its_spec_id():
+    # Only the probe's own pid is asserted: a live host batch matches every spec.
     probe = subprocess.Popen(
         [
             sys.executable,
@@ -1182,13 +1217,14 @@ def test_a_live_saffron_cell_is_found_by_its_spec_id():
             ".saffron/specs/SA-9999-probe.md",
         ]
     )
+    mine = f"{probe.pid} "
     try:
-        assert driver._cell_running("SA-9999")
-        assert not driver._cell_running("SA-9998")
+        assert any(o.startswith(mine) for o in driver._owners_running("SA-9999"))
+        assert not any(o.startswith(mine) for o in driver._owners_running("SA-9998"))
     finally:
         probe.kill()
         probe.wait()
-    assert not driver._cell_running("SA-9999")
+    assert not any(o.startswith(mine) for o in driver._owners_running("SA-9999"))
 
 
 def test_a_resnapshot_takes_in_a_follow_up_a_finish_ran_and_record_reads_it(

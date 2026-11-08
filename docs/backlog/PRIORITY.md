@@ -406,7 +406,7 @@ stack left alone.
 in `policy.yaml`. **b-2227b0**, closed as parked, records a draft ADR.
 
 **Placed 2026-10-25**, from the spec loop's run 48: ~~**b-9c5b11**~~,
-~~**b-01c53d**~~, **b-92fdbe**, **b-d3f977**, **b-f0e351** and **b-87001a**.
+~~**b-01c53d**~~, ~~**b-92fdbe**~~, **b-d3f977**, **b-f0e351** and **b-87001a**.
 Each is a gap a seat, a finish or the run found and the stack left alone.
 
 **Placed 2026-10-27**, from the spec loop's run 49:

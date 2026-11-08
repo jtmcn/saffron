@@ -1,9 +1,10 @@
 ---
 id: b-92fdbe
 title: "driver.py record reads a task mid-PACKAGE and records a halt, because nothing checks whether the batch still runs"
-status: open
+status: done
 tier: 3
 filed: 2026-10-25
+closed: 2026-11-08
 by_hand: true
 specs: []
 prs: []
@@ -32,3 +33,4 @@ and names the process.
 - 2026-10-25: filed from the spec loop's run 48.
 - 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
   `.claude/`, and `SA-0279` refuses any spec that touches that path.
+- 2026-11-08: done by hand.
