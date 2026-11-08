@@ -1,9 +1,11 @@
 ---
 id: b-27b9db
 title: A kind's required headings are read only when it also declares allowed ones
-status: open
+status: done
 tier: 3
 filed: 2026-09-19
+closed: 2026-11-08
+by_hand: true
 specs: []
 prs: []
 commits: []
@@ -32,3 +34,4 @@ Neither is ignored where a record is loaded.
 ## Record
 
 - 2026-09-19: filed from the spec loop's run 9 (#377).
+- 2026-11-08: done by hand.

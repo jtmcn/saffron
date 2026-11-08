@@ -426,7 +426,7 @@ Each line keeps the order it was filed in.
   ~~**150**~~, **151**, **155**, **156**, **174** and **b-d6bff7**.
 - From spec loop runs 7 to 10: **b-990bd9**, **b-7431a2**, **b-9eceda**, **b-bc9951**,
   **b-0281e4**, **b-e9db0e**, **b-397edd**, **b-0e20e9**, **b-98dc4d**,
-  **b-27b9db**, ~~**b-bbf663**~~ and ~~**b-6a9707**~~.
+  ~~**b-27b9db**~~, ~~**b-bbf663**~~ and ~~**b-6a9707**~~.
 - From the reviews of #393 and `SA-0120`, and spec loop runs 13 and 14: **b-d5d290**,
   **b-9ed36d**, **b-b431c1**, ~~**b-ac2f02**~~ and **b-49329e**.
 - From ADR 4's review and the superpowers comparison: ~~**b-07f694**~~,
