@@ -351,7 +351,7 @@ criteria declares a mutant inline, and name the witness in the reason. This
 replaces the probe comparison at `saffron/follow_up.py:216-227`, which the
 new rule covers. Change `saffron/agents/prompts/spec-writer.md:4-5` to tell
 the writer to declare no mutant in the spec. Keep that prompt free of any
-`saffron/` path, since `test_cores_spec_writer_prompts_fill_every_slot_and_name_no_repo_tool`
+`saffron/` or `docs/` path, and of the ref's name, since `test_cores_spec_writer_prompts_fill_every_slot_and_name_no_repo_tool`
 (`tests/test_spec_review.py`) refuses one.
 
 **The mirror.** After the existing fetch in `ensure_mirror`, add a second
@@ -393,7 +393,14 @@ is already credited there. It keeps that function's comment at
 - `tests/test_follow_up.py` hands four accepted candidates an inline
   mutant, at `:437`, `:488`, `:845` and `:983`. Drop the mutant from each,
   so each is still accepted. Case 9 at `:457-461` is still refused, and its
-  reason still holds the word `mutant`.
+  reason still holds the word `mutant`. A draft refused for an inline mutant
+  is pooled like any other `_validate` reason, with no resend.
+- Pass `retired=True` to `discover_specs` in `_origin_file_text`
+  (`saffron/follow_up.py:120`), which needs only the parse. A deferred finish
+  across this change can hold an origin layer that declares a mutant inline.
+- Pass `retired=True` in
+  `test_no_real_spec_names_a_criterion_path_its_touches_do_not_cover`
+  (`tests/test_scheduler.py:4257`), so its scan still reads every spec.
 - `spec_drift`'s docstring (`saffron/cell/session.py:146-150`) says the
   worktree copy defeats the withholding of `mutant`. Say instead that this
   was item 80's measurement, and a queued spec now carries no mutant.
