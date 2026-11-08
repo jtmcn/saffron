@@ -1963,6 +1963,30 @@ def cmd_status(args) -> int:
     return 0
 
 
+def _common_git_dir(cwd: Path) -> Path:
+    """The repository's shared git directory, read without git, from a worktree too."""
+    dot = cwd / ".git"
+    if not dot.is_file():
+        return dot
+    own = Path(dot.read_text().removeprefix("gitdir:").strip())
+    common = own / "commondir"
+    return (own / common.read_text().strip()).resolve() if common.is_file() else own
+
+
+def _leftover_rebase() -> str | None:
+    """A gh-stack rebase state on disk, named with its age (b-d3f977)."""
+    state = _common_git_dir(REPO) / "gh-stack-rebase-state"
+    if not state.exists():
+        return None
+    written = dt.datetime.fromtimestamp(state.stat().st_mtime, dt.UTC)
+    days = (dt.datetime.now(dt.UTC) - written).days
+    return (
+        f"{state} is a gh stack rebase left on {written:%Y-%m-%d} ({days} day(s) old). "
+        "`gh stack link` refuses while it exists, and `gh stack rebase --abort` "
+        "resets the branches it names. Move it aside once no rebase is running."
+    )
+
+
 def cmd_stack(args) -> int:
     order, warnings = _stack_order(_load())
     if len(order) < 2:
@@ -2005,9 +2029,14 @@ def cmd_stack(args) -> int:
     print(
         "\nPACKAGE opens drafts (§5.7); --execute marks each ready once its base reads back."
     )
+    leftover = _leftover_rebase()
     if not args.execute:
+        if leftover:
+            print(f"\nwarning: {leftover}")
         print("\n(dry run — pass --execute to link)")
         return 0
+    if leftover:
+        return _fail(leftover)
 
     done = subprocess.run(command, cwd=REPO, text=True)
     if done.returncode != 0:

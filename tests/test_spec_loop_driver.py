@@ -4111,3 +4111,39 @@ def test_status_line_prints_nothing_outside_a_loop(tmp_path, monkeypatch, capsys
 
     assert driver.cmd_status(argparse.Namespace(line=True)) == 0
     assert capsys.readouterr() == ("", "")
+
+
+def test_stack_names_a_leftover_gh_stack_rebase_and_its_age_before_linking(
+    loop, monkeypatch, capsys
+):
+    # b-d3f977: run 19's rebase state made run 48's `gh stack link` exit 7 with no cause named.
+    rows = [
+        loop.row(0, state="READY_FOR_REVIEW", pr=10),
+        loop.row(1, state="READY_FOR_REVIEW", pr=11),
+    ]
+    ran = []
+    monkeypatch.setattr(driver, "_load", lambda: rows)
+    monkeypatch.setattr(driver, "_stack_order", lambda _rows: (rows, []))
+    monkeypatch.setattr(driver, "_stack_conflicts", lambda _heads, **_k: [])
+    monkeypatch.setattr(
+        driver.subprocess,
+        "run",
+        lambda cmd, **_k: ran.append(cmd) or subprocess.CompletedProcess(cmd, 0),
+    )
+    # A worktree's `.git` is a file, and the state sits in the shared git directory.
+    common = loop.root / "main-checkout" / ".git"
+    own = common / "worktrees" / "wt"
+    own.mkdir(parents=True)
+    (own / "commondir").write_text("../..\n")
+    (loop.root / ".git").write_text(f"gitdir: {own}\n")
+    state = common / "gh-stack-rebase-state"
+    state.write_text("{}")
+    os.utime(state, (1_790_000_000, 1_790_000_000))
+
+    assert driver.cmd_stack(argparse.Namespace(execute=False, top=None)) == 0
+    assert "warning: " in capsys.readouterr().out
+    assert driver.cmd_stack(argparse.Namespace(execute=True, top=None)) == 1
+    err = capsys.readouterr().err
+    assert f"{state.resolve()} is a gh stack rebase left on 2026-09-21" in err
+    assert "day(s) old" in err
+    assert not [c for c in ran if c[:3] == ["gh", "stack", "link"]]
