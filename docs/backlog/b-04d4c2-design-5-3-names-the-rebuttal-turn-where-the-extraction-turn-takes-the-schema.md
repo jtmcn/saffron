@@ -1,12 +1,13 @@
 ---
 id: b-04d4c2
 title: '§5.3 says the rebuttal turn takes the schema, where the rebuttal extraction turn does'
-status: open
+status: done
+closed: 2026-11-07
 tier: 3
 by_hand: true
 filed: 2026-09-25
 specs: []
-prs: []
+prs: [1051]
 commits: []
 cites: [§5.3]
 related: [b-4e0868]
@@ -31,3 +32,4 @@ by hand.
 ## Record
 
 - 2026-09-25: filed from the Standards seat on #519 (run 17).
+- 2026-11-07: done by hand in #1051.

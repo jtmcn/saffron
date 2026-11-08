@@ -1,7 +1,9 @@
 ---
 id: b-a33889
 title: "A `CellRuntimeError` from a stack batch's mint or revision still marks the layer missed"
-status: open
+status: done
+closed: 2026-11-07
+by_hand: true
 tier: 2
 filed: 2026-10-09
 specs: []
@@ -30,3 +32,5 @@ descendant back as a candidate.
 ## Record
 
 - 2026-10-09: filed from the spec loop's run 32.
+- 2026-11-07: fixed by hand in #1047. A revision's `CellRuntimeError` offers the
+  spec again. The mint path is unchanged, as Done looks like names only the revision.

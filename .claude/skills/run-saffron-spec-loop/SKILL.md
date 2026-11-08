@@ -107,10 +107,12 @@ and listeners as in (a). Use `--stack --defer-end-review` unless a parent is an 
 request outside the order (b-e0e1cf). Then call `mcp__cell-watch__watch` once with
 `{}`. It follows each task in turn and never expires. Run `driver.py record`
 for a task when its hand-over wake-up names the next spec, since PACKAGE is
-then done. Record the last task when the batch exits. Stop the watch once the batch
+then done. When the batch exits, `driver.py record --all` records every
+pending spec a task ran for. Stop the watch once the batch
 exits. Without the tool, fall back to the Monitor in (a). Review each pull request while the next cell runs, hold its fixes as
-local commits, and restack the layers above once the batch drains
-(b-cab612). Then push each layer and run `saffron finish <batch id> --repo .`
+local commits, and restack the layers above once the batch drains.
+`driver.py rebase --execute` moves each layer onto the one below, as step 4
+says. Then push each layer and run `saffron finish <batch id> --repo .`
 with the token as in (a). The batch's deferral line names the id. The finish
 reads each branch at origin, so it grades only pushed commits. Record each
 follow-up it runs with `driver.py record`, and read
@@ -189,7 +191,8 @@ REVIEW ran. Put that line in the seats' `{KNOWN}` (step 2c).
 Then score the cell's own REVIEW the same way, with `--kind cell` and no
 `--report` or `--commit`. A non-zero exit is noted and the loop carries on.
 
-`drop SA-NNNN --why "…"` takes a spec out for good.
+`drop SA-NNNN --why "…"` takes a spec out of the loop, and `undrop SA-NNNN`
+puts it back.
 
 ### c. Review it
 

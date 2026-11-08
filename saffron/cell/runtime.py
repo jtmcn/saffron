@@ -20,6 +20,7 @@ import os
 import queue
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -296,6 +297,15 @@ def _must(argv: Sequence[str], timeout_s: float = 120) -> Completed:
     return done
 
 
+# Reasoned: the walk's create had 120s before it had a name. A hang means
+# the runtime holds a pending operation, which a retry cannot clear (b-7c1c99).
+NETWORK_CREATE_TIMEOUT_S = 120.0
+
+
+class NetworkCreateHung(CellRuntimeError):
+    """A `network create` that ran past its bound, as opposed to one refused."""
+
+
 def create_network(name: str, subnet: str) -> None:
     _admit()
     argv = [
@@ -307,7 +317,13 @@ def create_network(name: str, subnet: str) -> None:
         subnet,
         name,
     ]
-    done = _call(argv, 120)
+    done = _call(argv, NETWORK_CREATE_TIMEOUT_S)
+    if done.timed_out:
+        raise NetworkCreateHung(
+            f"network create for {subnet} ran past its "
+            f"{NETWORK_CREATE_TIMEOUT_S:g}s bound, so the runtime may hold a "
+            "pending operation"
+        )
     if done.returncode == 0:
         return
     # The runtime names the subnet and not the network holding it, and the
@@ -357,9 +373,9 @@ def allocate_network(name: str) -> str:
     itself rather than reading as an ordinary collision below. The walk
     tries `SUBNETS["pool"]` in address order, since the create is the
     claim and a listing taken first could go stale before it. A refused
-    create asks `networks_on_subnet` for that /24's holder: a name found
-    moves the walk on, and none re-raises the create's own error.
-    Exhaustion carries the last refused create's own error text.
+    create moves the walk on. A holder `networks_on_subnet` names is
+    collected, and a /24 with none is named on stderr (b-7c1c99). A create
+    that hangs raises at once. Exhaustion carries the last refusal's text.
     """
     _admit()
     pool = ipaddress.ip_network(SUBNETS["pool"])
@@ -369,17 +385,22 @@ def allocate_network(name: str) -> str:
         subnet = str(candidate)
         try:
             create_network(name, subnet=subnet)
+        except NetworkCreateHung:
+            raise
         except CellRuntimeError as exc:
             last_detail = str(exc)
             found = networks_on_subnet(subnet, exclude=name)
             if not found:
-                raise
+                print(
+                    f"network: {subnet} refused with no holder, skipped: {exc}",
+                    file=sys.stderr,
+                )
             holders += [holder for holder in found if holder not in holders]
             continue
         return subnet
+    held = f"held: {', '.join(holders)}" if holders else "refused, and none is held"
     raise CellRuntimeError(
-        f"every /24 of the pool is held: {', '.join(holders)}. "
-        f"The last refusal: {last_detail}"
+        f"every /24 of the pool is {held}. The last refusal: {last_detail}"
     )
 
 

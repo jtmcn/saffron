@@ -1,12 +1,13 @@
 ---
 id: 157
 title: The spec loop's driver reads specs from whatever branch is checked out, and tells the operator to revert an edit that was never made
-status: open
+status: done
+closed: 2026-11-07
 tier: 2
 filed: 2026-09-17
 by_hand: true
 specs: []
-prs: []
+prs: [1049]
 commits: []
 cites: []
 related: [137, b-792ab2]
@@ -53,3 +54,4 @@ checked out, saying which.
   default run path. The driver defect stays. `status` and `next` still call
   `_stale`, and `_stale_reasons` and `_edit_traps` still read the working tree.
   So the closure the entry above names did not follow, and the item stays open.
+- 2026-11-07: done by hand in #1049.

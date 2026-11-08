@@ -202,7 +202,8 @@ layer.
 
 **Mint**: What a stack batch does to open a spec's run and task before its spec
 review. The review's attempts and facts are recorded against that task, and its cell
-runs on it. A spec offered again after a wait keeps the task it was minted.
+runs on it. A spec offered again keeps the task it was minted. A `RATE_LIMITED` task is
+offered again after a wait, and a `PROVIDER_UNREACHABLE` or `PREFLIGHT_FAILED` one at once.
 
 **Spec writer session**: A host-invoked session that revises one spec after its spec
 review routes it to `revise`. It runs in a critic cell at the predecessor's head, or
@@ -303,7 +304,8 @@ one line. `run_task` also refuses a task whose `consumes` entry does not resolve
 cannot be read, at the tree base. That refusal prints one line and writes no queue
 row. A stack batch also refuses a spec its stack order never takes, and every spec
 whose `depends_on` reaches a missed task. It refuses a revision the budget left cannot
-cover.
+cover. Before its spec review, it refuses a spec with a citation that does not resolve
+once `rewrite_moved_citations` moves what it can.
 _Avoid_: "skip" (that is a gate status), "blocked", "reject" (that is what the
 operator does to a PR).
 
@@ -887,7 +889,8 @@ such as the port probe. That is fatal to the task, where the per-repo sense skip
 
 **Ledger**: The SQLite database at `~/.saffron/ledger.db`. Authoritative for state.
 Item 170 makes it an index that `saffron fold` rebuilds from the record on
-`refs/saffron/*`. It stays authoritative for every state read until the batch and run
+`refs/saffron/*`. `saffron migrate` writes a stored ledger's tasks into that record.
+It stays authoritative for every state read until the batch and run
 folds read the record instead.
 _Avoid_: "the DB" (ambiguous with fixture services inside a cell), "the store".
 

@@ -1,11 +1,13 @@
 ---
 id: b-74a122
 title: "`CONTEXT.md`'s Refusal entry does not list a stack batch's refusal for citations that do not resolve"
-status: open
+status: done
 tier: 3
+closed: 2026-11-08
+by_hand: true
 filed: 2026-10-17
 specs: []
-prs: []
+prs: [1054]
 commits: []
 cites: [§4.2.1]
 related: [b-d31930]
@@ -29,3 +31,4 @@ others, rendered from `ontology/factory.ttl` if the set is closed there.
 ## Record
 
 - 2026-10-17: filed from the spec loop's run 43.
+- 2026-11-08: done by hand in #1054.

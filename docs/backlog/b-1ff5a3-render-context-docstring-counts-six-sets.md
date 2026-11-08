@@ -1,11 +1,13 @@
 ---
 id: b-1ff5a3
 title: "`render_context`'s docstring counts six closed sets, and `SETS` holds eleven"
-status: open
+status: done
+closed: 2026-11-07
+by_hand: true
 tier: 3
 filed: 2026-10-27
 specs: []
-prs: []
+prs: [1051]
 commits: []
 cites: []
 related: [b-c16c6c]
@@ -26,3 +28,4 @@ The docstring states no count, or one a test holds to `SETS`.
 ## Record
 
 - 2026-10-27: filed from the spec loop's run 49.
+- 2026-11-07: done by hand in #1051.
