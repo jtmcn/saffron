@@ -212,7 +212,7 @@ writing `SA-0141`. It is the by-hand edit to §5.3 and the glossary, done in
 that spec's pull request.
 
 **Placed 2026-09-25**, from the spec loop's run 16: ~~**b-04a5d9**~~, ~~**b-e0cd57**~~,
-~~**b-bff670**~~, then **b-c375d6**. The first is a PR body that calls a new
+~~**b-bff670**~~, then ~~**b-c375d6**~~. The first is a PR body that calls a new
 advisory failure present at base. The second is a refusal that names ports
 and not processes. The last two are the loop's tools reading stale state.
 
@@ -495,7 +495,7 @@ judged at the pinned base. One escalation hides a leftover worktree. A
 child's tree carries an older spec than it runs. `snapshot --force` drops
 holds, and `status` has no one-line form.
 
-**Placed 2026-10-03**, from the spec loop's run 26: **b-cc8099**,
+**Placed 2026-10-03**, from the spec loop's run 26: ~~**b-cc8099**~~,
 **b-81e109**, then **b-14ccc7**. A finish's narrow `except` has no witness.
 `GhRunner` is defined three times. A live-cell test fails when two suites
 run at once.

@@ -14,6 +14,8 @@ the placeholders filled:
 
 - `{REPO}` — the checkout driving the loop (`git rev-parse --show-toplevel`)
 - `{PR}`, `{BRANCH}` (`saffron/SA-NNNN`), `{SPEC}` (the spec's path)
+  When `record` prints `Seats read <path>`, `{SPEC}` is that path instead.
+  A stacked branch keeps the copy its base held, so its own copy can be stale (b-c375d6).
 - `{BASE}` — `git merge-base origin/main origin/{BRANCH}`; for a spec with
   `depends_on`, `origin/saffron/<parent id>` in place of `origin/main`.
   `{CELL_BASE}` is the commit the cell was cut from, on the log's `cell:` line

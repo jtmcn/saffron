@@ -1022,6 +1022,63 @@ def test_record_all_records_every_pending_spec_a_batch_ran(loop, monkeypatch, ca
     assert f"{rows[2].spec_id}  not run" in capsys.readouterr().out
 
 
+def test_record_names_the_spec_the_cell_ran_when_a_stacked_branch_holds_another(
+    loop, monkeypatch, capsys
+):
+    """b-c375d6: a stacked branch keeps the spec its base held, and a seat
+    reading that copy reviews against stale text. `record` names the text
+    the cell ran once the pushed head's copy differs, and stays quiet once
+    it matches."""
+    from saffron.ledger import Ledger
+
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    root = loop.root
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "t")
+    spec_id = loop.ids[0]
+    path = loop.row(0).path
+    ran_text = (root / path).read_text()
+    _git(root, "add", path)
+    _git(root, "commit", "-qm", "the spec main ran")
+    matching = _git(root, "rev-parse", "HEAD")
+    _git(root, "checkout", "-q", "-b", "stacked")
+    stale = _commit(root, path, ran_text + "A line main later dropped.\n")
+    _git(root, "checkout", "-q", "main")
+
+    driver._save([loop.row(0)])
+    sha = driver._load()[0].spec_sha
+    ledger = Ledger(root / "ledger.db")
+    repo_id = ledger.upsert_repo("r", "git@github.com:o/r.git", "/mirror", "policy")
+    task_id = ledger.create_task(
+        ledger.create_run(repo_id, "b" * 40), spec_id, sha, "saffron/X", budget_usd=6.0
+    )
+    ledger.set_task_state(task_id, "PACKAGE")
+    ledger.set_task_package(
+        task_id, "READY_FOR_REVIEW", "saffron/X", stale, "https://x/pull/247"
+    )
+    ledger.close()
+    monkeypatch.setattr(
+        driver, "_ledger_and_repo", lambda: (Ledger(root / "ledger.db"), repo_id, "url")
+    )
+
+    assert driver.cmd_record(argparse.Namespace(spec_id=spec_id, all=False)) == 0
+    named = root / ".saffron-loop" / "ran" / Path(path).name
+    out = capsys.readouterr().out
+    assert f"copy at {stale[:12]} differs from the text the cell ran" in out
+    assert f"Seats read {named}" in out
+    assert named.read_text() == ran_text
+
+    ledger = Ledger(root / "ledger.db")
+    ledger.set_task_package(
+        task_id, "READY_FOR_REVIEW", "saffron/X", matching, "https://x/pull/247"
+    )
+    ledger.close()
+    assert driver.cmd_record(argparse.Namespace(spec_id=spec_id, all=False)) == 0
+    assert "differs" not in capsys.readouterr().out
+
+
 @pytest.mark.parametrize(
     ("state", "phrase"),
     [("REBUTTAL_UNJUDGED", "REBUT's verdict"), ("REVIEW_INCOMPLETE", "every lens")],

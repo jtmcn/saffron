@@ -2837,3 +2837,43 @@ def test_the_finishing_suite_passes_the_spec_directory_and_fails_every_other_pat
         assert files_hit == {extra_path}
         codes_hit = {nf.failure.code for nf in comparison.new_failures}
         assert "out-of-scope" in codes_hit
+
+
+def test_a_stack_finish_lets_a_commit_raise_outside_its_two_types_reach_main(
+    tmp_path, monkeypatch, capsys
+):
+    """`cli._stack_finish` swallows only `GitError` and `ValueError` from
+    `commit_finish` (b-cc8099). Any other raise reaches `main`, which exits 2,
+    so a wider `except` would turn a broken finish into a quiet night."""
+    from saffron import cli
+    from saffron import finish as finish_module
+    from tests.test_cli import _fake_batch_resolution, _readiness_passes
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+
+    def _fake_run_stack_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        kwargs["finish"](3, [5, 6])
+        return "UNTIL"
+
+    monkeypatch.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
+
+    def _broken_commit_finish(*_args, **_kwargs):
+        raise RuntimeError("the finish broke")
+
+    monkeypatch.setattr(finish_module, "commit_finish", _broken_commit_finish)
+    published = []
+    monkeypatch.setattr(
+        finish_module, "publish_finish", lambda *a, **k: published.append(a) or []
+    )
+
+    _readiness_passes(monkeypatch, tmp_path)
+    assert cli.main(["--home", str(tmp_path / "home"), "batch", "--stack"]) == 2
+
+    assert published == []
+    printed = capsys.readouterr()
+    assert "finish: RuntimeError: the finish broke" not in printed.out
+    assert "the finish broke" in printed.out + printed.err
