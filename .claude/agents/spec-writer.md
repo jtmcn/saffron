@@ -37,6 +37,8 @@ And optionally:
   on a path `.saffron/policy.yaml` lists as `protected`, an item marked
   `by_hand: true`, or one already done or already specced. Name which, with
   the line.
+- A spec that adds or widens a refusal declares `retired_first`. Name each
+  queued spec the new rule would refuse (b-e7898b).
 
 ## Read first
 
