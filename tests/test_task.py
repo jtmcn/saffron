@@ -3981,7 +3981,8 @@ def test_run_task_refuses_an_inline_mutant_or_an_unreadable_mutants_file_before_
     assert isinstance(result, Refused)
     assert "tests/test_a.py::test_two" in result.reason
     printed = capsys.readouterr().out
-    assert "refused" in printed
+    assert printed == f"{'SY-1':<10} refused  {result.reason}\n"
+    assert "\n" not in result.reason
     assert "tests/test_a.py::test_two" in printed
 
     # 2. A task's recorded text declaring a mutant inline: the handed spec
@@ -3994,7 +3995,8 @@ def test_run_task_refuses_an_inline_mutant_or_an_unreadable_mutants_file_before_
     assert isinstance(result, Refused)
     assert "tests/test_a.py::test_two" in result.reason
     printed = capsys.readouterr().out
-    assert "refused" in printed
+    assert printed == f"{'SY-1':<10} refused  {result.reason}\n"
+    assert "\n" not in result.reason
     assert "tests/test_a.py::test_two" in printed
 
     # 3. A `<spec id>.yaml` that is not valid YAML.
@@ -4014,7 +4016,8 @@ def test_run_task_refuses_an_inline_mutant_or_an_unreadable_mutants_file_before_
     assert isinstance(result, Refused)
     assert "SY-1.yaml" in result.reason
     printed = capsys.readouterr().out
-    assert "refused" in printed
+    assert printed == f"{'SY-1':<10} refused  {result.reason}\n"
+    assert "\n" not in result.reason
     assert "SY-1.yaml" in printed
 
     # 4. A mutant on the ref whose `find` the spec's body spells out.
@@ -4036,7 +4039,8 @@ def test_run_task_refuses_an_inline_mutant_or_an_unreadable_mutants_file_before_
     assert isinstance(result, Refused)
     assert "tests/test_a.py::test_two" in result.reason
     printed = capsys.readouterr().out
-    assert "refused" in printed
+    assert printed == f"{'SY-1':<10} refused  {result.reason}\n"
+    assert "\n" not in result.reason
     assert "tests/test_a.py::test_two" in printed
 
     # 5. A given task whose recorded commit the mirror does not hold.
@@ -4056,7 +4060,8 @@ def test_run_task_refuses_an_inline_mutant_or_an_unreadable_mutants_file_before_
     assert isinstance(result, Refused)
     assert missing[:12] in result.reason
     printed = capsys.readouterr().out
-    assert "refused" in printed
+    assert printed == f"{'SY-1':<10} refused  {result.reason}\n"
+    assert "\n" not in result.reason
     assert missing[:12] in printed
 
     ledger.close()
