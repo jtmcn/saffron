@@ -2304,6 +2304,56 @@ def test_a_stack_on_an_earlier_pull_request_is_finished_against_its_branch_and_n
     ]
 
 
+def test_a_finish_whose_stack_base_row_is_missing_escalates_and_names_it(
+    tmp_path, monkeypatch
+):
+    """b-7ee599: a layer whose stack base has no task row escalates naming
+    that row, rather than expecting the default branch."""
+    from saffron.finish import publish_finish
+
+    _isolate_git(tmp_path, monkeypatch)
+    earlier = _stack(tmp_path / "earlier", 2)
+    bottom, top = earlier.layers
+    ledger = earlier.ledger
+    batch_id = ledger.create_batch(100.0)
+    run_id = ledger.create_run(
+        earlier.repo_id, base_sha=earlier.base_sha, batch_id=batch_id
+    )
+    task_id = ledger.create_task(
+        run_id, spec_id="TE-3", spec_sha="n" * 64, branch=top["branch"]
+    )
+    ledger.record_push(task_id, top["head"])
+    ledger.set_task_package(
+        task_id,
+        "READY_FOR_REVIEW",
+        top["branch"],
+        top["head"],
+        "https://github.com/o/r/pull/300",
+    )
+    ledger.record_stack_layer(
+        task_id, position=1, predecessor_task_id=bottom["task_id"], generation=0
+    )
+    ledger._db.execute(
+        "UPDATE stack_layers SET predecessor_key = 'gone-key' WHERE batch_key = ?",
+        (str(batch_id),),
+    )
+    sha = _finishing_commit(earlier.mirror, top["head"])
+    gh = _FakeGh({"https://github.com/o/r/pull/300": "trunk"})
+    lines = publish_finish(
+        ledger,
+        batch_id,
+        sha,
+        mirror=earlier.mirror,
+        url=earlier.url,
+        slug=earlier.slug,
+        verify=lambda sha_arg, base_arg: 0,
+        gh=gh,
+        workdir=tmp_path / "push",
+    )
+    assert lines == ["escalate: TE-3's stack base task gone-key has no row"]
+    assert gh.calls == []
+
+
 def test_each_escalation_leaves_the_stack_unpushed(tmp_path, monkeypatch):
     from saffron.cell.runtime import CellRuntimeError
     from saffron.finish import ESCALATE, publish_finish

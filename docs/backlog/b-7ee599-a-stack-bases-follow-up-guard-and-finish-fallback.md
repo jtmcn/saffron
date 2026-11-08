@@ -1,9 +1,11 @@
 ---
 id: b-7ee599
 title: "A stack batch's `not is_follow_up` guard has no witness, and a finish with no stack-base row expects the default branch"
-status: open
+status: done
 tier: 2
 filed: 2026-10-12
+closed: 2026-11-08
+by_hand: true
 specs: []
 prs: []
 commits: []
@@ -32,3 +34,4 @@ missing, it expects the default branch instead of escalating.
 ## Record
 
 - 2026-10-12: filed from the spec loop's run 35 (#844).
+- 2026-11-08: done by hand. ADR 7 decides the outcome: a spec offered with no predecessor on a gone stack base is refused by name. So a follow-up is refused too, and lands among the unrun follow-ups.

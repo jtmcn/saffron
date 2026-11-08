@@ -504,7 +504,12 @@ def publish_finish(
                 "SELECT branch FROM tasks WHERE record_key = ?",
                 (layer["predecessor_key"],),
             ).fetchone()
-            wanted = row["branch"] if row is not None else default
+            if row is None:
+                return [
+                    f"{ESCALATE}{layer['spec_id']}'s stack base task "
+                    f"{layer['predecessor_key']} has no row"
+                ]
+            wanted = row["branch"]
         else:
             wanted = default
         view = gh(
