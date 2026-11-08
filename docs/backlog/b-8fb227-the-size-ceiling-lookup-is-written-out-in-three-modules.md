@@ -1,11 +1,13 @@
 ---
 id: b-8fb227
 title: The `size` ceiling lookup is written out in three modules and four tests, with no `ceiling_for` to give it one source
-status: open
+status: done
 tier: 3
 filed: 2026-09-25
+closed: 2026-11-08
+by_hand: true
 specs: []
-prs: []
+prs: [1082]
 commits: []
 cites: [§5.4]
 related: [b-a90136]
@@ -30,3 +32,4 @@ A change to the default, or a new fallback, has seven places to land.
 ## Record
 
 - 2026-09-25: filed from the spec loop's run 16.
+- 2026-11-08: done by hand in #1082.

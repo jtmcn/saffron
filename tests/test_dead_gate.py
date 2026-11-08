@@ -1,12 +1,10 @@
 """The `dead` gate (docs/superpowers/specs/2026-09-18-dead-code-gate-design.md).
 
-The script is loaded inside each test, never at module scope: the `revert`
-gate re-runs a new witness with the script deleted.
+The script is loaded inside each test, never at module scope.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import os
 import re
 import shlex
@@ -16,23 +14,17 @@ import sys
 from pathlib import Path
 
 import pytest
-import yaml
 
 from saffron.gates.contract import identity, parse_gate_json
 from saffron.intake import SpecError, parse_spec
+from tests.hook_helpers import git_in, hook_config, load_script
 
 REPO = Path(__file__).resolve().parent.parent
 SCRIPT = REPO / ".saffron" / "gates" / "dead.py"
 
 
 def _dead():
-    spec = importlib.util.spec_from_file_location("saffron_dead_gate", SCRIPT)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    # Registered first: `Unused` is a dataclass under postponed annotations.
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    return load_script(SCRIPT, "saffron_dead_gate")
 
 
 def test_each_vulture_line_becomes_one_failure_keyed_by_kind_and_symbol():
@@ -398,19 +390,11 @@ def test_make_deadcode_runs_the_report():
     assert "deadcode:\n\tuv run python .saffron/gates/dead.py --report\n" in makefile
 
 
-def _hook_config() -> dict:
-    """The `dead` hook, read from the file prek reads."""
-    config = yaml.safe_load((REPO / ".pre-commit-config.yaml").read_text())
-    hooks = [hook for repo in config["repos"] for hook in repo["hooks"]]
-    (found,) = [hook for hook in hooks if hook["id"] == "dead"]
-    return found
-
-
 def _hook_verdict() -> str:
     """The literal the hook greps for, unwrapped the way the shell unwraps it:
     prek splits the entry, then `sh -c` splits the script that entry carries.
     """
-    shell, flag, script = shlex.split(_hook_config()["entry"])
+    shell, flag, script = shlex.split(hook_config("dead")["entry"])
     assert (shell, flag) == ("sh", "-c")
     tokens = shlex.split(script)
     return tokens[tokens.index("-q") + 1]
@@ -441,22 +425,11 @@ def test_prek_runs_the_hook_on_python_and_on_a_spec():
     """prek skips a hook no staged file matches, and those two file sets are
     the whole of what moves the gate's answer.
     """
-    hook = _hook_config()
+    hook = hook_config("dead")
     assert hook["pass_filenames"] is False
     assert re.search(hook["files"], "saffron/task.py")
     assert re.search(hook["files"], ".saffron/specs/SA-0100-x.md")
     assert not re.search(hook["files"], "DESIGN.md")
-
-
-def _git_in(tree: Path, *args: str) -> None:
-    env = {**_env(), "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
-    subprocess.run(
-        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
-        cwd=tree,
-        check=True,
-        capture_output=True,
-        env=env,
-    )
 
 
 def test_the_hook_defers_a_stacked_branchs_own_spec_its_tree_lacks(tmp_path):
@@ -464,16 +437,16 @@ def test_the_hook_defers_a_stacked_branchs_own_spec_its_tree_lacks(tmp_path):
     The host hook then failed on the spec's own pending symbol (b-468378)."""
     tree = _tree(tmp_path)
     (tree / "saffron" / "extra.py").write_text(ORPHAN)
-    _git_in(tree, "init", "-q", "-b", "main")
-    _git_in(tree, "add", "-A")
-    _git_in(tree, "commit", "-q", "-m", "base")
-    _git_in(tree, "checkout", "-q", "-b", "joel/spec")
+    git_in(tree, "init", "-q", "-b", "main")
+    git_in(tree, "add", "-A")
+    git_in(tree, "commit", "-q", "-m", "base")
+    git_in(tree, "checkout", "-q", "-b", "joel/spec")
     (tree / ".saffron" / "specs" / "SA-9001-x.md").write_text(
         SPEC.format(extra="pending_symbols:\n  - saffron/extra.py::orphan\n")
     )
-    _git_in(tree, "add", "-A")
-    _git_in(tree, "commit", "-q", "-m", "spec")
-    _git_in(tree, "checkout", "-q", "-b", "saffron/SA-9001", "main")
+    git_in(tree, "add", "-A")
+    git_in(tree, "commit", "-q", "-m", "spec")
+    git_in(tree, "checkout", "-q", "-b", "saffron/SA-9001", "main")
 
     hooked = parse_gate_json(_script(tree, "--hook"), expected_gate="dead")
     assert hooked.status == "pass", hooked.summary
@@ -482,23 +455,23 @@ def test_the_hook_defers_a_stacked_branchs_own_spec_its_tree_lacks(tmp_path):
     assert _run(tree).status == "fail"
 
     # The prek hook is what asks for it.
-    _shell, _flag, script = shlex.split(_hook_config()["entry"])
+    _shell, _flag, script = shlex.split(hook_config("dead")["entry"])
     assert "--hook" in shlex.split(script)
 
     # Another spec's branch borrows nothing.
-    _git_in(tree, "checkout", "-q", "-b", "saffron/SA-9002", "main")
+    git_in(tree, "checkout", "-q", "-b", "saffron/SA-9002", "main")
     other = parse_gate_json(_script(tree, "--hook"), expected_gate="dead")
     assert other.status == "fail", other.summary
 
     # Once a commit retires the spec to `done/`, it defers nothing, as at the gate.
-    _git_in(tree, "checkout", "-q", "joel/spec")
-    _git_in(
+    git_in(tree, "checkout", "-q", "joel/spec")
+    git_in(
         tree,
         "mv",
         ".saffron/specs/SA-9001-x.md",
         ".saffron/specs/done/SA-9001-x.md",
     )
-    _git_in(tree, "commit", "-q", "-m", "retire")
-    _git_in(tree, "checkout", "-q", "saffron/SA-9001")
+    git_in(tree, "commit", "-q", "-m", "retire")
+    git_in(tree, "checkout", "-q", "saffron/SA-9001")
     retired = parse_gate_json(_script(tree, "--hook"), expected_gate="dead")
     assert retired.status == "fail", retired.summary

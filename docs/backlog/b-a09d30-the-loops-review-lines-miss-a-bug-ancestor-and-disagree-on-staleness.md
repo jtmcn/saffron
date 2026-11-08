@@ -1,12 +1,13 @@
 ---
 id: b-a09d30
 title: The loop's REVIEW lines read only declared `touches`, and `record` and `jev` disagree on a stale `findings.json`
-status: open
+status: done
 tier: 3
 filed: 2026-09-30
+closed: 2026-11-08
 by_hand: true
 specs: [SA-0196]
-prs: []
+prs: [1082]
 commits: []
 cites: []
 related: [b-66d1c3]
@@ -37,3 +38,4 @@ name that is not a string reads as none recorded.
 - 2026-09-30: filed from the spec loop's run 23.
 - 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
   `.claude/`, and `SA-0279` refuses any spec that touches that path.
+- 2026-11-08: done by hand in #1082.

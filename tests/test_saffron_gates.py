@@ -389,6 +389,24 @@ def test_a_pytest_internal_error_is_an_error(tmp_path):
     assert result.summary == "pytest failed to run"
 
 
+def test_a_keyboard_interrupt_the_code_lets_escape_is_a_failure(tmp_path):
+    """An escaped interrupt stops the session with no FAILED line (b-970f53).
+
+    The trailer names the deepest frame, so the failure keys on the raising site.
+    """
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("")
+    (tmp_path / "pkg" / "mod.py").write_text("def f():\n    raise KeyboardInterrupt\n")
+    (tmp_path / "test_kbi.py").write_text(
+        "from pkg.mod import f\n\ndef test_ok():\n    pass\n\ndef test_kbi():\n    f()\n"
+    )
+    result = _run_tests_gate(tmp_path)
+    assert result.status == "fail", result.summary
+    assert [(f.file, f.code) for f in result.failures] == [
+        (os.path.join("pkg", "mod.py"), os.path.join("pkg", "mod.py") + ":2")
+    ]
+
+
 def _run_tests_gate(tmp_path, *subset):
     done = subprocess.run(
         [str(GATES / "tests"), *subset],

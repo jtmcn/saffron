@@ -247,7 +247,7 @@ criterion drove was dropped. The
 finishing commit writes through a symlink, unverified, and drops parse
 failures.
 
-**Placed 2026-10-03**, from the spec loop's run 27: **b-970f53**, then
+**Placed 2026-10-03**, from the spec loop's run 27: ~~**b-970f53**~~, then
 ~~**b-c94a2f**~~. The `tests` gate reads an interrupted pytest session as
 `error`. A second `depends_on` entry carries no code into the cell.
 
@@ -432,13 +432,13 @@ Each line keeps the order it was filed in.
 - From ADR 4's review and the superpowers comparison: ~~**b-07f694**~~,
   **b-7c88f8**, **b-e1afbb** and **b-3732ef**.
 - From spec loop runs 15 to 17 and `SA-0135`'s review: **b-f30189**, ~~**b-a90136**~~,
-  **b-e06dbc**, **b-32f492**, **b-8fb227**, **b-79d951**, ~~**b-9ead75**~~ and
+  **b-e06dbc**, **b-32f492**, ~~**b-8fb227**~~, **b-79d951**, ~~**b-9ead75**~~ and
   ~~**b-04d4c2**~~.
 - From the stack batch's spec reviews: ~~**b-2d9ae9**~~, ~~**b-223244**~~,
   **b-acee54**, **b-6518ba**, **b-6a101f**, **b-7eb5f5** and **b-22ff3f**.
 - From the 2026-09-27 size pricing and spec loop run 32: **b-41664e**, **b-4b386f**,
-  ~~**b-d96f14**~~, ~~**b-9b94c9**~~, **b-ff3141**, **b-a99c76**, **b-3a8504**,
-  **b-7f105f** and ~~**b-8c17dc**~~.
+  ~~**b-d96f14**~~, ~~**b-9b94c9**~~, **b-ff3141**, ~~**b-a99c76**~~, **b-3a8504**,
+  ~~**b-7f105f**~~ and ~~**b-8c17dc**~~.
 - From item 52's review: ~~**b-cec9a7**~~.
 
 **Placed 2026-09-20**: ~~**161**~~, **162**, **163**, **126**, **128** and ~~**129**~~,
@@ -480,7 +480,7 @@ The last two are gaps in the spec chain's own tools. **b-9529e9** and
 ~~**b-91ead2**~~ came from closing the run. The scoring driver cannot reach a
 fixture head or clean up after a kill, and `labels` reads no cell round.
 
-**Placed 2026-09-30**, from the spec loop's run 23: **b-a09d30**,
+**Placed 2026-09-30**, from the spec loop's run 23: ~~**b-a09d30**~~,
 **b-979dbe**, ~~**b-4ddb5b**~~, then ~~**b-2dc561**~~. The first two are gaps the
 seats left in `SA-0196` and `SA-0161`. `terms` fails at base on a disavowal.
 Preflight names a listener's address but not its process.

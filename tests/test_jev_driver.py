@@ -509,11 +509,25 @@ def test_a_cell_whose_review_predates_its_latest_run_is_refused(monkeypatch, loo
     (cell / "findings.json").write_text(json.dumps([]))
     (cell / "patch.json").write_text(json.dumps({"head_sha": "feedbeef"}))
     (cell / "patch.diff").write_text("diff --git a/t.py b/t.py\n")
-    (cell / "baseline.json").write_text("{}")
+    (cell / "gates").mkdir()
     os.utime(cell / "findings.json", (1_000_000, 1_000_000))
     argv = ("jev", "SA-0901", "--kind", "cell", "--spec", str(loop.root / "spec.md"))
     assert _run(monkeypatch, *argv) == 1
     assert loop.client.questions == {} and not (cell / "jev.ttl").exists()
+
+
+def test_jev_and_record_read_one_cell_directory_alike(monkeypatch, loop):
+    """b-a09d30: `jev` anchored on `baseline.json` where `record` reads `gates/`."""
+    cell = loop.batches / "v0" / "SA-0901"
+    (cell / "gates").mkdir(parents=True)
+    os.utime(cell / "gates", (1_000_000, 1_000_000))
+    (cell / "findings.json").write_text(json.dumps([]))
+    os.utime(cell / "findings.json", (2_000_000, 2_000_000))
+    (cell / "baseline.json").write_text("{}")
+    (cell / "patch.json").write_text(json.dumps({"head_sha": "feedbeef"}))
+    (cell / "patch.diff").write_text("diff --git a/t.py b/t.py\n")
+    found = driver._jev_cell("SA-0901", "spec", [])
+    assert not isinstance(found, int), found
 
 
 def _label_all(round_dir: Path, **override) -> None:

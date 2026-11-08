@@ -6,6 +6,8 @@ costs nothing to honour before `revert` — the gate that needs it — exists.
 """
 
 import json
+import os
+import re
 import subprocess
 import sys
 
@@ -53,6 +55,24 @@ def collect(args):
 
 def node_file(name):
     return name.split("::")[0]
+
+
+def interrupted(lines):
+    """Where an escaped `KeyboardInterrupt` was raised, when that is repo code.
+
+    pytest prints a banner, then `path:line: KeyboardInterrupt` for the
+    deepest frame (b-970f53).
+    """
+    for banner, trailer in zip(lines, lines[1:], strict=False):
+        found = re.fullmatch(r"(\S+):(\d+): KeyboardInterrupt", trailer)
+        if not (re.fullmatch(r"!+ KeyboardInterrupt !+", banner) and found):
+            continue
+        path = os.path.relpath(found[1])
+        if path.startswith("..") or "site-packages" in path.split(os.sep):
+            return []
+        message = "KeyboardInterrupt stopped the session, and later tests did not run"
+        return [{"file": path, "code": f"{path}:{found[2]}", "message": message}]
+    return []
 
 
 returncode, names = collect(subset)
@@ -151,6 +171,9 @@ failures = [
     for name in [line.split(" ", 1)[1].split(" - ")[0]]
     if "::" in name or uncollected is not None
 ]
+
+if proc.returncode == 2 and not failures:
+    failures = interrupted(out.splitlines())
 
 if proc.returncode != 0 and not failures:
     emit(
