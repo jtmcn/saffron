@@ -558,45 +558,65 @@ def test_the_driver_reads_every_terminal_state_from_the_ontology():
     assert sorted(driver.terminal_states()) == sorted(TERMINAL_STATES)
 
 
-def test_next_says_when_the_spec_it_names_is_cut_from_a_reviewable_parent():
+def test_next_says_when_the_spec_it_names_is_cut_from_a_reviewed_parent():
     parent = _row("A", pr=10)
+    parent.reviewed_sha = "r" * 40
     child = _row("B", 2, ["A"], pr=None, state=None)
     sibling = _row("C", 2, pr=None, state=None)
+    heads = {"saffron/A": "r" * 40}
 
-    chosen, note = driver._next_spec([parent, child, sibling], again=False)
+    chosen, note = driver._next_spec(
+        [parent, child, sibling], again=False, head_of=heads.get
+    )
     assert chosen is child
-    assert note == "B is cut from A: push its review commits first"
+    assert note == "B is cut from A at rrrrrrrr, whose review ended there"
 
     chosen, note = driver._next_spec([parent, sibling], again=False)
     assert chosen is sibling
     assert note is None
 
 
-def test_next_passes_over_a_child_until_its_parents_review_commits_are_pushed():
-    # Stack #251: `next` named SA-0083 while SA-0082's review was unpushed, and
-    # exit 0 with a spec id reads as "start this".
+def test_next_passes_over_a_child_until_its_parents_review_is_marked_ended():
+    # Stack #251 named a child before its parent's review was pushed. Run 8
+    # (b-4589be) named SA-0102 after some of SA-0101's review commits were pushed.
     parent = _row("A", pr=10)
     parent.pushed_sha = "p" * 40
     child = _row("B", 2, ["A"], pr=None, state=None)
     sibling = _row("C", 2, pr=None, state=None)
-    heads = {"saffron/A": "p" * 40}
+    heads = {"saffron/A": "r" * 40}
+    waits = "B waits on A's review: `reviewed A` marks it ended after its last push"
 
     chosen, note = driver._next_spec(
         [parent, child, sibling], again=False, head_of=heads.get
     )
-    assert chosen is sibling
-    assert note == "B waits on A's review commits: none are pushed yet"
+    assert (chosen, note) == (sibling, waits)
+    chosen, note = driver._next_spec([parent, child], again=False, head_of=heads.get)
+    assert (chosen, note) == (None, waits)
 
+    parent.reviewed_sha = "r" * 40
+    heads["saffron/A"] = "s" * 40
     chosen, note = driver._next_spec([parent, child], again=False, head_of=heads.get)
     assert chosen is None
-    assert note == "B waits on A's review commits: none are pushed yet"
+    assert note == (
+        "B waits on A: its branch is not at the reviewed rrrrrrrr, "
+        "so `reviewed A` again"
+    )
 
     heads["saffron/A"] = "r" * 40
-    chosen, note = driver._next_spec(
-        [parent, child, sibling], again=False, head_of=heads.get
-    )
+    chosen, _note = driver._next_spec([parent, child], again=False, head_of=heads.get)
     assert chosen is child
-    assert note == "B is cut from A, whose review commits are pushed (rrrrrrrr)"
+
+
+def test_reviewed_marks_the_pushed_head_a_child_is_cut_from(loop, monkeypatch, capsys):
+    first, second, *_ = loop.ids
+    driver._save([loop.row(0, state="READY_FOR_REVIEW", pr=10), loop.row(1)])
+    monkeypatch.setattr(driver, "_origin_head", lambda branch: "r" * 40)
+
+    assert driver.cmd_reviewed(argparse.Namespace(spec_id=first)) == 0
+    assert driver._load()[0].reviewed_sha == "r" * 40
+    assert "review ended at rrrrrrrr" in capsys.readouterr().out
+    assert driver.cmd_reviewed(argparse.Namespace(spec_id=second)) == 1
+    assert "no reviewable pull request" in capsys.readouterr().err
 
 
 def test_next_says_a_waiting_child_is_all_that_is_left(monkeypatch, capsys):
@@ -609,7 +629,7 @@ def test_next_says_a_waiting_child_is_all_that_is_left(monkeypatch, capsys):
 
     assert driver.cmd_next(argparse.Namespace(again=False)) == 1
     err = capsys.readouterr().err
-    assert "B waits on A's review commits" in err
+    assert "B waits on A's review" in err
     assert "nothing untouched left" not in err
 
 

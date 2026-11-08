@@ -362,7 +362,7 @@ which is a ledger term. The spec chain records no cost per escaped defect, so
 no step can be cut on evidence.
 
 **Moved 2026-11-07 from tier 2**, on the operator's ruling: ~~**b-dc5212**~~ and
-**b-4589be**. Each bites only on the driver's attended path, which is now the
+~~**b-4589be**~~. Each bites only on the driver's attended path, which is now the
 fallback.
 
 **Placed 2026-11-06**, from the spec loop's run 54: **b-25c0f5**, then

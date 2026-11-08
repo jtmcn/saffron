@@ -127,7 +127,7 @@ spec, or exits 1 saying why none is left.
 **One cell at a time, reviewing while the next runs.** A cell's worktree is cut
 from the remote, not the checkout, so PR N can be reviewed on its branch while
 cell N+1 runs. A spec with `depends_on` has its worktree cut from its parent's
-branch, so it starts after the parent's review commits are pushed: until then
+branch, so it starts after `reviewed` marks the parent's review ended: until then
 `next` names it as waiting and hands back the next spec that can start. Within
 a priority, the order puts the parent with most descendants first, so its
 children have something to run beside its review. `next` holds back a child
@@ -257,7 +257,8 @@ needs two reviewable PRs, so it errors after the first.
 finding is fixed, answered, or kept. Every witness the review added fails at
 the spec's base with its imports inside the test. `size` reports the branch
 within its ceiling, or the PR body notes the overrun. `make check` echoes
-`make exit: 0`, and the commit is pushed.
+`make exit: 0`, and the commit is pushed. Then `driver.py reviewed SA-NNNN`
+marks the review ended at the pushed head, and `next` can name its children.
 
 ## 3. Stack the pull requests
 

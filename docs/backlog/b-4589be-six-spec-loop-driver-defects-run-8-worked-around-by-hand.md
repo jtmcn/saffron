@@ -1,9 +1,10 @@
 ---
 id: b-4589be
 title: Six spec-loop driver defects that run 8 worked around by hand
-status: partial
+status: done
 tier: 3
 filed: 2026-09-19
+closed: 2026-11-08
 by_hand: true
 specs: []
 prs: []
@@ -64,3 +65,9 @@ no commits and a bound in its terminal a halt. `hold` takes several ids or
   `hold`, and `next` survives in the attended fallback. So both bullets stand
   for that path only.
 - 2026-11-07: moved to tier 3 in grooming on the operator's ruling of 2026-11-07. It bites only on the driver's attended path, which is now the fallback.
+- 2026-11-08: checked against origin/main. `probe`, `history --spec`, `record`
+  and `pattern` hold as the 2026-09-30 entry says. `next` still read pushed
+  review commits as an ended review. `driver.py reviewed SA-NNNN` now marks the
+  review ended at the pushed head, and `next` waits for that mark. The `hold`
+  bullet is superseded. #748 removed step 1b, so no review round edits five specs.
+- 2026-11-08: done by hand.

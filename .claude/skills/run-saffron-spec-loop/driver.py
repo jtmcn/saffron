@@ -148,6 +148,8 @@ class OrderRow:
     # Why `next` passes over this spec: its edit is open as a pull request, so
     # a cell would run the old text. A re-snapshot releases it.
     held: str | None = None
+    # The branch head `reviewed` saw once the review's last fix was pushed. A child waits for it.
+    reviewed_sha: str = ""
 
     title: str = ""
     budget_usd: float = 0.0
@@ -1153,10 +1155,10 @@ def _next_spec(
     head_of: Callable[[str], str | None] | None = None,
 ) -> tuple[OrderRow | None, str | None]:
     """The first pending spec no cell has answered, and a note when its parent
-    is reviewable: a child's worktree is cut from the parent's branch, so the
-    parent's review commits have to be pushed first. A child whose parent in
-    the order has no reviewable branch is held back: `saffron cell` does not
-    refuse it, and would cut its worktree from main."""
+    is reviewable. A child's worktree is cut from the parent's branch, so it
+    waits until `reviewed` marks the parent's review ended at its branch head.
+    A child whose parent in the order has no reviewable branch is held back:
+    `saffron cell` does not refuse it, and would cut its worktree from main."""
     by_id = {p.spec_id: p for p in rows}
     notes = []
     for p in rows:
@@ -1183,27 +1185,25 @@ def _next_spec(
             )
             continue
         parents = [by_id[d] for d in p.depends_on if d in by_id]
-        names = ", ".join(q.spec_id for q in parents)
-        if parents and all(q.pushed_sha for q in parents):
-            head_of = head_of or _origin_head
-            heads = {q.spec_id: head_of(q.branch) for q in parents}
-            unpushed = [q for q in parents if heads[q.spec_id] in (None, q.pushed_sha)]
-            if unpushed:
+        if parents:
+            # Pushed review commits are no ended review: run 8 named SA-0102 mid-review.
+            if unreviewed := [q for q in parents if not q.reviewed_sha]:
+                q = unreviewed[0]
                 notes.append(
-                    f"{p.spec_id} waits on {unpushed[0].spec_id}'s review commits: "
-                    "none are pushed yet"
+                    f"{p.spec_id} waits on {q.spec_id}'s review: "
+                    f"`reviewed {q.spec_id}` marks it ended after its last push"
                 )
                 continue
-            pushed = ", ".join((heads[q.spec_id] or "")[:8] for q in parents)
-            notes.append(
-                f"{p.spec_id} is cut from {names}, whose review commits are pushed "
-                f"({pushed})"
-            )
-        elif parents:  # an order `record` wrote before it stored `pushed_sha`
-            notes.append(
-                f"{p.spec_id} is cut from {names}: push "
-                f"{'their' if len(parents) > 1 else 'its'} review commits first"
-            )
+            head_of = head_of or _origin_head
+            if moved := [q for q in parents if head_of(q.branch) != q.reviewed_sha]:
+                q = moved[0]
+                notes.append(
+                    f"{p.spec_id} waits on {q.spec_id}: its branch is not at the "
+                    f"reviewed {q.reviewed_sha[:8]}, so `reviewed {q.spec_id}` again"
+                )
+                continue
+            names = ", ".join(f"{q.spec_id} at {q.reviewed_sha[:8]}" for q in parents)
+            notes.append(f"{p.spec_id} is cut from {names}, whose review ended there")
         return p, "; ".join(notes) or None
     return None, "; ".join(notes) or None
 
@@ -1842,6 +1842,20 @@ def cmd_probe(args) -> int:
         print(f"  exit {done.returncode}")
     for line in failed[:5]:
         print(f"  {line}")
+    return 0
+
+
+def cmd_reviewed(args) -> int:
+    """Mark a reviewable spec's review ended at its branch head on origin."""
+    rows = _load()
+    match = next((p for p in rows if p.spec_id == args.spec_id), None)
+    if match is None or not match.reviewable:
+        return _fail(f"{args.spec_id} has no reviewable pull request in the order")
+    if (head := _origin_head(match.branch)) is None:
+        return _fail(f"no origin/{match.branch} to mark; push the review's fixes first")
+    match.reviewed_sha = head
+    _save(rows)
+    print(f"{match.spec_id}  review ended at {head[:8]}; its children can start")
     return 0
 
 
@@ -3400,6 +3414,10 @@ def main() -> int:
     p = sub.add_parser("undrop", help="put a dropped spec back in the order")
     p.add_argument("spec_id")
     p.set_defaults(func=cmd_undrop)
+
+    p = sub.add_parser("reviewed", help="mark a spec's review ended at its pushed head")
+    p.add_argument("spec_id")
+    p.set_defaults(func=cmd_reviewed)
 
     p = sub.add_parser("hold", help="keep next off a spec whose edit is still open")
     p.add_argument("spec_id")
