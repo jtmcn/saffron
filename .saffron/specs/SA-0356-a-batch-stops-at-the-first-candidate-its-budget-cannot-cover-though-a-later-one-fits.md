@@ -102,7 +102,7 @@ acceptance:
 ## Context
 
 Backlog item **b-f73cd0**, under `DESIGN.md` §4.2.1. Related: b-b24cf7.
-Every line below was read at `origin/main` `35e8aad0`.
+Every line below was read at `origin/main` `03a610d3`.
 
 **What the design says.** §4.2.1 says "A batch ends four ways, and says
 which. The queue drains, the budget is gone, `--until` hits, or the breaker
@@ -185,14 +185,14 @@ stopped `BUDGET`. `SA-0294` needs $25 and never ran.
 
 ## Out of scope
 
-- `_print_stack_admission`'s thresholds (`saffron/cli.py:2121-2153`). Each
+- `_print_stack_admission`'s thresholds (`saffron/cli.py:2171-2203`). Each
   still assumes every earlier candidate ran. For a chain, criterion 5 holds
   that as the least `--budget` that starts the layer. A spec that reaches no
   earlier one now starts under a lower `--budget` whenever an earlier spec is
   passed over. The printed line stays true as a budget that admits it. Its
   docstring becomes false, though. It says every earlier candidate has
   already spent its budget by the time the next one's admission is checked
-  (`saffron/cli.py:2124-2126`). It stays false until a later item fixes it,
+  (`saffron/cli.py:2174-2176`). It stays false until a later item fixes it,
   since `saffron/cli.py` is `forbidden` here.
 - A plain batch's dependents of a candidate passed over. Its rescan is
   `build_queue`, which judges each `depends_on` as today, and this spec
@@ -249,6 +249,6 @@ version listed under each criterion failed its witness, and with
 `saffron/batch.py` reverted all three witnesses failed.
 
 **Words.** A candidate is "passed over", never "skipped": `skip` is a gate
-status (`CONTEXT.md:385`, `:533`). Name a turn, an attempt or a batch,
+status (`CONTEXT.md:386`, `:534`). Name a turn, an attempt or a batch,
 never a bare "run". New comments and docstrings take no em-dash,
 semicolon, contraction or sentence over 25 words.

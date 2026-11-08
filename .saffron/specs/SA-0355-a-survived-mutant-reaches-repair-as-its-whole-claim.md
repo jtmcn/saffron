@@ -104,7 +104,7 @@ acceptance:
 ## Context
 
 Backlog item **b-fa4a83**. It cites `DESIGN.md` §5.4.1. Every line below was
-read at `3bac6ab9`.
+read at `03a610d3`.
 
 **What `SA-0330` lost.** In the spec loop's run 53, the `witness` gate failed
 both of `SA-0330`'s declared mutants in all three attempts. Both claims ran
@@ -119,20 +119,20 @@ message is `ran and passed with its mutant applied to <file> — <claim>`
 (`saffron/gates/core/witness.py:260-272`). The comment there says the
 message reaches REPAIR verbatim and withholds the edit (§5.4.1).
 `repair_prompt` renders each new failure's code and message as one line
-(`saffron/phases/implement.py:194-213`). A `survived-mutant` failure is never
-cancelled by the baseline (`saffron/gates/baseline.py:24-32`), so its message
+(`saffron/phases/implement.py:194-205`). A `survived-mutant` failure is never
+cancelled by the baseline (`saffron/gates/baseline.py:35-43`), so its message
 is no part of any identity that matters here.
 
 **Where a mutant comes from.** `parse_mutants` reads a mutants file's text
 and validates each entry with `Mutant.model_validate`
-(`saffron/mutants.py:40-64`). `Mutant` declares `file`, `find` and `replace`
+(`saffron/mutants.py:52-76`). `Mutant` declares `file`, `find` and `replace`
 under `extra="forbid"` (`saffron/intake.py:93-128`), so an entry with any
 other key is refused today. `attach_mutants` sets each criterion's mutant and
 then runs `refuse_disclosed_mutants` on the result
-(`saffron/mutants.py:83-112`). That check refuses a `find` that the body, any
-claim or any wrong version holds (`saffron/intake.py:378-431`). `run_task`
-reads and attaches the mutants (`saffron/task.py:784-785`). So does
-`driver.py`'s probe (`.claude/skills/run-saffron-spec-loop/driver.py:2336-2340`).
+(`saffron/mutants.py:95-124`). That check refuses a `find` that the body, any
+claim or any wrong version holds (`saffron/intake.py:381-434`). `run_task`
+reads and attaches the mutants (`saffron/task.py:786-787`). So does
+`driver.py`'s probe (`.claude/skills/run-saffron-spec-loop/driver.py:2759-2763`).
 `SA-0339`'s `saffron mutant` validates with `parse_mutants` and
 `attach_mutants` too (its Problem, step 1). So every reader and the writer
 take the new field with no edit of their own.
@@ -153,7 +153,7 @@ take the new field with no edit of their own.
    edit to the implementer. `refuse_disclosed_mutants` refuses a `find` that any
    criterion's mutant's case holds, as it refuses one any claim holds. Name
    the holder's witness when it is another criterion, as the claim check does
-   (`saffron/intake.py:409-415`). Update its docstring.
+   (`saffron/intake.py:412-418`). Update its docstring.
 4. **Prose that turns false.** The comment above the message
    (`saffron/gates/core/witness.py:261-262`) names only the claim and the
    file. In `docs/agents/issue-tracker.md`, add `case` to the mutants file's
@@ -175,7 +175,7 @@ concept, so no glossary entry is owed.
   limit holds: a paraphrase evades it.
 - Enforcing one sentence. Only a blank case is refused.
 - A criterion probe or a wrong version. Their edits come from a REVIEW
-  session's JSON (`saffron/cell/session.py:2065`), and no prompt asks for a
+  session's JSON (`saffron/cell/session.py:2069`), and no prompt asks for a
   case. One that carries `case` now loads and is quoted if it survives.
 - `refuse_disclosed_mutants` run from `parse_spec` over an inline mutant.
   It is the same function, but a queued spec's inline mutant is refused at
@@ -192,7 +192,7 @@ which restructures `witness_gate` around the same `survived-mutant` branch.
 Find the message by its text, not its line. `SA-0350` edits
 `saffron/intake.py` too, on another branch of the dependency graph. A stack
 batch is linear: it takes each ready spec by priority, then id
-(`saffron/scheduler.py:1178-1212`). `SA-0350` and `SA-0351` are both
+(`saffron/scheduler.py:1224-1258`). `SA-0350` and `SA-0351` are both
 priority 2, and `SA-0350` sorts first. This spec is ready only once
 `SA-0351` is taken, so its tree carries `SA-0350`'s change. That spec's
 criteria add `retired_first` to `Spec` and name neither `Mutant` nor
@@ -215,7 +215,7 @@ existing test passed over it.
 
 **Two traps the prototype hit.** REVIEW records each probe and wrong version
 with `model_dump()` (`saffron/phases/review.py:573`, `:675`,
-`saffron/probe.py:327`). A plain `case: str | None = None` put `'case': None`
+`saffron/probe.py:328`). A plain `case: str | None = None` put `'case': None`
 in each dump. Those dumps are read back with `Mutant.model_validate`, which
 hands an explicit `None` to the validator. Over that shape, 64 existing tests
 failed. 53 met a validator calling `.strip()` on `None`. The rest met a

@@ -188,7 +188,7 @@ acceptance:
 
 Backlog item **b-ffb930**. It cites `DESIGN.md` §3, whose §3.4 draft
 chain is one of the three paths this spec reaches. Every line below was
-read at `c8e8f6e6`, SA-0339's packaged head.
+read at `03a610d3`, SA-0352's merge.
 
 **The incident.** Finish 67 drafted `SA-0338` as a follow-up. The first
 draft failed to parse, because each of its four `wrong_versions` entries was
@@ -205,7 +205,7 @@ re-ask, whose validated text also returns at once
 the session.
 
 **Principle 18.** Structured output is a separate, tool-less turn
-(`DESIGN.md:1865`). The host resumes the session with a prompt that forbids
+(`DESIGN.md:1873`). The host resumes the session with a prompt that forbids
 further action (`DESIGN.md:850`, §5.3). ADR 7 says a spec writer keeps
 principle 18 (`docs/adr/0007-a-stack-batch-runs-the-spec-dag-and-writes-its-own-follow-ups.md:113-116`).
 So a send-back cannot be one turn under `output_format`. It is a work turn
@@ -231,8 +231,8 @@ string.
 (`saffron/follow_up.py:406-443`). A failure there opens a fresh `write`
 call, a new session, once (`saffron/follow_up.py:284-311`). The judge is
 `finish.judge_draft`, which commits the text atop a head in a worktree
-(`saffron/finish.py:257-293`). It runs the verify `_finish_verify` builds
-(`saffron/cli.py:1073-1100`). That verify loads the policy from the pinned
+(`saffron/finish.py:252-288`). It runs the verify `_finish_verify` builds
+(`saffron/cli.py:1123-1150`). That verify loads the policy from the pinned
 base's export, builds `finish.finish_suite` over it and runs
 `package_phase.reverify`. `reverify` runs both suites in gate-only cells,
 never host-side, and keeps only new failures
@@ -240,11 +240,11 @@ never host-side, and keeps only new failures
 the declared ones (`saffron/gates/suite.py:203-210`).
 
 **Why the gates cannot run in the writer's own cell.** The writer's cell is
-a critic cell (`saffron/end_review.py:783-803`). `DESIGN.md` §5.5 forbids a
+a critic cell (`saffron/end_review.py:786-806`). `DESIGN.md` §5.5 forbids a
 gate there, since a gate executes model-authored code as root where the
-session then re-execs its runner (`DESIGN.md:1254`). This repo's `prose`
+session then re-execs its runner (`DESIGN.md:1262`). This repo's `prose`
 gate does execute tree code. It loads `ontology/spans.py` from the tree
-under judgement (`.saffron/gates/prose.py:432-438`). So the judgement goes
+under judgement (`.saffron/gates/prose.py:496-502`). So the judgement goes
 to gate-only cells through `judge_draft`, as the follow-up's own judge does.
 
 **Which gates.** Core names no repo-defined gate (`DESIGN.md` §2.1). A repo
@@ -256,7 +256,7 @@ declares `format`, `lint` and `prose` as form gates (`.saffron/policy.yaml`).
 
 **What a failed writer session costs a revision.** A revision whose writer
 returns an error sets its task `GATE_ERROR`, misses its spec and raises
-(`saffron/batch.py:883-892`). So a send-back must never turn a session that
+(`saffron/batch.py:884-893`). So a send-back must never turn a session that
 produced a text into one that ends with an error.
 
 **Inline mutants.** At `1742e79f`, `saffron/intake.py` holds no
@@ -277,17 +277,17 @@ directory's files equal to the keys of `TURN_PROMPTS`
 **The session's ceiling.** `SPEC_WRITER_SESSION_USD` is the first turn plus
 one extraction turn (`saffron/spec_review.py:573-575`). The follow-up
 sub-cap reads it (`saffron/follow_up.py:294`, `:323`), and so does a
-revision's budget test (`saffron/batch.py:836-840`). Both read the module
+revision's budget test (`saffron/batch.py:837-841`). Both read the module
 attribute at call time.
 
 **The three callers.** Every `run_spec_writer` call sits in `saffron/cli.py`.
-`_stack_revise` calls it at `saffron/cli.py:1466`. Its head comes from
-`_stack_head` (`saffron/cli.py:1418`), and its policy from
-`_spec_review_policy` (`saffron/cli.py:1424`). `_draft_adapters`'s `write`
-calls it at `saffron/cli.py:1579`, seeded at `pinned.base_sha`.
-`_stack_follow_ups`'s `write` calls it at `saffron/cli.py:1760`, in a cell at
-`top.head` (`saffron/cli.py:1752-1759`), with the policy read at
-`saffron/cli.py:1709`.
+`_stack_revise` calls it at `saffron/cli.py:1516`. Its head comes from
+`_stack_head` (`saffron/cli.py:1468`), and its policy from
+`_spec_review_policy` (`saffron/cli.py:1474`). `_draft_adapters`'s `write`
+calls it at `saffron/cli.py:1629`, seeded at `pinned.base_sha`.
+`_stack_follow_ups`'s `write` calls it at `saffron/cli.py:1810`, in a cell at
+`top.head` (`saffron/cli.py:1802-1809`), with the policy read at
+`saffron/cli.py:1759`.
 
 ## Problem
 
@@ -418,7 +418,7 @@ so the reverted run fails rather than erroring at collection.
   a first draft whose `DraftFaults` says `parsed` true, then after one that
   says false.
 - The parse-only refusal in criterion 3 is `parse_spec`'s own check at
-  `saffron/intake.py:358-364`. A copy that validates `Spec` alone accepts
+  `saffron/intake.py:361-367`. A copy that validates `Spec` alone accepts
   it.
 - In `tests/test_cli.py`, criterion 6 builds a small git mirror whose
   `.saffron/policy.yaml` declares two `form: true` gates and one without,
