@@ -584,6 +584,7 @@ def test_status_says_which_reviewable_branches_carry_pushed_review_commits(
     monkeypatch.setattr(driver, "_load", lambda: [reviewed, unreviewed, unrecorded])
     monkeypatch.setattr(driver, "_stale", lambda rows: [])
     monkeypatch.setattr(driver, "_origin_head", heads.get)
+    monkeypatch.setattr(driver, "_pr_state", lambda _number: "OPEN")
 
     assert driver.cmd_status(argparse.Namespace()) == 0
     lines = capsys.readouterr().out.splitlines()
@@ -1243,6 +1244,25 @@ def test_add_without_force_is_refused_rather_than_ignored(loop, capsys):
     assert not driver.ORDER.exists()
 
 
+def test_status_says_when_github_merged_a_pull_request_the_order_calls_reviewable(
+    loop, capsys
+):
+    # b-bff670: `status` printed five merged pull requests as `READY_FOR_REVIEW`.
+    driver._save(
+        [
+            loop.row(0, state="READY_FOR_REVIEW", pr=11, pushed_sha="p" * 40),
+            loop.row(1, state="READY_FOR_REVIEW", pr=10),
+        ]
+    )
+
+    assert driver.cmd_status(argparse.Namespace()) == 0
+    out = capsys.readouterr().out
+    merged = next(line for line in out.splitlines() if "#11" in line)
+    still_open = next(line for line in out.splitlines() if "#10" in line)
+    assert "merged on GitHub" in merged
+    assert "on GitHub" not in still_open
+
+
 def test_a_new_loop_forgets_the_last_loops_drops(loop):
     # Run 6 (2026-09-17): `--force` over run 5's finished order brought back
     # three specs `dropped` for a reason that was true of run 5 only.
@@ -1681,7 +1701,7 @@ def test_check_blocks_the_ceilings_check_4_calls_blockers_and_no_others(
     monkeypatch.setattr(driver, "_past_cells", lambda *a, **k: rows)
 
     def run():
-        rc = driver.cmd_check(argparse.Namespace(spec_id="SA-0009"))
+        rc = driver.cmd_check(argparse.Namespace(spec=None, spec_id="SA-0009"))
         return rc, capsys.readouterr().out
 
     rc, out = run()
@@ -1730,8 +1750,31 @@ def test_check_judges_the_rows_history_prints_and_no_others(monkeypatch, capsys)
     monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (_StubLedger(), 1, "url"))
     monkeypatch.setattr(driver, "_past_cells", lambda *a, **k: rows)
 
-    assert driver.cmd_check(argparse.Namespace(spec_id="SA-0009")) == 0
+    assert driver.cmd_check(argparse.Namespace(spec=None, spec_id="SA-0009")) == 0
     assert "blocker:" not in capsys.readouterr().out
+
+
+def test_check_judges_the_spec_at_the_file_it_is_given(monkeypatch, capsys, tmp_path):
+    # b-bff670: `check` read the checkout's copy while the edit sat on a branch.
+    from saffron.intake import load_spec
+
+    source = sorted((REPO / ".saffron" / "specs" / "done").glob("SA-*.md"))[0]
+    spec, _sha = load_spec(source)
+    edited = tmp_path / source.name
+    text = source.read_text()
+    edited.write_text(
+        re.sub(
+            r"^(budget_usd: .*)$", r"\1\nestimated_lines: 7", text, count=1, flags=re.M
+        )
+    )
+    stale = load_spec(source)[0]
+    monkeypatch.setattr(driver, "_known_specs", lambda: {spec.id: stale})
+    monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (_StubLedger(), 1, "url"))
+    monkeypatch.setattr(driver, "_past_cells", lambda *a, **k: [])
+    monkeypatch.setattr(driver, "_cite_blocker", lambda *a, **k: None)
+
+    driver.cmd_check(argparse.Namespace(spec=str(edited), spec_id=spec.id))
+    assert "estimated_lines=7" in capsys.readouterr().out
 
 
 def test_check_reports_a_review_and_rebut_shortfall_as_a_concern(monkeypatch, capsys):
@@ -1758,13 +1801,13 @@ def test_check_reports_a_review_and_rebut_shortfall_as_a_concern(monkeypatch, ca
 
     # $11.00 minus the $4.00 pre-review total leaves $7.00, covering $6.00.
     target.budget_usd = 11.0
-    assert driver.cmd_check(argparse.Namespace(spec_id="SA-0009")) == 0
+    assert driver.cmd_check(argparse.Namespace(spec=None, spec_id="SA-0009")) == 0
     assert "concern:" not in capsys.readouterr().out
 
     # $9.50 minus $4.00 leaves $5.50, which cannot cover $6.00 — a concern.
     # Reading $9.50 raw, or subtracting some other row's total, would not be.
     target.budget_usd = 9.5
-    assert driver.cmd_check(argparse.Namespace(spec_id="SA-0009")) == 0
+    assert driver.cmd_check(argparse.Namespace(spec=None, spec_id="SA-0009")) == 0
     assert "concern:" in capsys.readouterr().out
 
 
@@ -1774,7 +1817,7 @@ def test_check_with_nothing_to_compare_against_claims_no_pass(monkeypatch, capsy
     monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (_StubLedger(), 1, "url"))
     monkeypatch.setattr(driver, "_past_cells", lambda *a, **k: [])
 
-    assert driver.cmd_check(argparse.Namespace(spec_id="SA-0009")) == 0
+    assert driver.cmd_check(argparse.Namespace(spec=None, spec_id="SA-0009")) == 0
     out = capsys.readouterr().out
     assert "no past cells of this shape to compare against" in out
     assert "check: ceilings clear this shape's history" not in out
@@ -1872,7 +1915,7 @@ def test_check_says_an_unretired_ancestors_review_change_is_not_in_this_specs_re
         return sorted(line for line in out.splitlines() if line.startswith("review:"))
 
     monkeypatch.setattr(driver, "_past_cells", lambda *a, **k: [])
-    rc = driver.cmd_check(argparse.Namespace(spec_id="SA-0910"))
+    rc = driver.cmd_check(argparse.Namespace(spec=None, spec_id="SA-0910"))
     out = capsys.readouterr().out
     assert rc == 0
     assert review_lines(out) == sorted(expected)
@@ -1880,14 +1923,14 @@ def test_check_says_an_unretired_ancestors_review_change_is_not_in_this_specs_re
     monkeypatch.setattr(
         driver, "_past_cells", lambda *a, **k: [_cell("SA-2000", "feature", 1, 0)]
     )
-    rc = driver.cmd_check(argparse.Namespace(spec_id="SA-0910"))
+    rc = driver.cmd_check(argparse.Namespace(spec=None, spec_id="SA-0910"))
     out = capsys.readouterr().out
     assert rc == 0
     assert review_lines(out) == sorted(expected)
     assert "check: ceilings clear this shape's history" in out
 
     monkeypatch.setattr(driver, "_past_cells", lambda *a, **k: [])
-    rc = driver.cmd_check(argparse.Namespace(spec_id="SA-0911"))
+    rc = driver.cmd_check(argparse.Namespace(spec=None, spec_id="SA-0911"))
     out = capsys.readouterr().out
     assert rc == 0
     assert review_lines(out) == []
@@ -1904,7 +1947,7 @@ def test_check_says_an_unretired_ancestors_review_change_is_not_in_this_specs_re
 
         m.setattr(intake, "discover_specs", boom)
 
-        rc = driver.cmd_check(argparse.Namespace(spec_id="SA-0912"))
+        rc = driver.cmd_check(argparse.Namespace(spec=None, spec_id="SA-0912"))
         out = capsys.readouterr().out
         assert rc == 0
         assert review_lines(out) == []
@@ -2557,7 +2600,7 @@ def test_cite_and_check_report_what_the_batchs_citation_check_reports(
         *[d.line for d in defects],
         "6 citation(s) checked",
     ]
-    assert driver.cmd_check(argparse.Namespace(spec_id="SA-0001")) == 1
+    assert driver.cmd_check(argparse.Namespace(spec=None, spec_id="SA-0001")) == 1
     out = capsys.readouterr().out.splitlines()
     assert [x for x in out if x.startswith("cite: ")] == [
         f"cite: {d.line}" for d in defects
@@ -2588,7 +2631,7 @@ def test_cite_and_check_print_what_the_core_check_returns_or_raises(
     monkeypatch.setattr(driver, "citation_count_and_defects", fake, raising=False)
     spec = _cite_tree(monkeypatch, tmp_path)
     args = SimpleNamespace(spec_path=str(spec), base="origin/main")
-    check = argparse.Namespace(spec_id="SA-0001")
+    check = argparse.Namespace(spec=None, spec_id="SA-0001")
     assert driver.cmd_cite(args) == 1
     assert capsys.readouterr().out == "x.py:1: seen\n7 citation(s) checked\n"
     assert calls == [(tmp_path, "origin/main", "Reads `mod.py:2`.\n")]
@@ -3630,7 +3673,7 @@ def test_check_blocks_a_queued_spec_whose_citations_drifted_at_its_cut_base(
     (specs_dir / "SA-0002-c.md").write_text("Reads `mod.py:4`.\n")
 
     def check(spec_id):
-        rc = driver.cmd_check(argparse.Namespace(spec_id=spec_id))
+        rc = driver.cmd_check(argparse.Namespace(spec=None, spec_id=spec_id))
         return rc, capsys.readouterr().out
 
     rc, out = check("SA-0001")

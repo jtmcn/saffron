@@ -1,7 +1,8 @@
 ---
 id: b-bff670
 title: The spec loop's driver reads stale state, so `status` shows merged PRs as reviewable and `check` judges a branch's spec on main's ceilings
-status: partial
+status: done
+closed: 2026-11-07
 tier: 2
 filed: 2026-09-25
 by_hand: true
@@ -43,3 +44,4 @@ is item b-e8027b, and it is recorded there.
 - 2026-11-07: groomed. `history --spec` now reads the spec from a file or a ref (`5106d0a1`, #616). Two parts stay open. `status` still prints each row's state from the order file. It asks GitHub only for its stale list (`_stale_reasons`). `check` still reads the spec from the checkout and takes no ref.
 - 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
   `.claude/`, and `SA-0279` refuses any spec that touches that path.
+- 2026-11-07: done by hand in #. `status` asks GitHub, and `check` takes `--spec`.
