@@ -1110,7 +1110,8 @@ never holds the ref, because the seed fetches `refs/heads/*` alone.
 
 **A mutant can name its case** (`SA-0355`). A mutant on the ref can carry a `case`: one
 sentence naming the part of its claim the witness leaves untested. A survivor's failure
-quotes that sentence after the claim and still withholds `find` and `replace`. So
+quotes that sentence after the claim. It adds no `find`, and no `replace` beyond what a
+claim or case holds. So
 REPAIR learns which case to add, and never the edit that would falsify it. The case
 is prompt text, so the disclosure check reads it: a `find` that any criterion's case
 holds is refused, as one a claim holds is.

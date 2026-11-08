@@ -54,9 +54,9 @@ acceptance:
       quotes the mutant's `case` when one is declared. Each failure quotes its
       own criterion's case and no other's. A mutant with no `case` gives the
       message the base gives, character for character. No mutant's `find`
-      text appears in the serialized gate result, or in the text
-      `saffron.phases.implement.repair_prompt` renders from its failures.
-      Neither does a mutant's `replace` text that no claim or case holds. The
+      or `replace` text that no claim or case holds appears in the serialized
+      gate result, or in the text `saffron.phases.implement.repair_prompt`
+      renders from its failures. The
       witness drives three surviving criteria in one call, in this order: two
       with distinct cases, then one with none. Their mutants are read from a
       mutants file's text by `saffron.mutants.parse_mutants`, and applied
@@ -224,14 +224,17 @@ dump, or a count downstream of one, that the key changed. Declaring the field wi
 validator pass `None` through left every one green. The locked Pydantic is
 2.13.4.
 
-**The witnesses.** Plain `def`s, never a parametrised test. Import
+**The witnesses.** Plain `def`s, never a parametrised test. Quote the
+padded, empty and whitespace-only cases in the YAML, since `yaml.safe_load`
+trims a plain scalar before `Mutant` reads it. Import
 `parse_mutants`, `attach_mutants`, `MutantsError`, `NewFailure` and
 `repair_prompt` inside the test body, as `tests/test_mutants.py` does.
 
 - Criterion 1 writes three files, each holding its own `find` once. Give each
   `find` and `replace` a shared distinctive prefix that no claim or case
   holds, so one substring check covers every edit. Declare the two criteria
-  with cases first and the case-less one last. Build the mutants with `parse_mutants` over one YAML
+  with cases first and the case-less one last. Neither case contains
+  the other, so a substring check tells them apart. Build the mutants with `parse_mutants` over one YAML
   text, as the ref holds them. Give each criterion its own claim, and assert
   the case-less one's message equals the base format in full. Render
   `repair_prompt` over the failures, each wrapped as `NewFailure("witness",
