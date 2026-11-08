@@ -48,8 +48,8 @@ repos:
           | tee /dev/stderr
           | grep -q "\"status\": \"pass\""'
         pass_filenames: false
-        # The gate reads only Markdown and Python files. Its wrapper moves the answer too.
-        files: ^(.*\.(md|py)|\.saffron/gates/terms)$
+        # The gate reads only Markdown, Python and YAML files. Its wrapper moves the answer too.
+        files: ^(.*\.(md|py|ya?ml)|\.saffron/gates/terms)$
 
   # Local for ty's reason: the `structure` gate parses ast-grep's JSON, and the
   # rule syntax is pre-1.0, so the hook runs the one version `pyproject.toml`
@@ -104,7 +104,7 @@ repos:
         language: system
         entry: uv run hooks/prose_limit.py
         pass_filenames: false
-        files: \.(md|py)$
+        files: \.(md|py|ya?ml)$
 
   # The prose gate's rules over the working tree. prose-limit reads the index,
   # and --all-files lists no untracked file. make lint runs this at the manual stage.

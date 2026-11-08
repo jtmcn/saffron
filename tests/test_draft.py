@@ -448,6 +448,15 @@ def test_each_route_and_each_writer_stop_ends_the_draft_in_its_own_state(tmp_pat
         ledger.close()
 
 
+def test_the_production_route_table_agrees_with_the_oracles_entry_by_entry():
+    from saffron import draft
+
+    production = draft._ROUTE_STATE
+    for route, state in _ROUTE_STATE.items():
+        assert production.get(route) == state, route
+    assert set(production) == set(_ROUTE_STATE)
+
+
 def test_each_session_is_one_attempt_and_each_round_records_its_own_findings(
     tmp_path,
 ):
