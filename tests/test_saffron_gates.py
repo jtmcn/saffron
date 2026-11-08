@@ -258,6 +258,25 @@ def test_the_fast_gates_name_their_tool_and_pass_on_a_clean_tree(name):
     assert result.tool and result.tool.startswith("ruff")
 
 
+@pytest.mark.parametrize("name", ["format", "lint"])
+def test_a_gitignore_cannot_hide_a_tracked_file_from_ruff(tmp_path, name):
+    """ruff skips a gitignored file that git still tracks (backlog item 76).
+    The `.git` directory is load-bearing: ruff reads `.gitignore` only in a repository."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    (tmp_path / "bad.py").write_text("import os\nx=1\n")
+    (tmp_path / ".gitignore").write_text("bad.py\n.gitignore\n")
+    worktree = tmp_path / ".claude" / "worktrees" / "w"
+    worktree.mkdir(parents=True)
+    (worktree / "other.py").write_text("import os\nx=1\n")
+    done = subprocess.run(
+        [str(GATES / name)], cwd=tmp_path, capture_output=True, text=True, timeout=120
+    )
+    result = parse_gate_json(done.stdout, expected_gate=name)
+    assert result.status == "fail", result.summary
+    assert {Path(f.file).name for f in result.failures} == {"bad.py"}
+
+
 def test_a_red_run_is_a_failure_even_when_a_test_is_named_for_a_crash(tmp_path):
     """`-q` echoes node ids in its FAILED lines, so keying the worker-crash
     check on "worker" and "crashed" anywhere in the output turned every red run

@@ -420,7 +420,7 @@ Two renderers spell a new failure, and they disagree on line 0.
 **The 2026-09-04 sort's tier 3, plus what spec loop runs up to 32 added.**
 Each line keeps the order it was filed in.
 
-- From the first sort: **31**, **20**, **53**, ~~**54**~~, ~~**55**~~, **75**, **76**,
+- From the first sort: **31**, **20**, **53**, ~~**54**~~, ~~**55**~~, **75**, ~~**76**~~,
   ~~**77**~~, **90**, **92**, **96**, ~~**100**~~, **101** and **108**.
 - Filed 2026-09-12 to 2026-09-19: ~~**116**~~, **121**, ~~**122**~~, **130**, **134**,
   ~~**150**~~, ~~**151**~~, **155**, **156**, **174** and **b-d6bff7**.
