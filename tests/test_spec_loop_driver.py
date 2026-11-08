@@ -1746,6 +1746,27 @@ def test_an_abnormal_ending_reaches_the_row_however_its_subtype_was_spelled(
     assert "REVIEWING success (api_error)" in cell.endings
 
 
+@pytest.mark.parametrize("phase", ["SPEC_REVIEW", "SPEC_WRITING"])
+def test_history_peak_reads_only_the_attempts_max_turns_bounds(tmp_path, phase):
+    # b-937778: a 150-turn spec review read as the cell's peak, though the
+    # spec's `max_turns` never bounds it. b-60ff2e fixed the stack page.
+    ledger, repo_id = _ledger_with_one_cell(tmp_path)
+    task_id = ledger.tasks_by_spec_id(repo_id, "SA-0001")[-1]["task_id"]
+    ledger.close_attempt(
+        ledger.open_attempt(task_id, phase),
+        session_id=None,
+        subtype="error_max_turns",
+        terminal_reason="max_turns",
+        num_turns=150,
+        cost_usd_est=2.0,
+    )
+    (cell,) = driver._past_cells(ledger, repo_id, {"SA-0001": _spec("SA-0001")})
+    ledger.close()
+
+    assert cell.peak_turns == 45
+    assert cell.peak_cut_off is False
+
+
 def test_a_peak_that_stopped_on_budget_is_not_called_a_turn_floor(tmp_path):
     """The fixture peaks at 45 turns on a REBUTTING attempt that ran out of
     budget, while the attempt that hit the turn ceiling ran 41. Reading the

@@ -2065,7 +2065,7 @@ class PastCell:
     plan: Spend | None
     implement: Spend  # every other IMPLEMENTING attempt
     repair: Spend
-    peak_turns: int  # the largest single attempt of any phase; max_turns bounds each
+    peak_turns: int  # the largest single attempt of a phase `max_turns` bounds
     review_usd: float
     rebut_usd: float
     endings: list[str]  # "<phase> <subtype>" for every attempt that did not succeed
@@ -2167,6 +2167,11 @@ def _commit_time(commit: str, cwd: Path = REPO) -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(epoch))
 
 
+# The phases a spec's `max_turns` bounds, as `saffron/report/stack.py` lists
+# them. A spec review or writing attempt has its own bound (b-937778).
+_MAX_TURNS_PHASES = frozenset({"IMPLEMENTING", "REPAIRING", "REVIEWING", "REBUTTING"})
+
+
 def _past_cells(
     ledger,
     repo_id: int,
@@ -2194,7 +2199,8 @@ def _past_cells(
                 for r in ledger.task_results(row["task_id"])
                 if r.gate == "size"
             ]
-            peak_attempt = max(attempts, key=lambda a: a["num_turns"] or 0)
+            bounded = [a for a in attempts if a["phase"] in _MAX_TURNS_PHASES]
+            peak_attempt = max(bounded, key=lambda a: a["num_turns"] or 0, default=None)
             cells.append(
                 PastCell(
                     spec_id=spec_id,
@@ -2209,8 +2215,9 @@ def _past_cells(
                     else None,
                     implement=_spend(implementing[1:], "IMPLEMENTING"),
                     repair=_spend(attempts, "REPAIRING"),
-                    peak_turns=peak_attempt["num_turns"] or 0,
-                    peak_cut_off=_cut_off_at_turn_ceiling(peak_attempt),
+                    peak_turns=(peak_attempt["num_turns"] or 0) if peak_attempt else 0,
+                    peak_cut_off=peak_attempt is not None
+                    and _cut_off_at_turn_ceiling(peak_attempt),
                     review_usd=_spend(attempts, "REVIEWING").usd,
                     rebut_usd=_spend(attempts, "REBUTTING").usd,
                     endings=[
