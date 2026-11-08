@@ -1,7 +1,9 @@
 ---
 id: b-cec9a7
 title: A refusal reaches stdout and never the morning queue, though §4.2 and the glossary say it lands there as one line
-status: open
+status: done
+closed: 2026-11-08
+by_hand: true
 tier: 3
 filed: 2026-09-29
 specs: []
@@ -36,3 +38,4 @@ state exists.
 ## Record
 
 - 2026-09-29: filed from item 52's review.
+- 2026-11-08: done by hand.

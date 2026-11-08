@@ -439,7 +439,7 @@ Each line keeps the order it was filed in.
 - From the 2026-09-27 size pricing and spec loop run 32: **b-41664e**, **b-4b386f**,
   **b-d96f14**, ~~**b-9b94c9**~~, **b-ff3141**, **b-a99c76**, **b-3a8504**,
   **b-7f105f** and **b-8c17dc**.
-- From item 52's review: **b-cec9a7**.
+- From item 52's review: ~~**b-cec9a7**~~.
 
 **Placed 2026-09-20**: **161**, **162**, **163**, **126**, **128** and **129**,
 then **b-7d2acf**. The first three are what PR #317 left on the `prose` gate. A
