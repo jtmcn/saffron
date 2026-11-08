@@ -6,7 +6,6 @@ closed: 2026-11-07
 by_hand: true
 tier: 3
 filed: 2026-09-23
-closed:
 specs: []
 prs: [1051]
 commits: []
