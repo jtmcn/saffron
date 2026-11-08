@@ -1,9 +1,10 @@
 ---
 id: b-1b8b1e
 title: "No witness drives `citations_held_at`'s `tokens_at` for a file suffix that leaves the tree by the later head"
-status: open
+status: partial
 tier: 3
 filed: 2026-10-27
+by_hand: true
 specs: []
 prs: []
 commits: []
@@ -31,3 +32,4 @@ by the later head, at both `citations_held_at` and `_stack_cite`.
 ## Record
 
 - 2026-10-27: filed from the spec loop's run 49.
+- 2026-11-08: partial by hand. A unit witness in `tests/test_spec_citations.py` drives a suffix that leaves the tree by the later head, and fails when `citations_held_at` drops `tokens_at`. Left: the integration witness through `cli._stack_cite`, since `tests/test_cli.py` is a file a queued spec touches.
