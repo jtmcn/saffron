@@ -818,7 +818,7 @@ the garbage collector: `SCOPE_REVIEW`, `PLAN_REJECTED`, `EXHAUSTED`,
 `GATE_ERROR`, `RATE_LIMITED`, `SPEC_WITHHELD`, `PROVIDER_UNREACHABLE`,
 `SPEC_DRAFTED`, `REBUTTAL_UNJUDGED`, `REVIEW_INCOMPLETE`, `APPROVED`,
 `CHANGES_REQUESTED`, `REJECTED`, `MERGED`, `ORPHANED`, `MERGE_TRAIN`.
-A re-queue resumes the same row from six end states, so an end state need not be
+A spec re-queues from six end states, on a fresh task, so an end state need not be
 final. Every terminal state is an end state.
 
 **In-flight state**: A state in which Saffron advances the task, tonight or now: `DRAFT`,
