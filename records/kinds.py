@@ -166,8 +166,7 @@ ADR_SECTIONS = (
     "Principles",
     "Consequences",
 )
-# Derived, so a required heading cannot drift out of the allowed ones: a kind
-# whose `required` is not a subset makes every record of it unloadable.
+# Derived, so a required heading cannot drift out of the allowed ones.
 ADR_REQUIRED = tuple(s for s in ADR_SECTIONS if s != "Options considered")
 
 
@@ -182,6 +181,16 @@ class Kind:
     sections: tuple[str, ...] = ()
     # The subset of `sections` that must appear. `_sectioned` refuses a missing one.
     required: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        # The loader reads `required` only through `sections`, so refuse it here.
+        if self.required and not self.sections:
+            raise ValueError(
+                f"kind {self.name}: required {self.required} but no sections"
+            )
+        stray = [s for s in self.required if s not in self.sections]
+        if stray:
+            raise ValueError(f"kind {self.name}: required {stray} not in sections")
 
 
 KINDS: dict[str, Kind] = {

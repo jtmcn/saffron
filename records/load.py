@@ -118,7 +118,7 @@ def _sectioned(
     path: Path | None,
 ) -> dict[str, str]:
     """A body that is `## ` sections only, drawn from `allowed`, in its order,
-    and carrying every heading in `required`."""
+    and carrying every heading in `required` with text under it."""
     preamble = _preamble(body)
     if preamble:
         raise RecordError(f"prose before the first `## ` heading: {preamble!r}", path)
@@ -129,6 +129,9 @@ def _sectioned(
     missing = [s for s in required if s not in sections]
     if missing:
         raise RecordError(f"missing required section(s) {missing}", path)
+    empty = [s for s in required if not sections[s]]
+    if empty:
+        raise RecordError(f"required section(s) {empty} are empty", path)
     order = [s for s in allowed if s in sections]
     if list(sections) != order:
         raise RecordError(

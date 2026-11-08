@@ -165,6 +165,16 @@ exists, the home ledger. It adds no ledger row and creates no ledger:
 uv run saffron next-id --repo .
 ```
 
+Write one spec's mutants onto `refs/saffron/mutants` and push them to origin.
+The command refuses what `run_task` refuses, including a spec that still
+declares `mutant:` inline. No agent runs, and it needs no token. Exit `0`
+prints the new commit, `1` is a refusal or a lost race, and `2` is any other
+git failure:
+
+```sh
+uv run saffron mutant <spec id> --from <file.yaml> --repo .
+```
+
 Run PACKAGE alone on a `READY_FOR_REVIEW` task whose own PACKAGE raised. No agent
 runs, and the token is scoped the same way:
 

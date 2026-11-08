@@ -1,6 +1,6 @@
-"""`saffron`: cell, batch, draft, next-id, queue, reconcile, regate, review,
-adopt, package, finish, watch, fold, migrate, chains, serve, replay. `ratify`
-and `gc` are still unbuilt (§4.2.1, §4.5)."""
+"""`saffron`: cell, batch, draft, next-id, mutant, queue, reconcile, regate,
+review, adopt, package, finish, watch, fold, migrate, chains, serve, replay.
+`ratify` and `gc` are still unbuilt (§4.2.1, §4.5)."""
 
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ from saffron.cell.session import (
 from saffron.cell.session import _SHA as _RESOLVED_SHA
 from saffron.events import Event, EventLog, RecordAppend
 from saffron.gates.baseline import NewFailure
-from saffron.intake import Spec, load_spec
+from saffron.intake import Spec, SpecError, load_spec
 from saffron.ledger import Ledger
 from saffron.phases import implement, review
 from saffron.phases import package as package_phase
@@ -193,6 +193,17 @@ def main(argv: list[str] | None = None) -> int:
         "spec files and, when one exists, the home ledger",
     )
     next_id_parser.add_argument("--repo", type=Path, default=Path.cwd())
+
+    mutant_parser = subcommands.add_parser(
+        "mutant",
+        help="write one spec's mutants onto refs/saffron/mutants and push "
+        "them to origin, refusing what run_task would refuse (item 80)",
+    )
+    mutant_parser.add_argument(
+        "spec_id", help="the spec id the mutants file belongs to"
+    )
+    mutant_parser.add_argument("--from", dest="from_file", type=Path, required=True)
+    mutant_parser.add_argument("--repo", type=Path, default=Path.cwd())
 
     reconcile_parser = subcommands.add_parser(
         "reconcile",
@@ -361,6 +372,18 @@ def main(argv: list[str] | None = None) -> int:
         # missing, and this command opens its own only when one is there.
         try:
             return _next_id(args)
+        except Exception as broke:
+            print(f"saffron: {type(broke).__name__}: {broke}")
+            return 2
+
+    if args.command == "mutant":
+        # Before the home ledger below: the ref is the only state this
+        # command touches, and it opens no `Ledger` at all.
+        try:
+            return _mutant(args)
+        except (mutants.MutantWriteRefused, SpecError) as refused:
+            print(f"saffron: {refused}")
+            return 1
         except Exception as broke:
             print(f"saffron: {type(broke).__name__}: {broke}")
             return 2
@@ -2768,6 +2791,16 @@ def _next_id(args: argparse.Namespace) -> int:
         print(follow_up.next_spec_id(seed_id, specs_dir, ledger, repo_id))
     finally:
         ledger.close()
+    return 0
+
+
+def _mutant(args: argparse.Namespace) -> int:
+    """`saffron mutant <spec id> --from <file> [--repo .]`: write one
+    spec's mutants onto `refs/saffron/mutants` and push them to origin
+    (item 80). Opens no `Ledger`: the ref is read and written straight
+    from `--repo`'s own git, never through a mirror."""
+    commit = mutants.write_mutants(args.repo.resolve(), args.spec_id, args.from_file)
+    print(commit)
     return 0
 
 

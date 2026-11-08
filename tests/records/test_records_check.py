@@ -9,11 +9,12 @@ from pathlib import Path
 
 import pytest
 
+import records.rules
 import tests.records.check
 from records.kinds import KINDS, Identified, Kind
 from records.load import Record, load
+from records.rules import Violation, check_priority, cited_items
 from tests.records.check import (
-    Violation,
     appendix_letters,
     building_pr,
     check_all,
@@ -26,14 +27,13 @@ from tests.records.check import (
     check_item_citations,
     check_links,
     check_no_old_path,
-    check_priority,
     check_spec_ids_unique,
     check_specs_name_their_items,
     check_specs_resolve,
-    cited_items,
 )
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "good"
+REPO = Path(__file__).resolve().parents[2]
 BACKLOG = KINDS["backlog"]
 APPENDIX = KINDS["appendix"]
 
@@ -276,7 +276,7 @@ def test_check_all_runs_every_check(monkeypatch):
         for name, fn in inspect.getmembers(tests.records.check, inspect.isfunction)
         if name.startswith("check_")
         and name != "check_all"
-        and fn.__module__ == "tests.records.check"
+        and fn.__module__ in ("tests.records.check", "records.rules")
     }
     for name in names:
         sentinel = Violation(Path(name), "sentinel", name)
@@ -285,6 +285,16 @@ def test_check_all_runs_every_check(monkeypatch):
         )
     ran = {v.message for v in check_all(FIXTURE, set(), principles=set())}
     assert ran == names
+
+
+def test_the_rules_a_tool_also_runs_have_one_definition_in_records():
+    # The driver's bookkeeping prints from these, and `make check` applies them.
+    for name in ("spec_files", "first_cited_item", "context_section", "check_priority"):
+        fn = getattr(records.rules, name)
+        assert fn.__module__ == "records.rules"
+        assert getattr(tests.records.check, name) is fn
+    driver = Path(".claude/skills/run-saffron-spec-loop/driver.py")
+    assert "from tests." not in (REPO / driver).read_text()
 
 
 def test_a_spec_id_in_two_files_is_a_violation_naming_both(broken):
@@ -386,8 +396,18 @@ def test_a_tiered_item_is_named_under_its_tier(broken):
     assert v.field == "tier" and "2" in v.message
 
 
+def test_an_item_the_index_ranks_carries_a_tier(broken):
+    item = _item(broken, "002-the-index-drifts.md")
+    _rewrite(item, "tier: 2\n", "")
+    [v] = check_priority(
+        load(BACKLOG, broken), broken / "docs" / "backlog" / "PRIORITY.md"
+    )
+    assert v.path == item and v.field == "tier"
+    assert v.message == "item 2 has no tier, but PRIORITY.md names it under tier 2"
+
+
 def test_an_id_named_under_another_tier_in_prose_is_fine(broken):
-    # The index narrates a move under the old tier; the rule runs records → index.
+    # The index narrates a move under the old tier. One matching heading is enough.
     _rewrite(
         broken / "docs" / "backlog" / "PRIORITY.md",
         "**2**.",

@@ -45,6 +45,7 @@ item's `specs:` list in the same commit.
 
 - Set `tier` (0–3) only if the item is named under that tier's heading in `PRIORITY.md` — the
   check enforces it.
+- An item named under a tier heading carries `tier`. The check enforces this too.
 - `done`, `superseded` and `wontfix` need `closed` plus at least one of `specs`/`prs`/`commits`
   (`superseded` also needs `superseded_by`).
 - `partial` needs a dated `## Record` entry.
