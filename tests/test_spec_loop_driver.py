@@ -337,6 +337,41 @@ def test_neighbours_that_both_append_to_one_file_are_reported_as_a_conflict(repo
     assert "base.txt" in conflicts[0]
 
 
+def test_stack_names_a_top_layer_that_conflicts_only_with_the_bottom_one(
+    repo, monkeypatch, capsys
+):
+    # b-2e7c4d: SA-0185 and SA-0150 each merged cleanly with their neighbour
+    # off `main`, and the rebase onto SA-0164 below them then conflicted.
+    cwd, tips = repo
+    for branch, name, text in (
+        ("x", "base.txt", "base\nx\n"),
+        ("y", "y.txt", "y\n"),
+        ("z", "base.txt", "base\nz\n"),
+    ):
+        _git(cwd, "checkout", "-q", "-b", f"saffron/{branch}", tips["M0"])
+        tip = _commit(cwd, name, text)
+        _git(cwd, "update-ref", f"refs/remotes/origin/saffron/{branch}", tip)
+    _git(cwd, "checkout", "-q", "main")
+    rows = [_row("x", pr=10), _row("y", pr=11), _row("z", pr=12)]
+    monkeypatch.setattr(driver, "REPO", cwd)
+    monkeypatch.setattr(driver, "_load", lambda: rows)
+    # The default `cwd` is bound at import, so every merge is sent to this repo.
+    merge = driver._merge_conflicts
+    monkeypatch.setattr(
+        driver, "_merge_conflicts", lambda a, b, _cwd=None: merge(a, b, cwd)
+    )
+
+    assert driver.cmd_stack(argparse.Namespace(execute=False, top=None)) == 0
+
+    out = capsys.readouterr().out
+    assert (
+        "saffron/z does not merge cleanly onto the layers below it, first at saffron/x:"
+        in out
+    )
+    assert "saffron/y does not merge cleanly" not in out
+    assert "every layer merges cleanly" not in out
+
+
 def test_a_gone_spec_an_edited_spec_and_a_merged_or_closed_pr_make_the_order_stale(
     tmp_path,
 ):
@@ -641,6 +676,11 @@ def _no_reconcile(monkeypatch):
     """`next` and `snapshot` reconcile the host's own ledger first, which a
     unit test must never read or write."""
     monkeypatch.setattr(driver, "_reconcile_first", lambda: None)
+    # `snapshot` reads the host's ledger for follow-ups, unless a test points it elsewhere.
+    monkeypatch.setattr(driver, "_follow_up_rows", lambda _known: [], raising=False)
+
+
+_FOLLOW_UP_ROWS = getattr(driver, "_follow_up_rows", None)
 
 
 @pytest.fixture
@@ -1149,6 +1189,70 @@ def test_a_live_saffron_cell_is_found_by_its_spec_id():
         probe.kill()
         probe.wait()
     assert not driver._cell_running("SA-9999")
+
+
+def test_a_resnapshot_takes_in_a_follow_up_a_finish_ran_and_record_reads_it(
+    loop, monkeypatch, capsys
+):
+    # b-719346: `saffron finish 58` opened #982 for `SA-0323`. `record` said it
+    # was not in the order, and `--add` said it was not new.
+    import hashlib
+
+    from saffron.ledger import Ledger
+
+    parent, follow_up = loop.ids[0], loop.ids[3]
+    source = next((loop.root / ".saffron" / "specs").glob(f"{follow_up}-*.md"))
+    text = source.read_text()
+    source.unlink()  # a finish writes a ran follow-up's text outside the tree
+    driver._save([loop.row(0, state="READY_FOR_REVIEW", pr=10)])
+    loop.scan_returns()
+
+    path = loop.root / "ledger.db"
+    ledger = Ledger(path)
+    repo_id = ledger.upsert_repo("r", "git@github.com:o/r.git", "/mirror", "policy")
+    batch_id = ledger.create_batch(50.0)
+    tasks = {}
+    for spec_id, sha, number in (
+        (parent, driver._load()[0].spec_sha, 10),
+        (follow_up, hashlib.sha256(text.encode()).hexdigest(), 982),
+    ):
+        run_id = ledger.create_run(repo_id, "b" * 40, batch_id)
+        tasks[spec_id] = ledger.create_task(run_id, spec_id, sha, f"saffron/{spec_id}")
+        ledger.set_task_state(tasks[spec_id], "PACKAGE")
+        ledger.set_task_package(
+            tasks[spec_id],
+            "READY_FOR_REVIEW",
+            f"saffron/{spec_id}",
+            "p" * 40,
+            f"https://github.com/o/r/pull/{number}",
+        )
+    ledger.record_spec_text(
+        tasks[follow_up],
+        origin="follow_up",
+        spec_id=follow_up,
+        path=f".saffron/specs/{source.name}",
+        text=text,
+    )
+    ledger.record_stack_layer(
+        tasks[parent], position=1, predecessor_task_id=None, generation=0
+    )
+    ledger.record_stack_layer(
+        tasks[follow_up], position=2, predecessor_task_id=tasks[parent], generation=1
+    )
+    ledger.close()
+    monkeypatch.setattr(
+        driver, "_ledger_and_repo", lambda: (Ledger(path), repo_id, "url")
+    )
+    monkeypatch.setattr(driver, "_follow_up_rows", _FOLLOW_UP_ROWS, raising=False)
+
+    assert driver.cmd_snapshot(argparse.Namespace(force=True, new=False, add=None)) == 0
+    rows = {p.spec_id: p for p in driver._load()}
+    assert (rows[follow_up].branch, rows[follow_up].pr) == (f"saffron/{follow_up}", 982)
+    assert rows[follow_up].depends_on == [parent]
+    capsys.readouterr()
+
+    assert driver.cmd_record(argparse.Namespace(spec_id=follow_up, all=False)) == 0
+    assert capsys.readouterr().out.startswith(f"{follow_up}  READY_FOR_REVIEW  #982")
 
 
 def test_a_resnapshot_keeps_what_the_loop_recorded(loop):
@@ -2210,7 +2314,7 @@ def test_a_linked_stack_is_marked_ready_only_once_every_base_reads_back(
     ran = []
     monkeypatch.setattr(driver, "_load", lambda: rows)
     monkeypatch.setattr(driver, "_stack_order", lambda _rows: (rows, []))
-    monkeypatch.setattr(driver, "_merge_conflicts", lambda _a, _b: [])
+    monkeypatch.setattr(driver, "_stack_conflicts", lambda _heads, **_k: [])
     monkeypatch.setattr(driver, "_trunk", lambda: "origin/main")
     monkeypatch.setattr(
         driver.subprocess,
@@ -2242,7 +2346,7 @@ def test_the_step_5_pull_request_is_linked_on_top_and_marked_ready(loop, monkeyp
     ran = []
     monkeypatch.setattr(driver, "_load", lambda: rows)
     monkeypatch.setattr(driver, "_stack_order", lambda _rows: (rows, []))
-    monkeypatch.setattr(driver, "_merge_conflicts", lambda _a, _b: [])
+    monkeypatch.setattr(driver, "_stack_conflicts", lambda _heads, **_k: [])
     monkeypatch.setattr(driver, "_trunk", lambda: "origin/main")
     monkeypatch.setattr(
         driver.subprocess,
@@ -2265,6 +2369,62 @@ def test_the_step_5_pull_request_is_linked_on_top_and_marked_ready(loop, monkeyp
     fields[(12, "baseRefName")] = "main"
     assert driver.cmd_stack(argparse.Namespace(execute=True, top=12)) == 1
     assert not [c for c in ran if c[:3] == ["gh", "pr", "ready"]]
+
+
+def test_an_exhausted_task_with_a_pull_request_is_a_layer_in_the_middle(
+    loop, monkeypatch, capsys
+):
+    # b-2247dd: SA-0204 ended `EXHAUSTED` with draft #678, and `stack`, `size`
+    # and `rebase` each left it out, so the delegate linked and measured it by hand.
+    bottom, middle, top = loop.ids[:3]
+    driver._save(
+        [
+            loop.row(0, state="READY_FOR_REVIEW", pr=10),
+            loop.row(1, state="EXHAUSTED", pr=11, depends_on=[bottom]),
+            loop.row(2, state="READY_FOR_REVIEW", pr=12, depends_on=[middle]),
+        ]
+    )
+    order, warnings = driver._stack_order(driver._load())
+    assert [p.spec_id for p in order] == [bottom, middle, top]
+    assert warnings == []
+
+    from saffron.repos import policy
+
+    measured = {}
+    monkeypatch.setattr(driver, "_known_specs", lambda: {})
+    monkeypatch.setattr(driver, "_trunk", lambda: "origin/main")
+    monkeypatch.setattr(
+        driver,
+        "_own_base",
+        lambda upper, below, _trunk: measured.setdefault(upper, below)[0],
+    )
+    monkeypatch.setattr(
+        policy,
+        "load_policy",
+        lambda _root: (SimpleNamespace(integrity=SimpleNamespace(test_paths=[])), "s"),
+    )
+    monkeypatch.setattr(
+        driver, "_size", lambda *_a, **_k: SimpleNamespace(status="pass", summary="ok")
+    )
+    for spec_id in (middle, top):
+        assert driver.cmd_size(argparse.Namespace(spec_id=spec_id)) == 0
+    assert measured[f"origin/saffron/{top}"] == [
+        f"origin/saffron/{bottom}",
+        f"origin/saffron/{middle}",
+    ]
+
+    chained = []
+    monkeypatch.setattr(
+        driver,
+        "_layers",
+        lambda branches, _trunk: (
+            chained.extend(branches)
+            or [driver.Layer(b, "t", "f", "o") for b in branches]
+        ),
+    )
+    monkeypatch.setattr(driver, "_git", lambda *_a, **_k: "not the fork")
+    assert driver.cmd_rebase(argparse.Namespace(execute=False)) == 0
+    assert chained == [f"saffron/{s}" for s in (bottom, middle, top)]
 
 
 def test_a_held_spec_is_passed_over_until_released(loop):

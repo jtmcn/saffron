@@ -116,7 +116,8 @@ and trades the review commits for an end review and follow-up specs.
   Siblings that both append to one document collide on the number as well as
   the text: SA-0027 and SA-0028 both appended `## 34.` to `docs/BACKLOG.md`,
   and the PR pages looked clean while `git merge-tree` reported a `CONFLICT`.
-  `stack` runs that check on every adjacent pair. A conflict goes to the
+  `stack` merges each layer onto every layer below it, and names the lowest
+  layer a conflict reaches (b-2e7c4d). A conflict goes to the
   operator before linking: resolving it is a hand rebase of the upper branch
   onto the lower one, renumbering, a grep of the code for comments citing the
   old number, and a leased force-push.

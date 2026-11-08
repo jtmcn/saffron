@@ -114,7 +114,7 @@ spec removes the first run's container. Cell images and the build cache are
 never reclaimed, and one host's free disk fell to 16 GB. The first two stand
 between ADR 10's sequence and two cells on one host.
 
-**Raised 2026-11-07 from tier 3**, in grooming: **b-719346**. `driver.py record`
+**Raised 2026-11-07 from tier 3**, in grooming: ~~**b-719346**~~. `driver.py record`
 refuses a finish's follow-up as not in the order. It took the rank of
 ~~**b-25f2b2**~~, the tier 2 item grooming folded into it.
 
@@ -231,7 +231,7 @@ its budget.
 `prose` with a false sentence. The last two are the loop's tools. One blocked a
 measured estimate, and the other takes a `drop` per spec to scope a loop.
 
-**Placed 2026-09-28**, after run 20: **b-2e7c4d**. The loop's `stack` check
+**Placed 2026-09-28**, after run 20: ~~**b-2e7c4d**~~. The loop's `stack` check
 merges adjacent pairs, and a sibling cut from `main` hid a conflict below it.
 
 **Placed 2026-09-28**, by hand: **b-12ffc3**. `cell_down` deletes the cell's
@@ -252,7 +252,7 @@ failures.
 `error`. A second `depends_on` entry carries no code into the cell.
 
 **Placed 2026-10-05**, from the spec loop's run 28: ~~**b-8e30bd**~~,
-**b-2247dd**, then ~~**b-708c8a**~~. A merged draft leaves its task `EXHAUSTED`
+~~**b-2247dd**~~, then ~~**b-708c8a**~~. A merged draft leaves its task `EXHAUSTED`
 and its dependents refused. The loop driver refuses an `EXHAUSTED` layer.
 REVIEW's re-prompt is written twice.
 

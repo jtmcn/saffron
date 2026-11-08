@@ -118,6 +118,9 @@ def _git(*args: str, cwd: Path = REPO) -> str:
 # --------------------------------------------------------------- the order
 
 
+_LAYER_STATES = frozenset({"READY_FOR_REVIEW", "EXHAUSTED"})
+
+
 @dataclass
 class OrderRow:
     spec_id: str
@@ -157,6 +160,12 @@ class OrderRow:
     @property
     def reviewable(self) -> bool:
         return self.state == "READY_FOR_REVIEW" and self.pr is not None
+
+    @property
+    def layer(self) -> bool:
+        """A pull request the stack carries. PACKAGE opens a draft for an
+        `EXHAUSTED` task whose gates went green (b-2247dd)."""
+        return self.state in _LAYER_STATES and self.pr is not None
 
 
 def _ledger_and_repo():
@@ -535,16 +544,89 @@ def _carried(previous: list[OrderRow]) -> tuple[list[OrderRow], dict[str, str]]:
     return kept, held
 
 
+def _follow_up_rows(known: set[str]) -> list[OrderRow]:
+    """Each follow-up that ran in a batch holding one of `known`, from the
+    ledger. A row carries its branch, its pull request and its parent layer.
+    Its text goes to the state dir, so `record` loads it as any spec (b-719346)."""
+    from saffron.intake import SpecError, parse_spec
+    from saffron.scheduler import DONE_STATES
+
+    ledger, repo_id, _url = _ledger_and_repo()
+    found: dict[str, OrderRow] = {}
+    try:
+        if repo_id is None:
+            return []
+        urls = {r["task_id"]: r["pr_url"] for r in ledger.queue_lines() if r["pr_url"]}
+        for batch_id in range(1, ledger.latest_batch_id() + 1):
+            if not known & {t["spec_id"] for t in ledger.batch_tasks(batch_id)}:
+                continue
+            layers = ledger.stack_layers(batch_id)
+            for f in ledger.batch_follow_ups(batch_id):
+                if f["state"] == "QUEUED" or f["spec_id"] in known:
+                    continue  # a follow-up a batch never ran, or one the order holds
+                tasks = ledger.tasks_by_spec_id(repo_id, f["spec_id"])
+                task = next((t for t in tasks if t["task_id"] == f["task_id"]), None)
+                if task is None:
+                    continue
+                texts = ledger.spec_texts(f["task_id"])
+                text = next(
+                    (t for t in texts if t["spec_sha"] == task["spec_sha"]), texts[-1]
+                )
+                try:
+                    spec = parse_spec(text["text"])
+                except SpecError:
+                    continue
+                dest = STATE_DIR / "follow-ups" / PurePosixPath(text["path"]).name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(text["text"].encode("utf-8"))
+                parent = _follow_up_parent(f["task_id"], layers)
+                url = urls.get(f["task_id"], "")
+                row = OrderRow(
+                    spec_id=f["spec_id"],
+                    path=_relative(dest),
+                    priority=spec.priority,
+                    depends_on=[parent] if parent else [],
+                    spec_sha=task["spec_sha"],
+                    pr=int(url.rstrip("/").rsplit("/", 1)[-1])
+                    if "/pull/" in url
+                    else None,
+                    branch=task["branch"],
+                    title=spec.title,
+                    budget_usd=spec.budget_usd,
+                    risk=spec.risk,
+                )
+                if task["state"] in DONE_STATES:
+                    row.state, row.pushed_sha = task["state"], task["pushed_sha"] or ""
+                else:
+                    row.last_state = task["state"]
+                found[row.spec_id] = row
+    finally:
+        ledger.close()
+    return list(found.values())
+
+
+def _follow_up_parent(task_id: int, layers: Sequence) -> str | None:
+    """The layer a follow-up was cut from: its recorded predecessor when it
+    became a layer, else the top layer recorded before it ran."""
+    own = next((x for x in layers if x["task_id"] == task_id), None)
+    if own is not None:
+        keys = {x["task_key"]: x["spec_id"] for x in layers}
+        return keys.get(own["predecessor_key"])
+    # Follow-ups run in task order, after every layer of the order's own pass.
+    below = [x for x in layers if x["generation"] == 0 or x["task_id"] < task_id]
+    return below[-1]["spec_id"] if below else None
+
+
 # ------------------------------------------------------------ the stack
 
 
 def _stack_order(rows: list[OrderRow]) -> tuple[list[OrderRow], list[str]]:
-    """The reviewable pull requests, bottom to top, each child directly above
+    """The stack's pull requests, bottom to top, each child directly above
     its parent. Snapshot order alone put a child above an unrelated sibling,
     and the child's PR then showed its parent's changes. A stack is a line, so
     a parent with two children, or a child whose parent is not in it, is said
     rather than hidden."""
-    ready = [p for p in rows if p.reviewable]
+    ready = [p for p in rows if p.layer]
     ids = {p.spec_id for p in ready}
     by_id = {p.spec_id: p for p in rows}
 
@@ -683,6 +765,44 @@ def _merge_conflicts(lower: str, upper: str, cwd: Path = REPO) -> list[str]:
         line for line in done.stdout.splitlines() if line.startswith("CONFLICT")
     ]
     return conflicts or [f"merge-tree exited {done.returncode}: {done.stderr.strip()}"]
+
+
+def _merge_commit(lower: str, upper: str, cwd: Path) -> str:
+    """A commit of `lower` and `upper` merged, made in the object store alone."""
+    tree = _git("merge-tree", "--write-tree", lower, upper, cwd=cwd).splitlines()[0]
+    who = {"GIT_AUTHOR_NAME": "driver", "GIT_AUTHOR_EMAIL": "driver@localhost"}
+    who |= {"GIT_COMMITTER_NAME": "driver", "GIT_COMMITTER_EMAIL": "driver@localhost"}
+    done = subprocess.run(
+        ["git", "commit-tree", tree, "-p", lower, "-p", upper, "-m", "stack check"],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        env={**os.environ, **who},
+    )
+    if done.returncode != 0:
+        raise GitError(f"git commit-tree: {done.stderr.strip()}")
+    return done.stdout.strip()
+
+
+def _stack_conflicts(
+    branches: Sequence[str], cwd: Path = REPO
+) -> list[tuple[str, str, list[str]]]:
+    """Each layer merged onto every layer below it, bottom up, as the operator
+    merges the stack. A conflict names the lowest layer that brings it on.
+    Adjacent pairs alone missed a sibling's conflict with the chain (b-2e7c4d)."""
+    found: list[tuple[str, str, list[str]]] = []
+    merged = list(branches[:1])  # merged[j]: every clean layer up to j, merged
+    for upper in branches[1:]:
+        if conflicts := _merge_conflicts(merged[-1], upper, cwd):
+            lowest = next(
+                (j for j, m in enumerate(merged) if _merge_conflicts(m, upper, cwd)),
+                len(merged) - 1,
+            )
+            found.append((branches[lowest], upper, conflicts))
+            merged.append(merged[-1])  # a conflicted layer cannot merge, so skip it
+        else:
+            merged.append(_merge_commit(merged[-1], upper, cwd))
+    return found
 
 
 # ----------------------------------------------------------- the rebase
@@ -943,11 +1063,21 @@ def cmd_snapshot(args) -> int:
     known = {p.spec_id for p in previous}
     arrived = [p for p in ordered if args.force and known and p.spec_id not in known]
     wanted = {p.spec_id for p in arrived} if args.add == [] else set(args.add or ())
-    if unknown := wanted - {p.spec_id for p in arrived}:
+    # A follow-up already ran, so it joins with no `--add` (b-719346).
+    follow_ups = _follow_up_rows(known | {p.spec_id for p in ordered})
+    taken = {p.spec_id for p in follow_ups}
+    if unknown := wanted - {p.spec_id for p in arrived} - taken:
         return _fail(f"not new since the last snapshot: {', '.join(sorted(unknown))}")
     added = [p for p in arrived if p.spec_id in wanted]
     left_out = [p for p in arrived if p.spec_id not in wanted]
-    ordered = [p for p in ordered if p not in left_out]
+    ordered = _sequence([p for p in ordered if p not in left_out] + follow_ups)
+    if follow_ups:
+        print(f"follow-ups a batch ran, taken in ({len(follow_ups)}):")
+        for p in follow_ups:
+            parent = f"above {p.depends_on[0]}" if p.depends_on else "no parent found"
+            pr = f"#{p.pr}" if p.pr else "(no PR)"
+            print(f"  {p.spec_id}  {p.state or p.last_state}  {pr}  {parent}")
+        print()
     if held_out:
         print(f"edited while its pull request is open ({len(held_out)}):")
         for reason in held_out.values():
@@ -1770,29 +1900,29 @@ def cmd_stack(args) -> int:
         print(f"  #{p.pr}  {p.spec_id}  ({p.branch})")
     for warning in warnings:
         print(f"\nwarning: {warning}")
-    clean = True
-    for lower, upper in zip(order, order[1:], strict=False):
-        conflicts = _merge_conflicts(f"origin/{lower.branch}", f"origin/{upper.branch}")
-        if conflicts:
-            clean = False
-            print(f"\n{lower.branch} and {upper.branch} do not merge cleanly:")
-            for line in conflicts:
-                print(f"  {line}")
     # Step 5's pull request opens after the layers are linked, so it joins here.
     top = getattr(args, "top", None)
     prs = [p.pr for p in order] + ([top] if top else [])
     wants = [p.branch for p in order]
+    heads = [p.branch for p in order]
     if top:
-        head = _gh_pr_field(top, "headRefName")
-        conflicts = _merge_conflicts(f"origin/{order[-1].branch}", f"origin/{head}")
-        if conflicts:
-            clean = False
-            print(f"\n{order[-1].branch} and {head} do not merge cleanly:")
-            for line in conflicts:
-                print(f"  {line}")
-        print(f"  #{top}  step 5  ({head})")
-    if clean:
-        print("\nevery adjacent pair merges cleanly (git merge-tree)")
+        if (head := _gh_pr_field(top, "headRefName")) is None:
+            return _fail(f"gh could not read #{top}'s branch")
+        heads.append(head)
+        print(f"  #{top}  step 5  ({heads[-1]})")
+    try:
+        found = _stack_conflicts([f"origin/{h}" for h in heads], cwd=REPO)
+    except GitError as err:
+        return _fail(str(err))
+    for lower, upper, conflicts in found:
+        print(
+            f"\n{upper.removeprefix('origin/')} does not merge cleanly onto the "
+            f"layers below it, first at {lower.removeprefix('origin/')}:"
+        )
+        for line in conflicts:
+            print(f"  {line}")
+    if not found:
+        print("\nevery layer merges cleanly onto the layers below it (git merge-tree)")
 
     command = ["gh", "stack", "link", *(str(n) for n in prs)]
     print(f"\n  {' '.join(command)}")
@@ -1883,8 +2013,8 @@ def cmd_size(args) -> int:
     match = next((p for p in rows if p.spec_id == args.spec_id), None)
     if match is None:
         return _fail(f"{args.spec_id} is not in the order")
-    if not match.reviewable:
-        return _fail(f"{match.spec_id} is not reviewable, so it has no stack to sit in")
+    if not match.layer:
+        return _fail(f"{match.spec_id} has no pull request in the stack to measure")
     spec, _sha = load_spec(REPO / match.path)
     subprocess.run(["git", "fetch", "-q", "origin"], cwd=REPO)
     upper = f"origin/{match.branch}"
