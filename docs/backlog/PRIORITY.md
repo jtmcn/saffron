@@ -304,7 +304,7 @@ then passed it. No gate re-runs a parent's wrong versions.
 passed. PACKAGE leaves a spec's deferred check out of `## Not covered`.
 
 **Placed 2026-10-23**, from the spec loop's run 46: ~~**b-0bd346**~~, then
-~~**b-066901**~~, ~~**b-1572e7**~~, **b-cc87b1** and **b-7c1c99**. REBUT ends a task
+~~**b-066901**~~, ~~**b-1572e7**~~, **b-cc87b1** and ~~**b-7c1c99**~~. REBUT ends a task
 `EXHAUSTED` on a gate failure its own fix made. A layer cut from a review
 commit cannot be packaged again. A child stacks on its lowest open parent.
 The writer drafts a follow-up a queued spec owns. One refused /24 stops
