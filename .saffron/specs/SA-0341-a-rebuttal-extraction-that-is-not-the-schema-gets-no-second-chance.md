@@ -137,11 +137,11 @@ acceptance:
 Backlog item **42**, its re-prompt half. It cites `DESIGN.md` §5.6. Every
 line below was read at `6db66941`.
 
-`DESIGN.md` §5.6 reads as amended at that commit (`DESIGN.md:1264`). An
+`DESIGN.md` §5.6 reads as amended at that commit (`DESIGN.md:1285`). An
 extraction that is not the schema is re-prompted once. The re-prompt quotes
 the validation error and draws on the extraction's reserve. The fix turn is
 never repeated, and a second unreadable answer is recorded as unreadable. The
-reserve paragraph after it is unchanged (`DESIGN.md:1266`). The extraction's
+reserve paragraph after it is unchanged (`DESIGN.md:1286`). The extraction's
 pool is $4.00 plus what the rebuttal turn left of the $10.00 cap.
 
 **What the turn does today.** `run_rebuttal` runs the fix turn, then one
@@ -158,22 +158,22 @@ no re-prompt. This spec reverses it.
 **The record.** `RebuttalTurn.error` holds the failure
 (`saffron/phases/rebut.py:105-107`). `RebutResult.as_dict` writes it under
 `rebuttal.error` (`saffron/phases/rebut.py:148-151`), and `session.py` writes
-that dict to `rebuttal.json` (`saffron/cell/session.py:3717-3719`). On
+that dict to `rebuttal.json` (`saffron/cell/session.py:3720-3722`). On
 `SA-0040` one trailing comma lost both arguments of a $2.59 turn, and the
 critic then confirmed a blocker on a false premise.
 
 **The pool.** `session.py` wraps every REBUT session in `_RebutCap`
-(`saffron/cell/session.py:3636-3637`). `run_rebuttal` opens the extraction's
+(`saffron/cell/session.py:3639-3640`). `run_rebuttal` opens the extraction's
 pool before the extraction (`saffron/phases/rebut.py:256`). A call the pool
 cannot cover raises `implement.AgentFailed` reading `the REBUT extraction pool
-is already spent` and sets `cut` (`saffron/cell/session.py:222-229`). A failed
-call that spends the pool sets `cut` too (`saffron/cell/session.py:236-241`).
+is already spent` and sets `cut` (`saffron/cell/session.py:221-228`). A failed
+call that spends the pool sets `cut` too (`saffron/cell/session.py:235-240`).
 A cut that leaves REBUT `REBUTTAL_UNJUDGED` becomes `EXHAUSTED`, with the
-reserve's line (`saffron/cell/session.py:3697-3705`).
+reserve's line (`saffron/cell/session.py:3700-3708`).
 
 **The patterns.** The plan checkpoint re-prompts once, with the error ahead
 of the extraction prompt, and emits a `PhaseStart` first
-(`saffron/cell/session.py:718-736`). A REVIEW lens does the same through
+(`saffron/cell/session.py:720-738`). A REVIEW lens does the same through
 `_parse_or_reprompt` (`saffron/phases/review.py:235-290`). Its `announce`
 emits the lens's line (`saffron/phases/review.py:328-337`).
 
@@ -204,7 +204,7 @@ emits the lens's line (`saffron/phases/review.py:328-337`).
 - A verdict that is not the schema (`saffron/phases/rebut.py:384-387`). It stays
   unre-prompted.
 - Rebuilding `reprompt_error` from `rebuttal.json` in `saffron/task.py`'s
-  `_rebuild_rebut_result` (`saffron/task.py:1142-1169`). No reader of the
+  `_rebuild_rebut_result` (`saffron/task.py:1169-1196`). No reader of the
   rebuilt result reads it, so it stays `None` there.
 - Recording a second unreadable answer as unread in the ledger. `SA-0340`
   owns that.
@@ -216,9 +216,9 @@ emits the lens's line (`saffron/phases/review.py:328-337`).
 
 **`SA-0340`, the parent.** It edits `sustained_blockers` and `unkept_fixes`
 (`saffron/phases/rebut.py:607-665`) and the ledger write near
-`saffron/cell/session.py:3727`. This spec assumes it leaves alone
+`saffron/cell/session.py:3730`. This spec assumes it leaves alone
 `saffron/phases/rebut.py:81-108`, `:137-164`, `:221-284` and `:722-734`. It
-also assumes `saffron/cell/session.py:222-229` and `:2903-2908` stay as they
+also assumes `saffron/cell/session.py:221-228` and `:2906-2911` stay as they
 are. Lines cited here were read before it, so find each by its text.
 
 **Edit or new.** The re-prompt, the field and the line are new code. So
@@ -232,7 +232,7 @@ the new `spec_id` argument and on the failed re-prompt case.
 **Comments that turn false.** Replace the comment at
 `saffron/phases/rebut.py:274-276`. The docstring at `:233-238` says two turns.
 The comment at `:725` says these two turns, and so does
-`saffron/cell/session.py:2907`. The comment at `saffron/cell/session.py:224` says
+`saffron/cell/session.py:2910`. The comment at `saffron/cell/session.py:223` says
 only a verdict meets the pool's refusal, which the re-prompt now meets too.
 Keep each comment at two lines or fewer.
 
@@ -247,7 +247,7 @@ Keep each comment at two lines or fewer.
 - In `tests/test_session.py`, drive a cell through `_through_rebut`, `_rebuttable`
   and `_drive`, with a `budget_usd` far above the spend. Criterion 4's three
   cells pass `rebut_commits=0`, since a moved HEAD opens the verdict pool and
-  clears the cut (`saffron/cell/session.py:208-212`). Find the re-prompt in
+  clears the cut (`saffron/cell/session.py:207-211`). Find the re-prompt in
   `cell.turns` as a prompt that ends with `EXTRACT_PROMPT` and is not equal to it.
   With a $6.00 fix turn and a $2.50 extraction, the re-prompt's cap is $5.50. An
   $8.00 extraction leaves nothing. In that refused cell, assert the re-prompt's

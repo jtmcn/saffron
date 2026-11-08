@@ -108,8 +108,8 @@ function or text named beside it.
 
 **What the batch scan assumes.** §4.2.1 says the in-flight states at scan
 time mean a corpse. "One batch runs at a time, so nothing is legitimately in
-flight when a scan happens" (`DESIGN.md:482`). `_batch` resolves its queue
-with `stamp_orphaned=True` (`saffron/cli.py:2290`). `reconcile` then sets
+flight when a scan happens" (`DESIGN.md:483`). `_batch` resolves its queue
+with `stamp_orphaned=True` (`saffron/cli.py:2318`). `reconcile` then sets
 every row in `IN_FLIGHT_STATES` to `ORPHANED` (`saffron/reconcile.py:222-226`).
 `IN_FLIGHT_STATES` holds `DRAFT`, `QUEUED` and the six phase states
 (`saffron/reconcile.py:53-64`). `ORPHANED` is in `REQUEUE_STATES`
@@ -119,20 +119,20 @@ on the live task's spec.
 **Nothing holds the premise.** No lock, lease or process check guards it in
 `saffron/`. Four commands leave a live row in flight. `saffron cell` and
 `saffron batch` reach `run_one_cell`, whose `_drive_cell` creates the row
-(`saffron/cell/session.py:1032`, `:2254`). `saffron draft` creates a row
-(`saffron/cli.py:1613`), and a new row starts `QUEUED`
-(`saffron/ledger.py:821`). It stays there while the writer cell runs, until
+(`saffron/cell/session.py:1034`, `:2256`). `saffron draft` creates a row
+(`saffron/cli.py:1641`), and a new row starts `QUEUED`
+(`saffron/ledger.py:823`). It stays there while the writer cell runs, until
 `saffron/draft.py` sets an end state, as `_stop` and `_end` do
 (`saffron/draft.py:158-171`). v0's `saffron replay` creates one too, then
 runs two gate suites (`saffron/replay.py:54-74`).
 
 **Where the three commands start.** `main` opens the home `Ledger` at
-`args.home / "ledger.db"` (`saffron/cli.py:370-372`). It then dispatches
+`args.home / "ledger.db"` (`saffron/cli.py:394-396`). It then dispatches
 `cell` through `_cell_guarding_sigterm`, `batch` through
 `_guarding_sigterm(lambda: _batch(...))`, and `draft` to `_draft`
-(`saffron/cli.py:374-381`). The `try` around the dispatch prints any
-exception and returns 2 (`saffron/cli.py:419-426`). `Ledger.__init__`
-creates the home directory before it connects (`saffron/ledger.py:415-416`).
+(`saffron/cli.py:398-405`). The `try` around the dispatch prints any
+exception and returns 2 (`saffron/cli.py:443-450`). `Ledger.__init__`
+creates the home directory before it connects (`saffron/ledger.py:416-417`).
 
 **A lock the tree already uses.** `saffron/report/index.py`'s `_locked` takes
 `fcntl.flock` on a sibling lock file (`saffron/report/index.py:355-366`).

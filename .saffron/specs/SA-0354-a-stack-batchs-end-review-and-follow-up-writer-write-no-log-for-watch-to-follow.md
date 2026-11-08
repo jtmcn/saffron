@@ -119,12 +119,12 @@ cited here. None of the four specs names `_stack_end_review` or
 `_stack_follow_ups`.
 
 **The end review.** `_stack_end_review` builds the stack batch's
-`end_review` callable (`saffron/cli.py:916`). Each call exports `.saffron/`
-into `out_dir / "end-review" / batch_key` (`saffron/cli.py:930-932`). Its
+`end_review` callable (`saffron/cli.py:940`). Each call exports `.saffron/`
+into `out_dir / "end-review" / batch_key` (`saffron/cli.py:954-956`). Its
 agent is `stop_on_rejected(partial(implement.run_agent, ...))` with the spec
-id `end-review-<batch key>` and no `emit` (`saffron/cli.py:936-942`). Its
+id `end-review-<batch key>` and no `emit` (`saffron/cli.py:960-966`). Its
 call to `end_review.run_end_review` passes no `emit`
-(`saffron/cli.py:953-967`). So `run_end_review` keeps its default,
+(`saffron/cli.py:977-991`). So `run_end_review` keeps its default,
 `print(describe(event))` (`saffron/end_review.py:698`). It threads that
 `emit` to the join lens and to each layer's lenses
 (`saffron/end_review.py:730`, `:747`, `:524`, `:470`, `:404`, `:651`).
@@ -134,25 +134,25 @@ bound in a `partial`. So an `emit` bound into the agent's `partial` never
 reaches a lens.
 
 **The follow-up writer.** `_stack_follow_ups` builds the `follow_ups`
-callable (`saffron/cli.py:1646`). Each call exports into
-`out_dir / "follow-ups" / batch_key` (`saffron/cli.py:1678-1680`). Its
+callable (`saffron/cli.py:1674`). Each call exports into
+`out_dir / "follow-ups" / batch_key` (`saffron/cli.py:1706-1708`). Its
 `write` binds `partial(implement.run_agent, ...)` with the spec id
-`follow-up-<origin spec id>` and no `emit` (`saffron/cli.py:1719-1723`).
+`follow-up-<origin spec id>` and no `emit` (`saffron/cli.py:1747-1751`).
 It hands that agent to `spec_review.run_spec_writer`
-(`saffron/cli.py:1732`), which calls it with no `emit`
+(`saffron/cli.py:1760`), which calls it with no `emit`
 (`saffron/spec_review.py:676`). So `run_agent`'s default prints each event
 (`saffron/phases/implement.py:250`) and no file holds it. The `emit=print`
 handed to `follow_up.write_follow_ups` takes progress strings, not events
-(`saffron/cli.py:1776`, `saffron/follow_up.py:247`).
+(`saffron/cli.py:1804`, `saffron/follow_up.py:240`).
 
 **Both commands.** `_batch` builds `_stack_end_review` and
 `_stack_follow_ups` with `main`'s `out_dir` when the batch is not deferred
-(`saffron/cli.py:2361-2363`, `:2389-2396`). `_finish` builds both with the
-same `out_dir` (`saffron/cli.py:2633-2635`, `:2646-2653`). Neither command takes
+(`saffron/cli.py:2389-2391`, `:2415-2422`). `_finish` builds both with the
+same `out_dir` (`saffron/cli.py:2661-2663`, `:2674-2681`). Neither command takes
 `--out`, so for either that is `<home>/batches/v0`
-(`saffron/cli.py:332-333`). `saffron watch` with no spec id runs
-`follow_every_task` over that same `out_dir` (`saffron/cli.py:405`,
-`:3083-3090`).
+(`saffron/cli.py:344-345`). `saffron watch` with no spec id runs
+`follow_every_task` over that same `out_dir` (`saffron/cli.py:429`,
+`:3121-3128`).
 
 **What the follower reads.** `follow_every_task` lists `root` on every
 poll and reads `<root>/<child>/events.jsonl` for each directory one level
@@ -163,10 +163,10 @@ joins after the start reads from offset 0 (`saffron/watch.py:254-268`).
 
 **The export deletes its destination.** `export_saffron_dir` calls
 `shutil.rmtree(dest, ignore_errors=True)` before it writes
-(`saffron/repos/mirror.py:209`).
+(`saffron/repos/mirror.py:220`).
 
 **The helper `SA-0253` left.** `_spec_session_emit(log_dir)` returns
-`partial(_default_emit, log=EventLog(log_dir))` (`saffron/cli.py:1235-1239`).
+`partial(_default_emit, log=EventLog(log_dir))` (`saffron/cli.py:1259-1263`).
 `_default_emit` prints `describe(event)` when it is not empty, then
 appends the event (`saffron/cell/session.py:125-136`). `EventLog` creates
 its directory on the first write (`saffron/events.py:556`).
@@ -205,7 +205,7 @@ one directory, `<batch key>.<kind>`, directly under `out_dir`.
   lenses in a loop, one session at a time (`saffron/end_review.py:716-749`,
   `:382-406`). So their lines do not interleave.
 - **`saffron draft`'s writer.** `_draft_adapters`' `write` binds its agent
-  with no `emit` (`saffron/cli.py:1538-1542`). It is an attended command
+  with no `emit` (`saffron/cli.py:1566-1570`). It is an attended command
   and stays print only.
 - **`saffron review`'s lenses** (`saffron/commit_review.py:259`). That
   command is attended too.
