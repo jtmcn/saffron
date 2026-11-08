@@ -1,10 +1,12 @@
 ---
 id: 55
 title: '`dist/` is not gitignored, so a build artifact is one `git add -A` from being committed'
-status: open
+status: done
+closed: 2026-11-07
+by_hand: true
 tier: 3
 specs: []
-prs: []
+prs: [1051]
 commits: []
 cites: []
 related: []
@@ -22,3 +24,6 @@ was found.
 one line in `.gitignore`. Filed rather than fixed in passing
 because it belongs to no branch in flight; it is a two-minute item for whoever
 touches packaging next.
+
+## Record
+- 2026-11-07: done by hand in #1051.

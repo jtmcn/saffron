@@ -103,7 +103,8 @@ the two lens sets share no key.
 - **18** departs. The lens emits its block in the turn that does the work,
   as ADR 4's lenses do.
 - **34** upholds. A conventions lens that errors stops the task at
-  `REVIEWING`, so an absent review never reads as a clean one.
+  `REVIEWING`, so an absent review never reads as a clean one. Amended
+  2026-11-07, by hand for b-80cc6e: since `SA-0287` it ends `REVIEW_INCOMPLETE`.
 - **6** upholds. A repair turn that rewrites a comment to pass `prose` now
   meets a reader that asks whether the comment is still true.
 - **9** upholds. Any one blocker still routes to REBUT, and a fourth lens adds

@@ -90,8 +90,8 @@ def render_context(
     including the em dash, the connective prose and the sentences after, is
     left exactly as committed.
 
-    Three of the six sets wrap across source lines, so the rewritten span is
-    re-wrapped at the committed width and continuation indent. Emitting it on
+    A set that wraps across source lines is re-wrapped at the committed
+    width and continuation indent. Emitting it on
     one line reproduces the members correctly and the bytes wrongly.
     """
     for term, (class_name, style) in SETS.items():

@@ -111,3 +111,38 @@ and not run.
 **What this run adds.** Both blockers in this run were arrangements, and each
 cost one prototype run to settle. A writer brief should ask for a prototype
 run of every wrong version that turns on process or descriptor behaviour.
+
+
+## `SA-0350`, from b-e7898b (spec loop run 55)
+
+One writer, two reviews and two revisions, beside a running batch. The draft
+took 23 minutes and about 198k tokens. Each review took 5 to 6 minutes.
+
+The design is a declared field. A spec that adds a refusal names the specs it
+would refuse in `retired_first`, and intake refuses it until each is in
+`done/`. The brief ruled out running the new rule on the host.
+
+**Review 1: no blocker, three concerns.**
+
+- A corpus test asserts every refusal reason holds `depends_on`. The first
+  retired spec that declares the field would fail it. This is pre-flight 6,
+  a change that breaks a live test. The writer had not read that assert.
+- An unreadable `done/` file gave a reason the filesystem contradicts. This is
+  pre-flight 4. The base already carries a suffix for this case.
+- The stack-mode witness never made its parent a stack base, so a wrong
+  version that credits the base passed. This is pre-flight 1, a set member
+  the witness never drove.
+
+**Review 2: no blocker, three concerns.**
+
+- `saffron cell` exited 1 on a failed base export, though `cli.py`'s contract
+  gives a setup failure 2. Pre-flight 8 missed it. The first revision added
+  the branch, so this class came from a fix.
+- The cell path passed the unreadable count with no witness. This is
+  pre-flight 1 again, on the branch the first revision added.
+- Whether the parent becomes the stack base was unmeasured. The writer ran
+  `build_queue` and confirmed it, which is pre-flight 10.
+
+**What this run adds.** Both review 2 concerns sat on code the first revision
+wrote. A revision brief should ask the writer to run pre-flight 1 and 8 on
+each branch it adds, not only on the findings it answers.

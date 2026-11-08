@@ -12,3 +12,5 @@ __pycache__/
 
 # `run-saffron-spec-loop` run state; the plan outlives the queue it was cut from.
 .saffron-loop/
+# `uv build` output (item 55).
+dist/

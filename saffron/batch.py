@@ -658,7 +658,7 @@ def run_stack_batch(
         if review is not None:
             if candidate.spec.id not in task_ids:
                 # Minted once per spec, never for a follow-up, already seeded.
-                # A raise here is always a miss, even an unmarked `CellRuntimeError`, which `review` and `runner` offer again (b-60a399).
+                # A raise here is always a miss, even an unmarked `CellRuntimeError`, which `review`, `revise` and `runner` offer again (b-60a399).
                 assert mint is not None
                 try:
                     task_id = mint(candidate)
@@ -806,6 +806,10 @@ def run_stack_batch(
                         )
                     if route == "run":
                         reviewed.add(candidate.spec.id)
+                        emit(
+                            f"{candidate.spec.id:<10} reviewed  run  "
+                            f"{len(read.findings)} finding(s)"
+                        )
                         # Gate 0's open-pull-request refusals again, on a revised
                         # spec of the order only, never a follow-up's own first text.
                         if not is_follow_up and open_prs is not None:
@@ -853,9 +857,10 @@ def run_stack_batch(
                     )
                 try:
                     turn = revise(candidate, pred, spec_text, review_text)
-                except Exception:
+                except Exception as exc:
                     ledger.set_task_state(task_id, "GATE_ERROR")
-                    if not is_follow_up:
+                    # A cell runtime failure offers the spec again, as `review`'s does (b-a33889).
+                    if not is_follow_up and not isinstance(exc, CellRuntimeError):
                         missed[candidate.spec.id] = frozenset({candidate.spec.id})
                         remaining.remove(original)
                     raise

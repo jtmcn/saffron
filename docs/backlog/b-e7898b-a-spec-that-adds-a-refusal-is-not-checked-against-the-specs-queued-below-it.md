@@ -4,7 +4,7 @@ title: A spec that adds a refusal is never checked against the specs queued belo
 status: open
 tier: 1
 filed: 2026-10-19
-specs: []
+specs: [SA-0350]
 prs: []
 commits: []
 cites: [§4.2.1]
@@ -36,3 +36,6 @@ orders it after the specs it refuses, and names each one.
 ## Record
 
 - 2026-10-19: filed from the spec loop's run 44.
+- 2026-11-07: specced as `SA-0350`. A spec declares `retired_first`, the
+  ids it waits to see in `done/`. The queue scan and `saffron cell` refuse
+  it while one is not, naming each.

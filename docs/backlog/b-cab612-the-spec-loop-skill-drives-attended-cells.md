@@ -1,12 +1,13 @@
 ---
 id: b-cab612
 title: "The spec loop's skill drives one attended cell per spec, while the operator made `saffron batch` its default"
-status: partial
+status: done
+closed: 2026-11-07
 tier: 1
 filed: 2026-10-07
 by_hand: true
 specs: []
-prs: []
+prs: [1040]
 commits: []
 cites: [§4.4]
 related: [b-e0e1cf, b-792ab2]
@@ -50,3 +51,6 @@ above with one command.
   takes one `record` call per task, by hand, and `record` names no batch.
   Restacking the layers above a lower layer's review commits is still a hand
   step, as step 2 says.
+- 2026-11-07: done by hand in #1040. `driver.py record --all` records every pending
+  spec a batch ran a task for. Step 2 names `driver.py rebase --execute` for
+  the restack, which already moves each layer onto the one below.
