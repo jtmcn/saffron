@@ -2842,6 +2842,24 @@ def _cite_tree(monkeypatch, root):
     return spec
 
 
+@pytest.mark.parametrize("retired", [False, True])
+def test_cite_takes_a_spec_id_as_well_as_a_path(monkeypatch, tmp_path, capsys, retired):
+    # b-b1a7d4: `driver.py cite SA-0152` failed with "no such spec".
+    spec = _cite_tree(monkeypatch, tmp_path)
+    if retired:
+        (spec.parent / "done").mkdir()
+        spec = spec.rename(spec.parent / "done" / spec.name)
+    seen = []
+    monkeypatch.setattr(
+        driver, "_cite_defects", lambda path, ref: seen.append((path, ref)) or (1, [])
+    )
+
+    assert driver.cmd_cite(SimpleNamespace(spec_path="SA-0001", base="b")) == 0
+    assert seen == [(spec, "b")]
+    assert driver.cmd_cite(SimpleNamespace(spec_path="SA-0002", base="b")) == 1
+    assert "no such spec: SA-0002" in capsys.readouterr().err
+
+
 def test_cite_and_check_report_what_the_batchs_citation_check_reports(
     empty_repo, monkeypatch, capsys
 ):

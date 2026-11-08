@@ -474,7 +474,7 @@ other is a fixture field under `docs/**` that no cell could add.
 uid 0 in every cell, and `--cap-drop ALL` makes the read they test fail.
 
 **Placed 2026-09-29**, from the spec loop's run 22: **b-695234**,
-**b-12e717**, **b-2dd65f**, **b-b1a7d4**, then **b-1f1188**.
+**b-12e717**, **b-2dd65f**, ~~**b-b1a7d4**~~, then **b-1f1188**.
 The first three are defects in REVIEW and REBUT that the run's seats found.
 The last two are gaps in the spec chain's own tools. **b-9529e9** and
 **b-91ead2** came from closing the run. The scoring driver cannot reach a

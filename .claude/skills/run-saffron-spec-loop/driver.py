@@ -2704,7 +2704,13 @@ def cmd_cite(args) -> int:
     and frontmatter plays no part in resolving one."""
     spec_path = Path(args.spec_path)
     if not spec_path.is_file():
-        return _fail(f"no such spec: {spec_path}")
+        # A bare id names a queued or retired spec (b-b1a7d4).
+        found = sorted(SPECS_DIR.glob(f"{args.spec_path}-*.md")) or sorted(
+            (SPECS_DIR / "done").glob(f"{args.spec_path}-*.md")
+        )
+        if len(found) != 1:
+            return _fail(f"no such spec: {spec_path}")
+        spec_path = found[0]
     try:
         count, defects = _cite_defects(spec_path, args.base)
     except GitError as err:
@@ -3352,7 +3358,7 @@ def main() -> int:
     p = sub.add_parser(
         "cite", help="check a spec's file:line citations resolve at --base"
     )
-    p.add_argument("spec_path")
+    p.add_argument("spec_path", metavar="spec", help="a spec's id or its path")
     p.add_argument("--base", default="origin/main")
     p.set_defaults(func=cmd_cite)
 
