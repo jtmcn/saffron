@@ -26,7 +26,7 @@ asserted — because a lens measured inside a weaker cell is measuring something
 else (Appendix I).
 
 Its own slug names its network and its proxy, and `cell_up` claims the
-network a free /24 of the pool. So it can run beside a live batch. This is
+network a free /24 of the subnet pool. So it can run beside a live batch. This is
 reasoned from the code and not measured.
 """
 

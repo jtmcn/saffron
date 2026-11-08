@@ -6,7 +6,6 @@ costs nothing to honour before `revert` — the gate that needs it — exists.
 """
 
 import json
-import re
 import subprocess
 import sys
 
@@ -143,31 +142,15 @@ if proc.returncode in (3, 4):
         }
     )
 
-# Keyed on node ids when `uncollected` is reported: `revert` reads both lists
-# together, and an exception type beside a node id reads a failure as a pass.
-if uncollected is not None:
-    failures = [
-        {"file": node_file(name), "code": name, "message": line}
-        for line in out.splitlines()
-        if line.startswith(("FAILED ", "ERROR "))
-        for name in [line.split(" ", 1)[1].split(" - ")[0]]
-    ]
-else:
-    failures = [
-        {
-            "file": m.group(1),
-            "line": int(m.group(2)),
-            "code": m.group(3),
-            "message": m.group(4).strip(),
-        }
-        for m in re.finditer(r"^(\S+?):(\d+): (\w+): (.*)$", out, re.MULTILINE)
-    ]
-if proc.returncode != 0 and not failures:
-    for line in out.splitlines():
-        if line.startswith("FAILED "):
-            name = line.split(" ", 1)[1].split(" - ")[0]
-            path = name.split("::")[0]
-            failures.append({"file": path, "code": name, "message": line})
+# Node ids from pytest's own FAILED and ERROR lines, never a regex over captured
+# output a test can print into (b-bba47a). A collection error names a file, not a node id.
+failures = [
+    {"file": node_file(name), "code": name, "message": line}
+    for line in out.splitlines()
+    if line.startswith(("FAILED ", "ERROR "))
+    for name in [line.split(" ", 1)[1].split(" - ")[0]]
+    if "::" in name or uncollected is not None
+]
 
 if proc.returncode != 0 and not failures:
     emit(

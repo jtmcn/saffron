@@ -371,8 +371,8 @@ _Avoid_: "the JSON step", "parsing the output".
 **Refusal**: A task rejected before any cell starts, or one `saffron package` will not
 package. The causes include a duplicate open PR, an overlapping in-flight change, a
 malformed or moved spec, and a repo that failed preflight.
-The refusal itself costs nothing. A refusal the queue scan makes reaches the queue as
-one line. `run_task` also refuses a task whose `consumes` entry does not resolve, or
+The refusal itself costs nothing. A refusal the queue scan makes reaches stdout as
+one line, and no morning queue row records it. `run_task` also refuses a task whose `consumes` entry does not resolve, or
 cannot be read, at the tree base. That refusal prints one line and writes no queue
 row. A stack batch also refuses a spec its stack order never takes, and every spec
 whose `depends_on` reaches a missed task. It refuses a revision the budget left cannot
@@ -818,7 +818,7 @@ the garbage collector: `SCOPE_REVIEW`, `PLAN_REJECTED`, `EXHAUSTED`,
 `GATE_ERROR`, `RATE_LIMITED`, `SPEC_WITHHELD`, `PROVIDER_UNREACHABLE`,
 `SPEC_DRAFTED`, `REBUTTAL_UNJUDGED`, `REVIEW_INCOMPLETE`, `APPROVED`,
 `CHANGES_REQUESTED`, `REJECTED`, `MERGED`, `ORPHANED`, `MERGE_TRAIN`.
-A re-queue resumes the same row from six end states, so an end state need not be
+A spec re-queues from six end states, on a fresh task, so an end state need not be
 final. Every terminal state is an end state.
 
 **In-flight state**: A state in which Saffron advances the task, tonight or now: `DRAFT`,

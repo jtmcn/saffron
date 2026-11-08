@@ -406,11 +406,11 @@ stack left alone.
 in `policy.yaml`. **b-2227b0**, closed as parked, records a draft ADR.
 
 **Placed 2026-10-25**, from the spec loop's run 48: ~~**b-9c5b11**~~,
-~~**b-01c53d**~~, ~~**b-92fdbe**~~, **b-d3f977**, **b-f0e351** and **b-87001a**.
+~~**b-01c53d**~~, ~~**b-92fdbe**~~, **b-d3f977**, ~~**b-f0e351**~~ and **b-87001a**.
 Each is a gap a seat, a finish or the run found and the stack left alone.
 
 **Placed 2026-10-27**, from the spec loop's run 49:
-**b-1b8b1e**, **b-92c92a**, **b-2a03c2**, **b-d2afe3**, ~~**b-1ff5a3**~~ and
+**b-1b8b1e**, **b-92c92a**, **b-2a03c2**, ~~**b-d2afe3**~~, ~~**b-1ff5a3**~~ and
 **b-3a0789**. Each is a gap a seat, a finish or the run found and the stack
 left alone.
 
@@ -434,12 +434,12 @@ Each line keeps the order it was filed in.
 - From spec loop runs 15 to 17 and `SA-0135`'s review: **b-f30189**, **b-a90136**,
   **b-e06dbc**, **b-32f492**, **b-8fb227**, **b-79d951**, **b-9ead75** and
   ~~**b-04d4c2**~~.
-- From the stack batch's spec reviews: ~~**b-2d9ae9**~~, **b-223244**,
+- From the stack batch's spec reviews: ~~**b-2d9ae9**~~, ~~**b-223244**~~,
   **b-acee54**, **b-6518ba**, **b-6a101f**, **b-7eb5f5** and **b-22ff3f**.
 - From the 2026-09-27 size pricing and spec loop run 32: **b-41664e**, **b-4b386f**,
   **b-d96f14**, ~~**b-9b94c9**~~, **b-ff3141**, **b-a99c76**, **b-3a8504**,
   **b-7f105f** and **b-8c17dc**.
-- From item 52's review: **b-cec9a7**.
+- From item 52's review: ~~**b-cec9a7**~~.
 
 **Placed 2026-09-20**: **161**, **162**, **163**, **126**, **128** and **129**,
 then **b-7d2acf**. The first three are what PR #317 left on the `prose` gate. A

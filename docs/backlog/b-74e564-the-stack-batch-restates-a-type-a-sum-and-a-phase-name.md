@@ -1,12 +1,12 @@
 ---
 id: b-74e564
 title: The stack batch restates the revise type, the budget-left sum and a phase name, and keeps a stale comment
-status: open
+status: partial
+by_hand: true
 tier: 3
 filed: 2026-09-28
-closed:
 specs: []
-prs: []
+prs: [1065]
 commits: []
 cites: [§4.4]
 related: [b-792ab2]
@@ -38,3 +38,9 @@ comment is gone.
 ## Record
 
 - 2026-09-28: filed from the spec loop's run 20.
+- 2026-11-08: partial by hand. The stale comment on `review` in
+  `run_stack_batch` now names `_batch` and `_finish` as its callers. Left:
+  the `revise` alias and the `review` `Protocol`, whose other sites are in
+  `cli.py`. The review phase constant belongs beside `WRITING_PHASE` in
+  `spec_review.py`, and `task.py` reads it. The budget-left helper needs its
+  test in `test_batch.py`. Queued specs touch all four files.

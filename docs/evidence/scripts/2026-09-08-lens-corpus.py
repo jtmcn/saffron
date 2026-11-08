@@ -24,7 +24,7 @@ is copied here rather than paraphrased (Appendix I: every mechanism reports
 success and applies to a different container).
 
 Like the single-fixture driver, it names its network and proxy from its own
-slug, and `cell_up` claims the network a free /24 of the pool. So it can run
+slug, and `cell_up` claims the network a free /24 of the subnet pool. So it can run
 beside a live batch. This is reasoned from the code and not measured.
 
 This module holds no scoring logic — `harness/corpus.py` is the predicate,

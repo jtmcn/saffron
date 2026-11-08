@@ -1,12 +1,13 @@
 ---
 id: b-223244
 title: A re-queued spec runs on a fresh task, where DESIGN 4.2.1 says it resumes its task row
-status: open
+status: done
+closed: 2026-11-08
+by_hand: true
 tier: 3
 filed: 2026-09-25
-closed:
 specs: []
-prs: []
+prs: [1065]
 commits: []
 cites: [§4.2.1]
 related: [b-792ab2]
@@ -31,3 +32,4 @@ tonight's batch, so its spend and layers read exactly.
 ## Record
 
 - 2026-09-25: filed from the spec reviews of `b-792ab2`'s last build specs.
+- 2026-11-08: done by hand in #1065.
