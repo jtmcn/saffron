@@ -13,9 +13,7 @@ import yaml
 from pydantic import ValidationError
 
 from saffron.intake import Mutant, Spec, SpecError, refuse_disclosed_mutants
-from saffron.repos.mirror import _run, file_at
-
-MUTANTS_REF = "refs/saffron/mutants"
+from saffron.repos.mirror import MUTANTS_REF, _run, file_at
 
 
 class MutantsError(SpecError):

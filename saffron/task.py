@@ -752,13 +752,13 @@ def run_task(
     """One task, start to finish: stack it if it has a parent, run its cell,
     and package a reviewable or standing-blocker `EXHAUSTED` result alike.
 
-    A given `handoff` replaces `_resolve_stacked_on` (`Handoff`, `SA-0143`).
-    Given a `task_id`, `_recorded_spec_text` runs first and rebinds `spec`,
-    `spec_sha` and `ceilings` to the task's recorded text (ADR 7). `state`
-    on the outcome is PACKAGE's own, not the pre-packaging `READY_FOR_REVIEW`.
-    Returns `Refused` before any cell exists: for an unresolved
-    `spec.consumes`, a refused recorded text, open parents on no one chain,
-    or a stale `REBUTTAL_UNJUDGED` parent (`b-1572e7`, `SA-0330`). A base the mirror lacks raises `GitError`."""
+    A given `handoff` replaces `_resolve_stacked_on` (`SA-0143`). A `task_id`
+    rebinds `spec`, `spec_sha` and `ceilings` to the recorded text (ADR 7).
+    `state` on the outcome is PACKAGE's own. `Refused` comes before any cell:
+    an unresolved `consumes`, a refused recorded text, open parents on no one
+    chain, or a stale `REBUTTAL_UNJUDGED` parent (`SA-0330`). So does a mutant
+    that is inline, disclosed or unreadable on the ref (`SA-0338`). A base
+    the mirror lacks raises `GitError`."""
     if task_id is not None:
         recorded = _recorded_spec_text(ledger, task_id, spec, base)
         if isinstance(recorded, Refused):

@@ -146,9 +146,9 @@ class Criterion(BaseModel):
     checked the opposite way — green at both sides. A new test can never
     preserve: it did not pass at base."""
     mutant: Mutant | None = None
-    """The edit that would falsify `claim` (§5.4.1). `None` on every parsed
-    spec: a mutant lives on `refs/saffron/mutants`, and `saffron.mutants.
-    attach_mutants` is the only thing that ever sets this field."""
+    """The edit that would falsify `claim` (§5.4.1). A mutant lives on
+    `refs/saffron/mutants`, and `saffron.mutants.attach_mutants` sets it.
+    `parse_spec` keeps an inline one, and `refuse_inline_mutants` refuses it."""
     subject: str | None = None
     """The path a claim is about, when `mutant.file` is not that code
     (backlog item b-000d04). `None` by default, and every criterion

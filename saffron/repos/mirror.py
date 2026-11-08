@@ -16,6 +16,8 @@ from pathlib import Path
 
 from saffron.cell.worktree import DIFF_FLAGS
 
+MUTANTS_REF = "refs/saffron/mutants"
+
 _ADDED = re.compile(r"(\d+) insertions?\(\+\)")
 _REMOVED = re.compile(r"(\d+) deletions?\(-\)")
 
@@ -86,7 +88,7 @@ def ensure_mirror(origin: Path | str, mirror_path: Path) -> Path:
             "fetch",
             "--prune",
             "origin",
-            "+refs/saffron/mutants*:refs/saffron/mutants*",
+            f"+{MUTANTS_REF}*:{MUTANTS_REF}*",
         )
         return mirror_path
 
