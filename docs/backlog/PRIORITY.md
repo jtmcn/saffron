@@ -370,7 +370,7 @@ wrong first line.
 **Placed 2026-10-16**, from the spec loop's run 42: **b-60317d**.
 `reconcile`'s `head_moved` comment says nothing judges a moved head.
 
-**Placed 2026-10-17**, from the spec loop's run 43: **b-74a122**.
+**Placed 2026-10-17**, from the spec loop's run 43: ~~**b-74a122**~~.
 `CONTEXT.md`'s Refusal entry lacks the citation cause.
 
 **Placed 2026-11-02**, from the spec loop's run 52: **b-e4cb58**. `CONTEXT.md`
@@ -423,7 +423,7 @@ Each line keeps the order it was filed in.
   ~~**150**~~, **151**, **155**, **156**, **174** and **b-d6bff7**.
 - From spec loop runs 7 to 10: **b-990bd9**, **b-7431a2**, **b-9eceda**, **b-bc9951**,
   **b-0281e4**, **b-e9db0e**, **b-397edd**, **b-0e20e9**, **b-98dc4d**,
-  **b-27b9db**, **b-bbf663** and **b-6a9707**.
+  **b-27b9db**, ~~**b-bbf663**~~ and **b-6a9707**.
 - From the reviews of #393 and `SA-0120`, and spec loop runs 13 and 14: **b-d5d290**,
   **b-9ed36d**, **b-b431c1**, ~~**b-ac2f02**~~ and **b-49329e**.
 - From ADR 4's review and the superpowers comparison: ~~**b-07f694**~~,
@@ -521,7 +521,7 @@ leave a side untested. The fold writes its spend rollup twice. A closed
 no socket list names no process.
 
 **Placed 2026-10-12**, from the spec loop's run 35: ~~**b-bff156**~~,
-**b-d3b755**, then **b-d7959f**. `ready_task` returns a Refusal after a cell.
+**b-d3b755**, then ~~**b-d7959f**~~. `ready_task` returns a Refusal after a cell.
 The host-probe line is built twice. The Mint entry says a re-offer waits.
 
 **Placed 2026-10-14**, from the spec loop's run 38: **b-6d4704**, **b-65dbbd**,
@@ -532,7 +532,7 @@ spells the proxy's Dockerfile by hand. §5.1 calls `/gates` the one bind mount.
 **b-dc41ef**. The loop's driver refuses an `EXHAUSTED` task with a PR. A
 History run's snapshot ignores `--home`.
 
-**Placed 2026-10-13**, from the spec loop's run 37: **b-be3adc**, then
+**Placed 2026-10-13**, from the spec loop's run 37: ~~**b-be3adc**~~, then
 **b-e4ab6f**. §5.5 lists lens #1 without the failure path. The code calls the
 subnet pool a bare pool.
 
@@ -563,7 +563,7 @@ sorts a reviewer's notes, and its stop signal adds nothing over a blocker count.
 **b-e8f092**. Each clears one area's hits, and together they bring the gate to zero.
 
 **Placed 2026-10-07**, from the spec loop's run 30: **b-cd41ac**, **b-7338e7**,
-then **b-d22c5a**. A spec named helpers absent at its base. Two repo rows on one
+then ~~**b-d22c5a**~~. A spec named helpers absent at its base. Two repo rows on one
 mirror prune each other. The docs name no `saffron migrate`.
 
 **b-d5d290 is filed here and is the fourth instance of one shape.** Building
@@ -587,7 +587,7 @@ thirds of the backlog. That is the deliberate consequence of ranking by the
 milestone rather than by what is nearest to hand. Of the 308 open items, 42
 are by hand, since a cell cannot reach their files.
 
-**Placed 2026-11-04**, from the spec loop's run 53: **b-8c6696**, **b-a19ffd**
+**Placed 2026-11-04**, from the spec loop's run 53: **b-8c6696**, ~~**b-a19ffd**~~
 and **b-9bb8b7**. A spec missed the fixtures that pin the plan's sha. §5.3's
 `plan.json` lacks the estimate fields. Two resolvers copy one landedness rule.
 

@@ -1,8 +1,10 @@
 ---
 id: b-d7959f
 title: "`CONTEXT.md`'s Mint entry says a spec is offered again after a wait, and two re-offers happen at once"
-status: open
+status: done
 tier: 3
+closed: 2026-11-08
+by_hand: true
 filed: 2026-10-12
 specs: []
 prs: []
@@ -28,3 +30,4 @@ spec keeps.
 ## Record
 
 - 2026-10-12: filed from the spec loop's run 35 (#829).
+- 2026-11-08: done by hand.

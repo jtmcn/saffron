@@ -1,8 +1,10 @@
 ---
 id: b-a19ffd
 title: '`DESIGN.md` §5.3 shows a `plan.json` without its estimate fields'
-status: open
+status: done
 tier: 3
+closed: 2026-11-08
+by_hand: true
 filed: 2026-11-04
 specs: []
 prs: []
@@ -27,3 +29,4 @@ validator.
 ## Record
 
 - 2026-11-04: filed from the spec loop's run 53.
+- 2026-11-08: done by hand.
