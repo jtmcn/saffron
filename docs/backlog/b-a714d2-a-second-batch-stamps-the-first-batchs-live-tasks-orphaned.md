@@ -4,7 +4,7 @@ title: A second batch stamps the first batch's live tasks ORPHANED, because noth
 status: open
 tier: 2
 filed: 2026-10-11
-specs: []
+specs: [SA-0352]
 prs: []
 commits: []
 cites: [§4.2.1]

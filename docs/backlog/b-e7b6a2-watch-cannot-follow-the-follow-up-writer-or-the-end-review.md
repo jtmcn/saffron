@@ -4,7 +4,7 @@ title: "`saffron watch` cannot follow a stack batch's follow-up writer or its en
 status: open
 tier: 2
 filed: 2026-10-11
-specs: []
+specs: [SA-0354]
 prs: []
 commits: []
 cites: [§4.7]

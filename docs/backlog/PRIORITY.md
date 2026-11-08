@@ -154,6 +154,9 @@ name the old halts.
 **Placed 2026-10-12**, from writing `SA-0290`: **b-f5ceaf**, by hand now that
 `SA-0290` merged (#919). `CONTEXT.md` has no entry for a removed name.
 
+**Placed 2026-11-07**, from writing `SA-0350`: ~~**b-7c118b**~~, done by hand in
+the spec's own pull request.
+
 **Placed 2026-10-13**, from writing `SA-0291`: **b-cd1566**, by hand now that
 `SA-0291` merged (#920). `CONTEXT.md` has no entry for a criterion's subject.
 
