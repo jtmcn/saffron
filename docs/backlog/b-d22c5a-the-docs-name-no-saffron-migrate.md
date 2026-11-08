@@ -7,7 +7,7 @@ closed: 2026-11-08
 by_hand: true
 filed: 2026-10-07
 specs: []
-prs: []
+prs: [1054]
 commits: []
 cites: [§10]
 related: [170]
@@ -32,4 +32,4 @@ All three name what the migration built, by hand in one pull request.
 
 - 2026-10-07: filed from the spec loop's run 30 (#733, #735).
 - 2026-11-07: retitled in grooming. §4.6 and §10's `migrate.py` line now name the migration. §10's `cli.py` line, the Ledger entry and `suite_drift` still do not.
-- 2026-11-08: done by hand.
+- 2026-11-08: done by hand in #1054.

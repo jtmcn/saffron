@@ -7,7 +7,7 @@ closed: 2026-11-08
 by_hand: true
 filed: 2026-09-19
 specs: []
-prs: []
+prs: [1054]
 commits: []
 cites: [§4.1]
 related: [b-1c7019]
@@ -45,4 +45,4 @@ recorded as still owed.
 
 - 2026-09-19: filed from the spec loop's run 10 (#381). Surfaced while
   checking whether `merged_head_sha`'s absence from §4.1 was a contradiction.
-- 2026-11-08: done by hand.
+- 2026-11-08: done by hand in #1054.

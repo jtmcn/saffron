@@ -7,7 +7,7 @@ closed: 2026-11-08
 by_hand: true
 filed: 2026-10-13
 specs: [SA-0286]
-prs: [867]
+prs: [867, 1054]
 commits: []
 cites: [§5.5, §5.5.1]
 related: [79]
@@ -31,4 +31,4 @@ truncating write beside the one it already keeps.
 ## Record
 
 - 2026-10-13: filed from the spec loop's run 37.
-- 2026-11-08: done by hand.
+- 2026-11-08: done by hand in #1054.
