@@ -247,7 +247,7 @@ criterion drove was dropped. The
 finishing commit writes through a symlink, unverified, and drops parse
 failures.
 
-**Placed 2026-10-03**, from the spec loop's run 27: **b-970f53**, then
+**Placed 2026-10-03**, from the spec loop's run 27: ~~**b-970f53**~~, then
 ~~**b-c94a2f**~~. The `tests` gate reads an interrupted pytest session as
 `error`. A second `depends_on` entry carries no code into the cell.
 

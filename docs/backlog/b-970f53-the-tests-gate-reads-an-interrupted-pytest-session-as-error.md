@@ -1,9 +1,11 @@
 ---
 id: b-970f53
 title: The `tests` gate reads an interrupted pytest session as `error`, so a test that lets `KeyboardInterrupt` escape charges wrong code to the gate
-status: open
+status: done
 tier: 2
 filed: 2026-10-03
+closed: 2026-11-08
+by_hand: true
 specs: [SA-0197]
 prs: [657]
 commits: []
@@ -38,3 +40,4 @@ that raises `KeyboardInterrupt` and asserts the gate's status.
 ## Record
 
 - 2026-10-03: filed from the spec loop's run 27.
+- 2026-11-08: done by hand.
