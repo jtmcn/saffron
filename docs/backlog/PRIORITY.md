@@ -498,7 +498,7 @@ holds, and `status` has no one-line form.
 run at once.
 
 **Placed 2026-10-03**, from the spec loop's run 27: **b-3b8eb2**,
-**b-3c17ab**, **b-835bfb**, **b-2944c9**, **b-b2fffe**, then **b-348114**.
+**b-3c17ab**, **b-835bfb**, **b-2944c9**, **b-b2fffe**, then ~~**b-348114**~~.
 The host never sees which criterion failed. REVIEW counts a test-side wrong
 version as unproven. A host listener that starts mid-loop is caught only at
 preflight. The rate's header key is spelled at seven sites. `SETTLED_STATES`
