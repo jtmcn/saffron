@@ -15,9 +15,12 @@ stamp `REJECTED` on a healthy branch — so every failure path below returns
 **A live task is skipped by its state**, and that is not the whole of it. A
 first run carries no `pr_url`, since `set_task_package` writes one only once
 PACKAGE ends. A cell bound for PACKAGE leaves its row in flight, `REVIEWING`
-or `REBUTTING`, until PACKAGE ends (backlog item b-dce9a4). The gap left is a
-stamping scan that marks a live cell's row `ORPHANED`. A wider state guard
-here does not close it.
+or `REBUTTING`, until PACKAGE ends (backlog item b-dce9a4). The gap is
+closed by the home lock `cli.main` takes before it dispatches `cell`,
+`batch` or `draft` (`saffron/home_lock.py`). That lock keeps a batch scan
+from running while one of the three already holds a live row on the same
+home. So this module's live-task skip needs no wider guard against a scan
+that treats a live cell as a corpse.
 """
 
 from __future__ import annotations

@@ -25,6 +25,7 @@ from saffron import (
     end_review,
     finish,
     follow_up,
+    home_lock,
     mutants,
     preflight,
     qualify,
@@ -396,13 +397,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         if args.command == "cell":
-            return _cell_guarding_sigterm(args, ledger, out_dir)
+            return _locked_dispatch(
+                args, lambda: _cell_guarding_sigterm(args, ledger, out_dir)
+            )
 
         if args.command == "batch":
-            return _guarding_sigterm(lambda: _batch(args, ledger, out_dir))
+            return _locked_dispatch(
+                args, lambda: _guarding_sigterm(lambda: _batch(args, ledger, out_dir))
+            )
 
         if args.command == "draft":
-            return _draft(args, ledger, out_dir)
+            return _locked_dispatch(args, lambda: _draft(args, ledger, out_dir))
 
         if args.command == "queue":
             return _queue(args, ledger)
@@ -612,6 +617,24 @@ def _pushed_landed(mirror: Path, base_sha: str, pushed_sha: str) -> bool:
     raise git_mirror.GitError(
         f"git merge-base {pushed_sha}..{base_sha}: {ancestor.stderr.strip()}"
     )
+
+
+def _locked_dispatch(args: argparse.Namespace, run: Callable[[], int]) -> int:
+    """Run `cell`, `batch` or `draft` under the home lock (`saffron/home_lock.py`).
+
+    A lock already held refuses at once, with one line naming the
+    holder's pid and command. It exits `2`, the same code SIGTERM and
+    every other infrastructure abort already use.
+
+    Nothing in `run` executes, so the refused command starts no work and
+    writes nothing to the ledger.
+    """
+    try:
+        with home_lock.lock(args.home, f"saffron {args.command}"):
+            return run()
+    except home_lock.HomeLocked as locked:
+        print(f"saffron: {locked}")
+        return 2
 
 
 def _guarding_sigterm(run: Callable[[], int]) -> int:
