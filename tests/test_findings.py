@@ -378,3 +378,13 @@ def test_an_adequacy_finding_on_an_untouched_test_line_anchors_through_a_one_wor
     ]
     reconciled = anchor(findings, diff, read_head=content.get)
     assert [f.anchored for f in reconciled] == [True, False]
+
+
+def test_a_renamed_path_adds_its_stem_and_not_its_extension():
+    """b-2dd65f: `py` from `legacy.py` once anchored a finding on `setup.py`."""
+    diff = _rename_diff("legacy.py", "modern.py")
+    assert {"legacy", "modern"} <= parse_diff(diff).tokens
+    assert "py" not in parse_diff(diff).tokens
+    content = {"x.md": "run setup.py first\n"}
+    finding = Finding(lens="l", severity="note", file="x.md", line=1, claim="c")
+    assert anchor([finding], diff, read_head=content.get)[0].anchored is False

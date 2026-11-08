@@ -1,9 +1,11 @@
 ---
 id: b-2dd65f
 title: A renamed path adds its file extension to `DiffFacts.tokens`
-status: open
+status: done
 tier: 3
 filed: 2026-09-29
+closed: 2026-11-08
+by_hand: true
 specs: [SA-0194]
 prs: [598]
 commits: []
@@ -30,3 +32,4 @@ rename above and reads the finding unanchored.
 ## Record
 
 - 2026-09-29: filed from the spec loop's run 22.
+- 2026-11-08: done by hand.
