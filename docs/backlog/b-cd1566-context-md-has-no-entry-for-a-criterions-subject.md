@@ -1,8 +1,9 @@
 ---
 id: b-cd1566
 title: "`CONTEXT.md` has no entry for a criterion's subject, the `subject:` field SA-0291 adds"
-status: open
+status: done
 tier: 2
+closed: 2026-11-08
 by_hand: true
 filed: 2026-10-13
 specs: [SA-0291]
@@ -44,3 +45,4 @@ declares one. It lands after `SA-0291` merges.
 
 - 2026-10-13: filed with `SA-0291`.
 - 2026-10-20: #920 landed `subject:`. The Standards seat noted the **Mutant** entry still says a mutant is declared "against its own subject". This item rewrites that entry too, not only adds one.
+- 2026-11-08: done by hand.

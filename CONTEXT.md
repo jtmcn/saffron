@@ -164,7 +164,10 @@ task's end state: these describe the night, and `DRAINED` says the queue emptied
 not that anything in it succeeded. `INFRASTRUCTURE` is the breaker firing, a
 failed readiness probe, or a PACKAGE raise on a task in `READY_FOR_REVIEW`. It
 is the only one of the five that says the machine rather than the work was
-wrong. `INCOMPLETE` is a night that left a task in flight: that task reached no
+wrong. It is also the reason a night gets when a raise leaves its row open, and
+an operator's Ctrl-C or SIGTERM is such a raise. So the row alone cannot tell a
+broken machine from a stopped night. A SIGTERM exits `143`, and its log ends with
+no `batch:` stop line. `INCOMPLETE` is a night that left a task in flight: that task reached no
 end state, which is not the same as failing. It outranks the other ordinary
 reasons, and `INFRASTRUCTURE` outranks it.
 _Avoid_: "failed" for `INFRASTRUCTURE` (a task fails, a night stops), "finished",
@@ -172,8 +175,9 @@ _Avoid_: "failed" for `INFRASTRUCTURE` (a task fails, a night stops), "finished"
 
 **Stack batch**: A batch started with `saffron batch --stack` (ADR 7). It fixes its
 stack order once, at batch start, and never rescans. Each task stacks on its
-predecessor. One end review reads the stack once the batch stops taking tasks, or later
-for a batch started with `--defer-end-review`.
+predecessor. One end review reads the stack once the order's tasks settle, or later
+for a batch started with `--defer-end-review`. After an order that stopped `DRAINED`,
+the batch runs the end review's follow-up specs on the same stack, still with no rescan.
 _Avoid_: "stack run" (a run is a pin), "spec loop" (the delegate's pass that starts one).
 
 **Stack order**: A stack batch's fixed order over its queued specs. A spec joins it
@@ -185,7 +189,9 @@ never takes is refused before any cell starts.
 **Predecessor**: The last task below a task in its stack order to reach
 `READY_FOR_REVIEW`. For the first layer it is the stack base's task, if the order
 has a base. The task is cut from the predecessor's head and targets its
-branch. A task with no predecessor is cut from `base_sha`.
+branch. A task with no predecessor is cut from `base_sha`. A follow-up spec is in no
+stack order. Its predecessor is the last layer of either generation, so the first
+follow-up stacks on the order's top layer.
 _Avoid_: "parent" (that is a `depends_on` entry, and a predecessor need not be one).
 
 **Stack base**: A parent outside a stack order whose newest waiting task has a
@@ -197,12 +203,17 @@ chain's branches are exempt from the overlap refusal (`SA-0265`, `SA-0267`, `SA-
 _Avoid_: "base" alone (that is `base_sha`), "root".
 
 **Layer**: A task in a stack batch that reached `READY_FOR_REVIEW`. It is one
-`stack_layers` row, with its position and its predecessor. A task that misses adds no
-layer.
+`stack_layers` row, with its position, its predecessor and its generation. A task that
+misses adds no layer.
+
+**Generation**: A layer's `generation` column: `0` for a task of the stack order, `1`
+for a follow-up spec. Nothing reviews the follow-ups' layers again, so a stack holds one
+generation of follow-ups. A second generation needs an ADR (ADR 7).
 
 **Mint**: What a stack batch does to open a spec's run and task before its spec
 review. The review's attempts and facts are recorded against that task, and its cell
-runs on it. A spec offered again keeps the task it was minted. A `RATE_LIMITED` task is
+runs on it. `saffron draft` mints a run and a task the same way, before its writer
+session, with the next free spec id (§3.4). A spec offered again keeps the task it was minted. A `RATE_LIMITED` task is
 offered again after a wait, and a `PROVIDER_UNREACHABLE` or `PREFLIGHT_FAILED` one at once.
 
 **Spec writer session**: A host-invoked session that revises one spec after its spec
@@ -215,13 +226,15 @@ it also writes the first text, from the item (§3.4).
 stack batch runs at most three per spec, then escalates the spec. `saffron draft` runs
 at most one (§3.4). A stack batch's revision starts
 only while the budget left, less the reserve, covers a writer, a review and the spec's
-budget.
+budget. A follow-up spec gets revisions under the same cap. Its check holds no reserve
+back, since the end review ran before it.
 
-**Escalation**: A stack batch's spec review sending a spec to the operator and not to
-a cell. A `blocker` tagged neither `build` nor `witness` escalates. So does any
+**Escalation**: A spec review sending a spec to the operator and not to a cell. A
+`blocker` tagged neither `build` nor `witness` escalates. In a stack batch so does any
 `blocker` left after three revisions, or read with no spec writer to revise it. The
 task ends `SPEC_WITHHELD`, and each spec that depends on it is refused. It counts as
-no abort.
+no abort. Under `saffron draft` a second review that still routes `revise` escalates,
+and so does a writer reply that declares another spec id (§3.4).
 _Avoid_: "rejected", "blocked".
 
 **Recorded spec text**: A spec's text that a task records and that is not at
@@ -230,6 +243,62 @@ Before the cell, `run_task` re-runs the gate 0 refusals that need no GitHub agai
 the latest one. A revision, a follow-up, a draft and a stack batch's citation
 rewrite each write one. A citation rewrite is recorded under origin `revision`,
 but it is not a Revision.
+
+**Qualification**: The host's decision on each end-review finding, made in host code and
+never by a model (`saffron/qualify.py`). It reads the join lens's findings first, then
+each layer from the top down, with its in-cell REVIEW concerns too. An unanchored
+finding is `unanchored`. A probed finding whose probe was `killed` is `killed`, and one
+whose probe survived is `qualified`. With no probe, a `note` stays `note` and anything
+else qualifies. An adequacy finding with no probe, or a probe with no clear verdict, is
+`unverified`. Each decision is a `qualification` fact.
+
+**Follow-up group**: One layer's `qualified` findings in one file, in the order the first
+was met. A join lens finding joins the top layer's groups. A `killed` finding joins no
+group, and every other outcome goes to the backlog pool.
+
+**Follow-up spec**: A spec a spec writer session writes from one follow-up group, after
+the end review. It is a `bug` or `feature` spec with no `depends_on` and no inline
+mutant. Its budget is no higher than its origin's, and it touches only its group's file
+and test paths the stack changed. A draft that fails to parse, or that fails the
+finishing suite atop the top head, goes back to the writer once. A passing one is minted on the same batch, and its
+text is recorded with origin `follow_up`. It runs only when the order stopped
+`DRAINED`.
+
+**Writer sub-cap**: The quarter of a stack batch's `--budget` held for spec writer
+sessions, revisions included. Before each follow-up group, and before each send-back,
+the batch checks that what is left covers one more session. Once it does not, every
+group left joins the backlog pool.
+
+**Backlog pool**: The end-review findings no follow-up spec took, each with its reason.
+It holds every `unverified`, `unanchored` or `note` finding. It also holds each
+qualified group that became no follow-up. A spent writer sub-cap, a provider limit, a
+stale probe, an untrusted draft or a judge that raised each sends a group there. It is
+written to `findings.json`. No code reads it, and the delegate files backlog items
+from it by hand.
+
+**`findings.json`**: The file at `finish/<batch id>/findings.json` in the batch tree. It
+holds each finding qualification did not kill, with its outcome and reason. A qualified
+finding reads `follow_up`, or `pooled` when no follow-up took it. It also holds
+the follow-up specs' own critic findings, which go to the backlog and never to a second
+generation.
+
+**Finishing layer**: A stack batch's last commit, cut from the top layer's head. It
+writes the latest spec text of each order layer and each unrun follow-up spec. A
+follow-up spec that ran is left out of it. It moves no spec into `done/`. Its suite is
+the repo's own gates over a `chore` spec that touches `.saffron/specs/*.md`.
+`publish_finish` pushes it to `saffron/batch-<batch id>-finish` and opens a draft pull
+request on the top layer's branch.
+
+**Escalation line**: A line `publish_finish` prints that starts with `escalate:`. It
+prints one for a finishing suite that did not finish, and one for a red finishing
+suite. It prints one for a layer whose remote head is not its graded head. It prints
+one for a pull request whose base is not its predecessor's branch. A finishing branch that already exists prints one too. Each
+pushes nothing and links nothing. It is not an Escalation, which withholds a spec.
+
+**Linking a stack**: What `link_stack` does once the finishing layer is pushed. It runs
+`gh stack link` over every layer's pull request from the bottom up, then the finishing
+layer's. It marks none ready. When the bottom layer stacks on a stack base, it links
+nothing and says to link the stack by hand.
 
 **Spec loop**: A delegate's pass over the queued specs into one stack. By
 default it starts one `saffron batch --stack` over its order. An attended
@@ -265,7 +334,9 @@ NULL means is open (backlog item b-eac388).
 **Phase**: A named stage in the cell pipeline: DIAGNOSE, IMPLEMENT, GATE ⇄ REPAIR,
 REVIEW, REBUT, PACKAGE. Written in bare caps. A stack batch also labels attempts
 SPEC_REVIEW and SPEC_WRITING. Each is a host-invoked session before the cell, and
-neither is a stage of the cell pipeline.
+neither is a stage of the cell pipeline. `saffron review` labels its attempts
+COMMIT_REVIEW. It is a host-invoked session after PACKAGE, and no stage of the pipeline
+either.
 The event log alone splits GATE ⇄ REPAIR into GATE and REPAIR, because a gate
 attempt and a repair turn print different lines. Everywhere else it is one phase.
 _Avoid_: "stage", "step", "mode".
@@ -297,8 +368,9 @@ _Avoid_: "the JSON step", "parsing the output".
 `scope.json`. Extracted and hashed the moment it is written, never re-read from
 `/work`. A control artifact left in the workspace is a claim, not a record.
 
-**Refusal**: A task rejected before any cell starts. The causes include a duplicate open PR, an
-overlapping in-flight change, a malformed or moved spec, and a repo that failed preflight.
+**Refusal**: A task rejected before any cell starts, or one `saffron package` will not
+package. The causes include a duplicate open PR, an overlapping in-flight change, a
+malformed or moved spec, and a repo that failed preflight.
 The refusal itself costs nothing. A refusal the queue scan makes reaches the queue as
 one line. `run_task` also refuses a task whose `consumes` entry does not resolve, or
 cannot be read, at the tree base. That refusal prints one line and writes no queue
@@ -306,6 +378,10 @@ row. A stack batch also refuses a spec its stack order never takes, and every sp
 whose `depends_on` reaches a missed task. It refuses a revision the budget left cannot
 cover. Before its spec review, it refuses a spec with a citation that does not resolve
 once `rewrite_moved_citations` moves what it can.
+`saffron package` refuses after the cell ended, before it reruns PACKAGE. It refuses a
+task that is not `READY_FOR_REVIEW` or already has a pull request. It also refuses a
+missing or stale file in the task directory, a spec text it cannot find, and a damaged
+`revert-exempt.json`.
 _Avoid_: "skip" (that is a gate status), "blocked", "reject" (that is what the
 operator does to a PR).
 
@@ -315,6 +391,17 @@ file holds as a whole word. `run_task` resolves each entry at the task's tree ba
 before any cell starts. An unresolved entry refuses the task. A spec that declares one
 with no `depends_on` does not parse.
 _Avoid_: "import", "dependency" (that is a `depends_on` entry).
+
+**Removed name**: An entry in a spec's `removes` list, naming something the spec
+deletes. It is a repo-relative path, or `path:name` for one name in that file. It
+needs no `depends_on`. The queue scan holds a candidate that clashes with a partner on
+one, unless a walk of `depends_on` entries joins the two specs. A partner is another
+candidate, or a spec whose task waits to merge, such as one in `READY_FOR_REVIEW`. The
+two clash when the other names the entry's name, or a bare entry's path, as a whole
+word in its body or claims. A `consumes` entry with that name clashes too, and a bare
+path also matches a `consumes` entry on that path. Of two candidates the later id is held. A waiting partner holds the
+candidate.
+_Avoid_: "deletion", "breaking change".
 
 **Retired-first entry**: An entry in a spec's `retired_first` list. It names a spec that
 must sit in `done/` at the spec's base before its cell runs. The queue scan and
@@ -430,7 +517,9 @@ _Avoid_: "gate run", as for a gate result.
 It is one of three things, checked in this order. First, a gate `error`ed, and whatever ran
 the suite aborts, whether an attempt or a package. Second, the suites **drifted** (a gate
 stopped running, or its `tool` changed), so no subtraction is to be trusted. Third,
-the blocking new failures that remain.
+the blocking new failures that remain. Beside whichever outcome holds, it carries
+the new failures in gates this run holds advisory. Those block nothing, and they are
+empty on an aborted or drifted head.
 _Avoid_: "verdict", which is the critic's confirm-or-withdraw of a finding.
 _Avoid_ also "the subtraction" for the whole: the subtraction produces only the
 third outcome, and it is not even attempted when either of the first two holds.
@@ -497,7 +586,8 @@ the claim is not one.
 _Avoid_: "the test for it".
 
 **Mutant**: A find-and-replace edit kept for a criterion on `refs/saffron/mutants`,
-against its own subject, which its witness must fail on (`DESIGN.md` §5.4.1). Applied by the `witness` gate
+which its witness must fail on (`DESIGN.md` §5.4.1). Its file is the criterion's
+subject, unless the criterion declares one. Applied by the `witness` gate
 to ask whether the tests would notice the claim being broken. Withheld from the
 implementer's prompt on purpose: a mutant a cell chooses is a mutant chosen to be
 killed.
@@ -506,6 +596,13 @@ against one named witness, not a generated suite. It also runs the constant muta
 it derives from a repo's patterns. _Avoid_ "mutant" for the tree
 the edit is applied to. That is the worktree, mutated. _Avoid_ "mutant" for the
 edit a lens names in a review finding. That is a vacuity probe.
+
+**Subject**: The path a criterion's claim is about, declared as `subject:` when its
+mutant's file is not that code. It is a repo-relative path, and only a criterion with a
+mutant declares one. `revert` sets a witness aside when its mutant's file lies outside
+the diff's source and the repo's test paths. A declared subject inside either keeps that
+witness judged. So a subject can keep a witness judged, and never sets one aside.
+_Avoid_: "target", "scope".
 
 **Constant mutant**: A find-and-replace edit the `witness` gate derives from the diff
 and applies as it applies a mutant (`DESIGN.md` §5.4.1). It changes the value the diff
@@ -619,7 +716,19 @@ unspent until `saffron finish` runs it on the batch's own id (b-8a0c9a).
 
 **End-review lens**: The Spec or the Standards session that reads one layer in the end
 review. Each runs in a fresh critic cell at the layer's branch head as fetched when the end
-review runs, with no patch applied. Neither is one of ADR 4's declared lenses.
+review runs, with no patch applied. Neither is one of ADR 4's declared lenses. A commit
+review runs the same two sessions over one task's review commits.
+
+**Review commit**: A commit pushed onto a task's branch after PACKAGE's own commit. No
+in-cell lens reads one, and neither does REBUT. `saffron regate` judges the head it
+lands in, and a commit review reads it.
+
+**Commit review**: The two end-review lenses reading one task's review commits, run by
+`saffron review <task id>`. The range runs from the packaged head to the branch's head
+at origin. After a restack it starts at the packaged commit's rebased copy. It declines
+a task with no open pull request, or an empty range. Each lens turn is a COMMIT_REVIEW
+attempt on the task, and the task's state never moves. It exits `0` with no blocker,
+`1` on a blocker, and `2` on a decline or a lens `error`.
 
 **Join lens**: The session that reads a whole stack's diff once, from the bottom
 layer's base to the top layer's head (ADR 6). It reads the seams between layers. A
@@ -633,7 +742,9 @@ both of its lenses' ceilings.
 **End-review status**: One lens's outcome against one layer: `reviewed`, `error` or
 `not_reached`. `not_reached` is a layer the reserve did not cover, and no cell opens
 for it. `error` is the lens breaking, never a verdict on the layer. Unlike a gate
-`error`, its cost is still charged to the reserve.
+`error`, its cost is still charged to the reserve. The stack page rolls a layer's two
+lenses into one status. Either lens's `error` makes it `error`. Both `reviewed` make it
+`reviewed`, and anything else is `not_reached`.
 
 **Finding**: Anything a critic reports, pointing at one file and line. Whether
 that line is one the change reaches is **anchored** below, a separate property
@@ -751,9 +862,10 @@ infrastructure, exits 2 and re-queues. A rejected window stays `RATE_LIMITED`. A
 that fails after an earlier turn completed never ends here.
 _Avoid_: "offline", "network failure".
 
-**`SPEC_WITHHELD`**: A task whose spec review in a stack batch escalated, so no cell
-ran its spec. It escalates a `blocker` it could not revise, or a spec still unclean
-after three revisions. The review is a fact on the task. The spec is not queued again
+**`SPEC_WITHHELD`**: A task whose spec review escalated, in a stack batch or under
+`saffron draft`, so no cell ran its spec. It escalates a `blocker` it could not revise,
+or a spec still unclean after its last revision. A stack batch allows three, and a draft
+one. The review is a fact on the task. The spec is not queued again
 until it is edited. Under `saffron draft`, a writer reply that declares an id other
 than the task's is withheld too, with no further review (§3.4).
 _Avoid_: "rejected" (the operator's word for a pull request), "blocked".
@@ -874,8 +986,13 @@ repo has one.
 **Onboarding**: Writing a repo's `.saffron/` directory. It touches zero lines of
 Saffron. If it does not, the core/repo boundary failed.
 
-**Preflight**: Per-repo readiness at batch start: mirror fetch, policy parse, image
-rebuild, baseline. A repo that fails preflight is skipped, not fatal.
+**Preflight**: Per-repo readiness, which `check_readiness` runs before `saffron batch`,
+`saffron draft` or `saffron finish` starts work. Its steps run in order: auth, mirror
+fetch, origin, default-branch pin, policy parse, disk headroom and `images`. It stops at
+the first step that fails, and names it. The `images` step asks the local image store
+for the proxy and the base image, and a miss names its build command. A batch whose
+readiness fails starts no task and closes `INFRASTRUCTURE`. `saffron cell` runs only
+the mirror fetch, origin and default-branch steps, through `prepare_mirror`.
 A task has a preflight of its own. Each `PreflightEvent` is one step of it, written by
 `events.Preflight`. The steps include the proxy, the image build, the port probe and the
 worktree coming online.
@@ -977,9 +1094,11 @@ already reserves it. Also "round", "sweep", "iteration".
 **Review round**: One review of one spec or pull request at one commit, in
 the spec chain or the spec loop. One spec review in a spec chain is one review
 round. Both seats of a step 2c pull request review count as one review round
-together. A cell's REVIEW counts as the cell's single review round. A spec
-review or a pull request review happens outside any task, so it is never an
-attempt. It is numbered from 1, and Jev scores each one (`driver.py jev`).
+together. A cell's REVIEW counts as the cell's single review round. A spec chain's
+spec review and a pull request review happen outside any task, so neither is an
+attempt. `saffron draft` charges each of its review rounds to its task as one
+SPEC_REVIEW attempt (§3.4). It is numbered from 1, and Jev scores each one
+(`driver.py jev`).
 _Avoid_: bare "round", "iteration", and "pass".
 
 **Spec loop run**: One spec loop, numbered from 1, from its order's snapshot to

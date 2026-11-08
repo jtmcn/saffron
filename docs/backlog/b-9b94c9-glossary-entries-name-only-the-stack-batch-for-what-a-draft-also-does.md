@@ -1,8 +1,9 @@
 ---
 id: b-9b94c9
 title: "Five glossary entries describe only the stack batch or the old comparison, though run 32 widened each"
-status: open
+status: done
 tier: 3
+closed: 2026-11-08
 by_hand: true
 filed: 2026-10-09
 specs: []
@@ -36,3 +37,4 @@ unchanged afterwards.
 ## Record
 
 - 2026-10-09: filed from the spec loop's run 32.
+- 2026-11-08: done by hand.

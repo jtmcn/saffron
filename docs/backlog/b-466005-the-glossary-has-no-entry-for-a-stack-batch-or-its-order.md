@@ -1,8 +1,9 @@
 ---
 id: b-466005
 title: The glossary has no entry for a stack batch or its order, and SA-0142 uses both
-status: partial
+status: done
 tier: 2
+closed: 2026-11-08
 by_hand: true
 filed: 2026-09-23
 specs: [SA-0142, SA-0143, SA-0144, SA-0145, SA-0146, SA-0147, SA-0149, SA-0150, SA-0151, SA-0153, SA-0154, SA-0155, SA-0156, SA-0160, SA-0161, SA-0162, SA-0164, SA-0167, SA-0170, SA-0174]
@@ -132,3 +133,4 @@ The **Refusal** entry names the stack order's refusal. This lands after
   `not_reached` means no cell opened. The page prints `not_reached` for a layer
   whose Spec lens reviewed. Add an entry for the layer's roll-up. `SA-0170`
   (#647) links the stack, and the glossary has no entry for linking.
+- 2026-11-08: done by hand. The open terms now have entries: generation, qualification, follow-up group, follow-up spec, writer sub-cap, backlog pool, `findings.json`, finishing layer, escalation line and linking a stack. Stack batch, Predecessor, Layer and Revision cover follow-ups, and End-review status names the layer roll-up.

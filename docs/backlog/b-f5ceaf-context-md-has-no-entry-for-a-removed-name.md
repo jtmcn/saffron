@@ -1,8 +1,9 @@
 ---
 id: b-f5ceaf
 title: '`CONTEXT.md` has no entry for a removed name, the `removes` entry SA-0290 adds'
-status: open
+status: done
 tier: 2
+closed: 2026-11-08
 by_hand: true
 filed: 2026-10-12
 specs: [SA-0290]
@@ -40,3 +41,4 @@ two candidates the later id is held. Its `_Avoid_` line names "deletion" and
 ## Record
 
 - 2026-10-12: filed with `SA-0290`.
+- 2026-11-08: done by hand.

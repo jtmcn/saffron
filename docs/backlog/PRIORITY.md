@@ -151,13 +151,13 @@ failed state, so its children stay refused. A spec named a module its own
 Redaction misses the files beside `events.jsonl`. The driver and two ADRs
 name the old halts.
 
-**Placed 2026-10-12**, from writing `SA-0290`: **b-f5ceaf**, by hand now that
+**Placed 2026-10-12**, from writing `SA-0290`: ~~**b-f5ceaf**~~, by hand now that
 `SA-0290` merged (#919). `CONTEXT.md` has no entry for a removed name.
 
 **Placed 2026-11-07**, from writing `SA-0350`: ~~**b-7c118b**~~, done by hand in
 the spec's own pull request.
 
-**Placed 2026-10-13**, from writing `SA-0291`: **b-cd1566**, by hand now that
+**Placed 2026-10-13**, from writing `SA-0291`: ~~**b-cd1566**~~, by hand now that
 `SA-0291` merged (#920). `CONTEXT.md` has no entry for a criterion's subject.
 
 **Placed 2026-10-06**, from ADR 10, in this order toward a night on GCP. The
@@ -200,7 +200,7 @@ reproducing every gate by hand. The second is a witness that fails once three
 local branches are pruned. The third opens when item b-b5f379 bumps the cell's
 git.
 
-**Placed 2026-09-23**, from writing `SA-0142`: **b-466005**. It is the
+**Placed 2026-09-23**, from writing `SA-0142`: ~~**b-466005**~~. It is the
 glossary entry for a stack batch, its order and a predecessor, which a cell
 cannot write.
 
@@ -376,7 +376,7 @@ wrong first line.
 **Placed 2026-10-17**, from the spec loop's run 43: ~~**b-74a122**~~.
 `CONTEXT.md`'s Refusal entry lacks the citation cause.
 
-**Placed 2026-11-02**, from the spec loop's run 52: **b-e4cb58**. `CONTEXT.md`
+**Placed 2026-11-02**, from the spec loop's run 52: ~~**b-e4cb58**~~. `CONTEXT.md`
 defines a Refusal as before any cell starts, and `ready_task` refuses after one.
 
 **Placed 2026-10-19**, from the spec loop's run 44: **b-b8f0d9**, **b-e9cd43**,
@@ -437,7 +437,7 @@ Each line keeps the order it was filed in.
 - From the stack batch's spec reviews: ~~**b-2d9ae9**~~, **b-223244**,
   **b-acee54**, **b-6518ba**, **b-6a101f**, **b-7eb5f5** and **b-22ff3f**.
 - From the 2026-09-27 size pricing and spec loop run 32: **b-41664e**, **b-4b386f**,
-  **b-d96f14**, **b-9b94c9**, **b-ff3141**, **b-a99c76**, **b-3a8504**,
+  **b-d96f14**, ~~**b-9b94c9**~~, **b-ff3141**, **b-a99c76**, **b-3a8504**,
   **b-7f105f** and **b-8c17dc**.
 - From item 52's review: **b-cec9a7**.
 
@@ -539,7 +539,7 @@ History run's snapshot ignores `--home`.
 **b-e4ab6f**. §5.5 lists lens #1 without the failure path. The code calls the
 subnet pool a bare pool.
 
-**Placed 2026-10-11**, from the spec loop's run 34: **b-5a69db**,
+**Placed 2026-10-11**, from the spec loop's run 34: ~~**b-5a69db**~~,
 **b-c86c4b**, then **b-54fee5**. A stopped night closes `INFRASTRUCTURE`,
 which the glossary keeps for the breaker. A probe's reason is called a
 refusal. The glob characters are spelled in two modules.

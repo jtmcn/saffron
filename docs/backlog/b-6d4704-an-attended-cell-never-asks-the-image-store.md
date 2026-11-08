@@ -1,7 +1,7 @@
 ---
 id: b-6d4704
 title: An attended cell never asks the image store, and the glossary's Preflight lists none of readiness's newer steps
-status: open
+status: partial
 tier: 3
 filed: 2026-10-14
 specs: [SA-0289]
@@ -32,3 +32,4 @@ runs.
 ## Record
 
 - 2026-10-14: filed from the spec loop's run 38.
+- 2026-11-08: partly done by hand. The **Preflight** entry names the steps `check_readiness` runs, and says `saffron cell` runs only three of them. Open: an attended cell still never runs the `images` step. That needs a change under `saffron/`, or a skill line saying why not.
