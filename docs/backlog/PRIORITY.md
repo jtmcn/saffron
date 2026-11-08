@@ -431,7 +431,7 @@ Each line keeps the order it was filed in.
   **b-9ed36d**, **b-b431c1**, ~~**b-ac2f02**~~ and **b-49329e**.
 - From ADR 4's review and the superpowers comparison: ~~**b-07f694**~~,
   **b-7c88f8**, **b-e1afbb** and **b-3732ef**.
-- From spec loop runs 15 to 17 and `SA-0135`'s review: **b-f30189**, **b-a90136**,
+- From spec loop runs 15 to 17 and `SA-0135`'s review: **b-f30189**, ~~**b-a90136**~~,
   **b-e06dbc**, **b-32f492**, **b-8fb227**, **b-79d951**, ~~**b-9ead75**~~ and
   ~~**b-04d4c2**~~.
 - From the stack batch's spec reviews: ~~**b-2d9ae9**~~, ~~**b-223244**~~,
