@@ -1097,15 +1097,15 @@ Anything kept on a branch still reaches the cell.
 **A mutant lives on `refs/saffron/mutants`, never in the spec** (item 80, decided
 2026-11-07). The ref's tree holds one `<spec id>.yaml` per spec, keyed by the id, so
 an edit to the spec leaves its mutants in place. `saffron mutant` writes that file and
-pushes the ref to the repo's origin. The mirror fetches the ref by name, because its
-general refspec leaves out `refs/saffron/*` (`SA-0278`). Intake reads each criterion's
-mutant from the mirror's copy and records the ref's commit beside `spec_sha`. A queued
+pushes the ref to the repo's origin. The mirror takes the ref in a second fetch of its
+own, because its general refspec leaves out `refs/saffron/*` (`SA-0278`). `run_task` reads
+each criterion's mutant from the mirror's copy and records the ref's commit beside `spec_sha`. A queued
 spec that still declares a `mutant:` inline is refused, since a cell would read it from
 `HEAD`. A spec in `done/` keeps its inline mutants as history and is never run. The cell
 never holds the ref, because the seed fetches `refs/heads/*` alone.
 
 **What the gate does.** A spec's `acceptance:` already pairs a claim with the
-witness that guards it. Each entry can also declare a **mutant**: the
+witness that guards it. Each entry can also have a **mutant** on the ref: the
 smallest edit that breaks the claim while leaving the code syntactically whole.
 For each such entry the gate applies the mutant to the head tree. It then invokes the
 repo's declared `tests` gate over **exactly that one witness**, and requires the
@@ -1113,7 +1113,7 @@ result to be `fail`. A mutant the witness survives is the finding: the claim is
 asserted by nothing.
 
 **It is `revert`'s exception, not a new one** (§2.1). The gate executes no tool:
-it applies a text edit the *spec* supplied, or one core derives from the
+it applies a text edit the *spec's author* supplied, or one core derives from the
 repo's patterns. It then invokes a gate the repo
 already declared, through the same JSON contract, with the subset argument
 `revert` established. Core still knows nothing about the toolchain, only that a
@@ -1121,7 +1121,7 @@ already declared, through the same JSON contract, with the subset argument
 future core gate wanting to run something must fit that shape or move to the
 repo side.
 
-**Why the spec declares the mutant rather than an agent generating it.** A cell
+**Why the spec's author declares the mutant rather than an agent generating it.** A cell
 is untrusted. A mutant it authored is a mutant chosen to be killed. The
 operator writes the spec, and the claim and the edit that breaks it are one
 thought. §5.5.1 asks the lens to name that edit as a vacuity probe, and the
