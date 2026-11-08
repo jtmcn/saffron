@@ -188,7 +188,7 @@ acceptance:
 
 Backlog item **b-ffb930**. It cites `DESIGN.md` §3, whose §3.4 draft
 chain is one of the three paths this spec reaches. Every line below was
-read at `1742e79f`, whose `saffron/` matches `9201e3be`.
+read at `c8e8f6e6`, SA-0339's packaged head.
 
 **The incident.** Finish 67 drafted `SA-0338` as a follow-up. The first
 draft failed to parse, because each of its four `wrong_versions` entries was

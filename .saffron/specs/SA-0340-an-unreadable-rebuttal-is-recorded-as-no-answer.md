@@ -208,7 +208,7 @@ its unread blockers on its line. `CONTEXT.md`'s **Rebuttal** entry names the
 three answers, amended by hand at `ae9c9dc3`. Item 42's visible half landed as
 `SA-0071`, in the pull request body. This spec is its recording half.
 `SA-0341` re-prompts the extraction once, and depends on this spec. Every line
-below was read at `05d4875a`.
+below was read at `c8e8f6e6`, SA-0339's packaged head.
 
 **What REBUT writes.** `saffron/cell/session.py:3730-3734` builds `argued` from
 `rebut.first_answers(result.rebuttal)`. `saffron/cell/session.py:3738-3743`

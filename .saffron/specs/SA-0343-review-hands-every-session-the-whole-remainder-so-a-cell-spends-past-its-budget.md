@@ -104,7 +104,7 @@ acceptance:
 ## Context
 
 Backlog item **b-d39d9a**, under `DESIGN.md` §4.3 and §5.5. Related:
-b-2f4746. Every line below was read at `6dfa5092`.
+b-2f4746. Every line below was read at `c8e8f6e6`, SA-0339's packaged head.
 
 **What the design now says.** Commits `5054cd61` and `01796b83` amended the
 design by hand, and `ad7049ad` amended the glossary by hand, in this pull

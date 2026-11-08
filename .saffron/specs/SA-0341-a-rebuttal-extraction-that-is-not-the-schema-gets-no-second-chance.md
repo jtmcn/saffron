@@ -135,7 +135,7 @@ acceptance:
 ## Context
 
 Backlog item **42**, its re-prompt half. It cites `DESIGN.md` §5.6. Every
-line below was read at `6db66941`.
+line below was read at `c8e8f6e6`, SA-0339's packaged head.
 
 `DESIGN.md` §5.6 reads as amended at that commit (`DESIGN.md:1285`). An
 extraction that is not the schema is re-prompted once. The re-prompt quotes

@@ -109,7 +109,7 @@ acceptance:
 Backlog item **b-e7b6a2**, which cites `DESIGN.md` §4.7. `SA-0253` (#821)
 did the same for a stack batch's spec review and spec writer, and named
 these two sessions out of its scope. ADR 7 is the stack batch. All line
-numbers below are at `09ae196c`.
+numbers below are at `c8e8f6e6`, SA-0339's packaged head.
 
 **Other work on these files.** `SA-0338` and `SA-0339` are queued and
 touch `saffron/cli.py`, and `SA-0338` touches `tests/test_cli.py`. Spec

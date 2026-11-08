@@ -100,7 +100,7 @@ acceptance:
 Backlog item **b-a714d2**, tier 2 in `docs/backlog/PRIORITY.md`. It also
 meets the second exit of **b-615466**, "a lock holds one batch per ledger, and
 a test shows a second refused". Every line cited below was read at
-`30c851cb`.
+`c8e8f6e6`, SA-0339's packaged head.
 
 **Cited lines move on the cell's base.** `SA-0338` and `SA-0339` edit
 `saffron/cli.py`, and this spec depends on them. Find each cited line by the
