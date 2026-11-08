@@ -208,7 +208,7 @@ its unread blockers on its line. `CONTEXT.md`'s **Rebuttal** entry names the
 three answers, amended by hand at `ae9c9dc3`. Item 42's visible half landed as
 `SA-0071`, in the pull request body. This spec is its recording half.
 `SA-0341` re-prompts the extraction once, and depends on this spec. Every line
-below was read at `05d4875a`.
+below was read at `c8e8f6e6`, SA-0339's packaged head.
 
 **What REBUT writes.** `saffron/cell/session.py:3730-3734` builds `argued` from
 `rebut.first_answers(result.rebuttal)`. `saffron/cell/session.py:3738-3743`
@@ -339,8 +339,8 @@ annotation (`:120-148`), and `_normalized`'s docstring
 (`saffron/record/migrate.py:88-89`).
 
 **Fixtures.** In `tests/test_session.py`, `_stub_the_runtime`, `_rebuttable`
-(`:5052`) and `_drive` build a REBUT, and `_BLOCKER` (`:5028`) is a one-blocker
-lens reply. Copy `_through_rebut` (`:5070`) with one lens filing two blockers
+(`:5083`) and `_drive` build a REBUT, and `_BLOCKER` (`:5059`) is a one-blocker
+lens reply. Copy `_through_rebut` (`:5101`) with one lens filing two blockers
 on `src/x.py` line 1, which `_ANCHORING_DIFF` anchors. In criterion 6's fixture
 one lens also files a concern, so a count over every finding reads 3 where the
 blockers read 2. A readable turn that
@@ -349,7 +349,7 @@ is not the schema, or `{"rebuttals": []}`, with `rebut_commits=0`, ends at the
 early exit with no verdict. So does a rebuttal turn scripted as
 `implement.AgentFailed("", _cut_off_turn(cost=0.4))`, which leaves an empty
 error. Read the expected error from the run's `rebuttal.json`.
-`_rebut_capped` (`tests/test_session.py:5115`) drives a pool cut. Script its
+`_rebut_capped` (`tests/test_session.py:5146`) drives a pool cut. Script its
 rebuttal turn as `implement.AgentFailed` costing $10.25, and follow it with
 three costs. That cuts a REBUT over two lenses' blockers. Case `"a"` at
 `tests/test_session.py:5360` cuts one over a single blocker. Both pass
