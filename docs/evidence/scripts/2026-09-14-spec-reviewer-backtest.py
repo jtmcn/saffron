@@ -121,7 +121,10 @@ def cmd_controls(_args) -> int:
     from saffron.intake import discover_specs
 
     driver = _driver()
-    done = {d.spec.id for d in discover_specs(REPO / ".saffron" / "specs" / "done")[0]}
+    done = {
+        d.spec.id
+        for d in discover_specs(REPO / ".saffron" / "specs" / "done", retired=True)[0]
+    }
     ledger, repo_id, _url = driver._ledger_and_repo()
     try:
         first: dict[str, tuple[int, str]] = {}

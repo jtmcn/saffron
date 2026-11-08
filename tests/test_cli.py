@@ -9649,6 +9649,97 @@ def test_the_stack_mint_records_the_declared_tier_and_null_where_none(tmp_path):
     fresh.close()
 
 
+def _mutants_file_commit(mirror, content: str) -> str:
+    """A root commit over one `SY-1.yaml`, on `mirror`'s own object store."""
+    blob = subprocess.run(
+        ["git", "-C", str(mirror), "hash-object", "-w", "--stdin"],
+        input=content,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    tree = subprocess.run(
+        ["git", "-C", str(mirror), "mktree"],
+        input=f"100644 blob {blob}\tSY-1.yaml\n",
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    return subprocess.run(
+        [
+            "git",
+            "-C",
+            str(mirror),
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=T",
+            "commit-tree",
+            tree,
+            "-m",
+            "mutants",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def test_the_stack_mint_records_the_mutants_refs_commit_and_null_without_one(tmp_path):
+    """`cli._stack_mint` reads `refs/saffron/mutants` fresh inside its own
+    minting closure, so a move between two mints of the same batch reaches
+    the next one. A mirror with no such ref mints with `None`."""
+    record = MemoryRecord()
+    ledger = Ledger(tmp_path / "l.db", record=record)
+    mirror = tmp_path / "m.git"
+    subprocess.run(
+        ["git", "init", "-q", "--bare", str(mirror)], check=True, capture_output=True
+    )
+    pinned = task.PinnedBase(
+        mirror=mirror, url="https://github.com/o/r.git", base_sha="a" * 40
+    )
+    mint = cli._stack_mint(pinned=pinned, repo=tmp_path / "checkout", ledger=ledger)
+
+    def _mint_one(spec_id):
+        text = f"---\nid: {spec_id}\ntitle: t\ntype: chore\n---\n"
+        candidate = Candidate(
+            path=Path(f"{spec_id}.md"),
+            spec=intake.parse_spec(text),
+            spec_sha="c" * 64,
+            task_id=None,
+        )
+        return mint(candidate)
+
+    def _recorded_commit(task_id):
+        key = ledger.record_key(task_id)
+        assert key is not None
+        created = next(f for f in record.read(key) if f.kind == "task_created")
+        row_commit = ledger._db.execute(
+            "SELECT mutants_commit FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()["mutants_commit"]
+        assert created.payload["mutants_commit"] == row_commit
+        return row_commit
+
+    task_no_ref = _mint_one("SY-1")
+    assert _recorded_commit(task_no_ref) is None
+
+    commit_1 = _mutants_file_commit(
+        mirror, "tests/test_a.py::test_one:\n  file: a.py\n  find: x\n"
+    )
+    _git(mirror, "update-ref", "refs/saffron/mutants", commit_1)
+    task_first = _mint_one("SY-2")
+    assert _recorded_commit(task_first) == commit_1
+
+    commit_2 = _mutants_file_commit(
+        mirror, "tests/test_a.py::test_one:\n  file: a.py\n  find: y\n"
+    )
+    _git(mirror, "update-ref", "refs/saffron/mutants", commit_2)
+    task_second = _mint_one("SY-3")
+    assert _recorded_commit(task_second) == commit_2
+
+    ledger.close()
+
+
 def test_a_spec_review_fills_cores_prompt_from_its_base_policy_in_a_cell_at_its_predecessors_head(
     tmp_path, monkeypatch
 ):

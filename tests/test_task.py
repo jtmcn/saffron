@@ -1062,6 +1062,46 @@ def _record(
     )
 
 
+def _mutants_commit(mirror: Path, content: str) -> str:
+    """A root commit over one `SY-1.yaml`, on `mirror`'s own object store."""
+    blob = subprocess.run(
+        ["git", "-C", str(mirror), "hash-object", "-w", "--stdin"],
+        input=content,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    tree = subprocess.run(
+        ["git", "-C", str(mirror), "mktree"],
+        input=f"100644 blob {blob}\tSY-1.yaml\n",
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    return subprocess.run(
+        [
+            "git",
+            "-C",
+            str(mirror),
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=T",
+            "commit-tree",
+            tree,
+            "-m",
+            "mutants",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def _set_mutants_ref(mirror: Path, commit: str) -> None:
+    _git(mirror, "update-ref", "refs/saffron/mutants", commit)
+
+
 def _handed_spec() -> tuple[Spec, str, ResolvedCeilings]:
     ceilings = ResolvedCeilings(
         budget_usd=12.0,
@@ -3785,5 +3825,238 @@ def test_ready_task_refuses_a_tree_base_no_branch_at_origin_carries(tmp_path):
             out_dir=tmp_path / "out-unknown",
             mirror_path=mirror_path,
         )
+
+    ledger.close()
+
+
+# --- backlog item 80: run_task reads each criterion's mutant from the ref ---
+
+
+def test_run_task_hands_its_cell_the_mutants_the_ref_holds_at_the_tasks_commit(
+    tmp_path, monkeypatch
+):
+    """`run_task` attaches each criterion's mutant from `refs/saffron/mutants`.
+    A given task reads it at the commit its own row pins. A fresh one
+    reads the ref's current head instead."""
+    from saffron.intake import Mutant
+
+    ledger, run_id, repo_id, mirror, shas = _recorded_ledger(tmp_path)
+    out_dir = tmp_path / "out"
+    witness = "tests/test_a.py::test_two"
+
+    built: list = []
+
+    def _run_one_cell(cell_spec, **_kwargs):
+        built.append(cell_spec)
+        return CellOutcome(
+            state="EXHAUSTED",
+            task_id=cell_spec.task_id,
+            run_id=cell_spec.task_id,
+            task_dir=out_dir / cell_spec.spec_id,
+        )
+
+    monkeypatch.setattr(task_module, "run_one_cell", _run_one_cell)
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
+
+    def _run(task_id=None):
+        return task_module.run_task(
+            parse_spec(_rev_text()),
+            hashlib.sha256(_rev_text().encode()).hexdigest(),
+            ceilings=ResolvedCeilings(
+                budget_usd=12.0,
+                max_attempts=4,
+                max_turns=60,
+                budget_source="default",
+                attempts_source="default",
+                turns_source="default",
+            ),
+            base=PinnedBase(
+                mirror=mirror,
+                url="https://example.invalid/o/r.git",
+                base_sha=shas["base"],
+            ),
+            repo_id=repo_id,
+            repo=tmp_path / "target-repo",
+            ledger=ledger,
+            out_dir=out_dir,
+            token=None,
+            task_id=task_id,
+        )
+
+    # A mirror with no ref runs with no mutants, and `None` on the `CellSpec`.
+    built.clear()
+    result = _run()
+    assert isinstance(result, CellOutcome)
+    assert built[-1].mutants_commit is None
+    assert built[-1].acceptance[0].mutant is None
+
+    commit_1 = _mutants_commit(
+        mirror, f"{witness}:\n  file: src/a.py\n  find: alpha_edit\n"
+    )
+    commit_2 = _mutants_commit(
+        mirror, f"{witness}:\n  file: src/a.py\n  find: beta_edit\n"
+    )
+    _set_mutants_ref(mirror, commit_1)
+
+    # No task given: reads the ref's current head.
+    built.clear()
+    result = _run()
+    assert isinstance(result, CellOutcome)
+    assert built[-1].mutants_commit == commit_1
+    assert built[-1].acceptance[0].mutant == Mutant(file="src/a.py", find="alpha_edit")
+
+    # A given task keeps the commit its own row recorded, once the ref moves on.
+    task_a = ledger.create_task(
+        run_id,
+        spec_id="SY-1",
+        spec_sha="f" * 64,
+        branch="saffron/SY-1",
+        mutants_commit=commit_1,
+    )
+    _set_mutants_ref(mirror, commit_2)
+    built.clear()
+    result = _run(task_id=task_a)
+    assert isinstance(result, CellOutcome)
+    assert built[-1].mutants_commit == commit_1
+    assert built[-1].acceptance[0].mutant == Mutant(file="src/a.py", find="alpha_edit")
+
+    # A given task whose row records no commit runs with no mutants.
+    task_b = ledger.create_task(
+        run_id, spec_id="SY-1", spec_sha="f" * 64, branch="saffron/SY-1"
+    )
+    built.clear()
+    result = _run(task_id=task_b)
+    assert isinstance(result, CellOutcome)
+    assert built[-1].mutants_commit is None
+    assert built[-1].acceptance[0].mutant is None
+
+    ledger.close()
+
+
+def test_run_task_refuses_an_inline_mutant_or_an_unreadable_mutants_file_before_its_cell(
+    tmp_path, monkeypatch, capsys
+):
+    """`run_task` returns `Refused` before any cell starts. The cause is
+    an inline mutant, a `<spec id>.yaml` that cannot parse, a mutant it
+    discloses, or a recorded commit the mirror does not hold."""
+    ledger, run_id, repo_id, mirror, shas = _recorded_ledger(tmp_path)
+    out_dir = tmp_path / "out"
+
+    def _run_one_cell(*_a, **_k):
+        raise AssertionError("a refused task must never reach a cell")
+
+    monkeypatch.setattr(task_module, "run_one_cell", _run_one_cell)
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
+
+    def _run(spec, spec_sha, *, task_id=None, base_sha=None):
+        return task_module.run_task(
+            spec,
+            spec_sha,
+            ceilings=ResolvedCeilings(
+                budget_usd=12.0,
+                max_attempts=4,
+                max_turns=60,
+                budget_source="default",
+                attempts_source="default",
+                turns_source="default",
+            ),
+            base=PinnedBase(
+                mirror=mirror,
+                url="https://example.invalid/o/r.git",
+                base_sha=base_sha or shas["base"],
+            ),
+            repo_id=repo_id,
+            repo=tmp_path / "target-repo",
+            ledger=ledger,
+            out_dir=out_dir,
+            token=None,
+            task_id=task_id,
+        )
+
+    # 1. A handed spec declaring a mutant inline.
+    inline_text = _rev_text(mutant_find="an edit this text spells nowhere else")
+    result = _run(
+        parse_spec(inline_text), hashlib.sha256(inline_text.encode()).hexdigest()
+    )
+    assert isinstance(result, Refused)
+    assert "tests/test_a.py::test_two" in result.reason
+    printed = capsys.readouterr().out
+    assert "refused" in printed
+    assert "tests/test_a.py::test_two" in printed
+
+    # 2. A task's recorded text declaring a mutant inline: the handed spec
+    # is clean, so only the recorded text can be the source of the refusal.
+    task_a = ledger.create_task(
+        run_id, spec_id="SY-1", spec_sha="f" * 64, branch="saffron/SY-1"
+    )
+    _record(ledger, task_a, inline_text)
+    result = _run(parse_spec(_rev_text()), "f" * 64, task_id=task_a)
+    assert isinstance(result, Refused)
+    assert "tests/test_a.py::test_two" in result.reason
+    printed = capsys.readouterr().out
+    assert "refused" in printed
+    assert "tests/test_a.py::test_two" in printed
+
+    # 3. A `<spec id>.yaml` that is not valid YAML.
+    task_b = ledger.create_task(
+        run_id,
+        spec_id="SY-1",
+        spec_sha="f" * 64,
+        branch="saffron/SY-1",
+        mutants_commit=_mutants_commit(mirror, "key: [\n"),
+    )
+    clean_text = _rev_text()
+    result = _run(
+        parse_spec(clean_text),
+        hashlib.sha256(clean_text.encode()).hexdigest(),
+        task_id=task_b,
+    )
+    assert isinstance(result, Refused)
+    assert "SY-1.yaml" in result.reason
+    printed = capsys.readouterr().out
+    assert "refused" in printed
+    assert "SY-1.yaml" in printed
+
+    # 4. A mutant on the ref whose `find` the spec's body spells out.
+    task_c = ledger.create_task(
+        run_id,
+        spec_id="SY-1",
+        spec_sha="f" * 64,
+        branch="saffron/SY-1",
+        mutants_commit=_mutants_commit(
+            mirror,
+            "tests/test_a.py::test_two:\n  file: src/a.py\n  find: revised body\n",
+        ),
+    )
+    result = _run(
+        parse_spec(clean_text),
+        hashlib.sha256(clean_text.encode()).hexdigest(),
+        task_id=task_c,
+    )
+    assert isinstance(result, Refused)
+    assert "tests/test_a.py::test_two" in result.reason
+    printed = capsys.readouterr().out
+    assert "refused" in printed
+    assert "tests/test_a.py::test_two" in printed
+
+    # 5. A given task whose recorded commit the mirror does not hold.
+    missing = "f" * 40
+    task_d = ledger.create_task(
+        run_id,
+        spec_id="SY-1",
+        spec_sha="f" * 64,
+        branch="saffron/SY-1",
+        mutants_commit=missing,
+    )
+    result = _run(
+        parse_spec(clean_text),
+        hashlib.sha256(clean_text.encode()).hexdigest(),
+        task_id=task_d,
+    )
+    assert isinstance(result, Refused)
+    assert missing[:12] in result.reason
+    printed = capsys.readouterr().out
+    assert "refused" in printed
+    assert missing[:12] in printed
 
     ledger.close()

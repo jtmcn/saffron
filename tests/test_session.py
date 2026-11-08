@@ -4363,6 +4363,37 @@ def test_the_task_created_fact_carries_the_cells_declared_tier_and_null_where_no
         assert row["risk"] == (declared if declared is not None else "standard")
 
 
+def test_a_cell_that_mints_its_task_records_the_mutants_commit_it_was_handed(
+    monkeypatch, tmp_path
+):
+    """`_drive_cell` passes `CellSpec.mutants_commit` straight through to
+    `create_task` when it mints its own task, `None` included, and the
+    `task_created` fact and the row both carry it."""
+    for i, commit in enumerate([None, "c" * 40]):
+        drive_dir = tmp_path / f"drive-{i}"
+        drive_dir.mkdir()
+        record = MemoryRecord()
+        cell = _stub_the_runtime(monkeypatch)
+        outcome, ledger = _drive(
+            monkeypatch,
+            drive_dir,
+            cell=cell,
+            turns=[_turn(_block(_PLAN)), _turn()],
+            spec=_spec(mutants_commit=commit),
+            record=record,
+        )
+        key = ledger.record_key(outcome.task_id)
+        assert key is not None
+        facts = record.read(key)
+        created = next(f for f in facts if f.kind == "task_created")
+        assert created.payload["mutants_commit"] == commit
+
+        (row,) = ledger._db.execute(
+            "SELECT mutants_commit FROM tasks WHERE task_id = ?", (outcome.task_id,)
+        ).fetchall()
+        assert row["mutants_commit"] == commit
+
+
 @dataclass(frozen=True)
 class _UnprovenVM(Apple):
     """apple/container's own spellings, with `unattended` never proven.

@@ -25,6 +25,7 @@ from saffron import (
     end_review,
     finish,
     follow_up,
+    mutants,
     preflight,
     qualify,
     regate,
@@ -1461,6 +1462,9 @@ def _stack_mint(
             repo.name, pinned.url, str(pinned.mirror), policy_sha=None
         )
         run_id = ledger.create_run(repo_id, pinned.base_sha)
+        # Read fresh on each mint, never cached by `_stack_mint` itself: a
+        # writer can move the ref between two specs of the same batch.
+        mutants_commit = mutants.ref_commit(pinned.mirror)
         return ledger.create_task(
             run_id,
             candidate.spec.id,
@@ -1469,6 +1473,7 @@ def _stack_mint(
             risk=candidate.spec.declared_risk,
             budget_usd=candidate.spec.budget_usd,
             prompt_sha=context.prompt_sha(),
+            mutants_commit=mutants_commit,
         )
 
     return run

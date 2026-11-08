@@ -647,7 +647,7 @@ def _retired_ids(directory: Path) -> tuple[frozenset[str], list[DiscoveryFailure
         return frozenset(), []
     # `discover_specs` globs non-recursively, so this reads `done/` alone and
     # cannot turn it into a second scan directory.
-    shipped, unparseable = discover_specs(retired)
+    shipped, unparseable = discover_specs(retired, retired=True)
     # A spec refused on *policy* read cleanly and declares a trustworthy id, so
     # retiring it still credits its dependents: `DiscoveryFailure.spec` is set
     # only for that case (item 82's disclosed mutant). Without this, adding an

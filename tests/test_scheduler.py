@@ -4064,17 +4064,11 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0230",
         "SA-0232",
         "SA-0259",
-        "SA-0260",
-        "SA-0286",
-        "SA-0299",
         "SA-0328",
-        "SA-0329",
         "SA-0333",
-        "SA-0334",
         "SA-0337",
         "SA-0338",
         "SA-0200",
-        "SA-0201",
         "SA-0208",
         "SA-0215",
         "SA-0238",
@@ -4083,8 +4077,6 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0255",
         "SA-0261",
         "SA-0298",
-        "SA-0311",
-        "SA-0312",
         "SA-0314",
         "SA-0320",
         "SA-0321",
@@ -4097,12 +4089,47 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0317",
     ]
     assert [r.path.name[:7] for r in refusals] == [
+        "SA-0201",
         "SA-0202",
         "SA-0203",
         "SA-0204",
         "SA-0205",
         "SA-0206",
         "SA-0207",
+        "SA-0229",
+        "SA-0231",
+        "SA-0243",
+        "SA-0247",
+        "SA-0250",
+        "SA-0251",
+        "SA-0254",
+        "SA-0260",
+        "SA-0264",
+        "SA-0265",
+        "SA-0267",
+        "SA-0270",
+        "SA-0271",
+        "SA-0276",
+        "SA-0277",
+        "SA-0282",
+        "SA-0286",
+        "SA-0287",
+        "SA-0288",
+        "SA-0290",
+        "SA-0291",
+        "SA-0293",
+        "SA-0299",
+        "SA-0302",
+        "SA-0303",
+        "SA-0306",
+        "SA-0311",
+        "SA-0312",
+        "SA-0318",
+        "SA-0319",
+        "SA-0329",
+        "SA-0330",
+        "SA-0331",
+        "SA-0334",
         "SA-0216",
         "SA-0217",
         "SA-0218",
@@ -4114,68 +4141,41 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0226",
         "SA-0227",
         "SA-0228",
-        "SA-0229",
-        "SA-0231",
         "SA-0233",
         "SA-0234",
         "SA-0235",
         "SA-0237",
         "SA-0240",
         "SA-0242",
-        "SA-0243",
         "SA-0244",
         "SA-0246",
-        "SA-0247",
         "SA-0248",
         "SA-0249",
-        "SA-0250",
-        "SA-0251",
         "SA-0252",
         "SA-0253",
-        "SA-0254",
         "SA-0258",
         "SA-0262",
-        "SA-0264",
-        "SA-0265",
         "SA-0266",
-        "SA-0267",
         "SA-0268",
-        "SA-0270",
-        "SA-0271",
         "SA-0272",
         "SA-0273",
         "SA-0274",
         "SA-0275",
-        "SA-0276",
-        "SA-0277",
         "SA-0278",
         "SA-0279",
         "SA-0280",
         "SA-0281",
-        "SA-0282",
         "SA-0283",
         "SA-0284",
         "SA-0285",
-        "SA-0287",
-        "SA-0288",
         "SA-0289",
-        "SA-0290",
-        "SA-0291",
-        "SA-0293",
         "SA-0301",
-        "SA-0302",
-        "SA-0303",
         "SA-0304",
         "SA-0305",
-        "SA-0306",
         "SA-0313",
         "SA-0315",
         "SA-0316",
-        "SA-0318",
-        "SA-0319",
         "SA-0327",
-        "SA-0330",
-        "SA-0331",
         "SA-0335",
         "SA-0336",
         "SA-0339",
@@ -4266,7 +4266,7 @@ def test_no_real_spec_names_a_criterion_path_its_touches_do_not_cover(tmp_path):
     """
     directory = _every_live_spec_flattened(tmp_path)
 
-    specs, _ = discover_specs(directory)
+    specs, _ = discover_specs(directory, retired=True)
     # A loop that examined nothing would pass silently, which is the failure
     # mode this test exists to close rather than a stricter form of it. The
     # count is the guard, and it is also why the discovery failures are
@@ -4771,7 +4771,15 @@ def test_no_real_spec_is_refused_on_its_own_acceptance_criteria(tmp_path, ledger
     # apply to keeps a second one from slipping in behind it.
     disclosed = [r for r in refusals if "mutant names text" in r.reason]
     assert [r.path.name[:7] for r in disclosed] == ["SA-0063"]
-    # Ten more non-`depends_on` refusals, named by literal id rather
+    # Item 80: a promoted spec still declaring a mutant inline is refused on
+    # it, checked against the corpus itself rather than a pinned id list.
+    inline_mutant = [r for r in refusals if "declares a mutant inline" in r.reason]
+    declared_inline, _ = discover_specs(directory, retired=True)
+    assert {r.path.name[:7] for r in inline_mutant} == {
+        s.spec.id for s in declared_inline if any(c.mutant for c in s.spec.acceptance)
+    }
+    assert len(inline_mutant) > 30
+    # Nine more non-`depends_on` refusals, named by literal id rather
     # than by the rule under test (`SA-0279`, backlog item b-e471bd).
     claude_touching = [r for r in refusals if "b-e471bd" in r.reason]
     assert [r.path.name[:7] for r in claude_touching] == [
@@ -4783,11 +4791,10 @@ def test_no_real_spec_is_refused_on_its_own_acceptance_criteria(tmp_path, ledger
         "SA-0129",
         "SA-0196",
         "SA-0280",
-        "SA-0282",
         "SA-0283",
     ]
     assert all(
         "depends_on" in r.reason
         for r in refusals
-        if r not in disclosed and r not in claude_touching
+        if r not in disclosed and r not in claude_touching and r not in inline_mutant
     )

@@ -79,6 +79,15 @@ def ensure_mirror(origin: Path | str, mirror_path: Path) -> Path:
             "+refs/*:refs/*",
             "^refs/saffron/*",
         )
+        # A second fetch: the exclusion above drops the mutants ref from the
+        # first one. The glob lets a checkout that deletes it prune it here too.
+        _git(
+            mirror_path,
+            "fetch",
+            "--prune",
+            "origin",
+            "+refs/saffron/mutants*:refs/saffron/mutants*",
+        )
         return mirror_path
 
     mirror_path.parent.mkdir(parents=True, exist_ok=True)

@@ -56,8 +56,8 @@ GitHub issues remain in use only for research/evidence records under
   child calls. A method is named without its class.
 - **Acceptance criteria are `acceptance:` in the frontmatter**, one entry per
   criterion: a `claim` (the prose the PR body renders) and a `witness` (a test
-  node id), plus `preserves: true` or a `mutant` where the bullets below say so.
-  They are load-bearing: `criteria` checks each witness at base and at head, and
+  node id), plus `preserves: true` where the bullets below say so. They are
+  load-bearing: `criteria` checks each witness at base and at head, and
   `witness` runs each mutant.
 
   ```yaml
@@ -65,11 +65,21 @@ GitHub issues remain in use only for research/evidence records under
     - claim: >-
         A task that wrote notes opens a pull request carrying them.
       witness: tests/test_package.py::test_the_packaged_body_carries_the_implementers_notes
-      mutant:
-        file: saffron/phases/package.py
-        find: notes=outcome.notes
-        replace: notes=""
   ```
+
+  A mutant lives on `refs/saffron/mutants`, never in the spec (backlog item
+  80). Its tree holds one `<spec id>.yaml` per spec, a mapping from witness
+  to the mutant that falsifies its claim.
+
+  ```yaml
+  # SA-0400.yaml, on refs/saffron/mutants
+  tests/test_package.py::test_the_packaged_body_carries_the_implementers_notes:
+    file: saffron/phases/package.py
+    find: notes=outcome.notes
+    replace: notes=""
+  ```
+
+  An inline `mutant:` on a queued spec is refused at intake.
 
   A `## Acceptance criteria` checklist in the body still parses — every spec up to
   `SA-0031` used one — but it names no witness, so nothing host-side can check
@@ -122,12 +132,12 @@ GitHub issues remain in use only for research/evidence records under
   reading the agent's own reasoning as it worked.
 
   *That check is a tripwire, not a boundary*, and writing to it as though the
-  channel were shut is the mistake it invites. A paraphrase evades it entirely —
-  "declare a module-scope constant named CEILING, set to 60" discloses the
-  spelling without containing it — and the cell can read the spec file directly
-  in any case: `.saffron/**` is forbidden to *write*, not to *read*
-  (backlog item 80). It catches the literal, which is the shape
-  `SA-0063` took; the honest mutant is still the author's job.
+  channel were shut is the mistake it invites. A paraphrase evades it
+  entirely: "declare a module-scope constant named CEILING, set to 60"
+  discloses the spelling without containing it. The mutant now lives on a
+  ref the cell's seed never fetches (backlog item 80). It catches the
+  literal, which is the shape `SA-0063` took; the honest mutant is still
+  the author's job.
 
   *Pinning what the code determines does work*, and is what `SA-0064` did: a
   field that exists, a parameter that exists, a predicate already written, so

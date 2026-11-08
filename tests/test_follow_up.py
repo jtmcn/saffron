@@ -434,7 +434,7 @@ def _eighteen_turns() -> list:
     from saffron import spec_review
 
     return [
-        _candidate("SA-0108", mutant=("src/b.py", "not_here", "y")),  # 1 accepted
+        _candidate("SA-0108"),  # 1 accepted
         _candidate(
             "SA-0109",
             budget=11.0,
@@ -485,7 +485,6 @@ def _eighteen_turns() -> list:
             "SA-0110",
             title="(-)",
             claims=("claim-rate",),
-            mutant=("src/c.py", "beta_rate", "beta_z"),
         ),  # 17 accepted
     ]
 
@@ -842,7 +841,7 @@ def test_a_follow_up_writers_attempt_records_the_model_its_session_names(
 
     groups = [g() for _ in range(5)]
 
-    accepted_text = _candidate("SA-0108", mutant=("src/b.py", "not_here", "y"))
+    accepted_text = _candidate("SA-0108")
     wrong_id_text = _candidate("SA-0999", claims=("claim-concern-b",))
     turns = [
         spec_review.SpecWriterSession(
@@ -980,7 +979,7 @@ def test_a_follow_up_writers_facts_reach_the_origin_at_exit(tmp_path, monkeypatc
 
     groups = [g() for _ in range(5)]
 
-    accepted_text = _candidate("SA-0108", mutant=("src/b.py", "not_here", "y"))
+    accepted_text = _candidate("SA-0108")
     wrong_id_text = _candidate("SA-0999", claims=("claim-concern-b",))
     turns = [
         spec_review.SpecWriterSession(
@@ -2245,3 +2244,72 @@ def test_a_follow_up_is_written_from_the_heads_and_ranges_the_end_review_graded(
     assert len(candidates_mb) == 2
     prompt_bottom_fallback = write_calls_mb[1][1]
     assert f"{built.shas['H1']}^..{built.shas['H1']}" in prompt_bottom_fallback
+
+
+def test_a_follow_up_declaring_any_mutant_inline_is_refused():
+    """`_validate` refuses a candidate whatever criterion carries an
+    inline mutant. A mutant now lives on the ref, and `run_task` refuses
+    every candidate that still spells one out. The spec-writer prompt
+    tells the writer to declare none."""
+    from saffron import follow_up
+    from saffron.agents import context
+    from saffron.intake import parse_spec
+
+    origin = parse_spec(
+        "---\nid: SA-0100\ntitle: Origin\ntype: feature\nbudget_usd: 20\n---\n\nbody\n"
+    )
+    group = FollowUpGroup(task_key="k", file="src/b.py", findings=())
+    allowed = {"src/b.py", "tests/test_b.py"}
+
+    on_first = parse_spec(_candidate("SA-0108", mutant=("src/b.py", "not_here", "y")))
+    reason = follow_up._validate(
+        on_first, candidate_id="SA-0108", origin=origin, _group=group, allowed=allowed
+    )
+    assert reason is not None
+    assert "mutant" in reason
+    assert "tests/test_b.py::test_w0" in reason
+
+    on_second = parse_spec(
+        _spec_text(
+            {
+                "id": "SA-0109",
+                "title": "Two",
+                "type": "feature",
+                "budget_usd": 10.0,
+                "touches": ["src/b.py", "tests/test_b.py"],
+                "acceptance": [
+                    {"claim": "claim-rate", "witness": "tests/test_b.py::test_w0"},
+                    {
+                        "claim": "claim-concern-b",
+                        "witness": "tests/test_b.py::test_w1",
+                        "mutant": {
+                            "file": "src/b.py",
+                            "find": "beta_rate",
+                            "replace": "beta_x",
+                        },
+                    },
+                ],
+            }
+        )
+    )
+    reason2 = follow_up._validate(
+        on_second,
+        candidate_id="SA-0109",
+        origin=origin,
+        _group=group,
+        allowed=allowed,
+    )
+    assert reason2 is not None
+    assert "mutant" in reason2
+    assert "tests/test_b.py::test_w1" in reason2
+
+    clean = parse_spec(_candidate("SA-0108"))
+    assert (
+        follow_up._validate(
+            clean, candidate_id="SA-0108", origin=origin, _group=group, allowed=allowed
+        )
+        is None
+    )
+
+    prompt = (context.PROMPTS_DIR / "spec-writer.md").read_text()
+    assert "Declare no mutant in the spec" in " ".join(prompt.split())
