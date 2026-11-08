@@ -104,7 +104,7 @@ acceptance:
 ## Context
 
 Backlog item **b-d39d9a**, under `DESIGN.md` §4.3 and §5.5. Related:
-b-2f4746. Every line below was read at `c8e8f6e6`, SA-0339's packaged head.
+b-2f4746. Every line below was read at `03a610d3`, SA-0352's merge.
 
 **What the design now says.** Commits `5054cd61` and `01796b83` amended the
 design by hand, and `ad7049ad` amended the glossary by hand, in this pull
@@ -116,27 +116,27 @@ $2 each". The floor does not promise that every lens starts. Each later session 
 the pool has left, and the host takes each cost off as it ends. A session the
 pool cannot cover does not start, and the task ends `REVIEW_INCOMPLETE`.
 §5.5's paragraph on that state now says the same, and that "Its line then says
-the review was cut at its budget" (`DESIGN.md:1260`). §5.5.1's "Ungated"
-paragraph now prices each lens at $2 of REVIEW's floor (`DESIGN.md:1277`).
+the review was cut at its budget" (`DESIGN.md:1268`). §5.5.1's "Ungated"
+paragraph now prices each lens at $2 of REVIEW's floor (`DESIGN.md:1285`).
 `CONTEXT.md` gained a **Review pool** entry that says the same
 (`CONTEXT.md:90-94`). Its `REVIEW_INCOMPLETE` entry gained "A REVIEW session
-its pool could not cover ends the task here too" (`CONTEXT.md:886-887`). This
+its pool could not cover ends the task here too" (`CONTEXT.md:887-888`). This
 spec makes those five passages true of the code.
 
 **What REVIEW spends today.** `critic_budget` returns the remainder, floored at
 `REVIEW_FLOOR_USD` of $2 (`saffron/cell/session.py:183-185`, `:90`). REVIEW
-calls it once, as `probe_budget` (`saffron/cell/session.py:3174`). It hands
-that figure whole to `review.run_review` (`saffron/cell/session.py:3251`), to
-`review.run_criterion_probes` (`:3266`) and to `review.run_wrong_versions`
-(`:3281`). `run_review` passes it to every lens in `LENSES`
+calls it once, as `probe_budget` (`saffron/cell/session.py:3178`). It hands
+that figure whole to `review.run_review` (`saffron/cell/session.py:3255`), to
+`review.run_criterion_probes` (`:3270`) and to `review.run_wrong_versions`
+(`:3285`). `run_review` passes it to every lens in `LENSES`
 (`saffron/phases/review.py:378-394`). Each criterion probe gets it as its own
 cap (`saffron/phases/review.py:519-524`), and so does each wrong-version
 session (`saffron/phases/review.py:732-737`). The comment above the floor says
 the cap is "never decremented between them" (`saffron/cell/session.py:80-89`).
 REVIEW's cost is summed into `spent` once, after every session has run
-(`saffron/cell/session.py:3393-3400`). `_over_budget` holds `spent` against
-the budget (`saffron/cell/session.py:2598-2613`). Its last call comes before
-the notes turn, ahead of REVIEW (`saffron/cell/session.py:3029`).
+(`saffron/cell/session.py:3397-3404`). `_over_budget` holds `spent` against
+the budget (`saffron/cell/session.py:2602-2617`). Its last call comes before
+the notes turn, ahead of REVIEW (`saffron/cell/session.py:3033`).
 
 **What a re-prompt spends.** `_parse_or_reprompt` resumes a session whose
 output was not the schema, capped at the session's cap less the failed turn's
@@ -148,13 +148,13 @@ cost. It returns both turns' summed cost
 **How REVIEW ends today.** `review_state` returns `REVIEW_INCOMPLETE` only for
 a lens with an `error` (`saffron/phases/review.py:976-989`). The cell calls it
 once, after every record is written, and passes its line to `_phase_start`
-(`saffron/cell/session.py:3416-3417`). An errored criterion probe or wrong
+(`saffron/cell/session.py:3420-3421`). An errored criterion probe or wrong
 version does not stop the task. Its entry carries an `error` and the REVIEW
 line names its witness (`saffron/phases/review.py:583-604`, `:766-787`). The
 cell pairs `criterion-probes` entries with `spec.acceptance`, and wrong-version
 entries with the criteria declaring wrong versions, each by
-`zip(..., strict=True)` (`saffron/cell/session.py:3331-3348`). The task's own
-last line is a `TaskOutcome` event (`saffron/cell/session.py:3768-3776`).
+`zip(..., strict=True)` (`saffron/cell/session.py:3335-3352`). The task's own
+last line is a `TaskOutcome` event (`saffron/cell/session.py:3783-3791`).
 `describe` renders it as "`{outcome}: ${spent} spent, session …`"
 (`saffron/events.py:982-985`).
 
@@ -168,7 +168,7 @@ criteria. The cell reached `READY_FOR_REVIEW` at $76.77.
    computes `probe_budget` today. It opens at the remainder,
    `spec.budget_usd - spent`, or at `REVIEW_FLOOR_USD` times
    `len(review.LENSES)`, whichever is larger. `critic_budget` goes, and so
-   does its test (`tests/test_session.py:7750-7757`). `REVIEW_FLOOR_USD` stays
+   does its test (`tests/test_session.py:7783-7790`). `REVIEW_FLOOR_USD` stays
    in `session.py` at $2. Rewrite its comment (`saffron/cell/session.py:80-89`)
    to say what the pool is.
 2. **The three REVIEW calls share it.** `run_review`, `run_criterion_probes`
@@ -178,7 +178,7 @@ criteria. The cell reached `READY_FOR_REVIEW` at $76.77.
    today. Each session is capped at what is left when it starts. Its cost,
    as the session reports it, comes off when it ends. A re-prompt turn stays
    inside its session's cap through `_parse_or_reprompt`, as today. `run_lens`
-   keeps its `budget_usd`, since `saffron/end_review.py:396` and `:643` call
+   keeps its `budget_usd`, since `saffron/end_review.py:399` and `:646` call
    it.
 3. **A session the pool cannot cover does not start.** A session starts only
    while the pool holds at least `REVIEW_FLOOR_USD`. Otherwise it buys no turn
@@ -195,7 +195,7 @@ criteria. The cell reached `READY_FOR_REVIEW` at $76.77.
    criterion's witness. The cell emits that line as the `REVIEW:` line it
    emits today. `TaskOutcome` then reads `REVIEW_INCOMPLETE`, and the ledger
    writes the state, through the paths an errored lens takes.
-5. **Spend is counted once.** The sum at `saffron/cell/session.py:3393-3400`
+5. **Spend is counted once.** The sum at `saffron/cell/session.py:3397-3404`
    stays the one place REVIEW's cost reaches `spent`. A session that did not
    start adds nothing to it. Rewrite the comment above it, since REVIEW is now
    bounded.
@@ -206,7 +206,7 @@ criteria. The cell reached `READY_FOR_REVIEW` at $76.77.
   budget (backlog item 119). PACKAGE makes no model call.
 - `run_lens`'s signature, and the end review's lenses that call it.
 - The adequacy probes and the criterion-probe edits that run after the
-  sessions (`saffron/cell/session.py:3304-3367`). They run in Gate-only cells
+  sessions (`saffron/cell/session.py:3308-3371`). They run in Gate-only cells
   and buy no turn.
 - `DESIGN.md`, `CONTEXT.md` and ADR 8. ADR 8 still prices the fourth lens as
   "three remainders to four"
@@ -288,21 +288,21 @@ the re-prompt rule and the session per criterion. Two tests in
 `tests/test_session.py` assert that a later session holds the same cap as an
 earlier one. They are
 `test_each_claim_is_asked_of_its_own_session_that_is_never_shown_a_witness`
-(`tests/test_session.py:11896`, its assert at `:11990`) and
+(`tests/test_session.py:12090`, its assert at `:12184`) and
 `test_criterion_probes_and_wrong_versions_share_one_gate_only_cell_and_the_spend`
-(`tests/test_session.py:13608`, its assert at `:13701`). Assert the cap REVIEW's pool leaves instead.
+(`tests/test_session.py:13802`, its assert at `:13895`). Assert the cap REVIEW's pool leaves instead.
 A prototype of the change failed these seven tests and the `critic_budget`
 test, and no others.
 
 **The two evidence scripts.** Each passes `budget_usd=args.budget_usd` to
 `run_review` (`docs/evidence/scripts/2026-09-07-lens-scoring.py:184`,
-`docs/evidence/scripts/2026-09-08-lens-corpus.py:453`). Each help text calls
-that figure "per lens" (`:83`, `:311`). Hand `run_review` a
+`docs/evidence/scripts/2026-09-08-lens-corpus.py:448`). Each help text calls
+that figure "per lens" (`:83`, `:306`). Hand `run_review` a
 pool of that figure times `len(review.LENSES)`. Rewrite each help text to say
 the flag sets the whole review pool, and `:83`'s "three lenses" to the four
-`review.LENSES` holds. Also rewrite the comment at `saffron/cell/session.py:3172-3173`,
+`review.LENSES` holds. Also rewrite the comment at `saffron/cell/session.py:3176-3177`,
 which calls the ceiling one figure computed once.
-`tests/test_corpus.py:573` replaces `run_review` with a stub that takes any
+`tests/test_corpus.py:636` replaces `run_review` with a stub that takes any
 keyword.
 
 **One stale comment.** `tests/test_lens_scoring.py:795-801` says a past figure
