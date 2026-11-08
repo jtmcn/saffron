@@ -353,7 +353,7 @@ wrong spec at 20 sites.
 ### Tier 3 — real, not urgent
 
 **Placed 2026-11-07**, in grooming, from six open items no tier named:
-**b-ba0cba**, **b-036cc5**, **b-262df1**, **b-4bd68a**, ~~**b-cd4de2**~~, then
+**b-ba0cba**, **b-036cc5**, ~~**b-262df1**~~, **b-4bd68a**, ~~**b-cd4de2**~~, then
 **b-98a3be**. A follower of `events.jsonl` sees no typed spend from IMPLEMENT
 to the outcome. `saffron watch` has no typed output for a follower outside
 Python. Record helpers sit under `tests/`, and the loop's driver imports them.
