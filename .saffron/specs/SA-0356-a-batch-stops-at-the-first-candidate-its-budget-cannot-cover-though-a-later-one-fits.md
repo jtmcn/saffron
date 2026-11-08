@@ -168,6 +168,9 @@ stopped `BUDGET`. `SA-0294` needs $25 and never ran.
    spec. This is the missed-layer path, and it adds no stack state. A plain
    batch and the follow-up pass give no such callable. A follow-up passed
    over is not a layer miss, as a follow-up's refusal is not one today.
+   A stack night that passed over a spec of its order closes `BUDGET` and runs
+   no follow-ups, on purpose. Follow-ups answer a stack the batch finished, and
+   this one left a layer unbuilt.
 5. **One existing test changes.** It is
    `test_a_follow_up_meets_until_the_budget_and_the_breaker_as_any_task_does`
    (`tests/test_batch.py:6265`). Its batch 2 offers `TE-44` at $27 and then
@@ -196,8 +199,8 @@ stopped `BUDGET`. `SA-0294` needs $25 and never ran.
   leaves it alone.
 - `DESIGN.md` and `CONTEXT.md`, which are `protected`. §4.2.1's "the budget
   is gone" becomes true of the code, so `DESIGN.md` needs no edit.
-  `CONTEXT.md`'s Refusal entry gained "A spec its budget passed over counts
-  as missed", amended by hand in this spec's pull request.
+  `CONTEXT.md`'s Refusal entry gained "A spec of its order that its budget
+  passed over counts as missed", amended by hand in this spec's pull request.
 - The revision check's own `unrevised` refusal (`saffron/batch.py:838-858`).
 
 ## Notes for the agent
