@@ -497,7 +497,7 @@ def test_a_spec_review_session_returns_a_rejected_window_as_a_reset_time():
         SpecReviewSession,
     )
 
-    assert SPEC_REVIEW_MAX_TURNS == 90
+    assert SPEC_REVIEW_MAX_TURNS == 150
     assert SPEC_REVIEW_BUDGET_USD == 6.0
     assert SPEC_REVIEW_EXTRACT_BUDGET_USD == 1.0
     assert SPEC_REVIEW_SESSION_USD == 8.0
@@ -1609,7 +1609,7 @@ def test_a_spec_writer_session_returns_the_extraction_turns_spec():
         SPEC_WRITER_TIMEOUT_S,
     )
 
-    assert SPEC_WRITER_MAX_TURNS == 120
+    assert SPEC_WRITER_MAX_TURNS == 200
     assert type(SPEC_WRITER_MAX_TURNS) is int
     assert SPEC_WRITER_BUDGET_USD == 17.0
     assert SPEC_WRITER_EXTRACT_BUDGET_USD == 1.5

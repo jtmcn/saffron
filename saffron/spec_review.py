@@ -41,8 +41,8 @@ WRITING_PHASE = "SPEC_WRITING"
 # neither `Write` nor `Edit`, so `Bash` runs unprivileged (SA-0169).
 SPEC_SESSION_TOOLS = ["Read", "Glob", "Grep", "Bash"]
 
-# Reasoned, unmeasured in a batch: SA-0155 records each review's turns.
-SPEC_REVIEW_MAX_TURNS = 90
+# Measured: the last twelve reviews ran 64 to 102 turns, and SA-0338's was cut at 91.
+SPEC_REVIEW_MAX_TURNS = 150
 
 # Reasoned, unmeasured in a batch: SA-0155 records each review's cost.
 SPEC_REVIEW_BUDGET_USD = 6.0
@@ -576,7 +576,7 @@ SPEC_WRITER_SESSION_USD = SPEC_WRITER_BUDGET_USD + SPEC_WRITER_EXTRACT_BUDGET_US
 
 # Reasoned, unmeasured: a third above SPEC_REVIEW_MAX_TURNS, since a spec
 # writer session can run longer.
-SPEC_WRITER_MAX_TURNS = 120
+SPEC_WRITER_MAX_TURNS = 200
 
 # Measured: 79 hand `spec-writer` transcripts had a median of 1396 s, and 21 ran
 # past 2700 s.
