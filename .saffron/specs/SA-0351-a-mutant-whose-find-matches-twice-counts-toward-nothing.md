@@ -113,7 +113,7 @@ acceptance:
       `witness_gate` over `saffron.cell.worktree.source_mutated`, on a
       committed host git repo, fails with `mutant-find-absent` for a find
       matching zero times and `mutant-find-repeated` for two and for three.
-      Each message carries its count as a whole word. A find matching once
+      Each message carries its count spelled as digits, as a whole word. A find matching once
       is applied, and only its witness reaches the `tests` gate. The tree is
       clean after.
     witness: tests/test_worktree.py::test_the_cell_mutator_hands_the_gate_its_find_count
@@ -122,17 +122,21 @@ acceptance:
       - "`source_mutated` reports a count only for two or more, so a find absent in a cell stays unproven."
       - "`source_mutated` writes the first match before it yields the count."
   - claim: >-
-      A find-count failure is a new failure and never drift. A `fail` that
-      carries only find-count failures names the head `tests` result's tool,
-      which `run_witness` already holds. The witness runs `GateSuite.baseline`
-      then `GateSuite.against` over a real git tree and a real `tests` gate,
-      with one `preserves` criterion and its declared mutant. At the tree
-      base the find matches once and the witness dies. At head the same file
-      holds the find twice. The comparison has no drift and exactly one new
-      failure, the witness gate's `mutant-find-repeated` on that criterion.
+      A find-count failure at head against a base whose witness died is a new
+      failure and never drift. A `fail` whose subset runs set no tool names
+      the head `tests` result's tool, which `run_witness` already holds. The
+      witness runs `GateSuite.baseline` then `GateSuite.against` over a real
+      git tree and a real `tests` gate, with two `preserves` criteria. The
+      first declares a mutant whose find matches once at the tree base, where
+      its witness dies. At head the same file holds the find twice. The
+      second declares a mutant naming a file that does not exist, so it stays
+      unproven on both sides and no subset run sets a tool. The comparison
+      has no drift and exactly one new failure, the witness gate's
+      `mutant-find-repeated` on the first criterion.
     witness: tests/test_constant_mutants.py::test_a_find_repeated_at_head_is_one_new_failure_and_no_drift
     wrong_versions:
       - A `fail` holding only find-count failures carries `tool=None`, so `suite_drift` reads a tool change and the attempt ends `GATE_ERROR`.
+      - The head tool is used only when every declared criterion miscounted, so a fail beside an unproven criterion carries `tool=None`.
 ---
 
 ## Context
@@ -280,7 +284,9 @@ keyword-only `tests_tool`, which `run_witness` filled from `tests_result`.
   holding no digit, so the count is the message's only number once the claim
   is removed. Criterion 3 keeps one criterion and one mutant file, and
   rewrites that file with the base's count, then the head's, before each run.
-  Distinct file names would normalise alike and hide a wrong version.
+  Distinct names such as `a.py` and `b.py` would put different text in each
+  message. Then no base would cancel, and a version sharing one code for 0
+  and 2 would pass the absent-base case.
 - In `tests/test_constant_mutants.py`, follow
   `test_a_witness_reading_its_constant_back_survives_a_constant_mutant`
   (`tests/test_constant_mutants.py:132`). A head file of `LIMIT = 3` twice,
@@ -289,9 +295,12 @@ keyword-only `tests_tool`, which `run_witness` filled from `tests_result`.
   second witness asserting the literal carries the declared mutant.
 - Criterion 6 uses the same harness. Commit the tree base, set `diff_base` to
   it, and run `suite.baseline`. Then commit the head and run
-  `suite.against(tree, baseline)`. Mark the criterion `preserves`, since its
-  witness exists and passes at base. Give the policy no `witness:` patterns,
-  so no constant mutant joins it.
+  `suite.against(tree, baseline)`. Mark both criteria `preserves`, since each
+  witness exists and passes at base. Give the second its own witness, a
+  second test in the same file. Give the policy no `witness:` patterns, so no
+  constant mutant joins them. On the prototype, a version using the head tool
+  only when every declared criterion miscounted drifted as
+  `witness: tool 'pytest 9.1.1' -> None` here.
 - In `tests/test_worktree.py`, use `_repo_with_a_file` and `_commit`
   (`tests/test_worktree.py:1397`, `:1136`). Pass
   `partial(worktree.source_mutated, "c")` as `mutate`.
