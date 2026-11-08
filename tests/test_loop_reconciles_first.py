@@ -84,5 +84,7 @@ def test_next_and_snapshot_reconcile_before_they_read(monkeypatch):
         return [], []
 
     monkeypatch.setattr(driver, "_scan", scan)
+    # A cell's checkout has no `origin`, which the follow-up read resolves first.
+    monkeypatch.setattr(driver, "_follow_up_rows", lambda known: [])
     driver.cmd_snapshot(argparse.Namespace(force=False, new=False, add=None))
     assert calls == ["reconcile", "read"]
