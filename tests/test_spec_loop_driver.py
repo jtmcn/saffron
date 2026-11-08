@@ -132,6 +132,13 @@ def _commit(cwd, name, text):
     return _git(cwd, "rev-parse", "HEAD")
 
 
+@pytest.fixture(autouse=True)
+def _off_a_loop_branch(monkeypatch):
+    """A cell checks out `saffron/SA-NNNN`, so the item 157 guard would refuse
+    every command these tests drive. Its own test sets the branch."""
+    monkeypatch.setattr(driver, "_on_loop_branch", lambda: None)
+
+
 @pytest.fixture
 def empty_repo(tmp_path, monkeypatch):
     """A git repo on `main` with no commits, blind to the host's git config."""

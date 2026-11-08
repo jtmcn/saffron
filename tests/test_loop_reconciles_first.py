@@ -10,10 +10,18 @@ import argparse
 import json
 import subprocess
 
+import pytest
+
 from saffron.ledger import Ledger
 from tests.test_spec_loop_driver import driver
 
 URL = "https://github.com/jtmcn/saffron/pull/7"
+
+
+@pytest.fixture(autouse=True)
+def _off_a_loop_branch(monkeypatch):
+    # A cell checks out `saffron/SA-NNNN`, and the item 157 guard refuses there.
+    monkeypatch.setattr(driver, "_on_loop_branch", lambda: None)
 
 
 def _merged_gh(argv):
