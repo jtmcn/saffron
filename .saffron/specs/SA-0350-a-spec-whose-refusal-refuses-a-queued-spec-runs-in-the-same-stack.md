@@ -4,7 +4,7 @@ title: A spec whose own new refusal refuses specs still queued at its base is ad
 type: feature
 priority: 2
 depends_on: [SA-0339]
-estimated_lines: 350
+estimated_lines: 360
 touches:
   - saffron/intake.py
   - saffron/scheduler.py
@@ -66,7 +66,7 @@ acceptance:
       queued with a `MERGED` task. One is declared by no spec anywhere. One
       is retired to `done/`. The reason names each of the first four and
       never names the retired one. It names `retired_first` and `done/`,
-      and never holds the text `depends_on`. A candidate whose
+      holds the text `not retired`, and never holds the text `depends_on`. A candidate whose
       `retired_first` names only the retired id is a candidate in both
       modes. With one more file in `done/` that does not parse, the reason
       also carries the text `could not be read as a spec`, the suffix
@@ -98,20 +98,24 @@ acceptance:
       `saffron cell` refuses a spec whose `retired_first` names a spec still
       queued in `.saffron/specs/` at `base_sha`, before any cell starts. It
       exits 1 and writes no task row. Its one line starts with the spec id,
-      says `refused` and names the queued id. The working copy has that
+      says `refused` and names the queued id. That base also holds a
+      file in `done/` that does not parse, and the line carries the text
+      `could not be read as a spec`. The working copy has the queued
       spec moved to `done/`, uncommitted. The same spec, with that id
       retired at `base_sha` and queued again in the working copy, reaches
       the cell. On a repo with no `.saffron` at `base_sha`, where the export
-      raises `GitError`, the same spec exits 1 with no task row and no cell.
-      Its one line starts with the spec id, names the failed read of
-      `done/` at `base_sha`, and never says `not retired`.
+      raises `GitError`, the same spec exits 2, the code a setup failure
+      takes, with no task row and no cell. Its one line starts with the
+      spec id, names the failed read of `done/` at `base_sha`, and never
+      says `not retired`.
     witness: tests/test_cli.py::test_a_spec_whose_retired_first_is_queued_at_base_refuses_before_the_cell_starts
     wrong_versions:
       - The check added to the queue scan's `_refuse` alone, so `saffron cell` starts the cell.
       - Retired ids read from the working copy, `repo`, rather than the export at `base_sha`.
       - Any non-empty `retired_first` refused, so the spec whose id is retired at `base_sha` never reaches the cell.
       - The `GitError` swallowed as `_protected_paths_at` does, so the line reports the id as not retired.
-      - The `GitError` left to propagate, so `saffron cell` exits 2 with no refused line.
+      - The `GitError` swallowed, so the command exits 1 or says not retired.
+      - The count of unreadable `done/` files passed as zero on this path, so the line carries no suffix.
   - claim: >-
       This repo's measured queue is unchanged. No queued spec declares
       `retired_first`.
@@ -211,7 +215,8 @@ export raises `GitError` when `base_sha` holds no `.saffron` or the
 mirror cannot be read, and the two look alike
 (`saffron/cli.py:519-531`). Then print one line starting with the spec
 id that names the failed read of `done/` at `base_sha`. Never say
-`not retired` there, and return 1. Skip the export and the line for a
+`not retired` there, and return 2. `saffron/cli.py:92-93` gives a setup
+failure 2, never 1. Skip the export and the line for a
 spec that declares no `retired_first`.
 
 `test_no_real_spec_is_refused_on_its_own_acceptance_criteria` promotes
@@ -285,6 +290,15 @@ a check that credits the stack base passes. The unreadable file is a
 witness drives `READY_FOR_REVIEW` alone. The new function reads no task
 state at all, so the other four waiting states are left to that design.
 
+**The stack base is measured**. At `6e224412` a host probe ran
+`build_queue(..., stack=True)` on this arrangement with no
+`retired_first` anywhere. `TE-1` and `TE-3` were queued, `TE-3` with a
+`MERGED` task, and `TE-5` sat in `done/`. `TE-2` had a
+`READY_FOR_REVIEW` task with a branch, a pushed sha and a pull request
+URL. `TE-9` declared only `depends_on: [TE-2]`. The candidates came back
+as `TE-1` and `TE-9`, each with `StackBase(spec_id='TE-2')`, and no
+refusals. So `TE-2` is the order's stack base with `TE-1` kept beside it.
+
 **The stack witness** builds the chain with `depends_on`, so the three
 parents lie on one chain as one stack's layers do. Assert the taken ids
 as an exact list, and the fourth's refusal rows as exactly one.
@@ -299,7 +313,10 @@ the working copy after the clone. For the admitted half,
 `GitError` half, `_local_origin` (`tests/test_cli.py:491`) commits no
 `.saffron`. Many existing tests run `_run_cell` on such a repo with specs
 that declare no `retired_first`, which is why that case skips the
-export.
+export. Those existing tests are the witnesses for a spec with no
+`retired_first`. One is `test_a_specs_own_ceilings_reach_the_cell`
+(`tests/test_cli.py:642`) on `_local_origin`, and the callers of
+`_repo_with_spec` are the rest.
 
 **The `prose` gate** counts each new comment and docstring. Write none
 with an em dash, a semicolon, a contraction, the perfect tense or a
@@ -307,6 +324,6 @@ sentence over 25 words.
 
 **Size**. `SA-0290` added `removes` and its scan refusal. It landed at
 184 changed lines outside `tests/` and 520 under it. This change has a
-smaller refusal and one more call site. The estimate is 70 lines of
-source and 280 of tests, with no overrun added. That covers the
+smaller refusal and one more call site. The estimate is 72 lines of
+source and 288 of tests, with no overrun added. That covers the
 unreadable suffix, the `GitError` line and the corpus test's third shape.
