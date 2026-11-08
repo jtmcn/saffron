@@ -634,10 +634,11 @@ def test_the_finishing_commit_leaves_out_each_follow_up_layer_that_ran_and_write
 def test_the_finish_refuses_a_symlink_on_any_path_it_writes(
     stack, tmp_path, monkeypatch
 ):
-    """Each of the four components a pending write can meet as a symlink
-    below the worktree, and the two finishes that commit: one where a
-    symlink sits on a path nothing pending writes, one where the worktree's
-    own parent is itself a symlink."""
+    """The finish refuses a symlink on any of the four components a pending
+    write meets below the worktree. It refuses a regular file where
+    `.saffron/specs` stands. Two finishes commit: one where a symlink sits
+    on a path nothing pending writes, one where the worktree's own parent is
+    itself a symlink."""
     from saffron.finish import commit_finish
     from saffron.repos import mirror as git_mirror
 
@@ -718,6 +719,12 @@ def test_the_finish_refuses_a_symlink_on_any_path_it_writes(
         "committed-file", ".saffron/specs/TE-7-seven.md", _plant_committed_file
     )
     _refused_case("dangling", ".saffron/specs/TE-21-other.md", _plant_dangling)
+
+    def _plant_specs_file(dest: Path, outside: Path) -> None:
+        shutil.rmtree(dest / ".saffron" / "specs")
+        (dest / ".saffron" / "specs").write_text("a file, not a directory\n")
+
+    _refused_case("specs-file", ".saffron/specs", _plant_specs_file)
 
     # A symlink on a path nothing pending writes does not block the finish:
     # TE-1-one.md is in the base tree, and no pending row writes it.

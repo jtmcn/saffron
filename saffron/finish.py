@@ -133,11 +133,13 @@ def _refuse_symlink(workdir: Path, path: str) -> None:
     """Raise `ValueError` naming the first component of `path`, read below
     `workdir` and never above it, that `lstat` finds to already be a
     symlink. `lstat` reads the link itself, so a dangling symlink is caught
-    too. A component `lstat` finds missing ends the walk: nothing below an
-    absent path can already be a link."""
+    too. A component above the last that is no directory raises too. A
+    component `lstat` finds missing ends the walk: nothing below an absent
+    path can already be a link."""
     accumulated = workdir
     rel = Path()
-    for part in Path(path).parts:
+    parts = Path(path).parts
+    for index, part in enumerate(parts):
         accumulated = accumulated / part
         rel = rel / part
         try:
@@ -147,6 +149,10 @@ def _refuse_symlink(workdir: Path, path: str) -> None:
         if stat.S_ISLNK(found.st_mode):
             raise ValueError(
                 f"{rel} is a symlink, so the finish refuses to write through it"
+            )
+        if index < len(parts) - 1 and not stat.S_ISDIR(found.st_mode):
+            raise ValueError(
+                f"{rel} is not a directory, so the finish refuses to write below it"
             )
 
 

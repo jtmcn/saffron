@@ -1,11 +1,11 @@
 ---
 id: b-d269f4
 title: "The view server exits 1 on a startup failure and shows float noise"
-status: open
+status: partial
 tier: 3
 filed: 2026-10-06
 specs: []
-prs: [708]
+prs: [708, 1073]
 commits: []
 cites: [§6.2]
 related: [b-a1d649, b-cf50dc, b-b51c9c]
@@ -36,3 +36,7 @@ Each startup failure exits 2 with one line. Money renders rounded. The batch
 page shows the batch's own facts and its tasks' cost and pull request. Each
 page names its build time. An unanchored finding is marked. The shapes file
 is read once per build. A negative length answers 405 without a read.
+
+## Record
+
+- 2026-11-08: partial by hand. Startup failures now exit 2 with one line, raised as `ViewGraphError` from `make_server`. The index rounds budget and spend to cents. A negative length answers 405 without a read. Left: the batch page's own facts and its tasks' cost and pull request, each page's build time, the unanchored mark, and one shapes read per build.

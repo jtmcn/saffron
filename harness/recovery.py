@@ -68,7 +68,7 @@ def _git(repo: Path, *args: str) -> str:
 
 
 def pinned_diff(repo: Path, base: str, head: str) -> str:
-    """`git diff base..head`, pinned by `worktree.DIFF_FLAGS` plus two of
+    """`git diff base..head`, pinned by `worktree.DIFF_FLAGS` plus three of
     `worktree.git_argv`'s `-c` overrides.
 
     The only spelling of `git diff` this module allows for comparing
@@ -84,6 +84,9 @@ def pinned_diff(repo: Path, base: str, head: str) -> str:
         "core.quotePath=false",
         "-c",
         "diff.suppressBlankEmpty=false",
+        # A global attr.tree can print an edit as binary (b-9ead75).
+        "-c",
+        "attr.tree=",
         "diff",
         *DIFF_FLAGS,
         f"{base}..{head}",

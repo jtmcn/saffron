@@ -387,7 +387,7 @@ defines a Refusal as before any cell starts, and `ready_task` refuses after one.
 modules each split a `consumes` or `removes` entry at its colon.
 
 **Placed 2026-10-20**, from the spec chain for `SA-0300` to `SA-0306`:
-**b-a64578**, ~~**b-206d2c**~~. The view's spend after a resume, and a runaway
+~~**b-a64578**~~, ~~**b-206d2c**~~. The view's spend after a resume, and a runaway
 row setting a budget floor.
 
 **Placed 2026-10-23**, from the spec loop's run 46: **b-30cbb8**,
@@ -432,13 +432,13 @@ Each line keeps the order it was filed in.
 - From ADR 4's review and the superpowers comparison: ~~**b-07f694**~~,
   **b-7c88f8**, **b-e1afbb** and **b-3732ef**.
 - From spec loop runs 15 to 17 and `SA-0135`'s review: **b-f30189**, **b-a90136**,
-  **b-e06dbc**, **b-32f492**, **b-8fb227**, **b-79d951**, **b-9ead75** and
+  **b-e06dbc**, **b-32f492**, **b-8fb227**, **b-79d951**, ~~**b-9ead75**~~ and
   ~~**b-04d4c2**~~.
 - From the stack batch's spec reviews: ~~**b-2d9ae9**~~, ~~**b-223244**~~,
   **b-acee54**, **b-6518ba**, **b-6a101f**, **b-7eb5f5** and **b-22ff3f**.
 - From the 2026-09-27 size pricing and spec loop run 32: **b-41664e**, **b-4b386f**,
   **b-d96f14**, ~~**b-9b94c9**~~, **b-ff3141**, **b-a99c76**, **b-3a8504**,
-  **b-7f105f** and **b-8c17dc**.
+  **b-7f105f** and ~~**b-8c17dc**~~.
 - From item 52's review: ~~**b-cec9a7**~~.
 
 **Placed 2026-09-20**: **161**, **162**, **163**, **126**, **128** and ~~**129**~~,
@@ -518,7 +518,7 @@ before a REBUT that runs. Three sentences lag the stack.
 regular-file git modes are spelled in three modules.
 
 **Placed 2026-10-10**, from the spec loop's run 33: **b-97357c**,
-**b-55186d**, **b-b94076**, then **b-dcf1ec**. Two of `SA-0243`'s witnesses
+**b-55186d**, **b-b94076**, then ~~**b-dcf1ec**~~. Two of `SA-0243`'s witnesses
 leave a side untested. The fold writes its spend rollup twice. A closed
 `EXHAUSTED` draft reports `head_moved` on every scan. A preflight hit with
 no socket list names no process.

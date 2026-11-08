@@ -156,6 +156,22 @@ def test_the_probe_checks_the_ports_it_was_given(monkeypatch):
     assert "ThreadPoolExecutor" in seen["script"]
 
 
+def test_a_hit_with_no_socket_list_says_no_list_was_read(monkeypatch):
+    """`no known process` claims an enumeration ran and named nobody. With
+    no socket list passed, none was read (b-dcf1ec)."""
+    monkeypatch.setattr(
+        preflight, "probe_host_bindings", lambda *a, **k: ["10.88.0.1:8000"]
+    )
+    with pytest.raises(preflight.PreflightFailed) as unread:
+        preflight.assert_host_is_unreachable("img", "net", "10.88.0.1")
+    assert "10.88.0.1:8000 (no socket list read)" in str(unread.value)
+    assert "no known process" not in str(unread.value)
+
+    with pytest.raises(preflight.PreflightFailed) as empty:
+        preflight.assert_host_is_unreachable("img", "net", "10.88.0.1", sockets=[])
+    assert "10.88.0.1:8000 (no known process)" in str(empty.value)
+
+
 def test_each_refusal_cell_up_can_reach_is_a_preflight_failure(monkeypatch):
     """Each of the seven refusals `cell_up` can reach through preflight is a
     `PreflightFailed`, the subclass `_drive_cell` closes honestly. A plain
