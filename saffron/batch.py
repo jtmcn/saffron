@@ -485,8 +485,8 @@ def run_stack_batch(
     follow_ups: Callable[[str, StackReview], list[Candidate]] | None = None,
     # A real default. `SA-0144`'s caller passes none (SA-0148).
     sleep: Callable[[float], None] = time.sleep,
-    # `None` means no review runs, and nothing here changes. `SA-0156` passes
-    # the production one, and `saffron batch` passes none until then.
+    # `None` means no review runs, and nothing here changes. `_batch` and
+    # `_finish` pass the production one.
     review: Callable[..., spec_review.SpecReviewSession] | None = None,
     # `None` checks nothing. Given, it runs before each `review` call, and
     # a defect `rewrite_moved_citations` leaves refuses the spec with no review.

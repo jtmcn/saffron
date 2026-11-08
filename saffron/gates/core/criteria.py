@@ -36,12 +36,11 @@ def _side(results: list[GateResult]) -> _Side | None:
     the whole of how core learns the field carries node ids — no name is
     inspected, because a gate that looks for a separator has learned a language.
 
-    Measured, which is why it is not optional: this repo's own `tests` gate
-    reaches node ids only through a fallback that runs when a regex over the
-    whole output matched nothing, and one printed `path:N: word: message` line
-    inside a failing test satisfies that regex. Every node id vanishes from
-    `code` for that run, and the naive rule then reports `pass` for a witness
-    that failed.
+    Measured, which is why it is not optional: until b-bba47a this repo's own
+    `tests` gate read a regex over the whole output first. One printed
+    `path:N: word: message` line inside a failing test matched it, and every
+    node id vanished from `code` for that run. The naive rule then reported
+    `pass` for a witness that failed. Another repo's gate can still do the same.
     """
     enumerating = [r for r in results if r.collected is not None]
     if not enumerating:

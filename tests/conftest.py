@@ -146,7 +146,7 @@ def network_model(monkeypatch):
     run against it, rather than against a flat stub.
 
     Not autouse: only the handful of tests that bring up two cells, or two
-    package runs, at once need the pool walked for real.
+    package runs, at once need the subnet pool walked for real.
     """
     live: dict[str, str] = {}
 

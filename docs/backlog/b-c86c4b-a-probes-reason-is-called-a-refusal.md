@@ -34,3 +34,6 @@ is acceptable.
 ## Record
 
 - 2026-10-11: filed from the spec loop's run 34 (#809).
+- 2026-11-08: left open by hand. Every caller of `probe_refusal` and every
+  reader of the `"refusal"` key is in `session.py`, `phases/review.py` or
+  `test_session.py`. Queued specs touch all three, so a rename waits on them.

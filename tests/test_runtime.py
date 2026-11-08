@@ -757,7 +757,7 @@ def test_every_subnet_saffron_allocates_is_declared_in_one_place():
 
 
 def test_the_pool_is_declared_once_and_overlaps_no_fixed_subnet():
-    """One `"pool"` entry carries every task network's subnet, and the
+    """One `"pool"` entry, the subnet pool, carries every task network's subnet. The
     `"cells"` and `"critic"` entries it replaced are gone."""
     assert runtime.SUBNETS["pool"] == "10.200.0.0/16"
     assert "cells" not in runtime.SUBNETS
@@ -830,7 +830,7 @@ def test_allocate_network_skips_each_held_slash24_whatever_the_refusal_says(
 
 
 def test_allocate_network_names_every_holder_once_the_pool_is_exhausted(monkeypatch):
-    """Every /24 of the pool is held, so the walk tries one create per /24,
+    """Every /24 of the subnet pool is held, so the walk tries one create per /24,
     in order, and raises naming every holder it met."""
     pool = ipaddress.ip_network(runtime.SUBNETS["pool"])
     subnets = list(pool.subnets(new_prefix=24))
@@ -863,7 +863,7 @@ def test_allocate_network_admits_the_host_before_its_walk_and_names_the_last_ref
 ):
     """`allocate_network` admits the host once, before its walk. On a host
     the selected runtime refuses, it raises that refusal after one `info`
-    call and no `network` call. When every /24 of the pool is refused, its
+    call and no `network` call. When every /24 of the subnet pool is refused, its
     error carries the last refused create's own error text, and not the
     first one's."""
     seen = _as_podman(monkeypatch, runtime.Completed(0, "false\n", ""))
@@ -873,8 +873,8 @@ def test_allocate_network_admits_the_host_before_its_walk_and_names_the_last_ref
     assert not any(argv[1] == "network" for argv in seen)
     assert "held" not in str(refused.value)
 
-    # Under the default runtime, every /24 of the pool is held and every
-    # create is refused, each with its own ordinal in the refusal's text.
+    # Under the default runtime, every /24 of the subnet pool is held.
+    # Every create is refused, each with its own ordinal in the refusal's text.
     monkeypatch.setattr(runtime, "_selected", apple.DIALECT)
     monkeypatch.setattr(runtime, "_admitted", False)
     pool = ipaddress.ip_network(runtime.SUBNETS["pool"])
