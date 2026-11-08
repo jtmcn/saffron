@@ -496,7 +496,7 @@ child's tree carries an older spec than it runs. `snapshot --force` drops
 holds, and `status` has no one-line form.
 
 **Placed 2026-10-03**, from the spec loop's run 26: ~~**b-cc8099**~~,
-**b-81e109**, then **b-14ccc7**. A finish's narrow `except` has no witness.
+**b-81e109**, then ~~**b-14ccc7**~~. A finish's narrow `except` has no witness.
 `GhRunner` is defined three times. A live-cell test fails when two suites
 run at once.
 
