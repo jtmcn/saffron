@@ -1234,6 +1234,37 @@ def test_a_new_loop_forgets_the_last_loops_drops(loop):
     assert (row.spec_id, row.dropped) == (dropped, None)
 
 
+def test_undrop_puts_a_dropped_spec_back_in_the_order_pending(loop, capsys):
+    # Item 172: `drop` had no inverse, so a spec dropped by mistake stayed out.
+    driver._save([loop.row(0, dropped="by mistake"), loop.row(1)])
+    spec_id = loop.ids[0]
+
+    assert driver.cmd_undrop(argparse.Namespace(spec_id=spec_id)) == 0
+    row = driver._load()[0]
+    assert row.dropped is None and row.pending
+    assert "by mistake" in capsys.readouterr().out
+    assert driver.cmd_undrop(argparse.Namespace(spec_id=spec_id)) == 1
+    assert driver.cmd_undrop(argparse.Namespace(spec_id="SA-9999")) == 1
+
+
+@pytest.mark.parametrize("command", ["status", "next", "snapshot"])
+def test_a_command_that_reads_specs_refuses_a_loop_branch_checked_out(
+    loop, monkeypatch, capsys, command
+):
+    # Item 157: with `saffron/SA-0095` checked out, `status` called an unedited
+    # spec edited and advised reverting the loop's own fixes.
+    driver._save([loop.row(0)])
+    monkeypatch.setattr(driver, "_on_loop_branch", lambda: "saffron/SA-0095")
+    args = {
+        "status": argparse.Namespace(),
+        "next": argparse.Namespace(again=False),
+        "snapshot": argparse.Namespace(force=True, new=False, add=None),
+    }[command]
+
+    assert getattr(driver, f"cmd_{command}")(args) == 1
+    assert "saffron/SA-0095" in capsys.readouterr().err
+
+
 def test_a_new_loop_is_refused_while_the_last_one_has_an_open_pull_request(
     loop, capsys
 ):

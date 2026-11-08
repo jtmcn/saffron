@@ -191,7 +191,8 @@ REVIEW ran. Put that line in the seats' `{KNOWN}` (step 2c).
 Then score the cell's own REVIEW the same way, with `--kind cell` and no
 `--report` or `--commit`. A non-zero exit is noted and the loop carries on.
 
-`drop SA-NNNN --why "…"` takes a spec out for good.
+`drop SA-NNNN --why "…"` takes a spec out of the loop, and `undrop SA-NNNN`
+puts it back.
 
 ### c. Review it
 
