@@ -885,7 +885,30 @@ def watch_pattern() -> str:
 # ------------------------------------------------------------- commands
 
 
+def _on_loop_branch() -> str | None:
+    """The checked-out `saffron/` branch, if any. Its `.saffron/specs/` is the
+    text its base was cut from, so a spec reads as edited when it is not (item 157)."""
+    try:
+        branch = _git("rev-parse", "--abbrev-ref", "HEAD")
+    except GitError:
+        return None
+    return branch if branch.startswith("saffron/") else None
+
+
+def _refuse_on_loop_branch(command: str) -> int | None:
+    branch = _on_loop_branch()
+    if branch is None:
+        return None
+    return _fail(
+        f"{command} reads specs from the checkout, and {branch} is checked out. "
+        "Its spec text predates the loop's fixes. Switch to the default branch, "
+        "or review the branch in its own worktree"
+    )
+
+
 def cmd_snapshot(args) -> int:
+    if (refused := _refuse_on_loop_branch("snapshot")) is not None:
+        return refused
     if ORDER.is_file() and not (args.force or args.new):
         return _fail(
             f"{ORDER.relative_to(REPO)} exists — pass --force to re-snapshot this "
@@ -1058,6 +1081,8 @@ def _next_spec(
 def cmd_next(args) -> int:
     """`--again` hands back a spec a cell stopped on without deciding — the
     case is a reopened rate-limit window."""
+    if (refused := _refuse_on_loop_branch("next")) is not None:
+        return refused
     _reconcile_first()
     rows = _load()
     if reasons := _stale(rows):
@@ -1096,8 +1121,8 @@ def cmd_next(args) -> int:
 
 def _cell_running(spec_id: str) -> bool:
     """Whether a `saffron cell` for this spec is still alive. Without one, an
-    in-flight state is a halt: SA-0087's REBUT ran out of budget and the task
-    stayed `REBUTTING` after the process exited (§5.6)."""
+    in-flight state is a halt. Since SA-0276 and SA-0287, REBUT and REVIEW
+    end their halts `REBUTTAL_UNJUDGED` and `REVIEW_INCOMPLETE` (§5.6)."""
     done = subprocess.run(
         ["pgrep", "-f", f"saffron cell .*{spec_id}"], capture_output=True, text=True
     )
@@ -1136,11 +1161,32 @@ def _review_lenses_line(spec_id: str) -> str:
 
 
 def cmd_record(args) -> int:
-    """What the cell did, read from the ledger (§4.3)."""
+    """What the cell did, read from the ledger (§4.3). `--all` records each
+    pending spec a task ran for, so a batch takes one call (b-cab612)."""
+    if not args.all:
+        if args.spec_id is None:
+            return _fail("name a spec, or pass --all")
+        code = _record_one(args.spec_id)
+        assert code is not None  # only `--all` asks for `None`
+        return code
+    if args.spec_id is not None:
+        return _fail("pass a spec or --all, not both")
+    pending = [p.spec_id for p in _load() if p.pending]
+    if not pending:
+        return _fail("no pending spec in the order")
+    codes = [_record_one(spec_id, quiet_if_unrun=True) for spec_id in pending]
+    ran = [code for code in codes if code is not None]
+    if not ran:
+        return _fail("no pending spec has a task yet")
+    return 0 if all(code == 0 for code in ran) else 1
+
+
+def _record_one(spec_id: str, *, quiet_if_unrun: bool = False) -> int | None:
+    """One spec's record. `None` means no task ran for it, under `--all`."""
     rows = _load()
-    match = next((p for p in rows if p.spec_id == args.spec_id), None)
+    match = next((p for p in rows if p.spec_id == spec_id), None)
     if match is None:
-        return _fail(f"{args.spec_id} is not in the order")
+        return _fail(f"{spec_id} is not in the order")
 
     from saffron.intake import load_spec
     from saffron.reconcile import IN_FLIGHT_STATES
@@ -1152,10 +1198,13 @@ def cmd_record(args) -> int:
         if repo_id is None:
             return _fail("this repo has no ledger row yet")
         _spec, spec_sha = load_spec(REPO / match.path)
-        tasks = ledger.tasks_by_spec(repo_id).get((args.spec_id, spec_sha), [])
+        tasks = ledger.tasks_by_spec(repo_id).get((spec_id, spec_sha), [])
         if not tasks:
+            if quiet_if_unrun:
+                print(f"{spec_id}  not run")
+                return None
             return _fail(
-                f"no task for {args.spec_id} at {spec_sha[:12]} — did the cell run?"
+                f"no task for {spec_id} at {spec_sha[:12]} — did the cell run?"
             )
         # Not `tasks[-1]`: a later orphaned or unfinished row must not hide the
         # one that opened a pull request (SA-0013 holds ten rows at one sha).
@@ -1181,7 +1230,7 @@ def cmd_record(args) -> int:
             match.state = None
             match.pr = pr or match.pr
             match.last_state = state
-            running = state in IN_FLIGHT_STATES and _cell_running(args.spec_id)
+            running = state in IN_FLIGHT_STATES and _cell_running(spec_id)
             if not running:
                 match.undecided_cells += 1
             pushed = line["pushed_sha"] or ""
@@ -1206,8 +1255,27 @@ def cmd_record(args) -> int:
         else:
             why = "nothing was decided; `next` moves on to the next untouched spec"
         print(f"left pending: {why}.", file=sys.stderr)
-    print(_review_lenses_line(args.spec_id))
+    elif state in _HALT_GUIDANCE:
+        print(
+            f"{state}: {_HALT_GUIDANCE[state]} (GOTCHAS, Recording).", file=sys.stderr
+        )
+    print(_review_lenses_line(spec_id))
     return 0 if state == "READY_FOR_REVIEW" else 1
+
+
+# The two halts `SA-0276` and `SA-0287` made decided states (b-80cc6e).
+_HALT_GUIDANCE = {
+    "REBUTTAL_UNJUDGED": (
+        "REBUT's verdict was never reached, so the critic's blockers stand "
+        "unanswered. The operator's call: re-run with more budget, take the "
+        "branch by hand, or drop it"
+    ),
+    "REVIEW_INCOMPLETE": (
+        "REVIEW could not start every lens, so no review stands for the head. "
+        "The operator's call: re-run with more budget, review the branch by "
+        "hand, or drop it"
+    ),
+}
 
 
 def _jev_client():
@@ -1539,6 +1607,20 @@ def cmd_drop(args) -> int:
     return 0
 
 
+def cmd_undrop(args) -> int:
+    """Put a dropped spec back in the order, pending (item 172)."""
+    rows = _load()
+    match = next((p for p in rows if p.spec_id == args.spec_id), None)
+    if match is None:
+        return _fail(f"{args.spec_id} is not in the order")
+    if match.dropped is None:
+        return _fail(f"{args.spec_id} is not dropped")
+    was, match.dropped = match.dropped, None
+    _save(rows)
+    print(f"{match.spec_id}  back in the order (it was dropped: {was})")
+    return 0
+
+
 # pytest's exit codes: 1 is a failed test; 2-5 are an interrupt, an internal
 # error, a usage error and no tests collected, none of which is a verdict.
 _PYTEST_NOT_A_VERDICT = {2, 3, 4, 5}
@@ -1621,6 +1703,8 @@ def cmd_hold(args) -> int:
 
 
 def cmd_status(_args) -> int:
+    if (refused := _refuse_on_loop_branch("status")) is not None:
+        return refused
     # The state dir is ignored by git, so every new worktree opens with no order.
     if not ORDER.is_file() and not LEGACY_PLAN.is_file():
         print(
@@ -1645,7 +1729,10 @@ def cmd_status(_args) -> int:
                 if p.pending and p.last_state
                 else ""
             )
-            if p.reviewable and p.pushed_sha:  # item 14: what is left to review
+            live = _pr_state(p.pr) if p.reviewable and p.pr is not None else None
+            if live in ("MERGED", "CLOSED"):  # b-bff670: the order file is not GitHub
+                extra = f"  {live.lower()} on GitHub"
+            elif p.reviewable and p.pushed_sha:  # item 14: what is left to review
                 head = _origin_head(p.branch)
                 extra = (
                     f"  reviewed {head[:8]}"
@@ -2322,10 +2409,19 @@ def cmd_check(args) -> int:
     status. A declared `estimated_lines` is priced at the measured overrun.
     At or above 80% of its type's `size` ceiling it blocks where `size`
     blocks, with or without past cells, and is a concern elsewhere."""
+    from saffron.intake import SpecError
+
     specs = _known_specs()
-    target = specs.get(args.spec_id)
+    if args.spec:  # b-bff670: a spec edited on a branch is judged as edited
+        try:
+            target = _spec_given(args.spec_id, args.spec)
+        except (GitError, SpecError, OSError) as err:
+            return _fail(f"--spec {args.spec}: {err}")
+    else:
+        target = specs.get(args.spec_id)
     if target is None:
-        return _fail(f"no spec declares {args.spec_id}")
+        at = f" at {args.spec}" if args.spec else ""
+        return _fail(f"no spec declares {args.spec_id}{at}")
     ledger, repo_id, _url = _ledger_and_repo()
     try:
         if repo_id is None:
@@ -3039,13 +3135,20 @@ def main() -> int:
     p.set_defaults(func=cmd_next)
 
     p = sub.add_parser("record", help="read the ledger for what a cell did")
-    p.add_argument("spec_id")
+    p.add_argument("spec_id", nargs="?")
+    p.add_argument(
+        "--all", action="store_true", help="every pending spec a task ran for"
+    )
     p.set_defaults(func=cmd_record)
 
     p = sub.add_parser("drop", help="take a spec out of the loop")
     p.add_argument("spec_id")
     p.add_argument("--why", required=True, help="what the operator should know")
     p.set_defaults(func=cmd_drop)
+
+    p = sub.add_parser("undrop", help="put a dropped spec back in the order")
+    p.add_argument("spec_id")
+    p.set_defaults(func=cmd_undrop)
 
     p = sub.add_parser("hold", help="keep next off a spec whose edit is still open")
     p.add_argument("spec_id")
@@ -3099,6 +3202,9 @@ def main() -> int:
         "and its estimated_lines against its size ceiling",
     )
     p.add_argument("spec_id")
+    p.add_argument(
+        "--spec", help="read the spec from this file or ref, not the checkout"
+    )
     p.set_defaults(func=cmd_check)
 
     p = sub.add_parser("pattern", help="print the Monitor's grep -E pattern")

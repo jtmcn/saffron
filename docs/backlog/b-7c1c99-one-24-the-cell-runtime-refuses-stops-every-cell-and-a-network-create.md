@@ -1,11 +1,13 @@
 ---
 id: b-7c1c99
 title: One /24 the cell runtime refuses stops every cell, and a network create past its bound names neither the /24 nor the bound
-status: open
+status: done
+closed: 2026-11-07
+by_hand: true
 tier: 2
 filed: 2026-10-23
 specs: []
-prs: []
+prs: [1045]
 commits: []
 cites: [§5.1]
 related: []
@@ -40,3 +42,5 @@ fake runtime.
 - 2026-10-23: filed from the spec loop's run 46. The reset steps live in
   the run's handoff.
 - 2026-11-07: retitled in grooming. The title said a hanging create waits forever. `create_network` already bounds it at 120 seconds, and what is missing is a timeout that names the /24 and the bound.
+- 2026-11-07: fixed by hand in #1045. A refused /24 with no holder is skipped and
+  named on stderr, and a hung create raises naming the /24 and its bound.

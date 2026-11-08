@@ -76,10 +76,6 @@ went green died seeding its gate cell on a transient `Permission denied`. It
 was recorded `ORPHANED`, and nothing resumes its patch, so the re-run paid
 again.
 
-**Placed 2026-10-07**, at the operator's request in the spec loop's run 30:
-**b-cab612**. The operator made `saffron batch` the loop's default. The skill
-now starts one batch, and recording each task and restacking stay by hand.
-
 **Placed 2026-10-12**, from the spec loop's run 36: **b-1c59c3**. A spec
 removed a name whose reader sat outside its `touches`, so its cell could not
 pass both `scope` and `tests`. It ended `EXHAUSTED` at $41.03.
@@ -107,7 +103,7 @@ stopped it. The overrun stopped its batch after two of four specs.
 - ~~**83**~~, ~~**84**~~, ~~**85**~~, ~~**88**~~, ~~**89**~~, ~~**94**~~, ~~**95**~~, ~~**97**~~, ~~**102**~~, ~~**109**~~, ~~**112**~~, ~~**114**~~, ~~**115**~~, ~~**117**~~, ~~**118**~~, ~~**120**~~, ~~**136**~~, ~~**137**~~, ~~**140**~~, ~~**141**~~.
 - ~~**143**~~, ~~**145**~~, ~~**154**~~, ~~**173**~~, ~~**b-36b551**~~, ~~**b-408cf5**~~, ~~**b-a8270f**~~, ~~**b-a4df62**~~, ~~**b-fd1468**~~, ~~**b-89ec93**~~, ~~**b-032c3e**~~, ~~**b-149df3**~~, ~~**b-4a63b7**~~, ~~**b-19b255**~~, ~~**b-792ab2**~~, ~~**b-8487de**~~, ~~**b-a7e5f3**~~, ~~**b-e471bd**~~, ~~**b-76f08d**~~, ~~**b-43a061**~~.
 - ~~**b-877e93**~~, ~~**b-bf0c91**~~, ~~**b-efdf1f**~~, ~~**b-8170eb**~~, ~~**b-a6bfb0**~~, ~~**b-038aef**~~, ~~**b-4c5dc7**~~, ~~**b-d4e015**~~, ~~**b-031ac2**~~, ~~**b-7251b5**~~, ~~**b-34d743**~~, ~~**b-3c7ce9**~~, ~~**b-60a399**~~, ~~**b-032c61**~~, ~~**b-3bba0f**~~, ~~**b-6cd3c2**~~, ~~**b-883f74**~~, ~~**b-a04cc8**~~, ~~**b-f8fa24**~~, ~~**b-6b06e1**~~.
-- ~~**b-af24d1**~~, ~~**b-02d328**~~, ~~**b-1c20da**~~, ~~**b-4eaaa4**~~, ~~**b-6677b6**~~, ~~**b-d4b847**~~, ~~**b-e773d9**~~, ~~**b-000d04**~~, ~~**b-4901d2**~~, ~~**b-b24cf7**~~, ~~**b-78a590**~~, ~~**b-9c7001**~~, ~~**b-8f6568**~~.
+- ~~**b-af24d1**~~, ~~**b-02d328**~~, ~~**b-1c20da**~~, ~~**b-4eaaa4**~~, ~~**b-6677b6**~~, ~~**b-d4b847**~~, ~~**b-e773d9**~~, ~~**b-000d04**~~, ~~**b-4901d2**~~, ~~**b-b24cf7**~~, ~~**b-78a590**~~, ~~**b-9c7001**~~, ~~**b-8f6568**~~, ~~**b-cab612**~~.
 
 ### Tier 2 — the morning after
 
@@ -149,7 +145,7 @@ later one fits.
 driver orders a stack by `depends_on`, not by the stack base a batch built.
 
 **Placed 2026-10-19**, from the spec loop's run 44: ~~**b-619b7d**~~, **b-71e2df**,
-**b-32b3db**, **b-3a3081**, then **b-80cc6e**. An adopted task keeps its
+**b-32b3db**, **b-3a3081**, then ~~**b-80cc6e**~~. An adopted task keeps its
 failed state, so its children stay refused. A spec named a module its own
 `forbidden` list made impossible. A multi-line constant derives no mutant.
 Redaction misses the files beside `events.jsonl`. The driver and two ADRs
@@ -157,6 +153,9 @@ name the old halts.
 
 **Placed 2026-10-12**, from writing `SA-0290`: **b-f5ceaf**, by hand now that
 `SA-0290` merged (#919). `CONTEXT.md` has no entry for a removed name.
+
+**Placed 2026-11-07**, from writing `SA-0350`: ~~**b-7c118b**~~, done by hand in
+the spec's own pull request.
 
 **Placed 2026-10-13**, from writing `SA-0291`: **b-cd1566**, by hand now that
 `SA-0291` merged (#920). `CONTEXT.md` has no entry for a criterion's subject.
@@ -174,7 +173,7 @@ SIGTERM during a silent agent turn waits for the turn to end, because the
 unwind closes a pipe a reader thread holds.
 
 **From the operator visibility plan and the spec loop's runs 5 to 10**, in
-this order: **43**, **66**, **67**, **98**, **157**, **172**, **b-eac388**,
+this order: **43**, **66**, ~~**67**~~, **98**, ~~**157**~~, ~~**172**~~, **b-eac388**,
 **b-bc54d1**, **b-63ac52**, **b-952c34**, **b-60d804**,
 **b-281f0a** and **b-7d3810**. Then **160**, which is what
 item 141's close left. The Gate-only cell's suite is in a file because the
@@ -213,7 +212,7 @@ writing `SA-0141`. It is the by-hand edit to §5.3 and the glossary, done in
 that spec's pull request.
 
 **Placed 2026-09-25**, from the spec loop's run 16: ~~**b-04a5d9**~~, ~~**b-e0cd57**~~,
-**b-bff670**, then **b-c375d6**. The first is a PR body that calls a new
+~~**b-bff670**~~, then **b-c375d6**. The first is a PR body that calls a new
 advisory failure present at base. The second is a refusal that names ports
 and not processes. The last two are the loop's tools reading stale state.
 
@@ -275,7 +274,7 @@ longer retires a spec, so the delegate retires each one and closes its item
 by hand. A step the repo declares would let the finish do both.
 
 **Placed 2026-10-09**, from the spec loop's run 32: **b-910cef**,
-**b-a33889**, **b-180f9f**, ~~**b-8a0c9a**~~, **b-5abe53**, **b-f10412**, then
+~~**b-a33889**~~, **b-180f9f**, ~~**b-8a0c9a**~~, ~~**b-5abe53**~~, **b-f10412**, then
 ~~**b-25f2b2**~~. The queue refuses every child of an open stack. A mint or a
 revision that meets a cell runtime failure still misses its layer. A
 resumed row keeps a stale merged head. The end review grades heads from
@@ -308,7 +307,7 @@ then passed it. No gate re-runs a parent's wrong versions.
 passed. PACKAGE leaves a spec's deferred check out of `## Not covered`.
 
 **Placed 2026-10-23**, from the spec loop's run 46: ~~**b-0bd346**~~, then
-~~**b-066901**~~, ~~**b-1572e7**~~, **b-cc87b1** and **b-7c1c99**. REBUT ends a task
+~~**b-066901**~~, ~~**b-1572e7**~~, **b-cc87b1** and ~~**b-7c1c99**~~. REBUT ends a task
 `EXHAUSTED` on a gate failure its own fix made. A layer cut from a review
 commit cannot be packaged again. A child stacks on its lowest open parent.
 The writer drafts a follow-up a queued spec owns. One refused /24 stops
@@ -374,7 +373,7 @@ wrong first line.
 **Placed 2026-10-16**, from the spec loop's run 42: **b-60317d**.
 `reconcile`'s `head_moved` comment says nothing judges a moved head.
 
-**Placed 2026-10-17**, from the spec loop's run 43: **b-74a122**.
+**Placed 2026-10-17**, from the spec loop's run 43: ~~**b-74a122**~~.
 `CONTEXT.md`'s Refusal entry lacks the citation cause.
 
 **Placed 2026-11-02**, from the spec loop's run 52: **b-e4cb58**. `CONTEXT.md`
@@ -411,7 +410,7 @@ in `policy.yaml`. **b-2227b0**, closed as parked, records a draft ADR.
 Each is a gap a seat, a finish or the run found and the stack left alone.
 
 **Placed 2026-10-27**, from the spec loop's run 49:
-**b-1b8b1e**, **b-92c92a**, **b-2a03c2**, **b-d2afe3**, **b-1ff5a3** and
+**b-1b8b1e**, **b-92c92a**, **b-2a03c2**, **b-d2afe3**, ~~**b-1ff5a3**~~ and
 **b-3a0789**. Each is a gap a seat, a finish or the run found and the stack
 left alone.
 
@@ -421,21 +420,21 @@ Two renderers spell a new failure, and they disagree on line 0.
 **The 2026-09-04 sort's tier 3, plus what spec loop runs up to 32 added.**
 Each line keeps the order it was filed in.
 
-- From the first sort: **31**, **20**, **53**, ~~**54**~~, **55**, **75**, **76**,
+- From the first sort: **31**, **20**, **53**, ~~**54**~~, ~~**55**~~, **75**, **76**,
   **77**, **90**, **92**, **96**, **100**, **101** and **108**.
 - Filed 2026-09-12 to 2026-09-19: **116**, **121**, **122**, **130**, **134**,
   ~~**150**~~, **151**, **155**, **156**, **174** and **b-d6bff7**.
 - From spec loop runs 7 to 10: **b-990bd9**, **b-7431a2**, **b-9eceda**, **b-bc9951**,
   **b-0281e4**, **b-e9db0e**, **b-397edd**, **b-0e20e9**, **b-98dc4d**,
-  **b-27b9db**, **b-bbf663** and **b-6a9707**.
+  **b-27b9db**, ~~**b-bbf663**~~ and **b-6a9707**.
 - From the reviews of #393 and `SA-0120`, and spec loop runs 13 and 14: **b-d5d290**,
   **b-9ed36d**, **b-b431c1**, ~~**b-ac2f02**~~ and **b-49329e**.
 - From ADR 4's review and the superpowers comparison: ~~**b-07f694**~~,
   **b-7c88f8**, **b-e1afbb** and **b-3732ef**.
 - From spec loop runs 15 to 17 and `SA-0135`'s review: **b-f30189**, **b-a90136**,
   **b-e06dbc**, **b-32f492**, **b-8fb227**, **b-79d951**, **b-9ead75** and
-  **b-04d4c2**.
-- From the stack batch's spec reviews: **b-2d9ae9**, **b-223244**,
+  ~~**b-04d4c2**~~.
+- From the stack batch's spec reviews: ~~**b-2d9ae9**~~, **b-223244**,
   **b-acee54**, **b-6518ba**, **b-6a101f**, **b-7eb5f5** and **b-22ff3f**.
 - From the 2026-09-27 size pricing and spec loop run 32: **b-41664e**, **b-4b386f**,
   **b-d96f14**, **b-9b94c9**, **b-ff3141**, **b-a99c76**, **b-3a8504**,
@@ -502,7 +501,7 @@ holds, and `status` has no one-line form.
 run at once.
 
 **Placed 2026-10-03**, from the spec loop's run 27: **b-3b8eb2**,
-**b-3c17ab**, **b-835bfb**, **b-2944c9**, **b-b2fffe**, then **b-348114**.
+**b-3c17ab**, **b-835bfb**, **b-2944c9**, **b-b2fffe**, then ~~**b-348114**~~.
 The host never sees which criterion failed. REVIEW counts a test-side wrong
 version as unproven. A host listener that starts mid-loop is caught only at
 preflight. The rate's header key is spelled at seven sites. `SETTLED_STATES`
@@ -525,7 +524,7 @@ leave a side untested. The fold writes its spend rollup twice. A closed
 no socket list names no process.
 
 **Placed 2026-10-12**, from the spec loop's run 35: ~~**b-bff156**~~,
-**b-d3b755**, then **b-d7959f**. `ready_task` returns a Refusal after a cell.
+**b-d3b755**, then ~~**b-d7959f**~~. `ready_task` returns a Refusal after a cell.
 The host-probe line is built twice. The Mint entry says a re-offer waits.
 
 **Placed 2026-10-14**, from the spec loop's run 38: **b-6d4704**, **b-65dbbd**,
@@ -536,7 +535,7 @@ spells the proxy's Dockerfile by hand. §5.1 calls `/gates` the one bind mount.
 **b-dc41ef**. The loop's driver refuses an `EXHAUSTED` task with a PR. A
 History run's snapshot ignores `--home`.
 
-**Placed 2026-10-13**, from the spec loop's run 37: **b-be3adc**, then
+**Placed 2026-10-13**, from the spec loop's run 37: ~~**b-be3adc**~~, then
 **b-e4ab6f**. §5.5 lists lens #1 without the failure path. The code calls the
 subnet pool a bare pool.
 
@@ -567,7 +566,7 @@ sorts a reviewer's notes, and its stop signal adds nothing over a blocker count.
 **b-e8f092**. Each clears one area's hits, and together they bring the gate to zero.
 
 **Placed 2026-10-07**, from the spec loop's run 30: **b-cd41ac**, **b-7338e7**,
-then **b-d22c5a**. A spec named helpers absent at its base. Two repo rows on one
+then ~~**b-d22c5a**~~. A spec named helpers absent at its base. Two repo rows on one
 mirror prune each other. The docs name no `saffron migrate`.
 
 **b-d5d290 is filed here and is the fourth instance of one shape.** Building
@@ -591,7 +590,7 @@ thirds of the backlog. That is the deliberate consequence of ranking by the
 milestone rather than by what is nearest to hand. Of the 308 open items, 42
 are by hand, since a cell cannot reach their files.
 
-**Placed 2026-11-04**, from the spec loop's run 53: **b-8c6696**, **b-a19ffd**
+**Placed 2026-11-04**, from the spec loop's run 53: **b-8c6696**, ~~**b-a19ffd**~~
 and **b-9bb8b7**. A spec missed the fixtures that pin the plan's sha. §5.3's
 `plan.json` lacks the estimate fields. Two resolvers copy one landedness rule.
 

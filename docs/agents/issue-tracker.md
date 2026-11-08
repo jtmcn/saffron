@@ -50,6 +50,12 @@ GitHub issues remain in use only for research/evidence records under
   `DEPENDENCY_WAITING_STATES`. A waiting partner holds the candidate. Of two
   candidates the later id is held. `SA-0290` adds the field. Until it
   lands, load refuses the key.
+- **`retired_first`** is optional and empty by default. Each entry is a spec
+  id that must sit in `done/` at the spec's base before its cell runs. Declare
+  it for a spec that adds or widens a refusal, and name each queued spec the
+  new rule would refuse. The queue scan and `saffron cell` refuse the spec
+  while one is not retired. `SA-0350` adds the field. Until it lands, load
+  refuses the key.
 - **`pending_symbols`** lists dead code this spec will bring into use, one
   `<path>::<name>` per entry (`saffron/events.py::GateResult`). The `dead` gate
   defers each one while the spec is open, so a parent spec can add what only its

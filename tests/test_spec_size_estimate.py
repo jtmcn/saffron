@@ -46,7 +46,7 @@ def _run(monkeypatch, capsys, target, rows, *, ratio=1, elevate_on=()):
         m.setattr(driver, "_past_cells", lambda *a, **k: rows)
         m.setattr(driver, "_overrun", lambda *a, **k: (ratio, "a pinned ratio"))
         m.setattr(driver, "_elevate_on", lambda: list(elevate_on))
-        rc = driver.cmd_check(argparse.Namespace(spec_id=target.id))
+        rc = driver.cmd_check(argparse.Namespace(spec=None, spec_id=target.id))
     return rc, capsys.readouterr().out.splitlines()
 
 
@@ -139,7 +139,7 @@ def test_check_blocks_an_estimate_at_80_percent_of_its_types_size_ceiling(
     monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (_StubLedger(), 1, "url"))
     monkeypatch.setattr(driver, "_past_cells", lambda *a, **k: [])
     monkeypatch.setattr(driver, "_overrun", lambda *a, **k: (1, "a pinned ratio"))
-    assert driver.cmd_check(argparse.Namespace(spec_id="SA-0009")) == 1
+    assert driver.cmd_check(argparse.Namespace(spec=None, spec_id="SA-0009")) == 1
     assert any(x.startswith("blocker: ") for x in capsys.readouterr().out.splitlines())
 
 

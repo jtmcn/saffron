@@ -62,6 +62,8 @@ trivial.
    `forbidden` is a blocker. Name the line at `base` that makes the file
    necessary. A symbol the change adds that only a later spec calls needs a
    `pending_symbols` entry, or the `dead` gate fails the task: a blocker.
+   A spec that adds or widens a refusal and names no queued spec it refuses
+   in `retired_first` is a concern (b-e7898b).
 3. **Witness/mutant discipline.** A spec whose change edits existing code
    has a `mutant` per criterion on the ref, keyed by witness. Where one is
    missing, name a plausible wrong implementation its witness would pass;
