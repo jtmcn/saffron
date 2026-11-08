@@ -3,7 +3,7 @@ id: 49
 title: '`revert` only checks *new* tests — a changed-body-same-name test has no coverage'
 status: open
 tier: 1
-specs: []
+specs: [SA-0342]
 prs: []
 commits: []
 cites: [§2.1, §5.4, §5.5.1]
