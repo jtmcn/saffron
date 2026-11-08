@@ -208,3 +208,15 @@ would refuse in `retired_first`, and intake refuses it until each is in
 **What this run adds.** Both review 2 concerns sat on code the first revision
 wrote. A revision brief should ask the writer to run pre-flight 1 and 8 on
 each branch it adds, not only on the findings it answers.
+
+## SA-0355 (b-fa4a83), spec loop run 55
+
+One writer session of 32 minutes, a revision of 12, and two reviews. The prototype ran 14 and then 17 wrong versions, and every one was killed. It also found a trap no reading would. A plain `case: str | None = None` on `Mutant` broke 64 tests, because REVIEW round-trips each probe through `model_dump`.
+
+**Review 1: 0 blockers, 4 concerns, 3 notes.** Two concerns were arrangements the witness left free: holder order and survivor order (pre-flight 1). One was a claim that `replace` never leaks while nothing checks it (pre-flight 2). One was §5.4.1 left silent about a paraphrase that now reaches REPAIR (pre-flight 8). One note was a real defect in the driver's new ref read, fixed by hand.
+
+**Review 2: 0 blockers, 3 concerns, 4 notes.** The `find` claim was as lopsided as the `replace` one had been (pre-flight 2). YAML trims a plain scalar, so the whitespace witness could pass a strip (pre-flight 3: a name the spec leans on, here `yaml.safe_load`'s behaviour). And the delegate's hand-written §5.4.1 sentence overstated the criteria. That is check 3 of the previous record again: a hand edit read against the criteria after the writer, and still wrong. The delegate applied all three by hand, with no third round.
+
+## Checks to build (SA-0355)
+
+7. Pre-flight 1 should ask, of every claim over several inputs, whether their order is fixed. Both of review 1's arrangement concerns were order.
