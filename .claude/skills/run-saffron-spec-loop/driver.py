@@ -2472,12 +2472,13 @@ def _is_review_trigger(entry: str) -> bool:
 def _with_ref_mutants(target: Spec, mirror: Path = REPO) -> Spec | str:
     """`target` with its mutants read from `refs/saffron/mutants` (SA-0338),
     unchanged where the ref holds none for it, or why they cannot be read."""
-    from saffron.mutants import MutantsError, attach_mutants, read_mutants, ref_commit
+    from saffron.intake import SpecError
+    from saffron.mutants import attach_mutants, read_mutants, ref_commit
 
     try:
         found = read_mutants(mirror, ref_commit(mirror), target.id)
         return attach_mutants(target, found) if found else target
-    except MutantsError as exc:
+    except SpecError as exc:  # a disclosed mutant raises no `MutantsError`
         return f"concern: {target.id}'s mutants on the ref cannot be read: {exc}"
 
 

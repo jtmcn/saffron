@@ -4041,3 +4041,25 @@ def test_subject_concerns_read_a_mutant_from_the_ref_not_the_spec(tmp_path):
     assert filled.acceptance[0].mutant.file == "elsewhere.py"
     other = _spec("SA-0010")
     assert driver._with_ref_mutants(other, mirror) is other
+
+
+def test_a_ref_mutant_a_claim_discloses_is_a_concern_not_a_raise(tmp_path):
+    # `attach_mutants` refuses a disclosed mutant with `DisclosedMutantError`,
+    # a `SpecError` that is no `MutantsError`, so `check` raised.
+    from saffron.intake import Criterion
+    from tests.test_mutants import _bare, _commit
+
+    mirror = _bare(tmp_path)
+    mutants = "t.py::t: {file: f0.py, find: return early, replace: pass}\n"
+    commit = _commit(mirror, {"SA-0009.yaml": mutants}, "mutants")
+    subprocess.run(
+        ["git", "-C", str(mirror), "update-ref", "refs/saffron/mutants", commit],
+        check=True,
+    )
+    target = _spec("SA-0009")
+    target.acceptance_criteria = []
+    target.acceptance = [Criterion(claim="it must return early", witness="t.py::t")]
+
+    filled = driver._with_ref_mutants(target, mirror)
+    assert isinstance(filled, str), filled
+    assert filled.startswith("concern: SA-0009's mutants on the ref cannot be read")
