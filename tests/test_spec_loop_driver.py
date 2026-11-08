@@ -1760,6 +1760,8 @@ def _cell(
     started_at="2026-09-14 12:00:00",
     *,
     peak_cut_off=False,
+    implement_usd=2.5,
+    runaway="",
 ):
     return driver.PastCell(
         spec_id=spec_id,
@@ -1770,7 +1772,7 @@ def _cell(
         state="READY_FOR_REVIEW",
         budget_usd=6.0,
         plan=driver.Spend(20, 1.82),
-        implement=driver.Spend(44, 2.5),
+        implement=driver.Spend(44, implement_usd),
         repair=driver.Spend(0, 0.0),
         peak_turns=41,
         review_usd=0.8,
@@ -1778,7 +1780,62 @@ def _cell(
         endings=[],
         peak_cut_off=peak_cut_off,
         size=None,
+        runaway=runaway,
     )
+
+
+def test_a_cell_cut_off_before_review_or_over_its_size_ceiling_is_a_runaway(tmp_path):
+    # b-206d2c. The fixture's REBUTTING budget cut adds nothing to the pre-review total.
+    from saffron.gates.contract import GateResult
+
+    ledger, repo_id = _ledger_with_one_cell(tmp_path)
+    specs = {"SA-0001": _spec("SA-0001")}
+    (cell,) = driver._past_cells(ledger, repo_id, specs)
+    assert cell.runaway == "cut off at its turn ceiling"
+
+    task_id = ledger.tasks_by_spec_id(repo_id, "SA-0001")[-1]["task_id"]
+    attempt = ledger.open_attempt(task_id, "REPAIRING")
+    ledger.close_attempt(
+        attempt,
+        session_id=None,
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=0.1,
+    )
+    ledger.record_gate_result(
+        GateResult(gate="size", status="fail", tool="size 1", summary="over"),
+        attempt_id=attempt,
+    )
+    (cell,) = driver._past_cells(ledger, repo_id, specs)
+    ledger.close()
+    assert cell.runaway == "over its size ceiling"
+
+
+def test_the_budget_floor_skips_a_runaway_row_and_names_it():
+    # b-206d2c: SA-0162 ran away at $39.72, and its peer SA-0277 spent $11.51.
+    target = _spec("SA-0306", touches=2, criteria=3)
+    target.budget_usd = 32
+    target.max_turns = 80
+    steady = _cell("SA-0277", "bug", 2, 3, implement_usd=11.51 - 1.82)
+    runaway = _cell(
+        "SA-0162",
+        "bug",
+        2,
+        3,
+        implement_usd=39.72 - 1.82,
+        runaway="over its size ceiling",
+    )
+
+    assert driver._budget_blocker(target, [steady, runaway]) is None
+    ceilings = driver._ceilings_line(target, [steady, runaway])
+    assert "SA-0277's pre-review total $11.51, above by $20.49" in ceilings
+    assert "past SA-0162's runaway $39.72 (over its size ceiling)" in ceilings
+
+    # A runaway is still the floor when no other row is left, and says so.
+    alone = driver._ceilings_line(target, [runaway])
+    assert "$39.72 (a runaway, over its size ceiling), below by $7.72" in alone
+    assert driver._budget_blocker(target, [runaway]) is not None
 
 
 def test_history_lists_only_the_same_type_most_similar_shape_first():

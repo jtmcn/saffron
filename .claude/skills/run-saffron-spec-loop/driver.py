@@ -2251,6 +2251,28 @@ def _cut_off_at_turn_ceiling(attempt) -> bool:
     )
 
 
+def _cut_off_at_budget_cap(attempt) -> bool:
+    """`saffron.cell.session.cut_off_at_budget_cap`'s rule over a ledger row."""
+    return attempt["terminal_reason"] == "budget_exhausted" or (
+        attempt["subtype"] == "error_max_budget_usd"
+    )
+
+
+def _runaway(attempts: list, sizes: list) -> str:
+    """Why a cell's pre-review spend measures a runaway rather than its shape,
+    or "" (b-206d2c). Only the phases that total counts can run it away."""
+    if sizes and sizes[-1].status == "fail":
+        return "over its size ceiling"
+    for a in attempts:
+        if a["phase"] not in ("IMPLEMENTING", "REPAIRING"):
+            continue
+        if _cut_off_at_turn_ceiling(a):
+            return "cut off at its turn ceiling"
+        if _cut_off_at_budget_cap(a):
+            return "cut off at its budget ceiling"
+    return ""
+
+
 @dataclass
 class PastCell:
     """One past cell's spend by phase, for a spec review's ceilings and size checks."""
@@ -2277,6 +2299,7 @@ class PastCell:
     # `error_max_turns` attempt ran 41, and calling 45 a turn floor is false.
     peak_cut_off: bool
     size: str | None  # the last `size` gate summary, verbatim: it names the ceiling
+    runaway: str = ""  # why its pre-review total is no budget floor, if it is not
 
 
 def _known_specs() -> dict[str, Spec]:
@@ -2395,11 +2418,7 @@ def _past_cells(
                 continue
             implementing = [a for a in attempts if a["phase"] == "IMPLEMENTING"]
             checkpoint = implementing[0] if implementing else None
-            sizes = [
-                r.summary
-                for r in ledger.task_results(row["task_id"])
-                if r.gate == "size"
-            ]
+            sizes = [r for r in ledger.task_results(row["task_id"]) if r.gate == "size"]
             bounded = [a for a in attempts if a["phase"] in _MAX_TURNS_PHASES]
             peak_attempt = max(bounded, key=lambda a: a["num_turns"] or 0, default=None)
             cells.append(
@@ -2432,7 +2451,8 @@ def _past_cells(
                         if a["subtype"] not in (None, "success")
                         or (a["terminal_reason"] or "completed") != "completed"
                     ],
-                    size=sizes[-1] if sizes else None,
+                    size=sizes[-1].summary if sizes else None,
+                    runaway=_runaway(attempts, sizes),
                 )
             )
     return cells
@@ -2456,6 +2476,12 @@ def _pre_review_total(c: PastCell) -> float:
     """Plan + implement + repair: what a cell spent before REVIEW touched it,
     and so what the budget must have covered before that (item 123)."""
     return (c.plan.usd if c.plan else 0.0) + c.implement.usd + c.repair.usd
+
+
+def _budget_row(rows: list[PastCell]) -> PastCell:
+    """The highest pre-review total among rows that did not run away, else
+    among all of them: a runaway measures its ceiling, not its shape (b-206d2c)."""
+    return max([c for c in rows if not c.runaway] or rows, key=_pre_review_total)
 
 
 def _ceilings_line(target: Spec, rows: list[PastCell]) -> str:
@@ -2483,14 +2509,22 @@ def _ceilings_line(target: Spec, rows: list[PastCell]) -> str:
         f"{turns_row.peak_turns}t ({turns_label}), {turns_gap}"
     )
 
-    budget_row = max(rows, key=_pre_review_total)
+    budget_row = _budget_row(rows)
     budget_total = _pre_review_total(budget_row)
     budget_diff = target.budget_usd - budget_total
     budget_word = "above" if budget_diff >= 0 else "below"
+    floor = f" (a runaway, {budget_row.runaway})" if budget_row.runaway else ""
     budget_part = (
         f"budget_usd={target.budget_usd} vs {budget_row.spec_id}'s pre-review "
-        f"total ${budget_total:.2f}, {budget_word} by ${abs(budget_diff):.2f}"
+        f"total ${budget_total:.2f}{floor}, {budget_word} by ${abs(budget_diff):.2f}"
     )
+    past = [c for c in rows if c.runaway and _pre_review_total(c) > budget_total]
+    if past:
+        top = max(past, key=_pre_review_total)
+        budget_part += (
+            f", past {top.spec_id}'s runaway ${_pre_review_total(top):.2f} "
+            f"({top.runaway})"
+        )
 
     return f"ceilings: {turns_part}; {budget_part}"
 
@@ -2547,7 +2581,7 @@ def _turns_blocker(target: Spec, rows: list[PastCell]) -> str | None:
 def _budget_blocker(target: Spec, rows: list[PastCell]) -> str | None:
     """Check 4's budget rule: a blocker only when `budget_usd` is strictly
     below the highest pre-review total among `rows` — equality is headroom."""
-    row = max(rows, key=_pre_review_total)
+    row = _budget_row(rows)
     total = _pre_review_total(row)
     if target.budget_usd < total:
         return (
@@ -2562,7 +2596,7 @@ def _review_rebut_concern(target: Spec, rows: list[PastCell]) -> str | None:
     `_budget_blocker` names, against the highest REVIEW+REBUT sum on one row —
     not two rows' maxima added, and not a mean. A row whose REBUT never ran
     contributes its REVIEW cost alone."""
-    remainder = target.budget_usd - _pre_review_total(max(rows, key=_pre_review_total))
+    remainder = target.budget_usd - _pre_review_total(_budget_row(rows))
     worst = max(rows, key=lambda c: c.review_usd + c.rebut_usd)
     worst_cost = worst.review_usd + worst.rebut_usd
     if remainder < worst_cost:
