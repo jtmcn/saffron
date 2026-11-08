@@ -1,11 +1,11 @@
 ---
 id: b-e9cd43
 title: "The `prose` gate reads no `.yaml` file and nothing under `docs/agents/`, so new prose there passes unread"
-status: open
+status: partial
 tier: 3
 filed: 2026-10-19
 specs: []
-prs: []
+prs: [1077]
 commits: []
 cites: [§5.4]
 related: [161, b-86fa07]
@@ -33,3 +33,7 @@ A test feeds each a hit and asserts the gate reports it.
 ## Record
 
 - 2026-10-19: filed from the spec loop's run 44.
+- 2026-11-08: partial by hand. `prose` and `terms` now read each YAML file's
+  comments. `docs/agents/` stays out of scope. With it in, `terms` fails on
+  "work item" at `docs/agents/issue-tracker.md:305`. Queued specs touch that
+  file, so the word and the scope change wait on them.

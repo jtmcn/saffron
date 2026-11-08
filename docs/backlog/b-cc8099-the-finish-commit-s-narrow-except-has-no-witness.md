@@ -1,11 +1,13 @@
 ---
 id: b-cc8099
 title: "`_stack_finish`'s narrow commit `except` has no witness, so widening it to `Exception` passes"
-status: open
+status: done
 tier: 3
 filed: 2026-10-03
+closed: 2026-11-08
+by_hand: true
 specs: [SA-0151, SA-0170]
-prs: [647]
+prs: [647, 1078]
 commits: []
 cites: [§4.3]
 related: [b-792ab2]
@@ -29,3 +31,4 @@ commit and asserts it reaches `main` with exit 2.
 ## Record
 
 - 2026-10-03: filed from the spec loop's run 26.
+- 2026-11-08: done by hand in #1078.

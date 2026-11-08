@@ -1402,6 +1402,9 @@ def _record_one(spec_id: str, *, quiet_if_unrun: bool = False) -> int | None:
 
         line = lines[chosen["task_id"]]
         spent, budget = line["spent_usd_est"], line["budget_usd"]
+        texts = ledger.spec_texts(chosen["task_id"])
+        ran_text = texts[-1]["text"] if texts else (REPO / match.path).read_text()
+        branch_sha = line["pushed_sha"] or ""
         if state in IN_FLIGHT_STATES and (owners := _owners_running(spec_id)):
             listed = "".join(f"\n  {owner}" for owner in owners)
             return _fail(
@@ -1443,7 +1446,28 @@ def _record_one(spec_id: str, *, quiet_if_unrun: bool = False) -> int | None:
             f"{state}: {_HALT_GUIDANCE[state]} (GOTCHAS, Recording).", file=sys.stderr
         )
     print(_review_lenses_line(spec_id))
+    if branch_sha:
+        _say_stale_branch_spec(match.path, ran_text, branch_sha)
     return 0 if state == "READY_FOR_REVIEW" else 1
+
+
+def _say_stale_branch_spec(path: str, ran_text: str, branch_sha: str) -> None:
+    """Name the text the cell ran when the branch carries another copy of
+    the spec. A stacked branch keeps the copy its base held (b-c375d6)."""
+    try:
+        on_branch = _git("show", f"{branch_sha}:{path}", cwd=REPO)
+    except GitError as exc:
+        print(f"spec: the branch's copy is unreadable: {exc}", file=sys.stderr)
+        return
+    if on_branch.strip() == ran_text.strip():
+        return
+    ran = STATE_DIR / "ran" / PurePosixPath(path).name
+    ran.parent.mkdir(parents=True, exist_ok=True)
+    ran.write_text(ran_text)
+    print(
+        f"spec: the branch's copy at {branch_sha[:12]} differs from the text "
+        f"the cell ran. Seats read {ran}"
+    )
 
 
 # The two halts `SA-0276` and `SA-0287` made decided states (b-80cc6e).

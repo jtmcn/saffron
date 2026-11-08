@@ -61,6 +61,8 @@ CODE_DIRS = (
     ".saffron/",
     ".claude/",
 )
+# Every YAML file but evidence is config a cell or a person writes (b-e9cd43).
+YAML_SUFFIXES = (".yaml", ".yml")
 # A comment names the non-obvious why in one or two lines (CLAUDE.md, item b-122686).
 COMMENT_LIMIT = 2
 # A summary and two short paragraphs; a module docstring describes a file and is exempt.
@@ -200,6 +202,8 @@ class _Text:
 def in_scope(path: str) -> bool:
     if path.endswith(".py"):
         return path.startswith(CODE_DIRS)
+    if path.endswith(YAML_SUFFIXES):
+        return not path.startswith("docs/")
     if not path.endswith(".md") or path.startswith(EXCLUDED_DIRS):
         return False
     return path in ROOT_FILES or path.startswith(INCLUDED_DIRS)
@@ -294,19 +298,70 @@ def _comment_blocks(text: str) -> list[Hit]:
         (t.start[0], t.string) for t in comments if not t.line[: t.start[1]].strip()
     ]
     dashed = [(line, f"--{body}") for _, line, body in sql]
-    blank = {n for n, line in enumerate(text.splitlines(), 1) if not line.strip()}
     found = []
     for lines in (hashed, dashed):
-        run: list[tuple[int, str]] = []
-        for number, comment in [*lines, (-1, "")]:
-            gap = range(run[-1][0] + 1, number) if run else range(0)
-            if run and (number <= run[-1][0] or not blank.issuperset(gap)):
-                if len(run) > COMMENT_LIMIT:
-                    excerpt = _excerpt(f"{len(run)} lines: {run[0][1]}")
-                    found.append(Hit(run[0][0], "comment-block", excerpt))
-                run = []
-            run.append((number, comment))
+        found += _long_runs(lines, text)
     return sorted(found, key=lambda hit: hit.line)
+
+
+def _long_runs(lines: list[tuple[int, str]], text: str) -> list[Hit]:
+    """A hit for each run of `(line, comment)` past `COMMENT_LIMIT`."""
+    blank = {n for n, line in enumerate(text.splitlines(), 1) if not line.strip()}
+    found = []
+    run: list[tuple[int, str]] = []
+    for number, comment in [*lines, (-1, "")]:
+        gap = range(run[-1][0] + 1, number) if run else range(0)
+        if run and (number <= run[-1][0] or not blank.issuperset(gap)):
+            if len(run) > COMMENT_LIMIT:
+                excerpt = _excerpt(f"{len(run)} lines: {run[0][1]}")
+                found.append(Hit(run[0][0], "comment-block", excerpt))
+            run = []
+        run.append((number, comment))
+    return found
+
+
+# A value that opens a block scalar, whose more indented lines are text, not comments.
+_BLOCK_SCALAR = re.compile(r"(?:^|[:\s])[|>][-+0-9]*$")
+
+
+def _yaml_comments(text: str) -> list[tuple[int, int, bool]]:
+    """`(offset of the #, line, whole line)` for each comment in YAML `text`.
+    A `#` inside a quoted scalar on one line, or in a block scalar, is text."""
+    found, offset, block = [], 0, None
+    for number, line in enumerate(text.splitlines(keepends=True), 1):
+        indent = len(line) - len(line.lstrip(" "))
+        if block is not None and (not line.strip() or indent > block):
+            offset += len(line)
+            continue
+        block, quote, at = None, None, None
+        for i, char in enumerate(line):
+            if quote:
+                quote = None if char == quote else quote
+            elif char in "'\"":
+                quote = char
+            elif char == "#" and (i == 0 or line[i - 1] in " \t"):
+                at = i
+                break
+        code = line[:at].rstrip() if at is not None else line.rstrip()
+        if _BLOCK_SCALAR.search(code):
+            block = indent
+        if at is not None:
+            found.append((offset + at, number, not code.strip()))
+        offset += len(line)
+    return found
+
+
+def _yaml_prose(text: str) -> tuple[str, list[Hit]]:
+    """The comments of YAML `text` at their own offsets, and its long comment runs."""
+    kept = list(_spaces(text))
+    whole = []
+    for at, number, alone in _yaml_comments(text):
+        end = text.find("\n", at)
+        end = len(text) if end < 0 else end
+        kept[at + 1 : end] = text[at + 1 : end]
+        if alone:
+            whole.append((number, text[at:end]))
+    return "".join(kept), _long_runs(whole, text)
 
 
 def _long_docstrings(text: str) -> list[Hit]:
@@ -593,6 +648,11 @@ def check(text: str, path: str, gate: str, *, root: Path) -> list[Hit]:
         found = [] if body is None else _words(_Text(_prepare(body)), path, gate, root)
         if gate == "prose":
             found += _comment_blocks(text) + _long_docstrings(text)
+        return sorted(found, key=lambda f: (f.line, f.code))
+    if path.endswith(YAML_SUFFIXES):
+        body, runs = _yaml_prose(text)
+        found = _words(_Text(_prepare(body)), path, gate, root)
+        found += runs if gate == "prose" else []
         return sorted(found, key=lambda f: (f.line, f.code))
     try:
         rendered = _rendered(text, path, root)
