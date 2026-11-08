@@ -2671,3 +2671,37 @@ def test_an_end_review_grades_each_layer_at_its_branch_head_after_package(
     assert f"{d_m1}^..{d_t1}" in join_prompt_e
 
     ledger.close()
+
+
+@pytest.mark.parametrize("claude_md", [None, "  \n"])
+def test_the_standards_lens_says_a_repo_declares_no_standing_instructions(claude_md):
+    """b-17d0d5: with no `CLAUDE.md` the Standards lens once judged against an
+    empty section. The Spec lens judges the spec, so it gets no such note."""
+    import saffron.end_review as end_review
+
+    fields = end_review.LayerFields(
+        spec_id="TE-4",
+        branch="saffron/layer-d",
+        pr_url="https://h/pull/4",
+        base="b",
+        head="h",
+        known="",
+        diff_base="b",
+    )
+
+    def _prompt(lens: str) -> str:
+        return end_review.end_review_prompt(
+            lens,
+            fields,
+            spec_body="fix it",
+            diff="",
+            acceptance=[Criterion(claim="c", witness="tests/x.py::t")],
+            touches=[],
+            forbidden=[],
+            context_md=CONTEXT_MD,
+            claude_md=claude_md,
+            prompts_dir=PROMPTS,
+        )
+
+    assert _flatten(review.NO_STANDING_INSTRUCTIONS) in _flatten(_prompt("standards"))
+    assert "declares no standing instructions" not in _prompt("spec")

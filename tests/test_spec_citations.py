@@ -793,3 +793,44 @@ def test_a_bare_citation_is_held_by_the_file_the_later_check_anchors_it_to(
     assert new_text == text
     assert rewrites == []
     assert left == defects
+
+
+def test_a_bare_citation_is_held_by_its_file_when_a_suffix_leaves_the_tree(
+    empty_repo,
+):
+    """b-1b8b1e: `x.rs` reads as a path at the spec's commit only. The later
+    tree's tokens anchor the bare `:1-2` to `mod/a.py`, as the later check
+    does. So `thing` holds it, and the rewrite moves it."""
+    from saffron.spec_citations import (
+        citation_defects,
+        citations_held_at,
+        rewrite_moved_citations,
+    )
+
+    repo = empty_repo
+    (repo / ".saffron").mkdir()
+    (repo / ".saffron" / "policy.yaml").write_text(_CITATION_POLICY)
+    (repo / "mod").mkdir()
+    (repo / "mod" / "a.py").write_text("def thing():\n    return 1\n")
+    (repo / "x.rs").write_text("\n\n\n\ndef thing():\n    return 2\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "own")
+    own = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "rm", "-q", "x.rs")
+    (repo / "mod" / "a.py").write_text("\n\ndef thing():\n    return 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "later")
+    head = _git(repo, "rev-parse", "HEAD")
+    text = "The module `mod/a.py` and `x.rs` hold `thing` at `:1-2`.\n"
+
+    defects = citation_defects(repo, head, text)
+    assert [str(d) for d in defects] == [
+        "mod/a.py:1-2: the construct it names sits at mod/a.py:3-4"
+    ]
+    assert citations_held_at(repo, own, text) == {}
+    held = citations_held_at(repo, own, text, tokens_at=head)
+    assert held == {text.index(":1-2"): "thing"}
+
+    new_text, rewrites, left = rewrite_moved_citations(text, defects, held)
+    assert new_text == text.replace(":1-2", ":3-4")
+    assert left == []

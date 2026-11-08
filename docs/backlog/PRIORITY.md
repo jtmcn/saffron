@@ -414,7 +414,7 @@ Each is a gap a seat, a finish or the run found and the stack left alone.
 **b-3a0789**. Each is a gap a seat, a finish or the run found and the stack
 left alone.
 
-**Placed 2026-10-30**, from #996's Standards seat and finish 61: **b-25b7ba**.
+**Placed 2026-10-30**, from #996's Standards seat and finish 61: ~~**b-25b7ba**~~.
 Two renderers spell a new failure, and they disagree on line 0.
 
 **The 2026-09-04 sort's tier 3, plus what spec loop runs up to 32 added.**
@@ -453,7 +453,7 @@ compares the index to the records in that direction. It ranks here, beside
 128 and 129. ~~**b-61127f**~~, the ADR layer, is done.
 
 **Placed 2026-09-26**, from the spec loop's run 18: **b-615466**, **b-50a704**,
-**b-17d0d5**, then ~~**b-830357**~~. Each is a stack batch seam that review kept
+~~**b-17d0d5**~~, then ~~**b-830357**~~. Each is a stack batch seam that review kept
 as written, or a witness too weak at one boundary.
 
 **Placed 2026-09-27**, from the spec loop's run 19: **b-1e9a7a**,
@@ -474,7 +474,7 @@ other is a fixture field under `docs/**` that no cell could add.
 uid 0 in every cell, and `--cap-drop ALL` makes the read they test fail.
 
 **Placed 2026-09-29**, from the spec loop's run 22: **b-695234**,
-**b-12e717**, **b-2dd65f**, ~~**b-b1a7d4**~~, then **b-1f1188**.
+**b-12e717**, ~~**b-2dd65f**~~, ~~**b-b1a7d4**~~, then **b-1f1188**.
 The first three are defects in REVIEW and REBUT that the run's seats found.
 The last two are gaps in the spec chain's own tools. **b-9529e9** and
 ~~**b-91ead2**~~ came from closing the run. The scoring driver cannot reach a
@@ -496,7 +496,7 @@ child's tree carries an older spec than it runs. `snapshot --force` drops
 holds, and `status` has no one-line form.
 
 **Placed 2026-10-03**, from the spec loop's run 26: ~~**b-cc8099**~~,
-**b-81e109**, then **b-14ccc7**. A finish's narrow `except` has no witness.
+**b-81e109**, then ~~**b-14ccc7**~~. A finish's narrow `except` has no witness.
 `GhRunner` is defined three times. A live-cell test fails when two suites
 run at once.
 

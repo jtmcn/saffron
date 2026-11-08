@@ -28,7 +28,7 @@ from pathlib import Path
 
 from saffron.cell.runtime import CellRuntimeError
 from saffron.follow_up import Pooled
-from saffron.gates.baseline import NewFailure
+from saffron.gates.baseline import NewFailure, render
 from saffron.intake import Spec
 from saffron.ledger import _REVISION_PATH, Ledger
 from saffron.phases import package as package_phase
@@ -249,17 +249,6 @@ def _commit(workdir: Path, message: str) -> str:
     return git_mirror._git(workdir, "rev-parse", "HEAD")
 
 
-def _render_new_failure(new_failure: NewFailure) -> str:
-    """`[gate] file:line code: message`, `?` for a missing line, and no
-    `file:line ` segment at all for a failure that carries no file."""
-    failure = new_failure.failure
-    loc = ""
-    if failure.file:
-        line = failure.line if failure.line is not None else "?"
-        loc = f"{failure.file}:{line} "
-    return f"[{new_failure.gate}] {loc}{failure.code}: {failure.message}"
-
-
 def judge_draft(
     mirror: Path,
     head: str,
@@ -296,7 +285,7 @@ def judge_draft(
             git_mirror._git(mirror, "update-ref", "-d", ref)
     finally:
         git_mirror.remove_worktree(mirror, workdir)
-    return [_render_new_failure(failure) for failure in failures]
+    return [render(failure) for failure in failures]
 
 
 def _match_pooled(pooled: Sequence[Pooled], task_key: str, row) -> Pooled | None:

@@ -19,7 +19,7 @@ from saffron.agents import context
 from saffron.cell import runtime
 from saffron.cell.worktree import STATE_MOUNT, WORKTREE_MOUNT
 from saffron.events import Agent, Event, describe
-from saffron.gates.baseline import NewFailure
+from saffron.gates.baseline import NewFailure, render
 
 # The whole set an implementer is offered, not merely the set it may call
 # unprompted. Measured: under `allowed_tools` alone the model still saw every
@@ -197,15 +197,7 @@ def repair_prompt(new_failures: Sequence[NewFailure]) -> str:
     No status, no gate verdict, no counts of what passed — the agent never runs
     the gates and never learns whether it is green.
     """
-    # A host-side gate can fail the diff as a whole rather than a path — `size`
-    # is the first — and "- [size] :? diff-too-large" reads as a broken gate to
-    # the one channel a gate result ever reaches the agent through.
-    lines = [
-        f"- [{n.gate}] "
-        + (f"{n.failure.file}:{n.failure.line or '?'} " if n.failure.file else "")
-        + f"{n.failure.code}: {n.failure.message}"
-        for n in new_failures
-    ]
+    lines = [f"- {render(n)}" for n in new_failures]
     return (
         "These failures are yours to fix. A failure the base commit already "
         "had is left out, unless it is a witness that survived its mutant "
