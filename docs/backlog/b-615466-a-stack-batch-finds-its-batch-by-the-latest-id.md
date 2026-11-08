@@ -1,11 +1,12 @@
 ---
 id: b-615466
 title: A stack batch finds its own batch by the latest id, and nothing enforces one batch at a time
-status: partial
+status: done
 tier: 3
 filed: 2026-09-26
+closed: 2026-11-08
 specs: [SA-0352]
-prs: [934]
+prs: [934, 1090]
 commits: []
 cites: [§4.2.1]
 related: [b-792ab2, b-a714d2]
@@ -32,3 +33,5 @@ sends the end review to the other batch's layers (`['2'] != ['1']`).
 - 2026-09-26: filed from the spec loop's run 18 (stack #531). Kept as written
   on #527.
 - 2026-11-07: groomed. `run_stack_batch` now holds the batch id it creates and hands it to its end review (`6a50eb23`, `SA-0304`, #934). The measured case is gone. The first exit is one reader short. `cli.py` renders the stack view after a stack batch with no id, so `write_stack_view` still reads `latest_batch_id`. The second exit, a lock, is b-a714d2's whole Done, so a lock there closes this item too.
+- 2026-11-08: done in #1090 (`SA-0352`). The home lock is this item's second
+  exit, so one batch runs per home.

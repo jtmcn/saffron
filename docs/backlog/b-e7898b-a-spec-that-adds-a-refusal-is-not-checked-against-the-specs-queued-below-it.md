@@ -1,11 +1,12 @@
 ---
 id: b-e7898b
 title: A spec that adds a refusal is never checked against the specs queued below it, so its cell spends its budget proving an impossibility
-status: open
+status: done
 tier: 1
 filed: 2026-10-19
+closed: 2026-11-08
 specs: [SA-0350]
-prs: []
+prs: [1089]
 commits: []
 cites: [§4.2.1]
 related: [b-e773d9, b-e471bd, b-7d3810]
@@ -39,3 +40,6 @@ orders it after the specs it refuses, and names each one.
 - 2026-11-07: specced as `SA-0350`. A spec declares `retired_first`, the
   ids it waits to see in `done/`. The queue scan and `saffron cell` refuse
   it while one is not, naming each.
+- 2026-11-08: done in #1089 (`SA-0350`), in the spec loop's run 55. A spec
+  declares `retired_first`, and the queue scan and `saffron cell` refuse it
+  while one entry is not in `done/`.

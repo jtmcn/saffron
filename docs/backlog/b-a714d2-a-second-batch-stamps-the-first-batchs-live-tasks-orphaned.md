@@ -1,11 +1,12 @@
 ---
 id: b-a714d2
 title: A second batch stamps the first batch's live tasks ORPHANED, because nothing enforces one batch at a time
-status: open
+status: done
 tier: 2
 filed: 2026-10-11
+closed: 2026-11-08
 specs: [SA-0352]
-prs: []
+prs: [1090]
 commits: []
 cites: [§4.2.1]
 related: [b-ca3bc6, b-6a692d, b-d9ed45, b-615466]
@@ -40,3 +41,7 @@ task keeps its state.
 - 2026-10-11: filed from the parallel-cells survey, beside b-ca3bc6.
 - 2026-11-07: a lock that holds one batch per ledger also meets b-615466's second exit,
   so the fix closes both items.
+- 2026-11-08: done in #1090 (`SA-0352`), in the spec loop's run 55. A home
+  lock refuses a second `cell`, `batch` or `draft`, and a test holds a live
+  task's state beside a refused batch. The commands that take no lock are
+  b-879e72.

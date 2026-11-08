@@ -2797,3 +2797,44 @@ critic's own, so they have no line.
 - `SA-0337` (#1027): docstrings cited "(problem 3)", a pointer into the spec
   that no reader of the module can resolve. **Bucket 2**, a `CLAUDE.md` line.
   **Landed:** a review commit on #1027.
+
+## 2026-11-08, spec loop run 55 (#1055, #1068, #1084, #1089, #1090)
+
+- `SA-0338` (#1055): REBUT's own new comment added one prose hit, and the
+  task ended `EXHAUSTED` on it. **Bucket 1**, the `prose` gate, judged
+  inside REBUT. **Landed:** a review commit on #1055.
+- `SA-0338` (#1055): the criterion 7 witness passed with the reason split
+  over five lines. **Bucket 3**, adequacy. **Landed:** a review commit on
+  #1055.
+- `SA-0338` (#1055): the `.claude/` edits the spec owed were absent.
+  **Bucket 3**, contract. **Landed:** a review commit on #1055.
+- `SA-0338` (#1055): a dead helper, a removed `ponytail:` and a rewrapped
+  docstring. **Bucket 3**, conventions. **Landed:** a review commit on #1055.
+- `SA-0339` (#1068): the criterion 6 witness never drove `hash-object` or
+  `commit-tree` failing, and the race guard had no witness. **Bucket 3**,
+  adequacy. **Landed:** review commits on #1068.
+
+- `SA-0340` (#1084): the unread-first tiebreak the spec asked for had no
+  witness, so swapping or deleting it passed. **Bucket 3**, adequacy.
+  **Landed:** a review commit on #1084.
+- `SA-0340` (#1084): `unread_blockers` and `unanswered_blockers` copied one
+  body, which `_confirmed_with`'s docstring forbids. **Bucket 3**,
+  conventions. **Landed:** a review commit on #1084.
+- `SA-0340` (#1084): an unanswered blocker was called a "skip", a gate
+  status. **Bucket 1**, the `terms` gate. **Landed:** a review commit on #1084.
+- `SA-0340` (#1084): `rebut_state` still reads an empty error as no answer.
+  **Bucket 3**, correctness. Kept as b-3df181.
+- `SA-0350` (#1089): the criterion 2 witness read `done/` from the
+  unreadable-file suffix and never counted the refusal rows. **Bucket 3**,
+  adequacy. **Landed:** a review commit on #1089.
+- `SA-0350` (#1089): tests called a retired-first entry a parent.
+  **Bucket 1**, the `prose` gate. Kept as b-840763, and the names landed in a
+  review commit on #1089.
+- `SA-0350` (#1089): one comment read as an order, and two split their names
+  across lines. **Bucket 3**, conventions. **Landed:** a review commit on
+  #1089.
+- `SA-0352` (#1090): `HomeLocked`'s docstring blamed an empty lock file on a
+  killed holder. **Bucket 3**, conventions. **Landed:** a review commit on
+  #1090.
+- `SA-0352` (#1090): `package` and `finish` take no home lock either.
+  **Bucket 3**, contract. Kept as b-879e72.
