@@ -4,7 +4,7 @@ title: The mutant a witness is judged by is withheld from the prompt and left in
 status: partial
 tier: 1
 filed: 2026-09-06
-specs: [SA-0056, SA-0063, SA-0064, SA-0237]
+specs: [SA-0056, SA-0063, SA-0064, SA-0237, SA-0338, SA-0339]
 prs: [784]
 commits: []
 cites: [§5.4.1]

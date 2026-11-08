@@ -87,6 +87,12 @@ _Avoid_: "the checkout", "the clone", "the workspace", "the sandbox dir".
 **Subnet pool**: The /16 that a task's internal networks draw from, one /24 each (`runtime.SUBNETS["pool"]`, `DESIGN.md` §5.1). A network claims its /24 by being created on it, never by a listing taken first.
 _Avoid_: a bare "pool". That word alone is a batch's concurrency pool.
 
+**Review pool**: The money REVIEW's sessions share (`DESIGN.md` §4.3). It opens at the task's
+remainder when REVIEW starts, floored at `REVIEW_FLOOR_USD` per declared lens. Each session is
+capped at what is left, and its cost comes off as it ends. A session it cannot cover does not
+start, and the task ends `REVIEW_INCOMPLETE`.
+_Avoid_: a bare "pool", "the critic budget".
+
 **Operator**: The human. Singular per deployment, by design (ADR 10).
 _Avoid_: "the user", "the reviewer" (reviewing is one of several things they do).
 
@@ -482,8 +488,8 @@ that it fails on its criterion's mutant. An ordinary test that happens to cover
 the claim is not one.
 _Avoid_: "the test for it".
 
-**Mutant**: A find-and-replace edit a criterion declares against its own subject,
-which its witness must fail on (`DESIGN.md` §5.4.1). Applied by the `witness` gate
+**Mutant**: A find-and-replace edit kept for a criterion on `refs/saffron/mutants`,
+against its own subject, which its witness must fail on (`DESIGN.md` §5.4.1). Applied by the `witness` gate
 to ask whether the tests would notice the claim being broken. Withheld from the
 implementer's prompt on purpose: a mutant a cell chooses is a mutant chosen to be
 killed.
@@ -674,7 +680,9 @@ the critic's verdict, and the basis of the critic-ROI question.
 
 **Rebuttal**: The implementer's single response to confirmed blockers: either a fix
 or an argument that the finding is wrong. Both outcomes are recorded. A documented
-disagreement is more informative than agreement.
+disagreement is more informative than agreement. Each confirmed blocker's answer is
+`answered`, `unanswered` or `unread`. An `unread` blocker met a turn nobody could read, so
+its argument is lost, not absent. Neither of the last two is an argument.
 _Avoid_: "response", "appeal", "pushback".
 
 ---
@@ -755,7 +763,8 @@ A row that carries a pull request keeps it, and only a merge of that pull
 request moves it to `MERGED`.
 
 **`REVIEW_INCOMPLETE`**: A task whose REVIEW ended with a lens that produced no
-findings, because its session failed or its output was not the schema. An unrun
+findings, because its session failed or its output was not the schema. A REVIEW
+session its pool could not cover ends the task here too. An unrun
 lens never reads as a clean review, and no finding set exists to rebut. No pull
 request opens. The cell's branch is pushed as a `REBUTTAL_UNJUDGED` task's is,
 and a dependent stacks on the branch of a recorded push. It is cut from `base_sha`

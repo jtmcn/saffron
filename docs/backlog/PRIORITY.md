@@ -122,6 +122,14 @@ between ADR 10's sequence and two cells on one host.
 refuses a finish's follow-up as not in the order. It took the rank of
 ~~**b-25f2b2**~~, the tier 2 item grooming folded into it.
 
+**Placed 2026-11-07**, from reviewing `SA-0340`: **b-3cf039**. `migrate`
+derives no `rebuttal` fact for a blocker that met REBUT's early exit, so it
+refuses the ref.
+
+**Placed 2026-11-07**, from reviewing `SA-0338`: **b-c5da95**. Four commands
+load a spec without the ref's mutants, so a regate can judge a witness the cell
+set aside.
+
 **Placed 2026-11-06**, from the spec loop's run 54: **b-fe3488**, **b-ffb930**,
 **b-0add4c**, then **b-71f95f**. A stack batch starts an order its budget
 cannot run. The follow-up writer's first draft never parses. The record's

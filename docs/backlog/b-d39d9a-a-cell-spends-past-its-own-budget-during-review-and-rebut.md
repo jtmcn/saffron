@@ -4,7 +4,7 @@ title: "A cell spends past its own `budget_usd` during REVIEW and REBUT, and not
 status: open
 tier: 1
 filed: 2026-11-06
-specs: [SA-0335]
+specs: [SA-0335, SA-0343]
 prs: []
 commits: []
 cites: [§5.2, §7.1]

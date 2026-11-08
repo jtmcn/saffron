@@ -30,6 +30,7 @@ A gate is an executable that prints one JSON object on stdout and nothing else t
 - Handed a subset, it collects only those names. The `witness` probe skips a gate that collects more.
 - A failed test's `code` is its collected name, so `criteria` can tell which witness failed.
 - A handed name the runner cannot find goes in `uncollected`. A subset run that accounts for every name is `pass` or `fail`, never `error` (SA-0127). Only `revert` reads the field.
+- `locations` is optional. It maps each collected name to the `file` and the `first` and `last` lines that define it. Only `revert` reads it, to find a test the diff rewrote under its old name.
 
 ## A domain gate
 
