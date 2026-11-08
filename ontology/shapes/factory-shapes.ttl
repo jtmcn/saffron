@@ -372,7 +372,7 @@ factory:RevisionAppendixShape a sh:NodeShape ;
         sh:datatype xsd:integer ; sh:minInclusive 1 ] .
 
 # Supersession symmetry and id contiguity are sets, not focus nodes, so they live
-# in `tests/records/check.py`, not here.
+# in `records/check.py`, not here.
 factory:ADRShape a sh:NodeShape ;
     sh:targetClass factory:ADR ;
     sh:property [ sh:path factory:adrNumber ; sh:minCount 1 ; sh:maxCount 1 ;

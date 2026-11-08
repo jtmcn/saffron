@@ -1,9 +1,11 @@
 ---
 id: b-98dc4d
 title: A vacuity probe can never be applied to the checking code a `records/` spec delivers
-status: open
+status: done
 tier: 3
 filed: 2026-09-19
+closed: 2026-11-08
+by_hand: true
 specs: []
 prs: []
 commits: []
@@ -38,3 +40,6 @@ test path, or a probe on it is answered rather than refused.
 ## Record
 
 - 2026-09-19: filed from the spec loop's run 9 (#377).
+- 2026-11-08: the checking logic moved from `tests/records/check.py` to
+  `records/check.py`, outside the declared test paths.
+- 2026-11-08: done by hand.

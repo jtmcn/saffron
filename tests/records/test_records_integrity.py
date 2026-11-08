@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from ontology import design_record
-from tests.records.check import building_pr, check_all, head_commits, merged_prs
+from records.check import building_pr, check_all, head_commits, merged_prs
 from tests.test_citations import addresses
 
 REPO = Path(__file__).resolve().parents[2]
