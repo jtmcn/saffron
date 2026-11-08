@@ -1,0 +1,29 @@
+id: prompt-is-a-file
+language: python
+severity: error
+message: a `_PROMPT` constant in saffron/ loads its text from a prompt file
+note: |
+  The `prose` gate reads Markdown, so a prompt written as a Python string is prose
+  no gate reads (item 161). Write it as `saffron/agents/prompts/turns/<name>.md`
+  and load it with `context.turn_prompt`, or build it with `build_system_prompt`.
+
+# `harness/` and `docs/evidence/scripts/` hold measurement code that no cell
+# reads. `repair_prompt` builds its text from gate failures, and no constant holds it.
+files:
+  - "saffron/**/*.py"
+# Any string under the right side, so `dedent("...")` and `"a" + "b"` are read too.
+# A bare `.md` name points at a prompt file, which is the sanctioned shape.
+rule:
+  kind: assignment
+  all:
+    - has: { field: left, kind: identifier, regex: '_PROMPT$' }
+    - has:
+        field: right
+        any:
+          - kind: string
+          - has: { kind: string, stopBy: end }
+        not:
+          any:
+            - has: { kind: string_content, regex: '^[\w./-]+\.md$' }
+            - kind: call
+              has: { field: function, regex: '(^|\.)(turn_prompt|build_system_prompt)$' }

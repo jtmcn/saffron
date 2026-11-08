@@ -46,6 +46,9 @@ And optionally:
 2. `CLAUDE.md`, `CONTEXT.md` (its _Avoid_ lines), and
    `docs/agents/issue-tracker.md`. The last is the authoring contract. Every
    rule in its Conventions binds you.
+   Bare "run" is an _Avoid_ word that no gate catches. "Run" means one
+   task's pin, so name a turn, an agent session, an attempt or a batch. A cell
+   copies the spec's word into comments and test names (b-050733).
 3. `.claude/agents/spec-reviewer.md`'s six checks. They are your self-review.
 4. Every `DESIGN.md` section the source cites or the change touches.
 5. Every file the change edits, and everything that calls, imports or reads

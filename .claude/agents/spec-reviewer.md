@@ -38,6 +38,9 @@ costs $8–22 and about an hour. Your job is to find defects like that first.
 1. The spec, frontmatter and body.
 2. `CLAUDE.md`, especially "Invariants worth knowing before editing", and
    `CONTEXT.md`, especially the _Avoid_ lines.
+   No gate catches bare "run" for one turn or one agent call, so raise it.
+   "Run" means one task's pin, and a cell copies the spec's word into its
+   code (b-050733).
 3. `docs/agents/issue-tracker.md`'s conventions for `acceptance`, `witness`,
    `mutant` and `preserves`. A mutant lives on `refs/saffron/mutants`, never
    inline: `git show refs/saffron/mutants:<spec id>.yaml` prints a spec's.

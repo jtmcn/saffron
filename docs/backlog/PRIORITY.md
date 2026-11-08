@@ -263,7 +263,7 @@ the cell token from whoever starts it, so a delegate must hold the credential.
 **b-fbd181**. Nothing runs `terms` over `main`, so it went red unseen. A
 measured estimate priced two specs at half what landed, and `size` only advised.
 
-**Placed 2026-10-08**, from the spec loop's run 31: **b-8acb05**, **b-fe82d9**,
+**Placed 2026-10-08**, from the spec loop's run 31: ~~**b-8acb05**~~, **b-fe82d9**,
 then **b-d28fd8**. A rename re-keys `prose`'s docstring hit, and joining lines
 slips it back under. An escalated stack finish names none of its failures.
 `migrate` drops `spec_findings`. b-d28fd8 took ~~**b-aee31f**~~'s place in
@@ -441,7 +441,7 @@ Each line keeps the order it was filed in.
   **b-7f105f** and ~~**b-8c17dc**~~.
 - From item 52's review: ~~**b-cec9a7**~~.
 
-**Placed 2026-09-20**: **161**, **162**, **163**, **126**, **128** and ~~**129**~~,
+**Placed 2026-09-20**: ~~**161**~~, **162**, **163**, **126**, **128** and ~~**129**~~,
 then ~~**b-7d2acf**~~. The first three are what PR #317 left on the `prose` gate. A
 prompt written as a Python string is invisible to it. Its rules read register
 and not instruction form, and its sentence limit fights §8's line budget. 126 is
@@ -545,7 +545,7 @@ which the glossary keeps for the breaker. A probe's reason is called a
 refusal. The glob characters are spelled in two modules.
 
 **Placed 2026-10-05**, from stage 2's stack batches: ~~**b-937778**~~,
-**b-050733**, then **b-0efc31**. The loop driver's `history` counts every
+~~**b-050733**~~, then **b-0efc31**. The loop driver's `history` counts every
 phase's turns against `max_turns`. Specs use bare "run" for a turn. Nothing
 compares the host's usage keys to the runner's.
 
