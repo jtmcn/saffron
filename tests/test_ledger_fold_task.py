@@ -191,9 +191,13 @@ def _drive_every_kind(source: Ledger, after) -> tuple[str, int]:
     after(key)
     (f2,) = source.record_findings(task_id, [_find("s", "note", "y", 8, "c2", False)])
     after(key)
-    source.record_rebuttal(f2, verdict="withdrawn", rebuttal="rebut two")
+    source.record_rebuttal(
+        f2, verdict="withdrawn", rebuttal="rebut two", answer="unread", error="boom"
+    )
     after(key)
-    source.record_rebuttal(f1, verdict="confirmed", rebuttal="rebut one")
+    source.record_rebuttal(
+        f1, verdict="confirmed", rebuttal="rebut one", answer="answered", error=""
+    )
     after(key)
     source.record_policy(task_id, "f" * 64)
     after(key)
@@ -320,6 +324,82 @@ def test_the_diff_stat_folds_back_as_written_and_null_where_unmeasured(
     assert (source_row["added"], source_row["removed"]) == (5, 5)
     fold_row = _raw_rows(fold_path, _TASK_SQL, key25)[0]
     assert (fold_row["added"], fold_row["removed"]) == (None, None)
+
+    source.close()
+    into.close()
+
+
+def test_a_rebuttal_fact_folds_its_answer_and_one_without_it_folds_to_unknown(
+    tmp_path, record
+):
+    """Item 42: the fold writes a `rebuttal` fact's `answer` and `error`
+    into the finding's row as written, for each of `answered`,
+    `unanswered` and `unread`. A fact that carries neither key, as every
+    fact before this change does, folds to a null answer and a null error.
+    It never folds to `unanswered`, which would claim a skip nobody knows
+    anything about."""
+    source_path, fold_path = tmp_path / "source.db", tmp_path / "fold.db"
+    source = Ledger(source_path, record=record)
+    into = Ledger(fold_path)
+
+    task_id = _minimal(source, "SA-1")
+    f1, f2, f3, f4 = source.record_findings(
+        task_id,
+        [
+            _find("a", "blocker", "x", 1, "answered one"),
+            _find("a", "blocker", "x", 2, "unanswered one"),
+            _find("a", "blocker", "x", 3, "unread one"),
+            _find("a", "blocker", "x", 4, "the old shape"),
+        ],
+    )
+    source.record_rebuttal(
+        f1, verdict="confirmed", rebuttal="r1", answer="answered", error=None
+    )
+    source.record_rebuttal(f2, verdict=None, rebuttal=None, answer="unanswered")
+    source.record_rebuttal(
+        f3, verdict=None, rebuttal=None, answer="unread", error="boom"
+    )
+    source.record_rebuttal(f4, verdict="withdrawn", rebuttal="old shape")
+
+    key = _key(source, task_id)
+    # `f4`'s own fact predates item 42: stripped back to the two keys every
+    # `rebuttal` fact carried before this change.
+    stripped = [
+        replace(
+            fact,
+            payload={
+                k: v for k, v in fact.payload.items() if k not in ("answer", "error")
+            },
+        )
+        if fact.kind == "rebuttal" and fact.payload["position"] == 4
+        else fact
+        for fact in record.read(key)
+    ]
+    record._facts[key] = stripped
+
+    into.fold_task(key, record.read(key))
+    rows = {
+        row["claim"]: row for row in _raw_rows(fold_path, _TABLE_SQL["findings"], key)
+    }
+    assert (rows["answered one"]["answer"], rows["answered one"]["rebuttal_error"]) == (
+        "answered",
+        None,
+    )
+    assert (
+        rows["unanswered one"]["answer"],
+        rows["unanswered one"]["rebuttal_error"],
+    ) == ("unanswered", None)
+    assert (rows["unread one"]["answer"], rows["unread one"]["rebuttal_error"]) == (
+        "unread",
+        "boom",
+    )
+    assert (
+        rows["the old shape"]["answer"],
+        rows["the old shape"]["rebuttal_error"],
+    ) == (
+        None,
+        None,
+    )
 
     source.close()
     into.close()

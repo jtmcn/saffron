@@ -83,13 +83,20 @@ _COMPARED_KINDS = (
 # aside here rather than compared.
 _GATE_RESULT_SET_ASIDE = frozenset({"schema_version", "collected", "uncollected"})
 
+# Item 42: a `rebuttal` fact's own `answer` and `error` keys, set aside
+# like `_GATE_RESULT_SET_ASIDE`. `_finding_facts` derives neither yet.
+_REBUTTAL_SET_ASIDE = frozenset({"answer", "error"})
+
 
 def _normalized(fact: Fact) -> Fact:
     """`fact` with every difference the top-up sets aside already gone: its
-    `at`, and, on a `gate_result`, the three keys above."""
+    `at`, the three `gate_result` keys above on a `gate_result`, and the two
+    `rebuttal` keys above on a `rebuttal`."""
     payload = fact.payload
     if fact.kind == "gate_result":
         payload = {k: v for k, v in payload.items() if k not in _GATE_RESULT_SET_ASIDE}
+    elif fact.kind == "rebuttal":
+        payload = {k: v for k, v in payload.items() if k not in _REBUTTAL_SET_ASIDE}
     return replace(fact, at="", payload=payload)
 
 

@@ -1069,6 +1069,8 @@ def _finish(ledger, outcome, out_dir: Path, spec, repo_name: str, result):
             risk=outcome.effective_risk,
             sustained=sustained_blockers(outcome.rebut_result),
             unkept=unkept_fixes(outcome.rebut_result),
+            unread=outcome.unread,
+            unanswered=outcome.unanswered,
         ),
         header={"trailing accept rate": index_report.trailing_accept_rate(ledger)},
     )

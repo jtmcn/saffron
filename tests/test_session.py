@@ -5115,6 +5115,39 @@ def _through_rebut(*rebut_turns):
     ]
 
 
+# One lens filing two blockers, both on `src/x.py` line 1, which
+# `_ANCHORING_DIFF` anchors.
+_TWO_BLOCKERS = {
+    "findings": [
+        {
+            "file": "src/x.py",
+            "line": 1,
+            "severity": "blocker",
+            "claim": "first claim",
+        },
+        {
+            "file": "src/x.py",
+            "line": 1,
+            "severity": "blocker",
+            "claim": "second claim",
+        },
+    ]
+}
+
+
+def _through_rebut_two(*rebut_turns):
+    """`_through_rebut`, but the one lens that files a blocker files two."""
+    return [
+        _turn(_block(_PLAN)),
+        _turn(),
+        _turn(_block(_TWO_BLOCKERS)),
+        _turn(_block({"findings": []})),
+        _turn(_block({"findings": []})),
+        _turn(_block({"findings": []})),
+        *rebut_turns,
+    ]
+
+
 def _rebuttal_fixed_prefix() -> str:
     """REBUT's own rebuttal turn prompt, up to `{blockers}`: the text that
     identifies it among `cell.turns`, however many turns IMPLEMENT or
@@ -10565,6 +10598,158 @@ def test_a_verdict_lands_on_the_finding_the_review_recorded(monkeypatch, tmp_pat
     assert (row["verdict"], row["rebuttal"]) == ("withdrawn", "argued: by design")
 
 
+def test_rebut_records_each_blockers_answer_and_an_unread_turns_error(
+    monkeypatch, tmp_path
+):
+    """Item 42: each blocker's `rebuttal` fact records an `answer` and an
+    `error`. A blocker the readable turn answered reads `answered`. One it
+    named no answer for reads `unanswered`. Both carry a null error. Every
+    blocker of a turn whose error is not `None` reads `unread`, carrying
+    that error text, the empty string included."""
+
+    def _run(path, rebut_turns, *, rebut_commits):
+        cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+        _rebuttable(monkeypatch, cell, rebut_commits=rebut_commits)
+        _outcome, ledger = _drive(
+            monkeypatch,
+            tmp_path / path,
+            cell=cell,
+            turns=_through_rebut_two(*rebut_turns),
+        )
+        (task_id,) = [row["task_id"] for row in ledger.queue_lines()]
+        rows = {r["claim"]: r for r in ledger.findings(task_id)}
+        return rows["first claim"], rows["second claim"]
+
+    # A readable turn that answers the first blocker alone.
+    first, second = _run(
+        "answers-first",
+        (
+            _turn("Fixed one."),
+            _turn(
+                structured_output={
+                    "rebuttals": [
+                        {"finding": 1, "action": "argued", "argument": "first"}
+                    ]
+                }
+            ),
+            _turn(
+                structured_output={
+                    "verdicts": [
+                        {"finding": 1, "verdict": "withdrawn", "reason": "r"},
+                        {"finding": 2, "verdict": "withdrawn", "reason": "r"},
+                    ]
+                }
+            ),
+        ),
+        rebut_commits=1,
+    )
+    assert (first["answer"], first["rebuttal_error"]) == ("answered", None)
+    assert (second["answer"], second["rebuttal_error"]) == ("unanswered", None)
+
+    # A readable turn that answers none of them. The early exit, no
+    # verdict turn runs at all.
+    first, second = _run(
+        "answers-none",
+        (
+            _turn("No changes."),
+            _turn(structured_output={"rebuttals": []}),
+        ),
+        rebut_commits=0,
+    )
+    assert (first["answer"], first["rebuttal_error"]) == ("unanswered", None)
+    assert (second["answer"], second["rebuttal_error"]) == ("unanswered", None)
+
+    # The extraction turn's reply is not the schema.
+    first, second = _run(
+        "not-the-schema",
+        (
+            _turn("Trying."),
+            _turn(structured_output={"not": "the schema"}),
+        ),
+        rebut_commits=0,
+    )
+    assert first["answer"] == "unread"
+    assert first["rebuttal_error"] is not None
+    assert "not the schema" in first["rebuttal_error"]
+    assert (second["answer"], second["rebuttal_error"]) == (
+        "unread",
+        first["rebuttal_error"],
+    )
+
+    # The rebuttal turn's own session raises with an empty message.
+    first, second = _run(
+        "empty-error",
+        (implement.AgentFailed("", _cut_off_turn(cost=0.4)),),
+        rebut_commits=0,
+    )
+    assert (first["answer"], first["rebuttal_error"]) == ("unread", "")
+    assert (second["answer"], second["rebuttal_error"]) == ("unread", "")
+
+
+def test_a_rebut_carries_its_unread_and_unanswered_counts_past_a_pool_cut(
+    monkeypatch, tmp_path
+):
+    """Item 42: `CellOutcome` carries `unread` and `unanswered`, set from
+    REBUT's result before a pool cut sets `rebut_result` to `None`. So a
+    cut REBUT still carries its own counts. The witness drives a cut REBUT
+    whose rebuttal turn raised, over two blockers, and an uncut readable
+    turn over two that answers the first."""
+    outcome, _ledger, _cell, _capture = _rebut_capped(
+        monkeypatch,
+        tmp_path / "cut",
+        implement.AgentFailed("provider crashed", _cut_off_turn(cost=10.25)),
+        0.50,
+        0.75,
+        0.75,
+        budget_usd=0.25,
+        rebut_commits=0,
+    )
+    assert outcome.state == "EXHAUSTED"
+    assert outcome.rebut_result is None
+    assert (outcome.unread, outcome.unanswered) == (2, 0)
+
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "uncut",
+        cell=cell,
+        turns=_through_rebut_two(
+            _turn("Fixed one."),
+            _turn(
+                structured_output={
+                    "rebuttals": [
+                        {"finding": 1, "action": "argued", "argument": "first"}
+                    ]
+                }
+            ),
+            _turn(
+                structured_output={
+                    "verdicts": [
+                        {"finding": 1, "verdict": "withdrawn", "reason": "r"},
+                        {"finding": 2, "verdict": "confirmed", "reason": "r"},
+                    ]
+                }
+            ),
+        ),
+    )
+    assert outcome.rebut_result is not None
+    assert (outcome.unread, outcome.unanswered) == (0, 1)
+
+    # No REBUT at all: REVIEW's own lenses file nothing, so the default
+    # stands uncomputed, never overwritten by a count REBUT never ran.
+    green_cell = _stub_the_runtime(monkeypatch)
+    green_outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "no-rebut",
+        cell=green_cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+    )
+    assert green_outcome.state == "READY_FOR_REVIEW"
+    assert green_outcome.rebut_result is None
+    assert (green_outcome.unread, green_outcome.unanswered) == (0, 0)
+
+
 def test_the_verdict_session_carries_claude_md_at_the_base_commit(
     monkeypatch, tmp_path
 ):
@@ -13918,6 +14103,8 @@ def test_a_protected_path_alone_asks_for_notes(monkeypatch, tmp_path):
         # both halves of the channel actually ran.
         notes=outcome.notes,
         revert_exempt=[],
+        unread=0,
+        unanswered=0,
     )
     pkg_spec = parse_spec(
         "---\nid: SA-9\ntitle: package the notes\ntype: feature\nrisk: standard\n---\n"

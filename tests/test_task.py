@@ -2104,6 +2104,66 @@ def test_an_exhausted_task_whose_rebuttal_was_never_paid_for_is_packaged(
             assert package_calls[0]["exhausted"] == (state == "EXHAUSTED"), name
 
 
+def test_both_run_task_rows_carry_the_outcomes_unread_and_unanswered_counts(
+    tmp_path, monkeypatch
+):
+    """Item 42: both queue lines `run_task` writes itself carry the
+    outcome's two counts. One is for an `EXHAUSTED` task whose PACKAGE
+    opened nothing, as a pool-cut REBUT leaves it. The other is for a task
+    PACKAGE never ran. Neither recounts from `rebut_result`, which both
+    outcomes carry none of."""
+    out_dir = tmp_path / "out"
+
+    # PACKAGE never ran: no anchored blocker, so `exhausted_package` is
+    # False and `run_task` takes the plain "never packaged" branch.
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-1",
+        state="EXHAUSTED",
+        task_id=1,
+        out_dir=out_dir,
+        unread=5,
+        unanswered=6,
+    )
+    row1 = next(r for r in _rows(out_dir) if r["spec_id"] == "SY-1")
+    assert (row1["unread"], row1["unanswered"]) == (5, 6)
+
+    # PACKAGE opened nothing: an anchored blocker and no `rebut_result` make
+    # `exhausted_package` True, and `package()` returns no `pr_url`.
+    blocker = Finding(
+        lens="correctness",
+        severity="blocker",
+        file="a.py",
+        line=3,
+        claim="broken",
+        anchored=True,
+    )
+    monkeypatch.setattr(
+        package_phase,
+        "package",
+        lambda _outcome, **kwargs: package_phase.PackageResult(
+            state="EXHAUSTED", note="conflicts with main"
+        ),
+    )
+    _push(monkeypatch, package_phase.PushResult(pushed=True, note="pushed"))
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-2",
+        state="EXHAUSTED",
+        task_id=2,
+        out_dir=out_dir,
+        reviews=[LensReview(lens="correctness", findings=[blocker])],
+        rebut_result=None,
+        unread=2,
+        unanswered=3,
+    )
+    row2 = next(r for r in _rows(out_dir) if r["spec_id"] == "SY-2")
+    assert (row2["unread"], row2["unanswered"]) == (2, 3)
+
+
 def test_an_exhausted_package_that_opened_nothing_still_pushes_its_work(
     tmp_path, monkeypatch
 ):
@@ -2997,6 +3057,130 @@ def _rt_ready_with_exempt(
     _rt_write_patch(task_dir, base_sha=base_sha, tree_base=tree_base, head_sha="c" * 40)
     _rt_seed_records(task_dir)
     return out_dir, task_dir
+
+
+def test_a_rebuilt_outcome_counts_the_unread_and_unanswered_blockers_its_record_holds(
+    tmp_path, monkeypatch
+):
+    """Item 42: `ready_task` sets `unread` and `unanswered` on the outcome
+    it rebuilds, from the rebuilt `rebut_result` over `anchored_blockers`
+    of the rebuilt reviews. A host-filed survivor counts, and a concern and
+    an unanchored blocker do not. The witness rebuilds an unread turn, then
+    a readable turn that answers the first blocker, from the same task
+    directory."""
+    from saffron.phases import review
+
+    ledger, repo_id = _rt_ledger(tmp_path)
+    out_dir, task_dir = _rt_ready_with_exempt(
+        ledger, repo_id, spec_id="RT-1", out_root=tmp_path
+    )
+    baseline_mtime = (task_dir / "baseline.json").stat().st_mtime
+
+    # `anchored_blockers` numbers these 1, 2, 3: the survivor, then the
+    # two anchored blockers. The concern and unanchored blocker get none.
+    survivor = Finding(
+        lens="correctness",
+        severity="blocker",
+        file="x",
+        line=1,
+        claim=f"{review.HOST_FILED}already covered",
+        anchored=False,
+    )
+    blocker1 = Finding(
+        lens="correctness",
+        severity="blocker",
+        file="x",
+        line=1,
+        claim="first",
+        anchored=True,
+    )
+    blocker2 = Finding(
+        lens="correctness",
+        severity="blocker",
+        file="x",
+        line=1,
+        claim="second",
+        anchored=True,
+    )
+    concern = Finding(
+        lens="correctness",
+        severity="concern",
+        file="x",
+        line=1,
+        claim="a concern",
+        anchored=True,
+    )
+    unanchored = Finding(
+        lens="correctness",
+        severity="blocker",
+        file="x",
+        line=1,
+        claim="dropped",
+        anchored=False,
+    )
+    review_one = LensReview(
+        lens="correctness",
+        findings=[survivor, blocker1, blocker2, concern, unanchored],
+        cost_usd=0.0,
+        error=None,
+    )
+    findings_path = task_dir / "findings.json"
+    findings_path.write_text(json.dumps([review_one.as_dict()]))
+    _rt_set_mtime(findings_path, baseline_mtime + 1.0)
+
+    rebuttal_path = task_dir / "rebuttal.json"
+    unread = RebutResult(
+        state="REBUTTAL_UNJUDGED",
+        why="unread",
+        rebuttal=RebuttalTurn(error="boom"),
+        verdicts=[],
+        moved=False,
+        cost_usd=0.1,
+    )
+    rebuttal_path.write_text(json.dumps(unread.as_dict(blockers=[])))
+    _rt_set_mtime(rebuttal_path, baseline_mtime + 1.0)
+
+    result = task_module.ready_task(
+        "RT-1",
+        repo=tmp_path / "target-repo",
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir,
+        mirror_path=tmp_path / "mirror.git",
+    )
+    assert isinstance(result, task_module.ReadyTask)
+    assert (result.outcome.unread, result.outcome.unanswered) == (3, 0)
+
+    readable = RebutResult(
+        state="READY_FOR_REVIEW",
+        why="argued",
+        rebuttal=RebuttalTurn(
+            rebuttals=[Rebuttal(finding=1, action="argued", argument="ok")]
+        ),
+        verdicts=[
+            LensVerdicts(
+                lens="correctness",
+                verdicts=[Verdict(finding=1, verdict="withdrawn", reason="r")],
+                cost_usd=0.0,
+            )
+        ],
+        moved=True,
+        cost_usd=0.1,
+    )
+    rebuttal_path.write_text(json.dumps(readable.as_dict(blockers=[])))
+    _rt_set_mtime(rebuttal_path, baseline_mtime + 2.0)
+
+    result2 = task_module.ready_task(
+        "RT-1",
+        repo=tmp_path / "target-repo",
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir,
+        mirror_path=tmp_path / "mirror2.git",
+    )
+    assert isinstance(result2, task_module.ReadyTask)
+    assert (result2.outcome.unread, result2.outcome.unanswered) == (0, 2)
+    ledger.close()
 
 
 def test_a_rebuilt_outcome_carries_the_exemption_its_task_directory_holds(

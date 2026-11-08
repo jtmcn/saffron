@@ -227,17 +227,19 @@ CREATE TABLE IF NOT EXISTS failures (
 -- judgements that must not collapse into one column (§4.1). Nothing produces
 -- an adjudication yet; the morning queue is where it will come from (§6).
 CREATE TABLE IF NOT EXISTS findings (
-    finding_id   INTEGER PRIMARY KEY,
-    task_id      INTEGER NOT NULL REFERENCES tasks(task_id),
-    lens         TEXT NOT NULL,
-    severity     TEXT NOT NULL,
-    file         TEXT NOT NULL,
-    line         INTEGER,
-    claim        TEXT NOT NULL,
-    anchored     INTEGER NOT NULL,
-    verdict      TEXT,
-    adjudication TEXT,
-    rebuttal     TEXT
+    finding_id     INTEGER PRIMARY KEY,
+    task_id        INTEGER NOT NULL REFERENCES tasks(task_id),
+    lens           TEXT NOT NULL,
+    severity       TEXT NOT NULL,
+    file           TEXT NOT NULL,
+    line           INTEGER,
+    claim          TEXT NOT NULL,
+    anchored       INTEGER NOT NULL,
+    verdict        TEXT,
+    adjudication   TEXT,
+    rebuttal       TEXT,
+    answer         TEXT,
+    rebuttal_error TEXT
 );
 
 -- One layer of a stack batch, keyed on record keys with no reference to
@@ -494,6 +496,16 @@ class Ledger:
         # Item 170: the tier the gate suite ran at (§4.1).
         if "earned_risk" not in attempts_existing:
             self._db.execute("ALTER TABLE attempts ADD COLUMN earned_risk TEXT")
+        # Item 42: `answer` and `rebuttal_error` on `findings`. A fresh
+        # table already carries both.
+        findings_existing = {
+            row["name"]
+            for row in self._db.execute("PRAGMA table_info(findings)").fetchall()
+        }
+        if "answer" not in findings_existing:
+            self._db.execute("ALTER TABLE findings ADD COLUMN answer TEXT")
+        if "rebuttal_error" not in findings_existing:
+            self._db.execute("ALTER TABLE findings ADD COLUMN rebuttal_error TEXT")
         # The backfill the old schema comment promised. A ledger written before
         # `attempts` existed holds a *task_id* in `gate_results.attempt_id`, and
         # a new attempt's id starts at 1 in that same integer namespace — so
@@ -1108,9 +1120,18 @@ class Ledger:
                     f"task {fact.task_key}: rebuttal for position "
                     f"{payload['position']} has no finding fact to attach to"
                 )
+            # `payload.get`: a fact recorded before item 42 carries
+            # neither key, and folds them to null.
             self._db.execute(
-                "UPDATE findings SET verdict = ?, rebuttal = ? WHERE finding_id = ?",
-                (payload["verdict"], payload["rebuttal"], finding_id),
+                "UPDATE findings SET verdict = ?, rebuttal = ?, "
+                "answer = ?, rebuttal_error = ? WHERE finding_id = ?",
+                (
+                    payload["verdict"],
+                    payload["rebuttal"],
+                    payload.get("answer"),
+                    payload.get("error"),
+                    finding_id,
+                ),
             )
             return None
         raise ValueError(f"fold cannot place fact kind {fact.kind!r}")
@@ -2158,8 +2179,18 @@ class Ledger:
         return cast("list[int]", ids)
 
     def record_rebuttal(
-        self, finding_id: int, *, verdict: str | None, rebuttal: str | None
+        self,
+        finding_id: int,
+        *,
+        verdict: str | None,
+        rebuttal: str | None,
+        answer: str | None = None,
+        error: str | None = None,
     ) -> None:
+        """Item 42: `answer` is the implementer's one of `answered`,
+        `unanswered` or `unread` (`rebut.blocker_answers`). `error` is the
+        turn's own text when it is `unread`, kept apart from `rebuttal`,
+        which stays the implementer's own argument."""
         owner = self._db.execute(
             """SELECT task_id,
                       (SELECT COUNT(*) FROM findings o
@@ -2172,7 +2203,13 @@ class Ledger:
         fact = self._build_fact(
             owner["task_id"],
             "rebuttal",
-            {"position": owner["position"], "verdict": verdict, "rebuttal": rebuttal},
+            {
+                "position": owner["position"],
+                "verdict": verdict,
+                "rebuttal": rebuttal,
+                "answer": answer,
+                "error": error,
+            },
         )
         self._commit_and_append(fact)
 

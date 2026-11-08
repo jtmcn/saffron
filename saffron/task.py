@@ -82,7 +82,9 @@ from saffron.phases.rebut import (
     RebuttalTurn,
     Verdict,
     sustained_blockers,
+    unanswered_blockers,
     unkept_fixes,
+    unread_blockers,
 )
 from saffron.phases.review import LensReview, anchored_blockers, anchored_concerns
 from saffron.reconcile import GhRunner, reconcile
@@ -1035,6 +1037,8 @@ def run_task(
                         risk=outcome.effective_risk,
                         sustained=sustained_blockers(outcome.rebut_result),
                         unkept=unkept_fixes(outcome.rebut_result),
+                        unread=outcome.unread,
+                        unanswered=outcome.unanswered,
                     ),
                     header={
                         "trailing accept rate": index_report.trailing_accept_rate(
@@ -1078,6 +1082,8 @@ def run_task(
                     risk=outcome.effective_risk,
                     sustained=sustained_blockers(outcome.rebut_result),
                     unkept=unkept_fixes(outcome.rebut_result),
+                    unread=outcome.unread,
+                    unanswered=outcome.unanswered,
                 ),
                 header={
                     "trailing accept rate": index_report.trailing_accept_rate(ledger)
@@ -1397,6 +1403,8 @@ def ready_task(
                 return fallback
             parent_branch = fallback
 
+    # Item 42: `anchored_blockers`, the same selection REBUT numbered from.
+    rebuilt_blockers = len(anchored_blockers(reviews))
     outcome = CellOutcome(
         state="READY_FOR_REVIEW",
         task_id=task_id,
@@ -1411,6 +1419,8 @@ def ready_task(
         effective_risk=effective_risk,
         notes=notes,
         revert_exempt=revert_exempt,
+        unread=unread_blockers(rebut_result, rebuilt_blockers),
+        unanswered=unanswered_blockers(rebut_result, rebuilt_blockers),
     )
     return ReadyTask(outcome=outcome, spec=spec, parent_branch=parent_branch)
 

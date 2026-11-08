@@ -1060,6 +1060,104 @@ def test_unkept_fixes_takes_the_first_answer_to_a_duplicated_finding():
     assert rebut.unkept_fixes(result) == 1
 
 
+# --- item 42: an answer per blocker, and the two counts it feeds ---
+
+
+def test_blocker_answers_reads_answered_and_unanswered_from_a_readable_turn():
+    """A readable turn (no error) answers some blockers and skips others.
+    `blocker_answers` reads every one of `blockers`, 1-indexed, from
+    `first_answers` alone."""
+    turn = rebut.RebuttalTurn(
+        rebuttals=[rebut.Rebuttal(finding=2, action="argued", argument="no")]
+    )
+    assert rebut.blocker_answers(turn, 3) == {
+        1: "unanswered",
+        2: "answered",
+        3: "unanswered",
+    }
+
+
+def test_blocker_answers_reads_unread_from_a_turn_whose_error_is_set():
+    """§5.6's own amendment: a turn whose `error` is not `None`, the empty
+    string included, makes every blocker `unread`, whatever `rebuttals`
+    carries. Never `unanswered`, since a turn nobody could read answered
+    nothing."""
+    assert rebut.blocker_answers(rebut.RebuttalTurn(error=""), 2) == {
+        1: "unread",
+        2: "unread",
+    }
+    assert rebut.blocker_answers(rebut.RebuttalTurn(error="boom"), 2) == {
+        1: "unread",
+        2: "unread",
+    }
+
+
+def test_unread_and_unanswered_blockers_are_zero_with_no_rebut_result():
+    assert rebut.unread_blockers(None, 3) == 0
+    assert rebut.unanswered_blockers(None, 3) == 0
+
+
+def test_the_unread_and_unanswered_counts_take_each_standing_blocker_by_its_answer():
+    """`unread_blockers` and `unanswered_blockers` count the blockers whose
+    answer is their own, excluding only one a verdict withdrew. A blocker
+    stands with a `confirmed` verdict, a `contradicted` one, or none at all.
+
+    The witness drives an unread turn over 4 blockers, judged `confirmed`,
+    `withdrawn`, `contradicted` and left unverdicted in turn. A second unread
+    turn carries no verdict at all. A readable turn carries no answer at all.
+    A readable turn of 4 blockers answers finding 1 twice, answers finding 3
+    once, answers finding 9, and verdicts its 4th blocker `withdrawn`.
+    """
+    assert rebut.unread_blockers(None, 3) == 0
+    assert rebut.unanswered_blockers(None, 3) == 0
+
+    unread_judged = _result(
+        rebuttal=rebut.RebuttalTurn(error="the model errored"),
+        verdicts=[
+            rebut.LensVerdicts(
+                lens="correctness",
+                verdicts=[
+                    rebut.Verdict(finding=1, verdict="confirmed", reason="r"),
+                    rebut.Verdict(finding=2, verdict="withdrawn", reason="r"),
+                    rebut.Verdict(finding=3, verdict="contradicted", reason="r"),
+                ],
+            )
+        ],
+    )
+    assert rebut.sustained_blockers(unread_judged) == 0
+    assert rebut.unkept_fixes(unread_judged) == 0
+    assert rebut.unread_blockers(unread_judged, 4) == 3
+    assert rebut.unanswered_blockers(unread_judged, 4) == 0
+
+    unread_no_verdict = _result(rebuttal=rebut.RebuttalTurn(error=""), verdicts=[])
+    assert rebut.unread_blockers(unread_no_verdict, 1) == 1
+    assert rebut.unanswered_blockers(unread_no_verdict, 1) == 0
+
+    readable_no_answer = _result(rebuttal=rebut.RebuttalTurn(rebuttals=[]), verdicts=[])
+    assert rebut.unread_blockers(readable_no_answer, 1) == 0
+    assert rebut.unanswered_blockers(readable_no_answer, 1) == 1
+
+    readable_mixed = _result(
+        rebuttal=rebut.RebuttalTurn(
+            rebuttals=[
+                rebut.Rebuttal(finding=1, action="argued", argument="a"),
+                rebut.Rebuttal(finding=1, action="argued", argument="a again"),
+                rebut.Rebuttal(finding=3, action="argued", argument="c"),
+                rebut.Rebuttal(finding=9, action="argued", argument="not a blocker"),
+            ]
+        ),
+        verdicts=[
+            rebut.LensVerdicts(
+                lens="correctness",
+                verdicts=[rebut.Verdict(finding=4, verdict="withdrawn", reason="r")],
+            )
+        ],
+    )
+    # 1 and 3 answered, 2 unanswered, 4 withdrawn (excluded from both counts).
+    assert rebut.unread_blockers(readable_mixed, 4) == 0
+    assert rebut.unanswered_blockers(readable_mixed, 4) == 1
+
+
 # --- backlog b-4e0868: REBUT's two turns read `structured_output`, not text ---
 
 

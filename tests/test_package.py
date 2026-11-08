@@ -892,6 +892,8 @@ def _cell_outcome(task_dir, task_id, run_id):
         advisory_gates=[],
         notes="",
         revert_exempt=[],
+        unread=0,
+        unanswered=0,
     )
 
 
@@ -2658,6 +2660,26 @@ def test_the_queue_line_carries_the_unkept_fix_count(packageable):
     row = next(r for r in rows if r["spec_id"] == "SA-0005")
     assert row["unkept"] == 1
     assert row["sustained"] == 1
+
+
+def test_the_queue_line_carries_the_unread_and_unanswered_blocker_counts(packageable):
+    """Item 42: the queue line `package.package` writes carries
+    `outcome.unread` and `outcome.unanswered`, never recounted from
+    `rebut_result`, which this outcome carries none of."""
+    packageable.outcome.unread = 2
+    packageable.outcome.unanswered = 3
+    assert packageable.outcome.rebut_result is None
+
+    package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
+        **packageable.kwargs,
+    )
+
+    rows = json.loads((packageable.out_dir / "queue.json").read_text())
+    row = next(r for r in rows if r["spec_id"] == "SA-0005")
+    assert row["unread"] == 2
+    assert row["unanswered"] == 3
 
 
 def test_reverify_is_handed_the_policy_from_the_commit_it_verifies_against(
