@@ -7,7 +7,7 @@ by_hand: true
 tier: 3
 filed: 2026-10-20
 specs: []
-prs: []
+prs: [1073]
 commits: []
 cites: [§4.2.1]
 related: [b-8a0c9a]
@@ -36,4 +36,4 @@ column is the night's alone. A test drives a batch with a resumed tail.
 ## Record
 
 - 2026-10-20: filed from the spec chain that wrote `SA-0300` to `SA-0306`.
-- 2026-11-08: done by hand.
+- 2026-11-08: done by hand in #1073.

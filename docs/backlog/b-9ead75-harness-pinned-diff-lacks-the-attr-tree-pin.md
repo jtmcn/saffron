@@ -7,7 +7,7 @@ by_hand: true
 tier: 3
 filed: 2026-09-25
 specs: []
-prs: []
+prs: [1073]
 commits: []
 cites: [§2]
 related: [b-a9ee32]
@@ -30,4 +30,4 @@ hunks.
 ## Record
 
 - 2026-09-25: filed from the spec loop's run 16.
-- 2026-11-08: done by hand.
+- 2026-11-08: done by hand in #1073.
