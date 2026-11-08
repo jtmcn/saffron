@@ -899,6 +899,32 @@ def test_a_resnapshot_keeps_the_outcome_of_a_spec_edited_while_its_pr_is_open(
     assert [r for r in driver._stale(rows) if edited in r] != []
 
 
+def test_a_spec_the_order_names_that_will_not_parse_is_a_stale_row_not_a_traceback(
+    loop, capsys
+):
+    """Item 151. `status` printed its whole table, then died on `SpecError`
+    with no spec named. `next` and `snapshot --force` died the same way."""
+    broken, sibling, _merged, _new = loop.ids
+    driver._save([loop.row(0, state="READY_FOR_REVIEW", pr=10), loop.row(1)])
+    spec_file = driver.REPO / driver._load()[0].path
+    spec_file.write_text("---\nid: [unclosed\n  title: x: y\n---\n")
+
+    assert driver.cmd_status(argparse.Namespace()) == 1
+    out, err = capsys.readouterr()
+    assert sibling in out  # the other rows still report
+    assert f"{broken}: " in out and "does not parse" in out
+    assert broken in err
+
+    assert driver.cmd_next(argparse.Namespace(again=False)) == 1
+    assert "does not parse" in capsys.readouterr().err
+
+    loop.scan_returns(1)
+    assert driver.cmd_snapshot(argparse.Namespace(force=True, new=False, add=None)) == 0
+    assert "#10 is still open" in capsys.readouterr().out
+    kept = {p.spec_id: p for p in driver._load()}
+    assert kept[broken].pr == 10 and kept[broken].edited_sha == ""
+
+
 def test_a_resnapshot_looks_past_only_the_loops_own_open_prs():
     # Hiding every open PR also hid step 5's backlog PR from the conflict set.
     import json
