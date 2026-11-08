@@ -80,6 +80,39 @@ though the brief said not to. The delegate deleted each and edited
 4. A child spec drafted in parallel gets its parent's chosen names before its
    draft ends, not after the first review.
 
+## `SA-0352`, from b-a714d2 (spec loop run 55)
+
+One writer, two reviews and one revision, beside a running batch. The draft
+took 33 minutes and about 180k tokens. The revision built a prototype and ran
+each wrong version it doubted.
+
+The design is one exclusive `flock` on a file beside the home ledger. A batch,
+a cell and a draft each hold it. A second command on the same home exits 2
+and names the holder's pid.
+
+**Review 1: one blocker, four concerns.**
+
+- The witness shape the notes cited starts its child with the default
+  `close_fds`. That closes an inheritable descriptor too, so the wrong
+  version "the lock is inheritable" passed. The prototype measured it. This
+  is pre-flight 10, an arrangement argued rather than run.
+- A file object closed only on a normal return still passed the raise case,
+  since refcounting closes it as the raise unwinds. The prototype measured
+  this too. Pre-flight 10 again.
+- The cited lock precedent opens with mode `w`, so a contender would erase
+  the holder's pid before its refusal. This is pre-flight 3, a name the spec
+  leans on that means something else at base.
+
+**Review 2: no blocker, two concerns.** A holder flag the stub never cleared
+let a reverted contender recurse until `main` returned 2. The delegate added
+the sentence by hand. The first criterion's six wrong versions were reasoned
+and not run.
+
+**What this run adds.** Both blockers in this run were arrangements, and each
+cost one prototype run to settle. A writer brief should ask for a prototype
+run of every wrong version that turns on process or descriptor behaviour.
+
+
 ## `SA-0350`, from b-e7898b (spec loop run 55)
 
 One writer, two reviews and two revisions, beside a running batch. The draft

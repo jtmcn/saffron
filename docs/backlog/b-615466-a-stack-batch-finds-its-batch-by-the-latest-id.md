@@ -4,7 +4,7 @@ title: A stack batch finds its own batch by the latest id, and nothing enforces 
 status: partial
 tier: 3
 filed: 2026-09-26
-specs: []
+specs: [SA-0352]
 prs: [934]
 commits: []
 cites: [§4.2.1]
