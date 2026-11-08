@@ -184,7 +184,7 @@ acceptance:
       `saffron migrate`'s top-up sets aside a `rebuttal` fact's `answer` and
       `error` keys, as it sets aside a `gate_result`'s own keys. So a held
       `rebuttal` fact that carries them, an empty error included, agrees with
-      the one `migrate` derives. The same keys on a `finding` fact still
+      the one `migrate` derives for the same row. The same keys on a `finding` fact still
       disagree, and so does a held `rebuttal` whose `verdict` differs. No value
       is backfilled.
     witness: tests/test_record_migrate.py::test_the_top_up_sets_aside_a_live_rebuttals_answer_and_error
@@ -198,17 +198,17 @@ acceptance:
 ## Context
 
 Backlog item **42**, under `DESIGN.md` §5.6 and §6. The operator amended §5.6
-by hand at `a56976cd`: "An unreadable rebuttal is recorded as unreadable, never
+by hand at `4d65206a`: "An unreadable rebuttal is recorded as unreadable, never
 as no answer (item 42)". Under it, the ledger's rebuttal fact names one of
 three answers per confirmed blocker. The implementer answered it, left it
 unanswered, or answered in a turn nobody could read. §6 is amended at
-`94c9022d`: "An unread or unanswered blocker ranks with a sustained one too,
+`e6880cb0`: "An unread or unanswered blocker ranks with a sustained one too,
 and keeps its own count". It adds that a REBUT its pool cut short still counts
 its unread blockers on its line. `CONTEXT.md`'s **Rebuttal** entry names the
-three answers, amended by hand at `fe00944a`. Item 42's visible half landed as
+three answers, amended by hand at `ae9c9dc3`. Item 42's visible half landed as
 `SA-0071`, in the pull request body. This spec is its recording half.
 `SA-0341` re-prompts the extraction once, and depends on this spec. Every line
-below was read at `94c9022d`.
+below was read at `05d4875a`.
 
 **What REBUT writes.** `saffron/cell/session.py:3730-3734` builds `argued` from
 `rebut.first_answers(result.rebuttal)`. `saffron/cell/session.py:3738-3743`
@@ -316,7 +316,7 @@ counts in none of the four.
   writes one per blocker (`saffron/cell/session.py:3738-3743`), and
   `saffron/record/migrate.py:534` derives none for such a row. The top-up then
   holds more `rebuttal` facts than it derives and refuses the ref. That holds
-  at `94c9022d` already, and this spec leaves it.
+  at `e6880cb0` already, and this spec leaves it.
 - The pull request body. `saffron/report/pr_body.py:311-329` already renders a
   turn with an error apart (`SA-0071`).
 - `CONTEXT.md` and the ontology. The answer values stay a `Literal` in code.
@@ -333,10 +333,17 @@ name through its module, as `rebut.unread_blockers` and the like.
 `tests/test_rebut.py:12` and `tests/test_package.py:24` import `rebut` as a
 module. Import no new name at module scope.
 
+**Comments that turn false.** Rewrite the `_SUSTAINED` comment
+(`saffron/report/index.py:84-86`), `sort_key`'s docstring and its return
+annotation (`:120-148`), and `_normalized`'s docstring
+(`saffron/record/migrate.py:88-89`).
+
 **Fixtures.** In `tests/test_session.py`, `_stub_the_runtime`, `_rebuttable`
 (`:5052`) and `_drive` build a REBUT, and `_BLOCKER` (`:5028`) is a one-blocker
 lens reply. Copy `_through_rebut` (`:5070`) with one lens filing two blockers
-on `src/x.py` line 1, which `_ANCHORING_DIFF` anchors. A readable turn that
+on `src/x.py` line 1, which `_ANCHORING_DIFF` anchors. In criterion 6's fixture
+one lens also files a concern, so a count over every finding reads 3 where the
+blockers read 2. A readable turn that
 answers needs `rebut_commits=1` and one verdict turn. An extraction reply that
 is not the schema, or `{"rebuttals": []}`, with `rebut_commits=0`, ends at the
 early exit with no verdict. So does a rebuttal turn scripted as
@@ -345,7 +352,8 @@ error. Read the expected error from the run's `rebuttal.json`.
 `_rebut_capped` (`tests/test_session.py:5115`) drives a pool cut. Script its
 rebuttal turn as `implement.AgentFailed` costing $10.25, and follow it with
 three costs. That cuts a REBUT over two lenses' blockers. Case `"a"` at
-`tests/test_session.py:5360` cuts one over a single blocker. In
+`tests/test_session.py:5360` cuts one over a single blocker. Both pass
+`rebut_commits=0`, since a moved HEAD opens the verdict pool and clears the cut. In
 `tests/test_ledger_fold_task.py`, `_minimal`, `_find`, `_key` and
 `record._facts` build and edit a task's facts. `dataclasses.replace` rebuilds
 a `Fact` with its payload's two keys removed. `tests/test_ledger.py:1773` drops
