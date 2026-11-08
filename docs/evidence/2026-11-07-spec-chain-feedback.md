@@ -80,6 +80,35 @@ though the brief said not to. The delegate deleted each and edited
 4. A child spec drafted in parallel gets its parent's chosen names before its
    draft ends, not after the first review.
 
+## `SA-0351`, from b-a68b24 (spec loop run 55)
+
+One writer, two reviews and two revisions, beside a running batch. The draft
+took 27 minutes and about 205k tokens. The writer built a prototype before the
+first review and rebuilt it for each revision.
+
+The change makes a declared mutant whose find matches other than once fail the
+`witness` gate. The failure names the criterion and the count, and still
+withholds the edit.
+
+**Review 1: two blockers, three concerns.**
+
+- A failure from find counts alone carried no `tool`. Against a base where a
+  mutant ran, `suite_drift` read that as drift, and the task would end
+  `GATE_ERROR`. This is pre-flight 8, an invariant the change breaks. The
+  prototype had passed every witness, since none ran `GateSuite.against`.
+- The summary check passed a version that counted the new failures as
+  survivors. This is pre-flight 1.
+
+**Review 2: no blocker, two concerns.** Criterion 6's witness drove one
+criterion, so a tool fallback taken only when every criterion miscounted
+passed. The writer added a second criterion and measured the drift.
+
+**What this run adds.** A prototype that passes its own witnesses still missed
+the drift path. The one blocker that mattered came from reading `baseline.py`,
+which no witness ran. Pre-flight 8 should name `suite_drift` for any change
+to a gate's `tool`.
+
+
 ## `SA-0352`, from b-a714d2 (spec loop run 55)
 
 One writer, two reviews and one revision, beside a running batch. The draft
