@@ -245,7 +245,9 @@ Keep each comment at two lines or fewer.
   argument is empty is a rejected shape, as
   `test_an_empty_argument_is_not_an_argument` shows.
 - In `tests/test_session.py`, drive a cell through `_through_rebut`, `_rebuttable`
-  and `_drive`, with a `budget_usd` far above the spend. Find the re-prompt in
+  and `_drive`, with a `budget_usd` far above the spend. Criterion 4's three
+  cells pass `rebut_commits=0`, since a moved HEAD opens the verdict pool and
+  clears the cut (`saffron/cell/session.py:208-212`). Find the re-prompt in
   `cell.turns` as a prompt that ends with `EXTRACT_PROMPT` and is not equal to it.
   With a $6.00 fix turn and a $2.50 extraction, the re-prompt's cap is $5.50. An
   $8.00 extraction leaves nothing. In that refused cell, assert the re-prompt's
@@ -256,9 +258,11 @@ Keep each comment at two lines or fewer.
 string as a turn with no structured output. So a test whose extraction is
 unreadable now feeds its next scripted turn to the re-prompt. The stub in
 `tests/test_session.py` hands a re-prompt its next scripted turn, or a default
-one (`tests/test_session.py:1624`). So the rule covers any test that scripts an
-unreadable extraction with more turns after it, `SA-0340`'s included. Give
-each such test a second unreadable answer right after its first. Make no other
+one (`tests/test_session.py:1624`). `_agent` has no default and raises `StopIteration` when its script runs out.
+So the rule covers any test whose extraction is unreadable, whatever is
+scripted after it, `SA-0340`'s included. Give each such test a second
+unreadable answer right after its first. A `tests/test_session.py` test that
+reads its expected error from `rebuttal.json` needs no edit. Make no other
 edit, save the one count named below. A full suite run over a prototype of this change, without
 `SA-0340`'s code, failed four tests, all in `tests/test_rebut.py`.
 
