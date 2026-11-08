@@ -1,9 +1,11 @@
 ---
 id: b-7430c1
 title: 'An existing finishing branch hides a leftover worktree, because its escalation drops the removal error'
-status: open
+status: done
 tier: 3
 filed: 2026-10-02
+closed: 2026-11-08
+by_hand: true
 specs: [SA-0167]
 prs: [638]
 commits: []
@@ -30,3 +32,4 @@ included.
 ## Record
 
 - 2026-10-02: filed from the spec loop's run 25.
+- 2026-11-08: done by hand.

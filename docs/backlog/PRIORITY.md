@@ -490,7 +490,7 @@ Preflight names a listener's address but not its process.
 revised spec gets no task state.
 
 **Placed 2026-10-02**, from the spec loop's run 25: **b-006372**,
-**b-7430c1**, **b-1068ea**, ~~**b-8a6f43**~~, then ~~**b-a7e315**~~. The finish is
+~~**b-7430c1**~~, **b-1068ea**, ~~**b-8a6f43**~~, then ~~**b-a7e315**~~. The finish is
 judged at the pinned base. One escalation hides a leftover worktree. A
 child's tree carries an older spec than it runs. `snapshot --force` drops
 holds, and `status` has no one-line form.

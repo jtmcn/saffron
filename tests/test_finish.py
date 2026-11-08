@@ -2526,6 +2526,69 @@ def test_each_escalation_leaves_the_stack_unpushed(tmp_path, monkeypatch):
     _assert_untouched(s, before_remote, before_mirror)
 
 
+def test_a_worktree_left_behind_is_named_on_the_escalation_and_the_raise_paths(
+    tmp_path, monkeypatch
+):
+    """b-7430c1: the "already exists" escalation and a raise from
+    `open_draft_pr` each name a worktree whose removal failed."""
+    from saffron.finish import publish_finish
+    from saffron.phases.package import PackageError
+    from saffron.repos import mirror as git_mirror
+
+    _isolate_git(tmp_path, monkeypatch)
+    real_remove = git_mirror.remove_worktree
+
+    def _raising_remove(mirror: Path, dest: Path) -> None:
+        real_remove(mirror, dest)
+        raise git_mirror.GitError("busy")
+
+    monkeypatch.setattr(git_mirror, "remove_worktree", _raising_remove)
+
+    s = _stack(tmp_path / "exists", 3)
+    top = s.layers[-1]
+    sha = _finishing_commit(s.mirror, top["head"])
+    branch = f"saffron/batch-{s.batch_id}-finish"
+    _seed_finish_branch(s.remote, s.batch_id, top["branch"], tmp_path / "seed")
+    workdir = tmp_path / "exists-push"
+    lines = publish_finish(
+        s.ledger,
+        s.batch_id,
+        sha,
+        mirror=s.mirror,
+        url=s.url,
+        slug=s.slug,
+        verify=lambda sha_arg, base_arg: 0,
+        gh=_FakeGh(_bases(s.layers)),
+        workdir=workdir,
+    )
+    assert lines == [
+        f"escalate: {branch} already exists",
+        f"worktree left at {workdir}: GitError: busy",
+    ]
+
+    s = _stack(tmp_path / "gh-fails", 3)
+    sha = _finishing_commit(s.mirror, s.layers[-1]["head"])
+    gh = _FakeGh(
+        _bases(s.layers),
+        create=(1, "", "denied"),
+        view_existing=(1, "", "still denied"),
+    )
+    workdir = tmp_path / "gh-fails-push"
+    with pytest.raises(PackageError) as raised:
+        publish_finish(
+            s.ledger,
+            s.batch_id,
+            sha,
+            mirror=s.mirror,
+            url=s.url,
+            slug=s.slug,
+            verify=lambda sha_arg, base_arg: 0,
+            gh=gh,
+            workdir=workdir,
+        )
+    assert raised.value.__notes__ == [f"worktree left at {workdir}: GitError: busy"]
+
+
 def test_a_finish_handed_graded_heads_judges_and_checks_each_layer_at_its_graded_head(
     tmp_path, monkeypatch
 ):
