@@ -1,7 +1,9 @@
 ---
 id: 122
 title: The event log records that a tool ran, never what it returned
-status: open
+status: done
+closed: 2026-11-08
+by_hand: true
 tier: 3
 filed: 2026-09-14
 specs: [SA-0087]
@@ -25,3 +27,7 @@ obvious objection, and the log already bounds agent text (`bounded`,
 
 a clipped tail of each tool result in its event, under the
 same bound agent text has.
+
+## Record
+
+- 2026-11-08: done by hand.

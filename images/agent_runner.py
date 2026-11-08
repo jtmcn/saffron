@@ -84,6 +84,18 @@ def _clip(value: Any) -> Any:
     return value
 
 
+def _tail(content: Any) -> str:
+    # The end of a tool's output is what a post-mortem needs: a count, an error.
+    if isinstance(content, list):
+        content = "\n".join(
+            str(c.get("text", "")) for c in content if isinstance(c, dict)
+        )
+    text = "" if content is None else str(content)
+    if len(text) <= _MAX_STR:
+        return text
+    return f"(…{len(text) - _MAX_STR} chars)" + text[-_MAX_STR:]
+
+
 def _block_event(block: Any) -> dict[str, Any]:
     """One content block, by the attributes it carries rather than its class.
 
@@ -108,6 +120,7 @@ def _block_event(block: Any) -> dict[str, Any]:
             "type": "tool_result",
             "tool_use_id": block.tool_use_id,
             "is_error": bool(getattr(block, "is_error", False)),
+            "tail": _tail(getattr(block, "content", None)),
         }
     return {"type": "passthrough", "kind": type(block).__name__}
 
