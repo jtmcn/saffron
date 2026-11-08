@@ -414,7 +414,7 @@ Each is a gap a seat, a finish or the run found and the stack left alone.
 **b-3a0789**. Each is a gap a seat, a finish or the run found and the stack
 left alone.
 
-**Placed 2026-10-30**, from #996's Standards seat and finish 61: **b-25b7ba**.
+**Placed 2026-10-30**, from #996's Standards seat and finish 61: ~~**b-25b7ba**~~.
 Two renderers spell a new failure, and they disagree on line 0.
 
 **The 2026-09-04 sort's tier 3, plus what spec loop runs up to 32 added.**

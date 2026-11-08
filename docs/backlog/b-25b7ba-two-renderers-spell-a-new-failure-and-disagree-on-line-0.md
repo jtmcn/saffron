@@ -1,9 +1,11 @@
 ---
 id: b-25b7ba
 title: Two renderers spell a new failure as text, and they disagree on a failure at line 0
-status: open
+status: done
 tier: 3
 filed: 2026-10-30
+closed: 2026-11-08
+by_hand: true
 specs: []
 prs: []
 commits: []
@@ -32,3 +34,4 @@ drives a failure at line 0 through each caller.
 ## Record
 
 - 2026-10-30: filed from the spec loop's run 50.
+- 2026-11-08: done by hand.
