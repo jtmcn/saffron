@@ -2570,25 +2570,15 @@ def test_a_gate_results_locations_is_set_aside_like_collected(tmp_path: Path) ->
     )
 
 
-_NUMBER_WORDS = {3: "three", 4: "four", 5: "five"}
-
-
 def test_the_normalized_docstring_counts_every_set_aside_gate_result_key() -> None:
-    """`_normalized`'s own docstring names the exact count of
-    `_GATE_RESULT_SET_ASIDE`'s own members. Read from the frozenset's own
-    length, never a number copied once and left stale."""
+    """`_normalized`'s docstring names one `gate_result` count, the
+    frozenset's own length, so a stale or second count fails."""
     from saffron.record.migrate import _GATE_RESULT_SET_ASIDE, _normalized
+    from tests.test_citations import COUNTED
 
-    doc = _normalized.__doc__ or ""
-    expected_word = _NUMBER_WORDS[len(_GATE_RESULT_SET_ASIDE)]
-    expected_phrase = f"the {expected_word} `gate_result` keys above"
-    assert expected_phrase in doc
-
-    for count, word in _NUMBER_WORDS.items():
-        if count == len(_GATE_RESULT_SET_ASIDE):
-            continue
-        stale_phrase = f"the {word} `gate_result` keys above"
-        assert stale_phrase not in doc
+    doc = " ".join((_normalized.__doc__ or "").split())
+    counts = re.findall(r"the (\w+) `gate_result` keys", doc)
+    assert counts == [COUNTED[len(_GATE_RESULT_SET_ASIDE) - 1]]
 
 
 def test_the_top_up_sets_aside_only_its_named_differences(tmp_path: Path) -> None:
