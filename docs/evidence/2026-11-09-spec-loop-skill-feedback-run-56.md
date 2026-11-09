@@ -12,6 +12,7 @@ Six specs reached a pull request, and the delegate adopted one of them.
 | `SA-0355` | #1097 | `READY_FOR_REVIEW` | $17.78 of $36 |
 | `SA-0353` | #1099 | `EXHAUSTED`, adopted | $53.80 of $60 |
 | `SA-0354` | #1098 | `READY_FOR_REVIEW` | $13.11 of $28 |
+| `SA-0359` | #1101 | `READY_FOR_REVIEW`, a finish follow-up | $4.52 of $10 |
 
 The six cells spent $216.59 against $318 of spec budgets. Finish 73 spent
 $11.23 on its end review and $4.52 on `SA-0359`'s cell, from a $137.50
@@ -77,8 +78,11 @@ batch could not move. `SA-0356` reaches `SA-0353`.
   fixed 16. Both seats' test-name findings went to b-f30189, and one
   needed no action.
 - **#1098:** the seats raised 2 notes, and neither needed a change.
+- **#1101:** the seats raised 1 blocker and 4 notes. Review commit
+  `e5854814` fixed all five. The witness passed a second count beside the
+  right one, and the in-cell critic raised nothing.
 
-`.saffron/rejections.md` holds ten lines for this run.
+`.saffron/rejections.md` holds eleven lines for this run.
 
 ## Run 55's items, checked
 
@@ -121,6 +125,7 @@ This PR changes no skill text.
 
 ## Next run
 
-`SA-0343` and `SA-0356` are queued. `SA-0343` needs its `session.py`
+`SA-0357` and `SA-0358` stay unrun, refused for overlapping #1099. Their
+ids are taken in the ledger. `SA-0343` and `SA-0356` are queued. `SA-0343` needs its `session.py`
 citation refreshed against `main` once this stack merges. `SA-0356` can run
 once `SA-0353` merges.

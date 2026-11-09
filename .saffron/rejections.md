@@ -2839,7 +2839,7 @@ critic's own, so they have no line.
 - `SA-0352` (#1090): `package` and `finish` take no home lock either.
   **Bucket 3**, contract. Kept as b-879e72.
 
-## 2026-11-09, spec loop run 56 (#1094, #1095, #1096, #1097, #1099)
+## 2026-11-09, spec loop run 56 (#1094, #1095, #1096, #1097, #1099, #1101)
 
 - `SA-0341` (#1094): the criterion 5 witness never checked that `run_rebut`
   passes its `spec_id` on. **Bucket 3**, adequacy. **Landed:** a review
@@ -2872,3 +2872,6 @@ critic's own, so they have no line.
 - `SA-0353` (#1099): ten citations named `SA-0340`, and a docstring said
   the session keeps a draft with no fault. **Bucket 3**, conventions.
   **Landed:** a review commit on #1099.
+- `SA-0359` (#1101): the docstring witness passed a second `gate_result`
+  count beside the right one, and its word map stopped at five.
+  **Bucket 3**, adequacy. **Landed:** a review commit on #1101.
