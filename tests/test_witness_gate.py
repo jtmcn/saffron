@@ -1086,6 +1086,76 @@ def test_a_find_count_failure_names_neither_half_of_its_edit(tmp_path):
     assert replace not in summary
 
 
+def test_a_surviving_mutant_quotes_its_own_case_and_never_its_edit(tmp_path):
+    """Item b-fa4a83 (§5.4.1): a survived-mutant failure keeps naming the
+    claim and the file, and quotes the mutant's own declared case too, never
+    another criterion's. A mutant with no case keeps today's exact message.
+    Neither `find` nor `replace` leaks into the result or into what
+    `repair_prompt` renders from it. Three mutants are read in one call,
+    from one mutants-file text, as the ref holds them."""
+    from saffron.gates.baseline import NewFailure
+    from saffron.mutants import parse_mutants
+    from saffron.phases.implement import repair_prompt
+
+    prefix = "QRVT_CASE_EDIT_"
+    _write(tmp_path, "a.py", f"{prefix}A = 1\n")
+    _write(tmp_path, "b.py", f"{prefix}B = 1\n")
+    _write(tmp_path, "c.py", f"{prefix}C = 1\n")
+
+    mutants_text = (
+        "w1:\n"
+        f"  file: a.py\n  find: {prefix}A = 1\n  replace: {prefix}A = 2\n"
+        "  case: the branch where the guard never fires\n"
+        "w2:\n"
+        f"  file: b.py\n  find: {prefix}B = 1\n  replace: {prefix}B = 2\n"
+        "  case: the branch where the retry never happens\n"
+        "w3:\n"
+        f"  file: c.py\n  find: {prefix}C = 1\n  replace: {prefix}C = 2\n"
+    )
+    mutants = parse_mutants(mutants_text, "SA-X.yaml")
+
+    first = Criterion(claim="the first claim holds", witness="w1", mutant=mutants["w1"])
+    second = Criterion(
+        claim="the second claim holds", witness="w2", mutant=mutants["w2"]
+    )
+    third = Criterion(claim="the third claim holds", witness="w3", mutant=mutants["w3"])
+
+    def run_tests(subset):
+        return _tests(status="pass", collected=tuple(subset))
+
+    result = witness_gate(
+        acceptance=[first, second, third],
+        mutate=host_mutator(tmp_path),
+        run_tests=run_tests,
+    )
+
+    assert result.status == "fail"
+    assert len(result.failures) == 3
+    by_witness = {f.file: f for f in result.failures}
+
+    # Exact equality, not substring containment: pins the lead-in's own
+    # wording, where a substring check would pass any wording around it.
+    assert by_witness["w1"].message == (
+        f"ran and passed with its mutant applied to a.py — {first.claim} "
+        "(untested case: the branch where the guard never fires)"
+    )
+    assert by_witness["w2"].message == (
+        f"ran and passed with its mutant applied to b.py — {second.claim} "
+        "(untested case: the branch where the retry never happens)"
+    )
+    assert by_witness["w3"].message == (
+        f"ran and passed with its mutant applied to c.py — {third.claim}"
+    )
+
+    dumped = result.model_dump_json()
+    rendered = repair_prompt([NewFailure("witness", f) for f in result.failures])
+    for mutant in mutants.values():
+        assert mutant.find not in dumped
+        assert mutant.replace not in dumped
+        assert mutant.find not in rendered
+        assert mutant.replace not in rendered
+
+
 def test_a_find_count_failure_is_new_unless_the_base_reported_its_own(tmp_path):
     """`subtract_baseline` reads a find-count failure like any other. A base
     that applied the mutant, or found its `find` absent, cancels nothing.

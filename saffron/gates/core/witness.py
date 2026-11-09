@@ -300,16 +300,20 @@ def witness_gate(
             tool = tool or tests_result.tool
             continue
         if tests_result.status == "pass":
-            # The claim and the file, never the edit: this message reaches
-            # REPAIR verbatim at every tier, and a mutant is withheld (§5.4.1).
+            # The claim, the file and the declared case, never the edit:
+            # this message reaches REPAIR verbatim at every tier (§5.4.1).
+            case = mutant.case
+            message = (
+                f"ran and passed with its {edit_noun} applied to "
+                f"{mutant.file} — {criterion.claim}"
+            )
+            if case is not None:
+                message += f" (untested case: {case})"
             survived.append(
                 Failure(
                     file=criterion.witness,
                     code="survived-mutant",
-                    message=(
-                        f"ran and passed with its {edit_noun} applied to "
-                        f"{mutant.file} — {criterion.claim}"
-                    ),
+                    message=message,
                 )
             )
             tool = tool or tests_result.tool
