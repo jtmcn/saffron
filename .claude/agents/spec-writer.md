@@ -115,8 +115,23 @@ And optionally:
    everything it would call a blocker or a concern. Re-run step 1's estimate
    against the `size:` line of every row step 4 printed, the rows that
    exceeded their ceiling included. **Done when** each check has evidence you
-   read and `make check` exits 0. A check you cannot settle stays open, and
-   the report says so.
+   read and the tree checks below exit 0. A check you cannot settle stays
+   open, and the report says so.
+
+## Tree checks, not the whole suite
+
+Run no `make check` and no bare `pytest`. A full suite costs 3 to 10 minutes,
+and writers spent about 40% of their active time waiting on one (b-98a3be).
+The caller runs `make check` once, after its commit, beside the review.
+
+- `uv run pytest -q tests/test_queued_specs.py tests/records tests/ontology tests/test_scheduler.py`
+  reads the live specs and backlog in about 20 seconds.
+- `git add` every file you changed or added, then `prek run --files <path> ...`
+  over them. Measured: prek passes an untracked file it never read.
+- `python3 hooks/prose_limit.py --file <path>` for each new or edited file.
+- On a prototype, run each wrong version against its witness's test file
+  alone. Run the whole suite on a prototype only when it sits on a parent's
+  diff. That full suite found `SA-0336`'s broken regate test.
 
 ## Revising against a review
 
@@ -140,7 +155,7 @@ reading its line and the review's error becomes the spec's.
 4. **Re-run steps 4 to 7.** A criterion the review added moves the size
    estimate, and the bookkeeping follows the spec.
 
-**Done when** every finding is applied or answered, and `make check` exits 0.
+**Done when** every finding is applied or answered, and the tree checks exit 0.
 Your report replaces its Checks section with one line per finding: `applied`
 or `answered`, its severity, and the evidence you read.
 
@@ -156,5 +171,5 @@ A run that ended on a split reports the split alone, as step 1 says.
    `narrowed: <members left>`.
 4. **For the operator**: each judgement call you made (priority, a split, a
    scope cut), one line each.
-5. **Next**: the `make check` exit code, then "commit on its own branch and
-   run spec-reviewer with `base:` that branch's head".
+5. **Next**: each tree check's exit code, then "commit on its own branch, run
+   `make check` and spec-reviewer with `base:` that branch's head".

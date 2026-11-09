@@ -70,10 +70,13 @@ match. A decision left open returns as a question and costs a round.
 The reviewer reads at a commit, so the draft is committed before the review is
 dispatched. Before the commit, check each new file with
 `python3 hooks/prose_limit.py --file <path>`. It compares against `HEAD`, so
-after the commit it reports zero whatever the file holds. Then stage the draft
-and run `make check`. Its `prose-limit-tree` hook reads the working tree,
-untracked files included. The other lint hooks read tracked files only, so
-stage the draft before trusting them.
+after the commit it reports zero whatever the file holds.
+
+The writer ran the tree checks in `.claude/agents/spec-writer.md`, not the
+suite. Commit, then start `make check` in the background and dispatch the
+review in the same turn. The reviewer reads the commit and never the check.
+A failure is nearly always prose or format, so fix it in the next commit.
+Redirect the output to a file and echo `$?`, never pipe it into `tail`.
 
 ### 6. Pre-flight the spec
 
@@ -120,6 +123,8 @@ read for finds more than one told nothing.
 
 Two rounds is the working stop rule. A third round means the spec's subject is
 unsettled, which is a question for the operator rather than another review.
+Apply the second review's findings yourself, each verified at the base. No
+chain from 2026-11-02 to 2026-11-07 ran a third review.
 
 Every finding is verified at the base before it is applied. A review's premise
 that does not hold is answered with evidence, not applied. Roughly one finding

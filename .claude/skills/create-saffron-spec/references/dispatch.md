@@ -12,7 +12,7 @@ item: <backlog id>
 
 base: <commit>, the head of branch <branch> in the checkout at <path>.
 The working tree is a clean snapshot of it. Write the spec there.
-Do not commit, and stage nothing.
+Do not commit. Stage what you write, so prek reads it.
 
 <What the base carries that the writer would not assume: unmerged specs it
 may overlap, a rule added to docs/agents/issue-tracker.md this week, a
@@ -32,9 +32,14 @@ If the estimate splits, stop at step 1 and report the split alone.
 ```
 
 A writer that splits returns within minutes and writes no file. Dispatch one
-writer per spec it names, in parallel, each with `item:`, the split's scope
-for that spec, and its `depends_on`. `SA-0113`'s draft took 35.7 minutes, so
-the early stop saves most of that for each child.
+writer per spec it names, each with `item:`, the split's scope for that spec,
+and its `depends_on`. `SA-0113`'s draft took 35.7 minutes, so the early stop
+saves most of that for each child.
+
+Draft coupled specs in sequence. Specs are coupled when one reads a name, a
+function or a refusal the other adds. A child waits for its parent's
+prototype, and its brief carries that diff. Independent specs run in parallel. Parallel coupled drafts cost three caller rounds on 2026-10-03. On
+2026-11-07, two children assumed names their parents had not yet chosen.
 
 Hand it the pre-flight commands by name. A writer that knows `driver.py cite`
 exists runs it on its own draft. One that does not writes a throwaway resolver
@@ -85,6 +90,7 @@ spec: <path>
 
 base: <commit>, the head of branch <branch> in the checkout at <path>,
 the base the reviewer read at. Revise in place. Do not commit.
+Stage what you change, so prek reads it.
 
 <Apply all, unless reading the line at base shows a finding is wrong.
 Then say so with the evidence and do not apply it.>
