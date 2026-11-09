@@ -1523,11 +1523,22 @@ def _write_extract_options():
     }
 
 
-def _run_writer(double):
+def _no_faults(text):
+    from saffron.spec_review import DraftFaults
+
+    return DraftFaults(parsed=True, lines=())
+
+
+def _run_writer(double, *, faults=_no_faults, emit=lambda line: None):
     from saffron.spec_review import run_spec_writer
 
     return run_spec_writer(
-        _CONTAINER, system_prompt=_SYSTEM_PROMPT, prompt=_PROMPT, agent=double
+        _CONTAINER,
+        system_prompt=_SYSTEM_PROMPT,
+        prompt=_PROMPT,
+        agent=double,
+        faults=faults,
+        emit=emit,
     )
 
 
@@ -1613,7 +1624,7 @@ def test_a_spec_writer_session_returns_the_extraction_turns_spec():
     assert type(SPEC_WRITER_MAX_TURNS) is int
     assert SPEC_WRITER_BUDGET_USD == 17.0
     assert SPEC_WRITER_EXTRACT_BUDGET_USD == 1.5
-    assert SPEC_WRITER_SESSION_USD == 18.5
+    assert SPEC_WRITER_SESSION_USD == 23.0
     assert SPEC_WRITER_TIMEOUT_S == 3600
 
     final = _write_extract()
@@ -1928,3 +1939,451 @@ def test_a_spec_writer_session_names_each_model_its_turns_named():
     # 9: a second clean extraction whose turns name nothing at all.
     double = _Agent([_draft(), _write_extract()])
     assert _run_writer(double).model is None
+
+
+def _faults_double(results, calls):
+    """A `faults` double that returns `results` in order and records each
+    text it was handed in the closure list `calls`."""
+
+    def faults(text):
+        calls.append(text)
+        return results[len(calls) - 1]
+
+    return faults
+
+
+_SECOND_SPEC = "---\nid: SY-2\n---\nfixed\n"
+_SECOND_V = {"spec": _SECOND_SPEC}
+
+
+def test_a_draft_with_faults_goes_back_to_the_same_session_naming_each_line():
+    from saffron.agents.artifacts import hash_artifact
+    from saffron.spec_review import (
+        SPEC_WRITER_EXTRACT_PROMPT,
+        SPEC_WRITER_SEND_BACK_PROMPT,
+        DraftFaults,
+        SpecWriterSession,
+        run_spec_writer,
+    )
+
+    # `extract_cost` and `work_cost` are the turns before the work turn and
+    # the second extraction. Each row puts one above its cap, one below.
+    for extract_cost, work_cost in ((0.25, 0.1), (5.0, 2.0)):
+        first = _draft(cost=0.5, session_id="s-1", num_turns=7)
+        extracted = _write_extract(session_id="s-2", cost=extract_cost, num_turns=7)
+        work = _attempt(session_id="s-3", cost=work_cost, num_turns=3)
+        resolved = _write_extract(
+            session_id="s-4", cost=0.2, num_turns=2, structured_output=_SECOND_V
+        )
+        double = _Agent([first, extracted, work, resolved])
+
+        calls: list[str] = []
+        faults = _faults_double(
+            [
+                DraftFaults(parsed=True, lines=("line one", "line two")),
+                DraftFaults(parsed=True, lines=()),
+            ],
+            calls,
+        )
+        emitted: list[str] = []
+
+        result = _run_writer(double, faults=faults, emit=emitted.append)
+
+        assert calls == [_WRITE_SPEC, _SECOND_SPEC]
+        assert emitted == []
+        assert len(double.calls) == 4
+        _assert_write_first_call(double)
+        _assert_write_second_call(double, last_cost_usd=0.5)
+
+        work_args, work_kwargs = double.calls[2]
+        assert work_args == (_CONTAINER,)
+        assert work_kwargs == {
+            "prompt": SPEC_WRITER_SEND_BACK_PROMPT + "\nline one\nline two",
+            "options": _write_options() | {"max_budget_usd": 3.0},
+            "resume": "s-2",
+            "last_cost_usd": min(extract_cost, 3.0),
+        }
+
+        extract_args, extract_kwargs = double.calls[3]
+        assert extract_args == (_CONTAINER,)
+        assert extract_kwargs == {
+            "prompt": SPEC_WRITER_EXTRACT_PROMPT,
+            "options": _write_extract_options(),
+            "resume": "s-3",
+            "last_cost_usd": min(work_cost, 1.5),
+        }
+
+        assert result == SpecWriterSession(
+            text=_SECOND_SPEC,
+            cost_usd=0.5 + extract_cost + work_cost + 0.2,
+            error=None,
+            resets_at=None,
+            session_id="s-4",
+            num_turns=7 + 7 + 3 + 2,
+            spec_sha=hash_artifact(_SECOND_SPEC),
+        )
+
+    # `faults` and `emit` are required: no default lets a caller omit either.
+    from typing import Any
+
+    import pytest as _pytest
+
+    incomplete: dict[str, Any] = {
+        "system_prompt": _SYSTEM_PROMPT,
+        "prompt": _PROMPT,
+        "agent": _Agent([]),
+    }
+    with _pytest.raises(TypeError):
+        run_spec_writer(_CONTAINER, **incomplete)
+
+    # A clean first draft never opens a send-back at all: two calls only.
+    clean_double = _Agent(
+        [_draft(cost=0.5, session_id="s-1", num_turns=7), _write_extract()]
+    )
+    clean_calls: list[str] = []
+    clean_faults = _faults_double([DraftFaults(parsed=True, lines=())], clean_calls)
+    clean_result = _run_writer(
+        clean_double, faults=clean_faults, emit=lambda line: None
+    )
+    assert len(clean_double.calls) == 2
+    assert clean_calls == [_WRITE_SPEC]
+    assert clean_result.text == _WRITE_SPEC
+
+    # Faults that never clear still stop at exactly `SPEC_WRITER_SEND_BACKS`
+    # (1, unpatched): a fifth scripted call would raise "unexpected call".
+    persistent_script = [
+        _draft(cost=0.5, session_id="s-1", num_turns=7),
+        _write_extract(session_id="s-2", cost=0.25, num_turns=7),
+        _attempt(session_id="s-3", cost=0.1, num_turns=3),
+        _write_extract(
+            session_id="s-4", cost=0.2, num_turns=2, structured_output=_SECOND_V
+        ),
+    ]
+    persistent_double = _Agent(persistent_script)
+    persistent_calls: list[str] = []
+    persistent_faults = _faults_double(
+        [
+            DraftFaults(parsed=True, lines=("line one", "line two")),
+            DraftFaults(parsed=True, lines=("line one", "line two")),
+        ],
+        persistent_calls,
+    )
+    persistent_result = _run_writer(
+        persistent_double, faults=persistent_faults, emit=lambda line: None
+    )
+    assert len(persistent_double.calls) == 4
+    assert persistent_result.text == _SECOND_SPEC
+
+    # A work turn naming no session keeps the extraction's own `resume` at
+    # that turn's id, never the session's prior one.
+    unnamed_script = [
+        _draft(cost=0.5, session_id="s-1", num_turns=7),
+        _write_extract(session_id="s-2", cost=0.25, num_turns=7),
+        _attempt(session_id=None, cost=0.1, num_turns=3),
+        _write_extract(
+            session_id="s-4", cost=0.2, num_turns=2, structured_output=_SECOND_V
+        ),
+    ]
+    unnamed_double = _Agent(unnamed_script)
+    unnamed_calls: list[str] = []
+    unnamed_faults = _faults_double(
+        [
+            DraftFaults(parsed=True, lines=("line one", "line two")),
+            DraftFaults(parsed=True, lines=()),
+        ],
+        unnamed_calls,
+    )
+    _run_writer(unnamed_double, faults=unnamed_faults, emit=lambda line: None)
+    assert unnamed_double.calls[3][1]["resume"] is None
+
+    # A send-back whose own text does not parse never displaces an earlier
+    # text that did, even once the loop has nowhere left to go.
+    diverge_script = [
+        _draft(cost=0.5, session_id="s-1", num_turns=7),
+        _write_extract(session_id="s-2", cost=0.25, num_turns=7),
+        _attempt(session_id="s-3", cost=0.1, num_turns=3),
+        _write_extract(
+            session_id="s-4", cost=0.2, num_turns=2, structured_output=_SECOND_V
+        ),
+    ]
+    diverge_double = _Agent(diverge_script)
+    diverge_calls: list[str] = []
+    diverge_faults = _faults_double(
+        [
+            DraftFaults(parsed=True, lines=("line one", "line two")),
+            DraftFaults(parsed=False, lines=("line one", "line two")),
+        ],
+        diverge_calls,
+    )
+    diverge_result = _run_writer(
+        diverge_double, faults=diverge_faults, emit=lambda line: None
+    )
+    assert diverge_result.text == _WRITE_SPEC
+
+
+def test_a_failed_send_back_keeps_the_last_draft_that_parsed_and_says_why(
+    monkeypatch,
+):
+    from saffron.agents.artifacts import hash_artifact
+    from saffron.spec_review import DraftFaults, SpecWriterSession
+
+    m_null = "not the schema: the turn returned no structured output"
+
+    def _work_rejected():
+        return [
+            _attempt(
+                status="rejected", resets_at=5, session_id="s-3", cost=0.3, num_turns=2
+            )
+        ]
+
+    def _work_raised():
+        failed = implement.AgentFailed(
+            "boom", _attempt(session_id="s-3", cost=0.3, num_turns=2)
+        )
+        return [failed]
+
+    def _extract_bad_schema():
+        return [
+            _attempt(session_id="s-3", cost=0.1, num_turns=2),
+            _write_extract(
+                session_id="s-4", cost=0.2, num_turns=1, structured_output=None
+            ),
+        ]
+
+    def _extract_rejected():
+        return [
+            _attempt(session_id="s-3", cost=0.1, num_turns=2),
+            _write_extract(
+                session_id="s-4", cost=0.2, num_turns=1, status="rejected", resets_at=9
+            ),
+        ]
+
+    def _extract_raised():
+        failed = implement.AgentFailed(
+            "boom2", _attempt(session_id="s-4", cost=0.2, num_turns=1)
+        )
+        return [_attempt(session_id="s-3", cost=0.1, num_turns=2), failed]
+
+    rows = [
+        (
+            _work_rejected,
+            "spec writer send-back's work turn rate limited",
+            0.3,
+            2,
+            "s-3",
+        ),
+        (_work_raised, "spec writer send-back's work turn boom", 0.3, 2, "s-3"),
+        (
+            _extract_bad_schema,
+            f"spec writer send-back's extraction {m_null}",
+            0.3,
+            3,
+            "s-4",
+        ),
+        (
+            _extract_rejected,
+            "spec writer send-back's extraction turn rate limited",
+            0.3,
+            3,
+            "s-4",
+        ),
+        (
+            _extract_raised,
+            "spec writer send-back's extraction turn boom2",
+            0.3,
+            3,
+            "s-4",
+        ),
+    ]
+
+    for make_tail, message, tail_cost, tail_turns, session_id in rows:
+        for initial_parsed in (True, False):
+            first = _draft(cost=0.5, session_id="s-1", num_turns=7)
+            extracted = _write_extract(session_id="s-2", cost=0.25, num_turns=7)
+            double = _Agent([first, extracted, *make_tail()])
+
+            calls: list[str] = []
+            faults = _faults_double(
+                [DraftFaults(parsed=initial_parsed, lines=("line one", "line two"))],
+                calls,
+            )
+            emitted: list[str] = []
+
+            result = _run_writer(double, faults=faults, emit=emitted.append)
+
+            assert calls == [_WRITE_SPEC]
+            assert emitted == [message, "line one", "line two"]
+            assert result == SpecWriterSession(
+                text=_WRITE_SPEC,
+                cost_usd=0.5 + 0.25 + tail_cost,
+                error=None,
+                resets_at=None,
+                session_id=session_id,
+                num_turns=7 + 7 + tail_turns,
+                spec_sha=hash_artifact(_WRITE_SPEC),
+            )
+
+    # Bound patched to 2: an unparsed send-back, then a second that fails.
+    # The first draft's text survives, and the second failure still runs.
+    import saffron.spec_review as _spec_review_module
+
+    monkeypatch.setattr(_spec_review_module, "SPEC_WRITER_SEND_BACKS", 2)
+    if True:
+        script = [
+            _draft(cost=0.5, session_id="s-1", num_turns=7),
+            _write_extract(session_id="s-2", cost=0.25, num_turns=7),
+            _attempt(session_id="s-3", cost=0.1, num_turns=3),
+            _write_extract(
+                session_id="s-4", cost=0.2, num_turns=2, structured_output=_SECOND_V
+            ),
+            implement.AgentFailed(
+                "boom3", _attempt(session_id="s-6", cost=0.15, num_turns=1)
+            ),
+        ]
+        double = _Agent(script)
+        calls: list[str] = []
+        faults = _faults_double(
+            [
+                DraftFaults(parsed=True, lines=("line one", "line two")),
+                DraftFaults(parsed=False, lines=("line three", "line four")),
+            ],
+            calls,
+        )
+        emitted: list[str] = []
+        result = _run_writer(double, faults=faults, emit=emitted.append)
+
+        assert calls == [_WRITE_SPEC, _SECOND_SPEC]
+        assert emitted == [
+            "spec writer send-back's work turn boom3",
+            "line three",
+            "line four",
+        ]
+        assert result == SpecWriterSession(
+            text=_WRITE_SPEC,
+            cost_usd=0.5 + 0.25 + 0.1 + 0.2 + 0.15,
+            error=None,
+            resets_at=None,
+            session_id="s-6",
+            num_turns=7 + 7 + 3 + 2 + 1,
+            spec_sha=hash_artifact(_WRITE_SPEC),
+        )
+
+
+def test_a_draft_intake_refuses_is_named_by_intakes_own_error_and_reaches_no_gate():
+    from saffron import intake
+    from saffron.spec_review import DraftFaults, draft_faults
+
+    def _expected(text):
+        try:
+            spec = intake.parse_spec(text)
+            intake.refuse_inline_mutants(spec)
+        except intake.SpecError as exc:
+            return str(exc)
+        raise AssertionError("expected a SpecError")
+
+    def _boom_judge(path, text):
+        raise AssertionError("judge must not run on a draft intake refuses")
+
+    object_wrong_version = (
+        "---\nid: TE-1\ntitle: t\ntype: feature\n"
+        "acceptance:\n"
+        "  - claim: c\n    witness: t.py::test_w\n"
+        "    wrong_versions:\n"
+        "      - file: a.py\n"
+        "---\n\nbody\n"
+    )
+    no_frontmatter = "no frontmatter here\n"
+    both_criteria_forms = (
+        "---\nid: TE-1\ntitle: t\ntype: feature\n"
+        "acceptance:\n"
+        "  - claim: c\n    witness: t.py::test_w\n"
+        "---\n\n## Acceptance criteria\n- [ ] something\n"
+    )
+    inline_mutant = (
+        "---\nid: TE-1\ntitle: t\ntype: feature\n"
+        "acceptance:\n"
+        "  - claim: the total is clamped at zero\n"
+        "    witness: tests/test_billing.py::test_never_negative\n"
+        "    mutant:\n"
+        "      file: saffron/billing.py\n"
+        "      find: 'max(total, 0)'\n"
+        "      replace: 'total'\n"
+        "---\n\nbody\n"
+    )
+
+    for text in (
+        object_wrong_version,
+        no_frontmatter,
+        both_criteria_forms,
+        inline_mutant,
+    ):
+        emitted: list[str] = []
+        result = draft_faults(
+            text, path="custom/path.md", judge=_boom_judge, emit=emitted.append
+        )
+        assert result == DraftFaults(parsed=False, lines=(_expected(text),))
+        assert emitted == []
+
+
+def test_a_draft_the_form_gates_fail_is_named_line_by_line_at_its_path():
+    from saffron.spec_review import DraftFaults, draft_faults
+
+    valid_text = (
+        "---\nid: TE-2\ntitle: t\ntype: chore\n"
+        "acceptance:\n"
+        "  - claim: c\n    witness: t.py::test_w\n"
+        "---\n\nbody\n"
+    )
+
+    calls: list[tuple[str, str]] = []
+
+    def _judge_two(path, text):
+        calls.append((path, text))
+        return ["line a", "line b"]
+
+    result = draft_faults(
+        valid_text, path="given/path.md", judge=_judge_two, emit=lambda line: None
+    )
+    assert result == DraftFaults(parsed=True, lines=("line a", "line b"))
+    assert calls == [("given/path.md", valid_text)]
+
+    calls.clear()
+    result = draft_faults(
+        valid_text, path=None, judge=_judge_two, emit=lambda line: None
+    )
+    assert result == DraftFaults(parsed=True, lines=("line a", "line b"))
+    assert calls == [(".saffron/specs/TE-2.md", valid_text)]
+
+    def _judge_none(path, text):
+        return []
+
+    result = draft_faults(
+        valid_text, path=None, judge=_judge_none, emit=lambda line: None
+    )
+    assert result == DraftFaults(parsed=True, lines=())
+
+    result = draft_faults(valid_text, path=None, judge=None, emit=lambda line: None)
+    assert result == DraftFaults(parsed=True, lines=())
+
+
+def test_a_form_judgement_that_raises_sends_nothing_back_and_says_so():
+    from saffron.spec_review import DraftFaults, draft_faults
+
+    valid_text = (
+        "---\nid: TE-3\ntitle: t\ntype: chore\n"
+        "acceptance:\n"
+        "  - claim: c\n    witness: t.py::test_w\n"
+        "---\n\nbody\n"
+    )
+
+    def _judge_raises(path, text):
+        raise RuntimeError("judge exploded")
+
+    emitted: list[str] = []
+    result = draft_faults(
+        valid_text, path=None, judge=_judge_raises, emit=emitted.append
+    )
+    assert result == DraftFaults(parsed=True, lines=())
+    assert len(emitted) == 1
+    assert "RuntimeError" in emitted[0]
+    assert "judge exploded" in emitted[0]

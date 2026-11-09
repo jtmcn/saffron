@@ -4726,6 +4726,7 @@ def test_a_revision_waits_on_a_rate_limit_and_stops_on_an_error_a_raise_or_the_b
     spec is refused instead, its task's state untouched. An errored
     writer session ends `GATE_ERROR` and is charged as an abort, and so
     does a writer callable that raises outright."""
+    from saffron import spec_review
     from saffron.batch import run_stack_batch
 
     clock = AdvancingClock(datetime(2030, 1, 1, 2, 0))
@@ -4737,7 +4738,7 @@ def test_a_revision_waits_on_a_rate_limit_and_stops_on_an_error_a_raise_or_the_b
     reason = run_stack_batch(
         order,
         ledger,
-        budget_usd=100.0,
+        budget_usd=81.5 + spec_review.SPEC_WRITER_SESSION_USD,
         until=None,
         runner=runner,
         readiness_check=_ready,
@@ -4798,6 +4799,7 @@ def test_each_revision_is_an_attempt_and_a_spec_text_on_its_specs_task(ledger, r
     A raise adds none. Each written text is one `spec_text` fact,
     numbered on from the task's own earlier rows. `batch_spend` counts
     every attempt this round exactly once."""
+    from saffron import spec_review
     from saffron.batch import run_stack_batch
     from saffron.spec_review import WRITING_PHASE
 
@@ -4809,7 +4811,7 @@ def test_each_revision_is_an_attempt_and_a_spec_text_on_its_specs_task(ledger, r
     reason = run_stack_batch(
         order,
         ledger,
-        budget_usd=100.0,
+        budget_usd=81.5 + spec_review.SPEC_WRITER_SESSION_USD,
         until=None,
         runner=runner,
         readiness_check=_ready,
