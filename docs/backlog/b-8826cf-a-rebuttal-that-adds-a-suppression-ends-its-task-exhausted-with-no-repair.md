@@ -39,3 +39,4 @@ measured run shows it no longer writes one.
 - 2026-11-08: recurred in the spec loop's run 55, on `SA-0338` in batch 70.
   REBUT fixed nine blockers, and its own new comment added one `prose` hit.
   The task ended `EXHAUSTED`, and its five children were refused by reach.
+- 2026-11-09: recurred in the spec loop's run 56. `SA-0353`'s REBUT fixed twelve adequacy blockers and its new witness wrote `import pytest as _pytest`. That one line failed `structure` and `tests/test_saffron_gates.py::test_structure_names_its_tool_and_passes_on_this_repos_code`, and the task ended `EXHAUSTED` at $53.80 of $60. `SA-0356` was refused by reach. A one-line review commit turned both green.

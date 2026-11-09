@@ -12,7 +12,7 @@ import os
 import signal
 import subprocess
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from functools import partial
@@ -1038,6 +1038,7 @@ def _stack_end_review(
                 budget_usd=end_review.LENS_BUDGET_USD,
                 agent=agent,
                 resolve=resolve,
+                emit=_spec_session_emit(out_dir / f"{batch_key}.end-review"),
             )
         except Exception as exc:
             message = f"{type(exc).__name__}: {exc}"
@@ -1121,7 +1122,11 @@ def _stack_deferred_end_review(
 
 
 def _finish_verify(
-    *, pinned: PinnedBase, repo: Path, gates_dir: Path
+    *,
+    pinned: PinnedBase,
+    repo: Path,
+    gates_dir: Path,
+    only: Collection[str] | None = None,
 ) -> Callable[[str, str], tuple[NewFailure, ...]]:
     """The `verify` callable `finish.publish_finish` and `finish.judge_draft`
     share. `_stack_finish` counts its result, and `judge_draft` renders it.
@@ -1129,12 +1134,17 @@ def _finish_verify(
     Exports `.saffron/` from the pinned mirror at the pinned base. Builds
     the finishing suite over the policy it finds there, and runs
     `package_phase.reverify` in the repo's own cell image. Returns the
-    suite's own new failures.
-    """
+    suite's own new failures. `only`, when given, narrows the loaded
+    policy's declared `gates` to those names first (`_draft_faults`,
+    SA-0353). Core gates sit outside that dict, so they still run."""
 
     def verify(sha: str, base: str) -> tuple[NewFailure, ...]:
         git_mirror.export_saffron_dir(pinned.mirror, pinned.base_sha, gates_dir)
         policy, _policy_sha = load_policy(gates_dir)
+        if only is not None:
+            policy = policy.model_copy(
+                update={"gates": {name: policy.gates[name] for name in only}}
+            )
         spec, finishing_policy = finish.finish_suite(policy)
         comparison = package_phase.reverify(
             mirror=pinned.mirror,
@@ -1148,6 +1158,44 @@ def _finish_verify(
         return comparison.new_failures
 
     return verify
+
+
+def _draft_faults(
+    *,
+    pinned: PinnedBase,
+    repo: Path,
+    policy: Policy,
+    head: str,
+    workdir: Path,
+    path: str | None,
+) -> Callable[[str], spec_review.DraftFaults]:
+    """A writer session's own `faults` (SA-0353): `spec_review.draft_faults`
+    bound to `path` and `emit=print`, with a `judge` for the policy's own
+    `form: true` gates, judged atop `head` through `finish.judge_draft`.
+
+    A policy declaring no form gate passes no `judge` at all, so a parsing
+    draft gets no fault line from here. The core gates still run either
+    way: they sit outside `policy.gates`, which `only` alone narrows.
+    """
+    form_gates = [name for name, decl in policy.gates.items() if decl.form]
+    if not form_gates:
+        return partial(spec_review.draft_faults, path=path, judge=None, emit=print)
+
+    verify = _finish_verify(
+        pinned=pinned, repo=repo, gates_dir=workdir / "gates", only=form_gates
+    )
+
+    def judge(judged_path: str, text: str) -> Sequence[str]:
+        return finish.judge_draft(
+            pinned.mirror,
+            head,
+            judged_path,
+            text,
+            workdir=workdir / "tree",
+            verify=verify,
+        )
+
+    return partial(spec_review.draft_faults, path=path, judge=judge, emit=print)
 
 
 # Printed once, in place of a link, on every path that reported no push.
@@ -1307,8 +1355,9 @@ def _spec_review_policy(exported: Path) -> Policy:
 
 
 def _spec_session_emit(log_dir: Path) -> Callable[[Event], None]:
-    """A spec review's or spec writer's `emit`: the terminal plus an
-    `EventLog(log_dir)`. A later session for the same spec appends to it.
+    """A spec review's, spec writer's, end review's or follow-up writer's
+    `emit`: the terminal plus an `EventLog(log_dir)`. A later session for
+    the same spec, or the same batch key, appends to it.
     """
     return partial(_default_emit, log=EventLog(log_dir))
 
@@ -1505,6 +1554,14 @@ def _stack_revise(
             timeout_s=spec_review.SPEC_WRITER_TIMEOUT_S,
             emit=_spec_session_emit(out_dir / f"{candidate.spec.id}.spec-write"),
         )
+        faults = _draft_faults(
+            pinned=pinned,
+            repo=repo,
+            policy=policy,
+            head=head,
+            workdir=out_dir / "spec-write" / candidate.spec.id / "judge",
+            path=f".saffron/specs/{candidate.path.name}",
+        )
         with end_review.layer_cell(
             fields,
             repo=repo,
@@ -1514,7 +1571,12 @@ def _stack_revise(
             spec_session=True,
         ) as container:
             return spec_review.run_spec_writer(
-                container, system_prompt=system_prompt, prompt=prompt, agent=agent
+                container,
+                system_prompt=system_prompt,
+                prompt=prompt,
+                agent=agent,
+                faults=faults,
+                emit=print,
             )
 
     return run
@@ -1618,6 +1680,14 @@ def _draft_adapters(
             spec_id=spec_id,
             timeout_s=spec_review.SPEC_WRITER_TIMEOUT_S,
         )
+        faults = _draft_faults(
+            pinned=pinned,
+            repo=repo,
+            policy=policy,
+            head=pinned.base_sha,
+            workdir=out_dir / "spec-write" / spec_id / "judge",
+            path=None,
+        )
         with end_review.layer_cell(
             fields,
             repo=repo,
@@ -1627,7 +1697,12 @@ def _draft_adapters(
             spec_session=True,
         ) as container:
             return spec_review.run_spec_writer(
-                container, system_prompt=system_prompt, prompt=full_prompt, agent=agent
+                container,
+                system_prompt=system_prompt,
+                prompt=full_prompt,
+                agent=agent,
+                faults=faults,
+                emit=print,
             )
 
     def review(path: str, text: str) -> spec_review.SpecReviewSession:
@@ -1798,6 +1873,15 @@ def _stack_follow_ups(
                     implement.run_agent,
                     spec_id=f"follow-up-{origin.spec_id}",
                     timeout_s=spec_review.SPEC_WRITER_TIMEOUT_S,
+                    emit=_spec_session_emit(out_dir / f"{batch_key}.follow-ups"),
+                )
+                faults = _draft_faults(
+                    pinned=pinned,
+                    repo=repo,
+                    policy=policy,
+                    head=top.head,
+                    workdir=out_dir / "follow-ups" / batch_key / "write-judge",
+                    path=None,
                 )
                 with end_review.layer_cell(
                     top,
@@ -1812,6 +1896,8 @@ def _stack_follow_ups(
                         system_prompt=system_prompt,
                         prompt=prompt,
                         agent=agent,
+                        faults=faults,
+                        emit=print,
                     )
 
             stack_mint = _stack_mint(pinned=pinned, repo=repo, ledger=ledger)

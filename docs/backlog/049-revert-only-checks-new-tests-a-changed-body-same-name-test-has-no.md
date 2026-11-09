@@ -1,10 +1,11 @@
 ---
 id: 49
 title: '`revert` only checks *new* tests — a changed-body-same-name test has no coverage'
-status: open
+status: done
+closed: 2026-11-09
 tier: 1
 specs: [SA-0342]
-prs: []
+prs: [1095]
 commits: []
 cites: [§2.1, §5.4, §5.5.1]
 related: [50, 51]
@@ -33,3 +34,4 @@ fixes. It closes 50 and 51 outright and narrows this one; what is left here is
 the changed-body-same-name case, which needs the repo-declared hunk-to-node-id
 mapping this item already describes. **Tier 1** with 51, since that is what
 forces the contract.
+- 2026-11-09: `SA-0342` (#1095) landed in the spec loop's run 56. `revert` now runs an old test the diff rewrote against the base.

@@ -87,6 +87,7 @@ def test_a_new_test_that_passes_without_the_source_is_a_failure():
         reverted=lambda paths: _reverted(paths, log=log),
         run_tests=run_tests,
         exempt=[],
+        diff="",
     )
     assert result.status == "fail"
     assert [f.file for f in result.failures] == ["t.py::test_new"]
@@ -125,6 +126,7 @@ def test_the_subset_is_the_new_names_and_excludes_a_preserved_witness():
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
         exempt=[],
+        diff="",
     )
     assert captured == [["t.py::test_new"]]
 
@@ -157,6 +159,7 @@ def test_a_collected_name_that_reads_as_an_option_never_reaches_the_runner():
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
         exempt=[],
+        diff="",
     )
     assert captured == [["t.py::test_new"]]
     # And the real name is still judged — the drop narrows the subset, it does
@@ -184,6 +187,7 @@ def test_the_source_is_restored_when_the_run_raises():
         reverted=lambda paths: _reverted(paths, log=log),
         run_tests=run_tests,
         exempt=[],
+        diff="",
     )
     assert result.status == "error"
     assert result.status != "fail"
@@ -214,6 +218,7 @@ def test_a_restore_that_failed_is_also_an_error():
         reverted=lambda paths: _reverted(paths, log=[], fail_on_exit=True),
         run_tests=lambda subset: _tests(*subset, failed=tuple(subset)),
         exempt=[],
+        diff="",
     )
     assert result.status == "error"
 
@@ -229,6 +234,7 @@ def test_a_checkout_that_failed_is_an_error_not_a_failure():
         reverted=lambda paths: _reverted(paths, log=[], fail_on_enter=True),
         run_tests=_refuse_run,
         exempt=[],
+        diff="",
     )
     assert result.status == "error"
     assert result.status != "fail"
@@ -286,6 +292,7 @@ def test_each_kind_of_nothing_to_revert_is_a_skip():
             reverted=_refuse,
             run_tests=_refuse_run,
             exempt=[],
+            diff="",
         )
         assert result.status == "skip", result
         assert summary in result.summary, result
@@ -314,6 +321,7 @@ def test_a_reverted_run_keyed_on_exception_types_is_a_skip_not_a_failure():
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
         exempt=[],
+        diff="",
     )
     assert result.status == "skip", result
     assert "node id" in result.summary
@@ -340,6 +348,7 @@ def test_a_reverted_run_that_did_not_enumerate_is_a_skip():
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
         exempt=[],
+        diff="",
     )
     assert result.status == "skip", result
     assert "no collected tests" in result.summary
@@ -366,6 +375,7 @@ def test_a_reverted_run_that_enumerated_nothing_still_passes():
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
         exempt=[],
+        diff="",
     )
     assert result.status == "pass", result
     # Pinned to the exact string, not a substring: with no `uncollected`
@@ -405,6 +415,7 @@ def test_a_reverted_run_that_could_not_produce_a_result_is_a_skip_not_an_error()
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
         exempt=[],
+        diff="",
     )
     assert result.status == "skip", result
     assert result.status != "error", "an untrustworthy result ends the attempt"
@@ -429,6 +440,7 @@ def test_a_repo_that_declares_no_test_paths_is_a_skip_and_never_reverts():
         reverted=lambda paths: _reverted(paths, log=log),
         run_tests=lambda _s: _tests(),
         exempt=[],
+        diff="",
     )
     assert result.status == "skip", result
     assert log == [], "nothing may be reverted when source cannot be identified"
@@ -454,6 +466,7 @@ def test_the_verdict_is_scoped_to_the_subset_not_the_whole_enumeration():
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
         exempt=[],
+        diff="",
     )
     assert result.status == "pass", result
 
@@ -476,6 +489,7 @@ def test_the_tool_is_the_one_that_actually_ran():
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
         exempt=[],
+        diff="",
     )
     assert result.status == "pass"
     assert result.tool == "pytest 8.3.2"
@@ -503,6 +517,7 @@ def test_a_declared_witness_joins_the_subset_even_when_it_existed_at_base():
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
         exempt=[],
+        diff="",
     )
     assert result.status == "fail", result
     assert [f.file for f in result.failures] == ["t.py::test_w"]
@@ -525,6 +540,7 @@ def test_a_declared_witness_the_head_run_never_collected_is_not_asserted():
         reverted=lambda paths: _reverted(paths, log=log),
         run_tests=lambda _s: _tests(),
         exempt=[],
+        diff="",
     )
     assert result.status == "skip", result
     assert log == [], "an unenumerated witness must not reach the worktree"
@@ -549,6 +565,7 @@ def test_uncommitted_work_on_a_path_this_would_revert_is_a_skip():
         reverted=_refuse,
         run_tests=_refuse_run,
         exempt=[],
+        diff="",
     )
     assert result.status == "skip", result
     assert "pkg/a.py" in result.summary
@@ -574,6 +591,7 @@ def test_uncommitted_work_somewhere_else_does_not_stop_the_gate():
         reverted=lambda paths: _reverted(paths, log=log),
         run_tests=run_tests,
         exempt=[],
+        diff="",
     )
     assert result.status == "pass", result
     assert ("revert", ["pkg/a.py"]) in log
@@ -603,6 +621,7 @@ def test_the_dirty_read_happens_before_anything_is_reverted():
         reverted=reverted,
         run_tests=lambda subset: _tests(*subset, failed=tuple(subset)),
         exempt=[],
+        diff="",
     )
     assert order == ["dirty", "revert"]
 
@@ -643,6 +662,7 @@ def test_a_witness_whose_subject_the_diff_never_touched_is_skipped():
         reverted=_refuse,
         run_tests=_refuse_run,
         exempt=[],
+        diff="",
     )
     assert result.status == "skip"
     assert "session.py" in result.summary
@@ -668,6 +688,7 @@ def test_a_witness_whose_subject_the_diff_did_touch_is_still_judged():
         reverted=lambda paths: _reverted(paths, log=log),
         run_tests=lambda subset: _tests(*subset),
         exempt=[],
+        diff="",
     )
     assert result.status == "fail"
     assert [f.file for f in result.failures] == [witness]
@@ -702,6 +723,7 @@ def test_a_mutant_naming_a_test_file_does_not_exempt_its_witness():
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=lambda subset: _tests(*subset),
         exempt=[],
+        diff="",
     )
     assert result.status == "fail"
     assert [f.file for f in result.failures] == [witness]
@@ -738,6 +760,7 @@ def test_a_witness_whose_declared_subject_the_diff_changed_is_judged_and_named()
             reverted=lambda paths: _reverted(paths, log=[]),
             run_tests=lambda subset: _tests(*subset, failed=failed),
             exempt=[],
+            diff="",
         )
 
     # A subject the diff changed keeps the witness judged, and theater here
@@ -773,6 +796,7 @@ def test_a_witness_whose_declared_subject_the_diff_changed_is_judged_and_named()
         reverted=_refuse,
         run_tests=_refuse_run,
         exempt=[],
+        diff="",
     )
     assert result.status == "skip"
     assert witness in result.summary and _UNTOUCHED in result.summary
@@ -802,6 +826,7 @@ def test_a_witness_whose_declared_subject_the_diff_changed_is_judged_and_named()
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=lambda subset: _tests(*subset),
         exempt=[],
+        diff="",
     )
     assert result.status == "fail"
     assert sorted(f.file for f in result.failures) == sorted(w[:4])
@@ -842,6 +867,7 @@ def test_a_witness_is_set_aside_only_when_its_mutant_and_its_subject_lie_outside
                 reverted=lambda paths: _reverted(paths, log=[]),
                 run_tests=lambda subset: _tests(*subset),
                 exempt=[],
+                diff="",
             )
             pair = (mutant_key, subject_key)
             if pair in aside_pairs:
@@ -871,6 +897,7 @@ def test_a_witness_two_criteria_disagree_on_stays_set_aside():
         reverted=_refuse,
         run_tests=_refuse_run,
         exempt=[],
+        diff="",
     )
     assert result.status == "skip"
     assert witness in result.summary
@@ -896,6 +923,7 @@ def test_a_witness_two_subjects_keep_is_counted_once():
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=lambda subset: _tests(*subset),
         exempt=[],
+        diff="",
     )
     assert "1 witness(es) a declared subject kept" in result.summary
     assert f"{witness} ({_CHANGED})" in result.summary
@@ -922,6 +950,7 @@ def test_an_exempt_new_test_is_left_out_of_the_reverted_run_and_named():
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
         exempt=["t.py::test_rebut", "t.py::test_a"],
+        diff="",
     )
     assert captured == [["t.py::test_new"]]
     assert result.status == "pass"
@@ -945,6 +974,7 @@ def test_a_diff_whose_every_new_test_is_exempt_skips_saying_so_and_names_each():
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=lambda subset: _tests(*subset),
         exempt=rebut,
+        diff="",
     )
     assert result.status == "skip"
     assert result.summary.startswith("every new test is exempt")
@@ -975,6 +1005,7 @@ def _revert(run_tests, *, acceptance=(), results=None, changed_files=("pkg/a.py"
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=run_tests,
         exempt=[],
+        diff="",
     )
 
 
@@ -1190,6 +1221,7 @@ def _one_absent_id_beside(tmp_path, witness_body):
         reverted=lambda paths: _reverted(paths, log=[]),
         run_tests=_real_tests_gate(tmp_path),
         exempt=[],
+        diff="",
     )
 
 
@@ -1207,3 +1239,791 @@ def test_one_uncollectable_new_id_no_longer_hides_a_witness_that_passes(tmp_path
     result = _one_absent_id_beside(tmp_path, "assert True")
     assert result.status == "fail", result.summary
     assert [f.file for f in result.failures] == ["tests/test_new.py::test_witness"]
+
+
+# Backlog item 49: the second, rewritten-test subset `locations` drives.
+# Every helper below builds a real `git diff`, under the pinned flags.
+
+
+def _git(repo, *args: str):
+    import subprocess
+
+    return subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+_REWRITE_BASE = (
+    "def test_added_inside():\n"
+    "    before = 1\n"
+    "    assert before == 1\n"
+    "\n"
+    "\n"
+    "def test_removed_last():\n"
+    "    before = 1\n"
+    "    assert before == 1\n"
+    "\n"
+    "\n"
+    "# marker line directly above test_removed_above\n"
+    "def test_removed_above():\n"
+    "    before = 1\n"
+    "    assert before == 1\n"
+    "\n"
+    "\n"
+    "def test_added_at_first():\n"
+    "    before = 1\n"
+    "    assert before == 1\n"
+    "\n"
+    "\n"
+    "def test_untouched():\n"
+    "    before = 1\n"
+    "    assert before == 1\n"
+)
+
+_REWRITE_HEAD = (
+    "def test_added_inside():\n"
+    "    before = 1\n"
+    "    added = 2\n"
+    "    assert before == 1\n"
+    "\n"
+    "\n"
+    "def test_removed_last():\n"
+    "    before = 1\n"
+    "\n"
+    "\n"
+    "def test_removed_above():\n"
+    "    before = 1\n"
+    "    assert before == 1\n"
+    "\n"
+    "\n"
+    "def test_added_at_first():  # renamed\n"
+    "    before = 1\n"
+    "    assert before == 1\n"
+    "\n"
+    "\n"
+    "def test_untouched():\n"
+    "    before = 1\n"
+    "    assert before == 1\n"
+)
+
+
+def _rewrite_fixture(tmp_path) -> str:
+    """A real diff rewriting four tests of `tests/test_thing.py` in place.
+    One gets an added line inside it. One loses its last line. One loses
+    the line directly above it. One gets a changed first line. A fifth
+    test stays alone. `src.py` also changes, so a source side exists to
+    revert."""
+    repo = tmp_path / "rewrite_repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "src.py").write_text("def helper():\n    return 1\n")
+    (repo / "tests").mkdir()
+    (repo / "tests" / "test_thing.py").write_text(_REWRITE_BASE)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "base")
+    base_sha = _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+    (repo / "src.py").write_text("def helper():\n    return 2\n")
+    (repo / "tests" / "test_thing.py").write_text(_REWRITE_HEAD)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "head")
+
+    from saffron.cell.worktree import DIFF_FLAGS
+
+    return _git(repo, "diff", *DIFF_FLAGS, f"{base_sha}..HEAD").stdout
+
+
+def _gate_result(names, *, locations=None, failed=()):
+    """A `tests` result built through `GateResult.model_validate`, from
+    plain dicts, so this module keeps collecting against the base
+    contract with the source reverted."""
+    payload = {
+        "gate": "tests",
+        "status": "fail" if failed else "pass",
+        "tool": "pytest 8.3.2",
+        "collected": list(names),
+        "failures": [{"file": n, "code": n, "message": "x"} for n in failed],
+    }
+    if locations is not None:
+        payload["locations"] = locations
+    return GateResult.model_validate(payload)
+
+
+def test_the_second_subset_is_each_old_test_a_changed_line_falls_inside(tmp_path):
+    diff = _rewrite_fixture(tmp_path)
+    locations = {
+        "tests/test_thing.py::test_added_inside": {
+            "file": "tests/test_thing.py",
+            "first": 1,
+            "last": 4,
+        },
+        "tests/test_thing.py::test_removed_last": {
+            "file": "tests/test_thing.py",
+            "first": 7,
+            "last": 8,
+        },
+        "tests/test_thing.py::test_removed_above": {
+            "file": "tests/test_thing.py",
+            "first": 11,
+            "last": 13,
+        },
+        "tests/test_thing.py::test_added_at_first": {
+            "file": "tests/test_thing.py",
+            "first": 16,
+            "last": 18,
+        },
+        # Located, but a changed line never reaches its own span.
+        "tests/test_thing.py::test_untouched": {
+            "file": "tests/test_thing.py",
+            "first": 21,
+            "last": 23,
+        },
+        # A file the diff left alone, under `test_paths` all the same.
+        "tests/test_other.py::test_other": {
+            "file": "tests/test_other.py",
+            "first": 1,
+            "last": 3,
+        },
+        # A real changed line, outside the repo's declared `test_paths`.
+        "src.py::test_as_source": {"file": "src.py", "first": 1, "last": 2},
+        # A `preserves` witness, overlapping a changed line all the same.
+        "tests/test_thing.py::test_preserved": {
+            "file": "tests/test_thing.py",
+            "first": 1,
+            "last": 4,
+        },
+        # An exempt name, overlapping a changed line.
+        "tests/test_thing.py::test_exempt": {
+            "file": "tests/test_thing.py",
+            "first": 7,
+            "last": 8,
+        },
+        # A name reading as a command-line option, overlapping a changed line.
+        "--deselect=tests/test_thing.py::test_option": {
+            "file": "tests/test_thing.py",
+            "first": 11,
+            "last": 13,
+        },
+        # The first subset's own candidate, overlapping a changed line too.
+        "tests/test_thing.py::test_brand_new": {
+            "file": "tests/test_thing.py",
+            "first": 16,
+            "last": 18,
+        },
+        # Collected at base alone. A head-only intersection drops it.
+        "tests/test_thing.py::test_only_base": {
+            "file": "tests/test_thing.py",
+            "first": 7,
+            "last": 8,
+        },
+        # The two blank lines after `test_added_inside` sit inside the
+        # hunk, but neither is a changed line on its own.
+        "tests/test_thing.py::test_context_only": {
+            "file": "tests/test_thing.py",
+            "first": 5,
+            "last": 6,
+        },
+    }
+    both_sides = [
+        "tests/test_thing.py::test_added_inside",
+        "tests/test_thing.py::test_removed_last",
+        "tests/test_thing.py::test_removed_above",
+        "tests/test_thing.py::test_added_at_first",
+        "tests/test_thing.py::test_untouched",
+        "tests/test_thing.py::test_no_location",
+        "tests/test_other.py::test_other",
+        "src.py::test_as_source",
+        "tests/test_thing.py::test_preserved",
+        "tests/test_thing.py::test_exempt",
+        "--deselect=tests/test_thing.py::test_option",
+        "tests/test_thing.py::test_context_only",
+    ]
+    # A declared witness collected on both sides, reached by a changed line.
+    locations["tests/test_thing.py::test_declared"] = {
+        "file": "tests/test_thing.py",
+        "first": 1,
+        "last": 4,
+    }
+    both_sides.append("tests/test_thing.py::test_declared")
+    before = [*both_sides, "tests/test_thing.py::test_only_base"]
+    after = [*both_sides, "tests/test_thing.py::test_brand_new"]
+    # A location for a name with none at head, read only if the baseline's
+    # own map were wrongly consulted too.
+    base_locations = {
+        "tests/test_thing.py::test_no_location": {
+            "file": "tests/test_thing.py",
+            "first": 1,
+            "last": 4,
+        }
+    }
+
+    calls: list[list[str]] = []
+    log: list = []
+
+    def run_tests(subset):
+        calls.append(list(subset))
+        log.append(("run", list(subset)))
+        return _gate_result(subset, failed=tuple(subset))
+
+    result = revert_gate(
+        prior=[_gate_result(before, locations=base_locations)],
+        results=[_gate_result(after, locations=locations)],
+        acceptance=[
+            Criterion(
+                claim="preserved",
+                witness="tests/test_thing.py::test_preserved",
+                preserves=True,
+            ),
+            Criterion(claim="w", witness="tests/test_thing.py::test_declared"),
+        ],
+        changed_files=["src.py", "tests/test_thing.py"],
+        test_paths=["tests/**"],
+        dirty=lambda: [],
+        reverted=lambda paths: _reverted(paths, log=log),
+        run_tests=run_tests,
+        exempt=["tests/test_thing.py::test_exempt"],
+        diff=diff,
+    )
+    assert result is not None
+    assert calls[0] == [
+        "tests/test_thing.py::test_brand_new",
+        "tests/test_thing.py::test_declared",
+    ]
+    assert calls[1] == [
+        "tests/test_thing.py::test_added_at_first",
+        "tests/test_thing.py::test_added_inside",
+        "tests/test_thing.py::test_removed_above",
+        "tests/test_thing.py::test_removed_last",
+    ]
+    # Both runs fall inside the one revert, never after the restore.
+    assert log == [
+        ("revert", ["src.py"]),
+        ("run", calls[0]),
+        ("run", calls[1]),
+        ("restore", ["src.py"]),
+    ]
+
+
+_POOL = ["t.py::test_old1", "t.py::test_old2"]
+_NEW = "t.py::test_new"
+_RAISE = "raise"
+
+
+def _two_old_tests_fixture(tmp_path) -> str:
+    """A real diff rewriting both old tests in place, each by one line
+    added inside it. A source file changes too, so a side exists to
+    revert."""
+    repo = tmp_path / "two_repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "src.py").write_text("def helper():\n    return 1\n")
+    (repo / "tests").mkdir()
+    (repo / "tests" / "t.py").write_text(
+        "def test_old1():\n    pass\n\n\ndef test_old2():\n    pass\n"
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "base")
+    base_sha = _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+    (repo / "src.py").write_text("def helper():\n    return 2\n")
+    (repo / "tests" / "t.py").write_text(
+        "def test_old1():\n    pass\n    pass\n\n\ndef test_old2():\n    pass\n    pass\n"
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "head")
+
+    from saffron.cell.worktree import DIFF_FLAGS
+
+    return _git(repo, "diff", *DIFF_FLAGS, f"{base_sha}..HEAD").stdout
+
+
+_POOL_LOCATIONS = {
+    "t.py::test_old1": {"file": "tests/t.py", "first": 1, "last": 3},
+    "t.py::test_old2": {"file": "tests/t.py", "first": 6, "last": 8},
+}
+
+
+def _first_outcomes() -> dict:
+    """The eight first-run outcomes criteria 3 and 4 share, keyed by name:
+    a callable the handed subset is passed, `_RAISE`, or `None` where the
+    subset is never handed at all. The second element says whether a new
+    name is declared, so `before`/`after` can be built either way."""
+    return {
+        "pass": (lambda subset: _tests(*subset, failed=tuple(subset)), True),
+        "fail": (lambda subset: _tests(*subset), True),
+        "skip_unreadable": (
+            lambda subset: GateResult(gate="tests", status="skip"),
+            True,
+        ),
+        "skip_unenumerated": (
+            lambda subset: GateResult.model_validate(
+                {"gate": "tests", "status": "pass", "tool": "pytest 8.3.2"}
+            ),
+            True,
+        ),
+        "skip_keyed_elsewhere": (
+            lambda subset: _tests_keyed_elsewhere(*subset, failed=tuple(subset)),
+            True,
+        ),
+        "error_unaccounted": (
+            lambda subset: GateResult.model_validate(
+                {
+                    "gate": "tests",
+                    "status": "fail",
+                    "tool": "pytest 8.3.2",
+                    "collected": [],
+                    "uncollected": [],
+                }
+            ),
+            True,
+        ),
+        "error_raised": (_RAISE, True),
+        "skip_adds_no_new_test": (None, False),
+    }
+
+
+def _second_outcomes() -> dict:
+    """The eight second-run outcomes criteria 3 and 4 share, keyed by name
+    the same way `_first_outcomes` is."""
+    return {
+        "one_passing": (
+            lambda subset: GateResult.model_validate(
+                {
+                    "gate": "tests",
+                    "status": "fail",
+                    "tool": "pytest 8.3.2",
+                    "collected": list(subset),
+                    "failures": [
+                        {
+                            "file": "t.py::test_old2",
+                            "code": "t.py::test_old2",
+                            "message": "x",
+                        }
+                    ],
+                }
+            ),
+        ),
+        "all_passing": (
+            lambda subset: GateResult.model_validate(
+                {
+                    "gate": "tests",
+                    "status": "pass",
+                    "tool": "pytest 8.3.2",
+                    "collected": list(subset),
+                    "failures": [],
+                }
+            ),
+        ),
+        "all_failing": (
+            lambda subset: GateResult.model_validate(
+                {
+                    "gate": "tests",
+                    "status": "fail",
+                    "tool": "pytest 8.3.2",
+                    "collected": list(subset),
+                    "failures": [
+                        {"file": n, "code": n, "message": "x"} for n in subset
+                    ],
+                }
+            ),
+        ),
+        "errored": (
+            lambda subset: GateResult.model_validate(
+                {"gate": "tests", "status": "error", "summary": "boom"}
+            ),
+        ),
+        "raised": (_RAISE,),
+        "unenumerated": (
+            lambda subset: GateResult.model_validate(
+                {"gate": "tests", "status": "pass", "tool": "pytest 8.3.2"}
+            ),
+        ),
+        "keyed_elsewhere": (
+            lambda subset: GateResult.model_validate(
+                {
+                    "gate": "tests",
+                    "status": "fail",
+                    "tool": "pytest 8.3.2",
+                    "collected": list(subset),
+                    "failures": [
+                        {"file": n, "code": "AssertionError", "message": "x"}
+                        for n in subset
+                    ],
+                }
+            ),
+        ),
+        "uncollected": (
+            lambda subset: GateResult.model_validate(
+                {
+                    "gate": "tests",
+                    "status": "pass",
+                    "tool": "pytest 8.3.2",
+                    "collected": [],
+                    "failures": [],
+                }
+            ),
+        ),
+    }
+
+
+def _crossed_run_tests(first_behavior, second_behavior, calls=None):
+    """One `run_tests` fake, dispatched on whether `_NEW` is in the handed
+    subset: the shared helper criteria 3 and 4 both build their calls
+    from."""
+
+    def run_tests(subset):
+        if calls is not None:
+            calls.append(list(subset))
+        behavior = first_behavior if _NEW in subset else second_behavior
+        if behavior == _RAISE:
+            raise RuntimeError("the reverted run crashed")
+        return behavior(subset)
+
+    return run_tests
+
+
+def test_the_second_subset_never_changes_what_revert_decides(tmp_path):
+    diff = _two_old_tests_fixture(tmp_path)
+    first_outcomes = _first_outcomes()
+    second_outcomes = _second_outcomes()
+
+    for first_key, (first_behavior, subset_present) in first_outcomes.items():
+        after = [*_POOL, _NEW] if subset_present else list(_POOL)
+        for second_key, (second_behavior,) in second_outcomes.items():
+            with_calls: list[list[str]] = []
+            without_calls: list[list[str]] = []
+            with_second = revert_gate(
+                prior=[_gate_result(_POOL)],
+                results=[_gate_result(after, locations=_POOL_LOCATIONS)],
+                acceptance=[],
+                changed_files=["src.py", "tests/t.py"],
+                test_paths=["tests/**"],
+                dirty=lambda: [],
+                reverted=lambda paths: _reverted(paths, log=[]),
+                run_tests=_crossed_run_tests(
+                    first_behavior, second_behavior, calls=with_calls
+                ),
+                exempt=[],
+                diff=diff,
+            )
+            without_second = revert_gate(
+                prior=[_gate_result(_POOL)],
+                results=[_gate_result(after)],
+                acceptance=[],
+                changed_files=["src.py", "tests/t.py"],
+                test_paths=["tests/**"],
+                dirty=lambda: [],
+                reverted=lambda paths: _reverted(paths, log=[]),
+                run_tests=_crossed_run_tests(
+                    first_behavior, second_behavior, calls=without_calls
+                ),
+                exempt=[],
+                diff=diff,
+            )
+            case = f"{first_key} x {second_key}"
+            first_calls = [[_NEW]] if subset_present else []
+            # Two runs, never one union, and the second runs with no new test.
+            assert with_calls == [*first_calls, _POOL], case
+            assert without_calls == first_calls, case
+            assert with_second.status == without_second.status, case
+            assert with_second.failures == without_second.failures, case
+            assert with_second.tool == without_second.tool, case
+
+    # The second run happens inside the same revert, never after the
+    # restore.
+    log: list = []
+    run_tests = _crossed_run_tests(
+        first_outcomes["pass"][0], second_outcomes["all_passing"][0], calls=log
+    )
+    revert_gate(
+        prior=[_gate_result(_POOL)],
+        results=[_gate_result([*_POOL, _NEW], locations=_POOL_LOCATIONS)],
+        acceptance=[],
+        changed_files=["src.py", "tests/t.py"],
+        test_paths=["tests/**"],
+        dirty=lambda: [],
+        reverted=lambda paths: _reverted(paths, log=log),
+        run_tests=run_tests,
+        exempt=[],
+        diff=diff,
+    )
+    revert_index = log.index(("revert", ["src.py"]))
+    restore_index = log.index(("restore", ["src.py"]))
+    run_indices = [i for i, entry in enumerate(log) if isinstance(entry, list)]
+    assert run_indices
+    assert all(revert_index < i < restore_index for i in run_indices)
+
+    # A checkout or restore that fails is `error`, with a first subset and
+    # without one.
+    for after in ([*_POOL, _NEW], list(_POOL)):
+        for fails in ({"fail_on_enter": True}, {"fail_on_exit": True}):
+            broken = revert_gate(
+                prior=[_gate_result(_POOL)],
+                results=[_gate_result(after, locations=_POOL_LOCATIONS)],
+                acceptance=[],
+                changed_files=["src.py", "tests/t.py"],
+                test_paths=["tests/**"],
+                dirty=lambda: [],
+                reverted=lambda paths, fails=fails: _reverted(paths, log=[], **fails),
+                run_tests=_crossed_run_tests(
+                    first_outcomes["pass"][0], second_outcomes["all_passing"][0]
+                ),
+                exempt=[],
+                diff=diff,
+            )
+            case = f"{after} {fails}"
+            assert broken.status == "error", case
+            assert broken.failures == [], case
+            assert broken.tool is None, case
+
+    # A first subset that exemption empties still runs the second subset.
+    exempt_calls: dict[bool, list[list[str]]] = {True: [], False: []}
+    exempt_runs = {}
+    for located in (True, False):
+        exempt_runs[located] = revert_gate(
+            prior=[_gate_result(_POOL)],
+            results=[
+                _gate_result(
+                    [*_POOL, _NEW], locations=_POOL_LOCATIONS if located else None
+                )
+            ],
+            acceptance=[],
+            changed_files=["src.py", "tests/t.py"],
+            test_paths=["tests/**"],
+            dirty=lambda: [],
+            reverted=lambda paths: _reverted(paths, log=[]),
+            run_tests=_crossed_run_tests(
+                first_outcomes["pass"][0],
+                second_outcomes["all_passing"][0],
+                calls=exempt_calls[located],
+            ),
+            exempt=[_NEW],
+            diff=diff,
+        )
+    assert exempt_calls == {True: [_POOL], False: []}
+    with_exempt, without_exempt = exempt_runs[True], exempt_runs[False]
+    assert with_exempt.status == without_exempt.status
+    assert with_exempt.failures == without_exempt.failures
+    assert with_exempt.tool == without_exempt.tool
+    assert with_exempt.summary == without_exempt.summary + (
+        " — advisory, does not block: 2 of 2 rewritten test(s) passed "
+        "without their source: t.py::test_old1, t.py::test_old2"
+    )
+
+
+def test_each_verdict_after_the_reverted_run_carries_the_advisory(tmp_path):
+    diff = _two_old_tests_fixture(tmp_path)
+    first_outcomes = _first_outcomes()
+    second_outcomes = _second_outcomes()
+    unreadable_clause = (
+        " — advisory, does not block: no readable verdict for the rewritten test(s)"
+    )
+    clause_text = {
+        "one_passing": (
+            " — advisory, does not block: 1 of 2 rewritten test(s) passed "
+            "without their source: t.py::test_old1"
+        ),
+        "all_passing": (
+            " — advisory, does not block: 2 of 2 rewritten test(s) passed "
+            "without their source: t.py::test_old1, t.py::test_old2"
+        ),
+        "all_failing": (
+            " — advisory, does not block: 0 of 2 rewritten test(s) passed "
+            "without their source"
+        ),
+        "errored": unreadable_clause,
+        "raised": unreadable_clause,
+        "unenumerated": unreadable_clause,
+        "keyed_elsewhere": unreadable_clause,
+        "uncollected": (
+            " — advisory, does not block: 0 of 2 rewritten test(s) passed "
+            "without their source"
+        ),
+    }
+    main_keys = (
+        "pass",
+        "fail",
+        "skip_unreadable",
+        "skip_unenumerated",
+        "skip_keyed_elsewhere",
+        "skip_adds_no_new_test",
+    )
+    for first_key in main_keys:
+        first_behavior, subset_present = first_outcomes[first_key]
+        after = [*_POOL, _NEW] if subset_present else list(_POOL)
+        baseline = revert_gate(
+            prior=[_gate_result(_POOL)],
+            results=[_gate_result(after)],
+            acceptance=[],
+            changed_files=["src.py", "tests/t.py"],
+            test_paths=["tests/**"],
+            dirty=lambda: [],
+            reverted=lambda paths: _reverted(paths, log=[]),
+            run_tests=_crossed_run_tests(
+                first_behavior, second_outcomes["all_passing"][0]
+            ),
+            exempt=[],
+            diff=diff,
+        )
+        for second_key, (second_behavior,) in second_outcomes.items():
+            result = revert_gate(
+                prior=[_gate_result(_POOL)],
+                results=[_gate_result(after, locations=_POOL_LOCATIONS)],
+                acceptance=[],
+                changed_files=["src.py", "tests/t.py"],
+                test_paths=["tests/**"],
+                dirty=lambda: [],
+                reverted=lambda paths: _reverted(paths, log=[]),
+                run_tests=_crossed_run_tests(first_behavior, second_behavior),
+                exempt=[],
+                diff=diff,
+            )
+            case = f"{first_key} x {second_key}"
+            assert result.summary == baseline.summary + clause_text[second_key], case
+
+    # Five rewritten tests passing: named, but only the first three.
+    pool5 = [f"t.py::test_r{i}" for i in range(5)]
+    locations5 = {name: {"file": "tests/t.py", "first": 1, "last": 3} for name in pool5}
+
+    def run_tests5(subset):
+        return GateResult.model_validate(
+            {
+                "gate": "tests",
+                "status": "pass",
+                "tool": "pytest 8.3.2",
+                "collected": list(subset),
+                "failures": [],
+            }
+        )
+
+    result5 = revert_gate(
+        prior=[_gate_result(pool5)],
+        results=[_gate_result(pool5, locations=locations5)],
+        acceptance=[],
+        changed_files=["src.py", "tests/t.py"],
+        test_paths=["tests/**"],
+        dirty=lambda: [],
+        reverted=lambda paths: _reverted(paths, log=[]),
+        run_tests=run_tests5,
+        exempt=[],
+        diff=diff,
+    )
+    assert result5.summary == (
+        "the diff adds no new test"
+        " — advisory, does not block: 5 of 5 rewritten test(s) passed without "
+        "their source: t.py::test_r0, t.py::test_r1, t.py::test_r2"
+    )
+
+
+def test_with_no_locations_the_rewritten_tests_are_never_run(tmp_path):
+    readable_diff = _two_old_tests_fixture(tmp_path)
+    unreadable_diff = "diff --git a/x.py c/x.py\n"
+
+    # A diff with a first subset: one run, no second, for a readable diff
+    # and for one `revert` cannot read alike. Nothing reads either.
+    for diff in (readable_diff, unreadable_diff):
+        for locations in (None, {}):
+            calls: list[list[str]] = []
+
+            def run_tests(subset, calls=calls):
+                calls.append(list(subset))
+                return _tests(*subset, failed=tuple(subset))
+
+            result = revert_gate(
+                prior=[_gate_result(_POOL)],
+                results=[_gate_result([*_POOL, _NEW], locations=locations)],
+                acceptance=[],
+                changed_files=["src.py", "tests/t.py"],
+                test_paths=["tests/**"],
+                dirty=lambda: [],
+                reverted=lambda paths: _reverted(paths, log=[]),
+                run_tests=run_tests,
+                exempt=[],
+                diff=diff,
+            )
+            assert calls == [[_NEW]], (diff, locations)
+            assert result.status == "pass", (diff, locations)
+            assert (
+                result.summary
+                == "1 new test(s) failed without their source, as required"
+            )
+
+    # A diff with neither subset: today's skip, with today's own summary.
+    # Nothing here touches the worktree.
+    def _refuse_dirty():
+        raise AssertionError("locations=None/{} must never read dirty paths")
+
+    for diff in (readable_diff, unreadable_diff):
+        for locations in (None, {}):
+            result = revert_gate(
+                prior=[_gate_result(_POOL)],
+                results=[_gate_result(_POOL, locations=locations)],
+                acceptance=[],
+                changed_files=["tests/t.py"],
+                test_paths=["tests/**"],
+                dirty=_refuse_dirty,
+                reverted=_refuse,
+                run_tests=_refuse_run,
+                exempt=[],
+                diff=diff,
+            )
+            assert result.status == "skip", (diff, locations)
+            assert result.summary == "the diff adds no new test", (diff, locations)
+
+
+def test_a_diff_revert_cannot_read_leaves_the_second_subset_unrun_and_says_so():
+    # One diff `_split_blocks` rejects, and one block `_parse_block` rejects.
+    for bad_diff in (
+        "diff --git a/x.py c/x.py\n",
+        "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ bogus @@\n+x\n",
+    ):
+        _assert_unreadable_diff_unrun(bad_diff)
+
+
+def _assert_unreadable_diff_unrun(bad_diff):
+    unreadable_clause = (
+        " — advisory, does not block: the diff could not be read, so no "
+        "rewritten test could be checked"
+    )
+
+    # With a first subset: its verdict stands, and the clause still rides.
+    def run_tests(subset):
+        return _tests(*subset, failed=tuple(subset))
+
+    with_first = revert_gate(
+        prior=[_gate_result(_POOL)],
+        results=[_gate_result([*_POOL, _NEW], locations=_POOL_LOCATIONS)],
+        acceptance=[],
+        changed_files=["src.py", "tests/t.py"],
+        test_paths=["tests/**"],
+        dirty=lambda: [],
+        reverted=lambda paths: _reverted(paths, log=[]),
+        run_tests=run_tests,
+        exempt=[],
+        diff=bad_diff,
+    )
+    assert with_first.status == "pass"
+    assert with_first.summary == (
+        "1 new test(s) failed without their source, as required" + unreadable_clause
+    )
+
+    # Without one: today's skip for a diff that adds no new test, and
+    # nothing here is ever touched.
+    without_first = revert_gate(
+        prior=[_gate_result(_POOL)],
+        results=[_gate_result(_POOL, locations=_POOL_LOCATIONS)],
+        acceptance=[],
+        changed_files=["src.py", "tests/t.py"],
+        test_paths=["tests/**"],
+        dirty=lambda: [],
+        reverted=_refuse,
+        run_tests=_refuse_run,
+        exempt=[],
+        diff=bad_diff,
+    )
+    assert without_first.status == "skip"
+    assert without_first.summary == "the diff adds no new test" + unreadable_clause

@@ -485,3 +485,67 @@ def test_the_suite_leaves_the_policys_test_paths_out_of_size():
         _Tree(changed=changed, patch=diff), undeclared_baseline
     )
     assert [n.gate for n in undeclared_comparison.new_failures] == ["size"]
+
+
+class _RewriteTree(_Tree):
+    """A `tests` gate that reports `locations` on its full run (backlog
+    item 49), and plays along with whatever subset `revert` hands it."""
+
+    def run(self, argv, cwd, timeout_s):
+        if Path(argv[0]).name != "tests":
+            return super().run(argv, cwd, timeout_s)
+        self.calls.append("run tests")
+        subset = argv[1:]
+        if not subset:
+            payload = {
+                "gate": "tests",
+                "status": "pass",
+                "tool": "tests 1.0",
+                "collected": ["tests/test_a.py::test_old"],
+                "locations": {
+                    "tests/test_a.py::test_old": {
+                        "file": "tests/test_a.py",
+                        "first": 1,
+                        "last": 2,
+                    }
+                },
+            }
+        else:
+            payload = {
+                "gate": "tests",
+                "status": "pass",
+                "tool": "tests 1.0",
+                "collected": subset,
+            }
+        return Completed(0, json.dumps(payload), "")
+
+
+def test_the_suite_hands_revert_its_diff_so_a_rewritten_test_is_reported():
+    diff = "".join(
+        [
+            "diff --git a/src/a.py b/src/a.py\n",
+            "--- a/src/a.py\n+++ b/src/a.py\n",
+            "@@ -1,1 +1,1 @@\n",
+            "-x = 1\n",
+            "+x = 2\n",
+            "diff --git a/tests/test_a.py b/tests/test_a.py\n",
+            "--- a/tests/test_a.py\n+++ b/tests/test_a.py\n",
+            "@@ -1,2 +1,2 @@\n",
+            "-def test_old(): pass\n",
+            "+def test_old(): pass  # x\n",
+            " marker\n",
+        ]
+    )
+    policy = Policy(
+        gates={"tests": GateDeclaration()},
+        integrity=IntegrityPatterns(test_paths=["tests/**"]),
+    )
+    spec = _Spec(touches=["src/**", "tests/**"])
+    suite = _suite(("tests",), policy=policy, spec=spec)
+    baseline = suite.baseline(_RewriteTree())
+    comparison = suite.against(
+        _RewriteTree(changed=["src/a.py", "tests/test_a.py"], patch=diff), baseline
+    )
+    revert_result = next(r for r in comparison.run.results if r.gate == "revert")
+    assert "tests/test_a.py::test_old" in revert_result.summary
+    assert comparison.new_failures == ()

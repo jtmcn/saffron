@@ -83,7 +83,11 @@ GitHub issues remain in use only for research/evidence records under
     file: saffron/phases/package.py
     find: notes=outcome.notes
     replace: notes=""
+    case: a packaged body built with no notes attached
   ```
+
+  `case` names the part of the claim the witness leaves untested, and a
+  survived-mutant failure quotes it for REPAIR.
 
   An inline `mutant:` on a queued spec is refused at intake.
 

@@ -1,11 +1,12 @@
 ---
 id: b-e7b6a2
 title: "`saffron watch` cannot follow a stack batch's follow-up writer or its end review, because both print only"
-status: open
+status: done
+closed: 2026-11-09
 tier: 2
 filed: 2026-10-11
 specs: [SA-0354]
-prs: []
+prs: [1098]
 commits: []
 cites: [§4.7]
 related: [b-4e1b6d, b-2d09de]
@@ -32,3 +33,4 @@ drives one of each and reads its events back through the follower.
 ## Record
 
 - 2026-10-11: filed from the spec loop's run 34 (#821).
+- 2026-11-09: `SA-0354` (#1098) landed in the spec loop's run 56. A stack batch's end review and follow-up writer log under the batch key, so `saffron watch` follows them.

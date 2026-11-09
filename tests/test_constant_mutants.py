@@ -16,7 +16,7 @@ from saffron.cell.worktree import DIFF_FLAGS
 from saffron.gates import runner
 from saffron.gates.contract import GateResult
 from saffron.gates.suite import GateSuite
-from saffron.intake import Criterion
+from saffron.intake import Criterion, Mutant
 from saffron.repos.policy import GateDeclaration, IntegrityPatterns, Policy
 from tests.mutation import host_mutator
 
@@ -380,3 +380,160 @@ def test_a_quantifier_in_witness_body_is_regex_not_a_format_field():
     assert [(c.witness, c.mutant.file, c.mutant.find) for c in derived if c.mutant] == [
         ("tests/test_stuff.py::test_uses_new", "a.py", 'NEW = "')
     ]
+
+
+def test_a_constant_mutant_whose_find_matches_twice_stays_unproven(
+    tmp_path, monkeypatch
+):
+    """A constant mutant whose `find` matches its file twice stays unproven,
+    never a failure, because it is `derived` rather than spec-declared.
+    Driven through one `GateSuite._run`, over a real git tree and a real
+    `tests` gate. The diff gives `LIMIT` twice in one file. One criterion's
+    witness reads it back, the constant mutant's own. Another declares its
+    own mutant, whose `find` also matches the same file twice. Only the
+    declared one fails."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "README.md").write_text("base\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "base")
+    base_sha = _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+    (repo / "prompts.py").write_text(
+        "LIMIT = 3\nLIMIT = 3\n\n\ndef get_limit():\n    return LIMIT\n"
+    )
+    (repo / "pytest.ini").write_text("[pytest]\npythonpath = .\n")
+    (repo / "tests").mkdir()
+    (repo / "tests" / "test_prompts.py").write_text(
+        "import prompts\n\n\n"
+        "def test_a():\n    assert prompts.LIMIT == prompts.get_limit()\n\n\n"
+        "def test_b():\n    assert prompts.LIMIT == 3\n"
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "head")
+
+    gate = tmp_path / "tests_gate.py"
+    gate.write_text(_TESTS_GATE.format(python=sys.executable))
+    gate.chmod(0o755)
+
+    reads_limit_back = Criterion(
+        claim="reads the limit back", witness="tests/test_prompts.py::test_a"
+    )
+    pins_the_literal = Criterion(
+        claim="matches the pinned literal",
+        witness="tests/test_prompts.py::test_b",
+        mutant=Mutant(file="prompts.py", find="LIMIT = 3", replace="LIMIT = 4"),
+    )
+    policy = Policy(
+        gates={"tests": GateDeclaration()},
+        integrity=IntegrityPatterns(test_paths=["tests/**"]),
+        witness=PATTERNS,
+    )
+    suite = GateSuite(
+        gates={"tests": gate},
+        spec=_Spec(acceptance=[reads_limit_back, pins_the_literal]),
+        policy=policy,
+        diff_base=base_sha,
+    )
+    prior = [GateResult(gate="tests", status="pass", tool="pytest 0", collected=[])]
+
+    run = suite._run(_GitTree(repo), prior=prior)
+
+    witness = next(r for r in run.results if r.gate == "witness")
+    assert witness.status == "fail"
+    assert [(f.file, f.code) for f in witness.failures] == [
+        (pins_the_literal.witness, "mutant-find-repeated")
+    ]
+    assert reads_limit_back.witness in witness.summary
+
+    assert _git(repo, "diff", "HEAD").stdout == ""
+
+
+def test_a_find_repeated_at_head_is_one_new_failure_and_no_drift(tmp_path, monkeypatch):
+    """A find-count failure at head against a base whose witness died is
+    one new failure, and never drift. The `fail` carries the head `tests`
+    result's own `tool`, which `suite_drift` reads as unchanged. One
+    criterion's mutant matches once at base, where its witness dies, and
+    twice at head. A second names a file that does not exist, and stays
+    unproven on both sides, contributing no `tool` of its own."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    # Ignored up front: the tests gate's own `__pycache__` must never be
+    # swept into the head commit by the `git add -A` below.
+    (repo / ".gitignore").write_text("__pycache__/\n")
+    (repo / "pytest.ini").write_text("[pytest]\npythonpath = .\n")
+    (repo / "guard.py").write_text(
+        "TARGET = 1\n\n\ndef check():\n    return TARGET == 1\n"
+    )
+    (repo / "tests").mkdir()
+    (repo / "tests" / "test_guard.py").write_text(
+        "import guard\n\n\n"
+        "def test_guard():\n    assert guard.check()\n\n\n"
+        "def test_other():\n    assert True\n"
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "base")
+    base_sha = _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+    gate = tmp_path / "tests_gate.py"
+    gate.write_text(_TESTS_GATE.format(python=sys.executable))
+    gate.chmod(0o755)
+
+    guard_dies = Criterion(
+        claim="the guard holds",
+        witness="tests/test_guard.py::test_guard",
+        mutant=Mutant(file="guard.py", find="TARGET = 1", replace="TARGET = 42"),
+        preserves=True,
+    )
+    file_missing = Criterion(
+        claim="unrelated, by design",
+        witness="tests/test_guard.py::test_other",
+        mutant=Mutant(file="absent.py", find="X", replace="Y"),
+        preserves=True,
+    )
+    policy = Policy(
+        gates={"tests": GateDeclaration()},
+        integrity=IntegrityPatterns(test_paths=["tests/**"]),
+    )
+    suite = GateSuite(
+        gates={"tests": gate},
+        spec=_Spec(
+            touches=["guard.py", "pytest.ini", "tests/test_guard.py"],
+            acceptance=[guard_dies, file_missing],
+        ),
+        policy=policy,
+        diff_base=base_sha,
+    )
+
+    baseline = suite.baseline(_GitTree(repo))
+    base_witness = next(r for r in baseline.results if r.gate == "witness")
+    assert base_witness.status == "pass"
+    assert base_witness.tool is not None
+
+    # At head the same file holds `TARGET = 1` twice, still correct, so
+    # the declared mutant's own `find` now matches twice instead of once.
+    (repo / "guard.py").write_text(
+        "TARGET = 1\nTARGET = 1\n\n\ndef check():\n    return TARGET == 1\n"
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "head")
+
+    comparison = suite.against(_GitTree(repo), baseline)
+
+    assert comparison.aborted == ()
+    assert comparison.drift == ()
+    assert [(nf.gate, nf.failure.code) for nf in comparison.new_failures] == [
+        ("witness", "mutant-find-repeated")
+    ]
+    head_witness = next(r for r in comparison.run.results if r.gate == "witness")
+    assert head_witness.tool == base_witness.tool

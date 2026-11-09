@@ -700,6 +700,7 @@ TURN_PROMPTS = {
     "wrong-version": review.WRONG_VERSION_PROMPT,
     "spec-review-extract": spec_review.SPEC_REVIEW_EXTRACT_PROMPT,
     "spec-writer-extract": spec_review.SPEC_WRITER_EXTRACT_PROMPT,
+    "spec-writer-send-back": spec_review.SPEC_WRITER_SEND_BACK_PROMPT,
 }
 
 

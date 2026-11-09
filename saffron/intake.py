@@ -109,6 +109,11 @@ class Mutant(BaseModel):
     file: str
     find: str
     replace: str = ""
+    case: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    """One sentence naming the case `claim` leaves untested (§5.4.1).
+
+    Excluded from a dump while `None`, so an older `Mutant` round-trips
+    unchanged."""
 
     @field_validator("file")
     @classmethod
@@ -125,6 +130,17 @@ class Mutant(BaseModel):
         # discovered at gate time.
         if not value:
             raise ValueError("mutant find text is empty")
+        return value
+
+    @field_validator("case")
+    @classmethod
+    def _case_is_not_blank(cls, value: str | None) -> str | None:
+        # `None` passes through untouched, never stripped: this is the check
+        # itself, not a normalizer, so a declared case keeps its own spacing.
+        if value is None:
+            return value
+        if not value.strip():
+            raise ValueError("mutant case is blank")
         return value
 
 
@@ -380,7 +396,8 @@ def parse_spec(text: str) -> Spec:
 
 def refuse_disclosed_mutants(spec: Spec) -> None:
     """Raise `DisclosedMutantError` where a criterion's mutant names text
-    `spec` also puts in its own body, a claim, or a wrong version."""
+    `spec` also puts in its own body, a claim, a wrong version, or a
+    declared case."""
     # Item 82: a mutant the spec itself spells out is a mutant handed to the
     # implementer. The body *is* prompt text — `build_system_prompt` passes it
     # as the substituted `{spec}` value — and so is a claim, which
@@ -403,6 +420,11 @@ def refuse_disclosed_mutants(spec: Spec) -> None:
     # already unusable; that argument thins as the text gets longer, and
     # backlog item 82 carries what to do if it starts biting.
     claims = [(c.witness, c.claim) for c in spec.acceptance]
+    cases = [
+        (c.witness, c.mutant.case)
+        for c in spec.acceptance
+        if c.mutant is not None and c.mutant.case is not None
+    ]
     for criterion in spec.acceptance:
         if criterion.mutant is None:
             continue
@@ -422,6 +444,16 @@ def refuse_disclosed_mutants(spec: Spec) -> None:
             for holder in spec.acceptance:
                 if any(find in version for version in holder.wrong_versions):
                     where = f"the wrong versions of {holder.witness}"
+                    break
+        # A survived-mutant message hands REPAIR a declared case too.
+        if where is None:
+            for witness, case in cases:
+                if find in case:
+                    where = (
+                        "its own case"
+                        if witness == criterion.witness
+                        else f"the case for {witness}"
+                    )
                     break
         if where is not None:
             raise DisclosedMutantError(

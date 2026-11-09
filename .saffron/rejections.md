@@ -2838,3 +2838,40 @@ critic's own, so they have no line.
   #1090.
 - `SA-0352` (#1090): `package` and `finish` take no home lock either.
   **Bucket 3**, contract. Kept as b-879e72.
+
+## 2026-11-09, spec loop run 56 (#1094, #1095, #1096, #1097, #1099, #1101)
+
+- `SA-0341` (#1094): the criterion 5 witness never checked that `run_rebut`
+  passes its `spec_id` on. **Bucket 3**, adequacy. **Landed:** a review
+  commit on #1094.
+- `SA-0341` (#1094): two comments still said the rebuttal is one turn
+  before the extraction, and two witness docstrings named the wrong
+  criterion. **Bucket 3**, conventions. **Landed:** a review commit on
+  #1094.
+- `SA-0341` (#1094): ADR 0004 still said the rebuttal is two turns.
+  **Bucket 3**, contract, held out by `forbidden`. **Landed:** this PR.
+- `SA-0342` (#1095): seven of the spec's wrong versions survived their own
+  criterion's witness. **Bucket 3**, adequacy. **Landed:** a review commit
+  on #1095.
+- `SA-0342` (#1095): `revert_gate`'s docstring stated the opposite trigger,
+  and a field docstring held semicolons. **Bucket 3**, conventions.
+  **Landed:** a review commit on #1095.
+- `SA-0351` (#1096): the comments the spec named for rewriting still called
+  a miscounted find unproven. **Bucket 1**, the `prose` gate, which held the
+  docstrings out of reach (b-ec607a). **Landed:** a review commit on #1096,
+  in comments.
+- `SA-0355` (#1097): the `case` field's docstring cited an item, and the
+  doc line misdefined a case against §5.4.1. **Bucket 3**, conventions.
+  **Landed:** a review commit on #1097.
+- `SA-0353` (#1099): REBUT's new witness aliased `pytest`, and the task
+  ended `EXHAUSTED` on it. **Bucket 1**, the `structure` gate, judged
+  inside REBUT (b-8826cf). **Landed:** a review commit on #1099.
+- `SA-0353` (#1099): criterion 2's witness drove the reverse of its claim,
+  and criterion 1's skipped the re-ask, the bound and the none-parsed
+  branch. **Bucket 3**, adequacy. **Landed:** a review commit on #1099.
+- `SA-0353` (#1099): ten citations named `SA-0340`, and a docstring said
+  the session keeps a draft with no fault. **Bucket 3**, conventions.
+  **Landed:** a review commit on #1099.
+- `SA-0359` (#1101): the docstring witness passed a second `gate_result`
+  count beside the right one, and its word map stopped at five.
+  **Bucket 3**, adequacy. **Landed:** a review commit on #1101.

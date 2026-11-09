@@ -221,3 +221,90 @@ def test_a_mutants_file_that_cannot_apply_to_its_spec_is_refused():
         attach_mutants(
             wrong_version_disclosed, {"w1": Mutant(file="a.py", find="RATE_Y")}
         )
+
+
+def test_a_mutant_case_loads_when_declared_and_is_refused_blank():
+    """A mutants file's entry declares `case` as a string, loaded as
+    written, whitespace included, and as `None` when the entry omits it.
+    An empty or whitespace-only `case` is refused as a `MutantsError`
+    naming the file."""
+    from saffron.mutants import MutantsError, parse_mutants
+
+    found = parse_mutants(
+        "plain:\n  file: a.py\n  find: x\n  case: a plain case\n"
+        "padded:\n  file: a.py\n  find: y\n  case: '  padded case  '\n"
+        "omitted:\n  file: a.py\n  find: z\n",
+        "SA-1.yaml",
+    )
+    assert found["plain"].case == "a plain case"
+    assert found["padded"].case == "  padded case  "
+    assert found["omitted"].case is None
+
+    for bad_case in ("''", "'   '"):
+        with pytest.raises(MutantsError) as excinfo:
+            parse_mutants(
+                f"bad:\n  file: a.py\n  find: x\n  case: {bad_case}\n", "SA-1.yaml"
+            )
+        assert "SA-1.yaml" in str(excinfo.value)
+
+
+def test_a_case_that_holds_any_mutants_find_is_refused_as_a_disclosure():
+    """`attach_mutants` refuses a mutant whose `find` text its own `case`
+    holds. It also refuses one whose `find` text a sibling criterion's
+    `case` holds, naming that criterion's witness, in either declared
+    order. A case holding no mutant's `find` attaches cleanly."""
+    from saffron.intake import DisclosedMutantError, Mutant, parse_spec
+    from saffron.mutants import attach_mutants
+
+    def two_criteria():
+        return parse_spec(
+            "---\nid: TE-1\ntitle: t\ntype: feature\n"
+            "acceptance:\n"
+            "  - claim: c1\n    witness: w1\n"
+            "  - claim: c2\n    witness: w2\n"
+            "---\n\nbody\n"
+        )
+
+    clean = attach_mutants(
+        two_criteria(),
+        {
+            "w1": Mutant(file="a.py", find="alpha_edit", case="a clean case"),
+            "w2": Mutant(file="b.py", find="beta_edit"),
+        },
+    )
+    assert clean.acceptance[0].mutant is not None
+    assert clean.acceptance[0].mutant.case == "a clean case"
+
+    with pytest.raises(DisclosedMutantError):
+        attach_mutants(
+            two_criteria(),
+            {
+                "w1": Mutant(
+                    file="a.py", find="alpha_edit", case="case naming alpha_edit"
+                )
+            },
+        )
+
+    with pytest.raises(DisclosedMutantError) as holder_first:
+        attach_mutants(
+            two_criteria(),
+            {
+                "w1": Mutant(
+                    file="a.py", find="alpha_edit", case="case naming beta_edit"
+                ),
+                "w2": Mutant(file="b.py", find="beta_edit"),
+            },
+        )
+    assert "w1" in str(holder_first.value)
+
+    with pytest.raises(DisclosedMutantError) as holder_second:
+        attach_mutants(
+            two_criteria(),
+            {
+                "w1": Mutant(file="a.py", find="beta_edit"),
+                "w2": Mutant(
+                    file="b.py", find="alpha_edit", case="case naming beta_edit"
+                ),
+            },
+        )
+    assert "w2" in str(holder_second.value)

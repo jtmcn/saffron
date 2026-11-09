@@ -55,3 +55,4 @@ before the finish commits it.
   (`saffron/batch.py:855`). `commit_finish` writes each layer's latest text
   into the tree (`saffron/finish.py`). So a revision's `prose` hits can still
   turn re-verification red.
+- 2026-11-09: recurred in the spec loop's run 56, finish 73. The writer's drafts for `SA-0357`, `SA-0358` and `SA-0359` failed `prose` at re-verification four times before one held.

@@ -8936,7 +8936,7 @@ def test_a_stack_batchs_spec_with_no_predecessor_is_seeded_on_the_pull_request_i
 
     monkeypatch.setattr(spec_review, "run_spec_review", _fake_run_spec_review)
 
-    def _fake_run_spec_writer(container, *, system_prompt, prompt, agent):
+    def _fake_run_spec_writer(container, *, system_prompt, prompt, agent, faults, emit):
         return spec_review.SpecWriterSession(
             text="",
             cost_usd=0.0,
@@ -10161,6 +10161,12 @@ def test_a_spec_revision_fills_cores_writer_prompt_from_its_base_policy_in_a_cel
     the operator's checkout, or the mirror's `HEAD`."""
     from saffron.agents.artifacts import hash_artifact
 
+    monkeypatch.setattr(
+        spec_review,
+        "draft_faults",
+        lambda text, **kwargs: spec_review.DraftFaults(parsed=True, lines=()),
+    )
+
     rig = _spec_session_rig(tmp_path, monkeypatch)
     mirror, bare_sha, base_sha = rig.mirror, rig.bare_sha, rig.base_sha
     repo, out_dir, _candidate = rig.repo, rig.out_dir, rig.candidate
@@ -10745,6 +10751,12 @@ def test_a_review_reads_a_recorded_text_and_a_revision_starts_from_the_queued_fi
     `.saffron/specs/` at the pinned base through `git_mirror.file_at`,
     never a layer's head or the checkout. It raises `ValueError` before
     any cell for a path absent there."""
+    monkeypatch.setattr(
+        spec_review,
+        "draft_faults",
+        lambda text, **kwargs: spec_review.DraftFaults(parsed=True, lines=()),
+    )
+
     rig = _spec_session_rig(tmp_path, monkeypatch, ".saffron/specs/SY-1-x.md")
     prompts: list[str] = []
 
@@ -11214,6 +11226,188 @@ def test_a_stack_batchs_spec_sessions_reach_the_follower_by_phase_across_rounds(
     ]
 
 
+def test_a_stack_batchs_end_review_and_follow_up_writer_reach_the_follower_by_batch(
+    tmp_path, monkeypatch, capsys
+):
+    """`cli._stack_end_review` passes its `emit` straight to
+    `end_review.run_end_review`, never bound into the agent's `partial`:
+    `review.run_lens` always passes its own `emit` at the call site. The
+    follow-up writer binds `emit` into its agent's `partial` instead, since
+    `run_spec_writer` calls agent with no `emit` keyword. Both reuse
+    `cli._spec_session_emit`, so every event lands in `<batch key>.end-review`
+    or `<batch key>.follow-ups` under `out_dir`, and on stdout too. A later
+    pass for the same batch key appends to the same log. `watch.follow_every_task`
+    follows both, prefixed by directory name (`b-e7b6a2`)."""
+    from saffron import watch
+    from saffron.events import Agent
+
+    rig = _spec_session_rig(tmp_path, monkeypatch)
+    rig.out_dir.mkdir()
+
+    ledger = Ledger(tmp_path / "ledger.db")
+    pinned_url = "https://github.com/o/r.git"
+    ledger.upsert_repo("r", pinned_url, str(rig.mirror), policy_sha=None)
+
+    pinned = task.PinnedBase(mirror=rig.mirror, url=pinned_url, base_sha=rig.base_sha)
+
+    spec_ids: list[str] = []
+
+    def _fake_run_agent(
+        container,
+        *,
+        prompt,
+        options,
+        spec_id,
+        timeout_s,
+        resume=None,
+        emit=_default_spec_session_emit,
+        last_cost_usd=0.0,
+    ):
+        n = len(spec_ids) + 1
+        spec_ids.append(spec_id)
+        emit(
+            Agent(
+                timestamp=0.0,
+                spec_id=spec_id,
+                raw=False,
+                event={"type": "text", "text": f"call {n}"},
+            )
+        )
+        return implement.AttemptResult(
+            session_id=f"s-{n}",
+            subtype="success",
+            terminal_reason=None,
+            num_turns=1,
+            cost_usd_est=0.1,
+            rate_limit_status="rejected",
+            rate_limit_resets_at=None,
+        )
+
+    monkeypatch.setattr(implement, "run_agent", _fake_run_agent)
+
+    def _fake_run_end_review(
+        ledger_arg,
+        batch_key,
+        reserve_usd,
+        specs,
+        *,
+        mirror,
+        open_cell,
+        context_md,
+        claude_md,
+        prompts_dir,
+        max_turns,
+        budget_usd,
+        agent,
+        resolve,
+        emit=_default_spec_session_emit,
+    ):
+        for lens in ("join", *end_review.END_LENSES):
+            with pytest.raises(session.RateLimited):
+                review.run_lens(
+                    "container",
+                    lens=lens,
+                    system_prompt="p",
+                    max_turns=1,
+                    budget_usd=1.0,
+                    agent=agent,
+                    spec_id=f"end-review-{batch_key}",
+                    emit=emit,
+                )
+        return end_review.StackReview(join=None, layers=[], fields={})
+
+    monkeypatch.setattr(end_review, "run_end_review", _fake_run_end_review)
+
+    def _fake_write_follow_ups(ledger_arg, stack, *, write, **kwargs):
+        write(_follow_up_group("k-top", "src/a.py", ["one"]), "prompt")
+        return []
+
+    monkeypatch.setattr(follow_up, "write_follow_ups", _fake_write_follow_ups)
+    monkeypatch.setattr(cli, "writer_left", lambda *a, **k: 5.0)
+
+    end_review_fn = cli._stack_end_review(
+        pinned=pinned, repo=rig.repo, ledger=ledger, out_dir=rig.out_dir
+    )
+    follow_ups_fn = cli._stack_follow_ups(
+        pinned=pinned,
+        repo=rig.repo,
+        ledger=ledger,
+        out_dir=rig.out_dir,
+        cap_usd=5.0,
+        pooled=[],
+    )
+
+    def _stack_for_follow_ups() -> end_review.StackReview:
+        return end_review.StackReview(
+            join=None,
+            layers=[end_review.LayerReview("k-top", [])],
+            fields={
+                "k-top": end_review.LayerFields(
+                    spec_id="SY-1",
+                    branch="saffron/SY-1",
+                    pr_url="",
+                    base=rig.base_sha,
+                    head=rig.base_sha,
+                    known="",
+                    diff_base=rig.base_sha,
+                )
+            },
+        )
+
+    sleeps: list[int] = []
+
+    def _sleep(_interval):
+        sleeps.append(1)
+        poll = len(sleeps)
+        if poll == 1:
+            end_review_fn("7", 10.0, {})
+            follow_ups_fn("7", _stack_for_follow_ups())
+            return True
+        if poll == 2:
+            end_review_fn("7", 10.0, {})
+            follow_ups_fn("7", _stack_for_follow_ups())
+            end_review_fn("8", 10.0, {})
+            follow_ups_fn("8", _stack_for_follow_ups())
+            return True
+        return False
+
+    lines = list(watch.follow_every_task(rig.out_dir, sleep=_sleep))
+
+    assert spec_ids == [
+        "end-review-7",
+        "end-review-7",
+        "end-review-7",
+        "follow-up-SY-1",
+        "end-review-7",
+        "end-review-7",
+        "end-review-7",
+        "follow-up-SY-1",
+        "end-review-8",
+        "end-review-8",
+        "end-review-8",
+        "follow-up-SY-1",
+    ]
+
+    assert lines == [
+        "7.end-review agent: call 1",
+        "7.end-review agent: call 2",
+        "7.end-review agent: call 3",
+        "7.follow-ups agent: call 4",
+        "7.end-review agent: call 5",
+        "7.end-review agent: call 6",
+        "7.end-review agent: call 7",
+        "7.follow-ups agent: call 8",
+        "8.end-review agent: call 9",
+        "8.end-review agent: call 10",
+        "8.end-review agent: call 11",
+        "8.follow-ups agent: call 12",
+    ]
+
+    printed = capsys.readouterr().out
+    agent_lines = [line for line in printed.splitlines() if line.startswith("agent: ")]
+    assert agent_lines == [f"agent: call {n}" for n in range(1, 13)]
+
+
 def test_a_stack_batch_holds_the_writer_share_and_passes_its_follow_up_writer(
     tmp_path, monkeypatch, capsys
 ):
@@ -11237,6 +11431,15 @@ def test_a_stack_batch_holds_the_writer_share_and_passes_its_follow_up_writer(
         return sentinel
 
     monkeypatch.setattr(cli, "_stack_follow_ups", _fake_stack_follow_ups)
+
+    end_review_sentinel = object()
+    end_review_builds: list[dict] = []
+
+    def _fake_stack_end_review(**kwargs):
+        end_review_builds.append(kwargs)
+        return end_review_sentinel
+
+    monkeypatch.setattr(cli, "_stack_end_review", _fake_stack_end_review)
 
     run_stack_batch_calls: list[dict] = []
 
@@ -11276,6 +11479,9 @@ def test_a_stack_batch_holds_the_writer_share_and_passes_its_follow_up_writer(
     assert built["out_dir"] == home1 / "batches" / "v0"
     assert built["cap_usd"] == 5.25
     assert built["pooled"] == []
+
+    assert len(end_review_builds) == 1
+    assert end_review_builds[0]["out_dir"] == home1 / "batches" / "v0"
 
     # Case 2: readiness fails.
     follow_ups_builds.clear()
@@ -11905,7 +12111,7 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
     writer_calls: list[dict] = []
     writer_counter = [0]
 
-    def _fake_run_spec_writer(container, *, system_prompt, prompt, agent):
+    def _fake_run_spec_writer(container, *, system_prompt, prompt, agent, faults, emit):
         log.append("writer")
         writer_calls.append(
             {"container": container, "system_prompt": system_prompt, "prompt": prompt}
@@ -12354,7 +12560,7 @@ def test_a_stack_batchs_follow_up_writer_is_seeded_at_the_top_head_the_end_revie
 
     monkeypatch.setattr(cli.end_review, "layer_cell", _fake_layer_cell)
 
-    def _fake_run_spec_writer(container, *, system_prompt, prompt, agent):
+    def _fake_run_spec_writer(container, *, system_prompt, prompt, agent, faults, emit):
         return spec_review.SpecWriterSession(
             text="",
             cost_usd=0.0,
@@ -13746,7 +13952,7 @@ def test_a_draft_writes_reviews_and_revises_in_spec_cells_at_the_pinned_base(
 
     writer_calls: list[dict] = []
 
-    def _fake_run_spec_writer(container, *, system_prompt, prompt, agent):
+    def _fake_run_spec_writer(container, *, system_prompt, prompt, agent, faults, emit):
         agent(container, prompt=prompt, options={})
         writer_calls.append(
             {"container": container, "system_prompt": system_prompt, "prompt": prompt}
@@ -14215,6 +14421,7 @@ def test_saffron_finish_runs_a_deferred_stack_batchs_tail_on_its_own_id_at_its_p
     [review_kwargs] = stack_end_review_calls
     assert review_kwargs["pinned"] == pinned
     assert review_kwargs["repo"] == fixture.repo.resolve()
+    assert review_kwargs["out_dir"] == fixture.out_dir
 
     [spec_review_kwargs] = stack_review_calls
     assert spec_review_kwargs["pinned"] == pinned
@@ -14242,6 +14449,7 @@ def test_saffron_finish_runs_a_deferred_stack_batchs_tail_on_its_own_id_at_its_p
     assert follow_ups_kwargs["pinned"] == pinned
     assert follow_ups_kwargs["repo"] == fixture.repo.resolve()
     assert follow_ups_kwargs["cap_usd"] == 3.0
+    assert follow_ups_kwargs["out_dir"] == fixture.out_dir
 
     assert stack_open_prs_calls == ["o/r"]
 
@@ -14889,3 +15097,276 @@ def test_every_command_pushes_the_facts_it_appended_before_it_exits(
     code = cli.main(["--home", str(home), "replay", str(tmp_path), "9"])
     assert code == 0
     assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]
+
+
+def test_a_writers_draft_is_judged_atop_its_head_by_the_repos_form_gates(
+    tmp_path, monkeypatch
+):
+    """`cli._draft_faults` judges a draft with `finish.judge_draft`, atop
+    the head it is given, through `_finish_verify`. The policy is narrowed
+    to the gates the repo declares `form: true`, read from the policy.
+    The core gates still run regardless. A policy declaring no form gate
+    passes no `judge`. A parsing draft then gets no fault line, and one
+    that does not parse still gets intake's own line."""
+    from saffron.gates.baseline import NewFailure
+    from saffron.gates.contract import Failure
+    from saffron.repos import image as repo_image
+
+    mirror = tmp_path / "mirror"
+    mirror.mkdir()
+    _git(mirror, "init", "-q")
+    (mirror / ".saffron" / "gates").mkdir(parents=True)
+    (mirror / ".saffron" / "specs").mkdir(parents=True)
+    (mirror / ".saffron" / "specs" / ".gitkeep").write_text("")
+    (mirror / ".saffron" / "policy.yaml").write_text(
+        "gates:\n"
+        "  gate-x: { blocking: true, form: true }\n"
+        "  gate-y: { blocking: true, form: true }\n"
+        "  gate-z: { blocking: true }\n"
+    )
+    for name in ("gate-x", "gate-y", "gate-z"):
+        _exec_file(mirror / ".saffron" / "gates" / name)
+    _git(mirror, "add", "-A")
+    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "base")
+    base_sha = _rev_parse(mirror, "HEAD")
+
+    (mirror / "unrelated.txt").write_text("x\n")
+    _git(mirror, "add", "-A")
+    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "head")
+    head = _rev_parse(mirror, "HEAD")
+
+    policy, _policy_sha = load_policy(mirror)
+    pinned = task.PinnedBase(
+        mirror=mirror, url="https://github.com/o/r.git", base_sha=base_sha
+    )
+
+    draft_path = ".saffron/specs/TE-9-new.md"
+    draft_text = (
+        "---\nid: TE-9\ntitle: t\ntype: chore\n"
+        "acceptance:\n"
+        "  - claim: c\n    witness: t.py::test_w\n"
+        "---\n\nbody\n"
+    )
+
+    reverify_calls: list[dict] = []
+    read_during: dict[str, str] = {}
+
+    def _fake_reverify(**kwargs):
+        reverify_calls.append(kwargs)
+        sha = kwargs["packaged_sha"]
+        read_during["parent"] = _rev_parse(mirror, f"{sha}^1")
+        read_during["blob"] = _git(mirror, "show", f"{sha}:{draft_path}")
+
+        class _Comparison:
+            new_failures = (
+                NewFailure(
+                    gate="gate-x",
+                    failure=Failure(file="a.py", line=1, code="E1", message="m"),
+                ),
+            )
+
+        return _Comparison()
+
+    monkeypatch.setattr(package, "reverify", _fake_reverify)
+
+    faults = cli._draft_faults(
+        pinned=pinned,
+        repo=tmp_path / "checkout",
+        policy=policy,
+        head=head,
+        workdir=tmp_path / "workdir",
+        path=draft_path,
+    )
+    result = faults(draft_text)
+
+    assert result == spec_review.DraftFaults(
+        parsed=True, lines=("[gate-x] a.py:1 E1: m",)
+    )
+    assert read_during["parent"] == head
+    assert read_during["blob"] == draft_text.strip()
+
+    assert len(reverify_calls) == 1
+    rcall = reverify_calls[0]
+    assert rcall["mirror"] == mirror
+    assert rcall["new_base_sha"] == head
+    assert rcall["gates_dir"] == tmp_path / "workdir" / "gates"
+    assert rcall["image"] == repo_image.cell_tag(tmp_path / "checkout")
+    assert set(rcall["policy"].gates) == {"gate-x", "gate-y"}
+    assert rcall["spec"].id == "FINISH-0"
+
+    # No form gate: no judge at all, so a parsing draft gets no fault line
+    # and a non-parsing one still gets intake's own line.
+    no_form_policy = policy.model_copy(
+        update={"gates": {"gate-z": policy.gates["gate-z"]}}
+    )
+    no_form_faults = cli._draft_faults(
+        pinned=pinned,
+        repo=tmp_path / "checkout",
+        policy=no_form_policy,
+        head=head,
+        workdir=tmp_path / "workdir-2",
+        path=draft_path,
+    )
+    before = len(reverify_calls)
+    assert no_form_faults(draft_text) == spec_review.DraftFaults(parsed=True, lines=())
+    assert len(reverify_calls) == before
+    broken = no_form_faults("not a spec at all\n")
+    assert broken.parsed is False
+    assert len(broken.lines) == 1
+    assert len(reverify_calls) == before
+
+
+def test_every_writer_adapter_hands_its_session_the_faults_of_its_own_head(
+    tmp_path, monkeypatch
+):
+    """Each of the three writer adapters hands its session `_draft_faults`
+    for the tree its cell opened at, and `emit=print`. `_stack_revise`
+    passes its layer's fetched head and the queued file's path.
+    `_draft_adapters`'s `write` passes `pinned.base_sha` and no path.
+    `_stack_follow_ups`'s `write` passes the top layer's graded head and
+    no path. Each passes its own pinned base and the policy it read."""
+    draft_faults_calls: list[dict] = []
+    counter = [0]
+
+    def _fake_draft_faults(**kwargs):
+        draft_faults_calls.append(kwargs)
+        counter[0] += 1
+        return f"faults-{counter[0]}"
+
+    monkeypatch.setattr(cli, "_draft_faults", _fake_draft_faults)
+
+    writer_calls: list[dict] = []
+
+    def _fake_run_spec_writer(container, *, system_prompt, prompt, agent, faults, emit):
+        writer_calls.append({"faults": faults, "emit": emit})
+        return spec_review.SpecWriterSession(
+            text="",
+            cost_usd=0.0,
+            error="stub, never written",
+            resets_at=None,
+            session_id="s",
+            num_turns=0,
+            spec_sha=None,
+        )
+
+    monkeypatch.setattr(spec_review, "run_spec_writer", _fake_run_spec_writer)
+
+    # --- `_stack_revise` ---
+    revise_root = tmp_path / "revise"
+    revise_root.mkdir()
+    rig = _spec_session_rig(revise_root, monkeypatch, ".saffron/specs/SY-1-x.md")
+    pinned = task.PinnedBase(
+        mirror=rig.mirror, url="https://github.com/o/r.git", base_sha=rig.base_sha
+    )
+    revise = cli._stack_revise(pinned=pinned, repo=rig.repo, out_dir=rig.out_dir)
+    sy1 = rig.candidate("SY-1")
+    sy7 = rig.candidate("SY-7")
+    revise(sy1, sy7, "spec text", "review text")
+
+    assert len(draft_faults_calls) == 1
+    call0 = draft_faults_calls[0]
+    assert call0["pinned"] == pinned
+    assert call0["repo"] == rig.repo
+    assert call0["head"] == "d" * 40
+    assert call0["workdir"] == rig.out_dir / "spec-write" / "SY-1" / "judge"
+    assert call0["path"] == ".saffron/specs/SY-1-x.md"
+    assert call0["policy"].thread_env == {"X": "base"}
+    assert writer_calls[0]["faults"] == "faults-1"
+    assert writer_calls[0]["emit"] is print
+
+    # --- `_draft_adapters` ---
+    draft_root = tmp_path / "draft"
+    draft_root.mkdir()
+    rig2 = _spec_session_rig(draft_root, monkeypatch, ".saffron/specs/SY-9-x.md")
+    pinned2 = task.PinnedBase(
+        mirror=rig2.mirror, url="https://github.com/o/r.git", base_sha=rig2.base_sha
+    )
+    write, _review, _revise2 = cli._draft_adapters(
+        pinned=pinned2, repo=rig2.repo, out_dir=rig2.out_dir, spec_id="SY-9"
+    )
+    write("a prompt")
+
+    assert len(draft_faults_calls) == 2
+    call1 = draft_faults_calls[1]
+    assert call1["pinned"] == pinned2
+    assert call1["repo"] == rig2.repo
+    assert call1["head"] == rig2.base_sha
+    assert call1["workdir"] == rig2.out_dir / "spec-write" / "SY-9" / "judge"
+    assert call1["path"] is None
+    assert call1["policy"].thread_env == {"X": "base"}
+    assert writer_calls[1]["faults"] == "faults-2"
+    assert writer_calls[1]["emit"] is print
+
+    # --- `_stack_follow_ups` ---
+    followups_root = tmp_path / "followups"
+    followups_root.mkdir()
+    rig3 = _follow_ups_mirror(followups_root)
+    pinned3_url = "https://github.com/o/r.git"
+    ledger = Ledger(followups_root / "ledger.db")
+    repo_id = ledger.upsert_repo("r", pinned3_url, str(rig3.mirror), policy_sha=None)
+    pinned3 = task.PinnedBase(
+        mirror=rig3.mirror, url=pinned3_url, base_sha=rig3.base_sha
+    )
+
+    run_id = ledger.create_run(repo_id, rig3.base_sha)
+    task_id = ledger.create_task(run_id, "SY-1", "s" * 64, "saffron/SY-1")
+    ledger.set_task_package(
+        task_id, "READY_FOR_REVIEW", "saffron/SY-1", "2" * 40, "https://pr/1"
+    )
+    ledger.record_stack_layer(
+        task_id, position=1, predecessor_task_id=None, generation=1
+    )
+    key = ledger.record_key(task_id)
+    assert key is not None
+
+    monkeypatch.setattr(cli.runtime, "remove_container", lambda _container: None)
+
+    @contextmanager
+    def _fake_layer_cell(fields, **kwargs):
+        yield "fake-container"
+
+    monkeypatch.setattr(cli.end_review, "layer_cell", _fake_layer_cell)
+
+    def _fake_qualify(ledger_arg, layers, join, **kwargs):
+        return qualify.Qualification(groups=[], pool=[])
+
+    monkeypatch.setattr(cli.qualify, "qualify", _fake_qualify)
+
+    def _fake_write_follow_ups(ledger_arg, stack_arg, *, qualify, write, **kwargs):
+        qualify(stack_arg.layers, stack_arg.join)
+        group = _follow_up_group(key, "src/a.py", ["c"])
+        write(group, "prompt")
+        return []
+
+    monkeypatch.setattr(cli.follow_up, "write_follow_ups", _fake_write_follow_ups)
+
+    graded_head = "3" * 40
+    graded = replace(
+        end_review.layer_fields(ledger, key), head=graded_head, diff_base=graded_head
+    )
+    stack_graded = end_review.StackReview(
+        join=None, layers=[end_review.LayerReview(key, [])], fields={key: graded}
+    )
+    out_dir3 = followups_root / "out"
+    make = cli._stack_follow_ups(
+        pinned=pinned3,
+        repo=Path("/repo-sentinel"),
+        ledger=ledger,
+        out_dir=out_dir3,
+        cap_usd=1.0,
+        pooled=[],
+    )
+    make("7", stack_graded)
+
+    assert len(draft_faults_calls) == 3
+    call2 = draft_faults_calls[2]
+    assert call2["pinned"] == pinned3
+    assert call2["repo"] == Path("/repo-sentinel")
+    assert call2["head"] == graded_head
+    assert call2["workdir"] == out_dir3 / "follow-ups" / "7" / "write-judge"
+    assert call2["path"] is None
+    assert call2["policy"].thread_env == {"X": "base"}
+    assert writer_calls[2]["faults"] == "faults-3"
+    assert writer_calls[2]["emit"] is print
+
+    ledger.close()

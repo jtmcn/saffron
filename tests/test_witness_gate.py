@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 
 import pytest
 
@@ -206,11 +207,11 @@ def test_the_tree_is_unchanged_however_the_gate_ends(tmp_path):
 
 
 def test_a_mutant_that_did_not_apply_is_named_not_counted(tmp_path):
-    """A mutant that does not apply is `skip` for that criterion and is named
-    in the summary — never `pass`, and never counted as a witness that did
-    its job."""
-    _write(tmp_path, "a.py", "def total(x):\n    return x\n")  # `find` absent
-    criterion = _criterion()
+    """A mutant whose file cannot be read at all is `skip` for that
+    criterion. It is named in the summary, never counted as a witness
+    that did its job. A mutant whose file exists but whose `find` is
+    absent or repeated fails instead, now (§5.4.1)."""
+    criterion = _criterion(file="missing.py")
 
     def run_tests(subset):
         raise AssertionError("the tests gate must not run for an unapplied mutant")
@@ -906,3 +907,300 @@ def test_a_criterion_probe_summary_names_its_edit_and_never_a_mutant(tmp_path, s
     )
     assert "criterion probe" in result.summary
     assert "mutant" not in result.summary
+
+
+def test_a_declared_find_that_matches_other_than_once_fails_naming_its_criterion_and_count(
+    tmp_path, monkeypatch
+):
+    """A declared mutant whose `find` matches its file zero, two or three
+    times fails the `witness` gate, naming its criterion and the count.
+    The `tests` gate never runs for it. Only a find that matches exactly
+    once is applied and run. The summary says how many declared mutants
+    miscounted, and names no survival when none survived (§5.4.1). The
+    cell mutator keeps the identical rule on its own, so this also drives
+    it through `source_mutated`, never only through `host_mutator`."""
+    find = "TARGET = 1"
+    for name, times in (("zero", 0), ("one", 1), ("two", 2), ("three", 3)):
+        _write(tmp_path, f"{name}.py", "# padding\n" + f"{find}\n" * times)
+
+    zero = _criterion(
+        claim="the absent target guard holds",
+        witness="tests/test_zero.py::test_zero",
+        file="zero.py",
+        find=find,
+    )
+    one = _criterion(
+        claim="the matching target guard holds",
+        witness="tests/test_one.py::test_one",
+        file="one.py",
+        find=find,
+    )
+    two = _criterion(
+        claim="the doubled target guard holds",
+        witness="tests/test_two.py::test_two",
+        file="two.py",
+        find=find,
+    )
+    three = _criterion(
+        claim="the tripled target guard holds",
+        witness="tests/test_three.py::test_three",
+        file="three.py",
+        find=find,
+    )
+
+    calls: list[list[str]] = []
+
+    def run_tests(subset):
+        calls.append(subset)
+        return _tests(status="fail", collected=tuple(subset))
+
+    result = witness_gate(
+        acceptance=[zero, one, two, three],
+        mutate=host_mutator(tmp_path),
+        run_tests=run_tests,
+    )
+
+    assert result.status == "fail"
+    # Only the find that matched exactly once ever reached a run.
+    assert calls == [[one.witness]]
+
+    by_witness = {f.file: f for f in result.failures}
+    assert set(by_witness) == {zero.witness, two.witness, three.witness}
+    assert by_witness[zero.witness].code == "mutant-find-absent"
+    assert by_witness[two.witness].code == "mutant-find-repeated"
+    assert by_witness[three.witness].code == "mutant-find-repeated"
+
+    for criterion, count in ((zero, 0), (two, 2), (three, 3)):
+        message = by_witness[criterion.witness].message
+        assert message.endswith(criterion.claim)
+        rest = message[: -len(criterion.claim)]
+        assert re.findall(r"\d+", rest) == [str(count)]
+
+    # No witness survived, since `one`'s died, so the summary names no survival.
+    assert "survived" not in result.summary
+    assert "3 of 4 declared mutant(s) did not match once" in result.summary
+
+    # The same three, driven as a criterion probe and as a wrong version,
+    # each stay `skip`, named in the summary, with no failure at all.
+    for noun in ("criterion probe", "wrong version"):
+
+        def must_not_run(subset):
+            raise AssertionError("the tests gate must not run for a bad count")
+
+        skipped = witness_gate(
+            acceptance=[zero, two, three],
+            mutate=host_mutator(tmp_path),
+            run_tests=must_not_run,
+            edit_noun=noun,
+        )
+        assert skipped.status == "skip"
+        assert not skipped.failures
+        for criterion in (zero, two, three):
+            assert criterion.witness in skipped.summary
+
+    # `source_mutated` repeats this count rule on its own, not shared with
+    # `host_mutator`, so a bug only there must not leave this witness green.
+    from functools import partial
+
+    from saffron.cell import worktree
+    from tests.test_worktree import _commit, _repo_with_a_file
+
+    cell_root = tmp_path / "cell"
+    cell_root.mkdir()
+    _repo_with_a_file(cell_root, monkeypatch, "# padding\n")
+    for name, times in (("czero", 0), ("cone", 1), ("ctwo", 2), ("cthree", 3)):
+        (cell_root / "src" / f"{name}.py").write_text(
+            "# padding\n" + f"{find}\n" * times
+        )
+    _commit(cell_root, "cell counts")
+
+    cell_criteria = {
+        name: _criterion(
+            claim=f"the cell {name} guard holds",
+            witness=f"tests/test_{name}.py::test_{name}",
+            file=f"src/{name}.py",
+            find=find,
+        )
+        for name in ("czero", "cone", "ctwo", "cthree")
+    }
+    cell_calls: list[list[str]] = []
+
+    def cell_run_tests(subset):
+        cell_calls.append(subset)
+        return _tests(status="fail", collected=tuple(subset))
+
+    cell_result = witness_gate(
+        acceptance=list(cell_criteria.values()),
+        mutate=partial(worktree.source_mutated, "c"),
+        run_tests=cell_run_tests,
+    )
+
+    assert cell_result.status == "fail"
+    assert cell_calls == [[cell_criteria["cone"].witness]]
+    cell_by_witness = {f.file: f for f in cell_result.failures}
+    assert cell_by_witness[cell_criteria["czero"].witness].code == "mutant-find-absent"
+    assert cell_by_witness[cell_criteria["ctwo"].witness].code == "mutant-find-repeated"
+    assert (
+        cell_by_witness[cell_criteria["cthree"].witness].code == "mutant-find-repeated"
+    )
+
+
+def test_a_find_count_failure_names_neither_half_of_its_edit(tmp_path):
+    """A failure for a find that did not match once withholds the edit
+    (§5.4.1): neither `find` nor `replace` appears in the serialized result
+    or in the table `saffron.phases.review.gate_summary` renders from it."""
+    from saffron.phases.review import gate_summary
+
+    find = "QRVT_FIND_TOKEN = 1"
+    replace = "QRVT_REPLACE_TOKEN = 1"
+    for name, times in (("zero", 0), ("two", 2), ("three", 3)):
+        _write(tmp_path, f"{name}.py", "# padding\n" + f"{find}\n" * times)
+
+    criteria = [
+        _criterion(
+            claim="the token guard holds",
+            witness=f"tests/test_{name}.py::test_{name}",
+            file=f"{name}.py",
+            find=find,
+            replace=replace,
+        )
+        for name in ("zero", "two", "three")
+    ]
+
+    result = witness_gate(
+        acceptance=criteria,
+        mutate=host_mutator(tmp_path),
+        run_tests=lambda subset: (_ for _ in ()).throw(
+            AssertionError("must not run for a miscounted find")
+        ),
+    )
+
+    assert result.status == "fail"
+    assert len(result.failures) == 3
+
+    dumped = result.model_dump_json()
+    summary = gate_summary([result])
+    assert find not in dumped
+    assert replace not in dumped
+    assert find not in summary
+    assert replace not in summary
+
+
+def test_a_surviving_mutant_quotes_its_own_case_and_never_its_edit(tmp_path):
+    """Item b-fa4a83 (§5.4.1): a survived-mutant failure keeps naming the
+    claim and the file, and quotes the mutant's own declared case too, never
+    another criterion's. A mutant with no case keeps today's exact message.
+    Neither `find` nor `replace` leaks into the result or into what
+    `repair_prompt` renders from it. Three mutants are read in one call,
+    from one mutants-file text, as the ref holds them."""
+    from saffron.gates.baseline import NewFailure
+    from saffron.mutants import parse_mutants
+    from saffron.phases.implement import repair_prompt
+
+    prefix = "QRVT_CASE_EDIT_"
+    _write(tmp_path, "a.py", f"{prefix}A = 1\n")
+    _write(tmp_path, "b.py", f"{prefix}B = 1\n")
+    _write(tmp_path, "c.py", f"{prefix}C = 1\n")
+
+    mutants_text = (
+        "w1:\n"
+        f"  file: a.py\n  find: {prefix}A = 1\n  replace: {prefix}A = 2\n"
+        "  case: the branch where the guard never fires\n"
+        "w2:\n"
+        f"  file: b.py\n  find: {prefix}B = 1\n  replace: {prefix}B = 2\n"
+        "  case: the branch where the retry never happens\n"
+        "w3:\n"
+        f"  file: c.py\n  find: {prefix}C = 1\n  replace: {prefix}C = 2\n"
+    )
+    mutants = parse_mutants(mutants_text, "SA-X.yaml")
+
+    first = Criterion(claim="the first claim holds", witness="w1", mutant=mutants["w1"])
+    second = Criterion(
+        claim="the second claim holds", witness="w2", mutant=mutants["w2"]
+    )
+    third = Criterion(claim="the third claim holds", witness="w3", mutant=mutants["w3"])
+
+    def run_tests(subset):
+        return _tests(status="pass", collected=tuple(subset))
+
+    result = witness_gate(
+        acceptance=[first, second, third],
+        mutate=host_mutator(tmp_path),
+        run_tests=run_tests,
+    )
+
+    assert result.status == "fail"
+    assert len(result.failures) == 3
+    by_witness = {f.file: f for f in result.failures}
+
+    # Exact equality, not substring containment: pins the lead-in's own
+    # wording, where a substring check would pass any wording around it.
+    assert by_witness["w1"].message == (
+        f"ran and passed with its mutant applied to a.py — {first.claim} "
+        "(untested case: the branch where the guard never fires)"
+    )
+    assert by_witness["w2"].message == (
+        f"ran and passed with its mutant applied to b.py — {second.claim} "
+        "(untested case: the branch where the retry never happens)"
+    )
+    assert by_witness["w3"].message == (
+        f"ran and passed with its mutant applied to c.py — {third.claim}"
+    )
+
+    dumped = result.model_dump_json()
+    rendered = repair_prompt([NewFailure("witness", f) for f in result.failures])
+    for mutant in mutants.values():
+        assert mutant.find not in dumped
+        assert mutant.replace not in dumped
+        assert mutant.find not in rendered
+        assert mutant.replace not in rendered
+
+
+def test_a_find_count_failure_is_new_unless_the_base_reported_its_own(tmp_path):
+    """`subtract_baseline` reads a find-count failure like any other. A base
+    that applied the mutant, or found its `find` absent, cancels nothing.
+    A base that also reported the find matching two or three times does.
+    The shared `mutant-find-repeated` code and the digit-normalized
+    message make 2 and 3 the same identity. One criterion, whose witness,
+    claim and file never change, is rewritten before each run (§5.4)."""
+    from saffron.gates.baseline import subtract_baseline
+
+    find = "TARGET = 1"
+    criterion = _criterion(
+        claim="the target guard holds",
+        witness="tests/test_guard.py::test_guard",
+        file="guard.py",
+        find=find,
+    )
+
+    def result_for(times: int, *, died: bool = False) -> GateResult:
+        _write(tmp_path, "guard.py", "# padding\n" + f"{find}\n" * times)
+
+        def run_tests(subset):
+            if died:
+                return _tests(status="fail", collected=tuple(subset))
+            raise AssertionError("must not run for a miscounted find")
+
+        return witness_gate(
+            acceptance=[criterion], mutate=host_mutator(tmp_path), run_tests=run_tests
+        )
+
+    head_twice = result_for(2)
+
+    # The base applied the mutant and the witness died, so no failure of any
+    # kind cancels against it, and the head's repeat is new.
+    base_died = result_for(1, died=True)
+    new = subtract_baseline([head_twice], [base_died])
+    assert [n.failure.code for n in new] == ["mutant-find-repeated"]
+
+    # The base's find was absent, a different code, so it still cancels
+    # nothing.
+    base_absent = result_for(0)
+    new = subtract_baseline([head_twice], [base_absent])
+    assert [n.failure.code for n in new] == ["mutant-find-repeated"]
+
+    # The base also reported a repeat, two or three, and that does cancel.
+    base_twice = result_for(2)
+    assert subtract_baseline([head_twice], [base_twice]) == []
+    base_thrice = result_for(3)
+    assert subtract_baseline([head_twice], [base_thrice]) == []

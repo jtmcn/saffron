@@ -16,6 +16,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 
 from saffron.cell import runtime
+from saffron.gates.core.witness import FindCount
 from saffron.intake import Mutant
 
 WORKTREE_MOUNT = "/work"
@@ -685,6 +686,8 @@ def source_mutated(container: str, mutant: Mutant) -> Iterator[str | None]:
     that into `error`, never a verdict on the claim the mutant was meant to
     test.
     """
+    # The two find-count reasons below yield `witness.FindCount` instead
+    # of a plain `str`, carrying the match count as data too.
     if not _confined(mutant.file):
         yield f"mutant path {mutant.file!r} is not a relative path inside the tree"
         return
@@ -738,10 +741,13 @@ def source_mutated(container: str, mutant: Mutant) -> Iterator[str | None]:
     find = mutant.find.encode()
     count = content.count(find)
     if count == 0:
-        yield f"{mutant.file}: find text not found"
+        yield FindCount(f"{mutant.file}: find text not found", count)
         return
     if count > 1:
-        yield (f"{mutant.file}: find text matches {count} times, expected exactly once")
+        yield FindCount(
+            f"{mutant.file}: find text matches {count} times, expected exactly once",
+            count,
+        )
         return
     _write_file(
         container, mutant.file, content.replace(find, mutant.replace.encode(), 1)

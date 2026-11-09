@@ -17,6 +17,7 @@ from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict
 
+from saffron import intake
 from saffron.agents import context
 from saffron.agents.artifacts import hash_artifact
 from saffron.agents.findings import Severity
@@ -527,6 +528,10 @@ SPEC_WRITER_PROMPT = "spec-writer.md"
 # Loaded once at import, as `rebut.EXTRACT_PROMPT` is.
 SPEC_WRITER_EXTRACT_PROMPT = context.turn_prompt("spec-writer-extract")
 
+# Loaded once at import, as the other turn prompts are. Sent before a
+# send-back's own fault lines (SA-0353).
+SPEC_WRITER_SEND_BACK_PROMPT = context.turn_prompt("spec-writer-send-back")
+
 
 class _SpecWriterReply(BaseModel):
     """The spec writer's whole answer, one required field (ADR 7).
@@ -570,9 +575,22 @@ SPEC_WRITER_BUDGET_USD = 17.0
 # room: a real spec writer session resumes a longer context than the spike's did.
 SPEC_WRITER_EXTRACT_BUDGET_USD = 1.5
 
-# What one session records at most, best effort: the spec writer session's
-# first turn plus one extraction turn.
-SPEC_WRITER_SESSION_USD = SPEC_WRITER_BUDGET_USD + SPEC_WRITER_EXTRACT_BUDGET_USD
+# The operator's bound on how many send-backs one draft gets, read at
+# call time so a patched value holds (SA-0353).
+SPEC_WRITER_SEND_BACKS = 1
+
+# Reasoned, unmeasured: twice the extraction turn's own budget. A
+# send-back's own work turn spends up to this much (SA-0353).
+SPEC_WRITER_SEND_BACK_BUDGET_USD = 3.0
+
+# What one session records at most, best effort: the writer's first turn,
+# one extraction turn, and each send-back's own work and extraction turns.
+SPEC_WRITER_SESSION_USD = (
+    SPEC_WRITER_BUDGET_USD
+    + SPEC_WRITER_EXTRACT_BUDGET_USD
+    + SPEC_WRITER_SEND_BACKS
+    * (SPEC_WRITER_SEND_BACK_BUDGET_USD + SPEC_WRITER_EXTRACT_BUDGET_USD)
+)
 
 # Reasoned, unmeasured: a third above SPEC_REVIEW_MAX_TURNS, since a spec
 # writer session can run longer.
@@ -584,14 +602,59 @@ SPEC_WRITER_TIMEOUT_S = 3600.0
 
 
 @dataclass(frozen=True)
+class DraftFaults:
+    """One judgement of a draft `run_spec_writer` is about to settle on
+    (SA-0353). `parsed` is whether `intake.parse_spec` and
+    `intake.refuse_inline_mutants` could read it at all. `lines` is every
+    fault line found, in order: the one line an unparseable draft gets, or
+    a `judge`'s own rendering of each new failure. Empty `lines` means
+    nothing is wrong."""
+
+    parsed: bool
+    lines: tuple[str, ...]
+
+
+def draft_faults(
+    text: str,
+    *,
+    path: str | None,
+    judge: Callable[[str, str], Sequence[str]] | None,
+    emit: Callable[[str], None],
+) -> DraftFaults:
+    """Whether `text` is a draft `run_spec_writer` can hand back as is.
+
+    `intake.parse_spec` then `intake.refuse_inline_mutants` read it first
+    (SA-0338). A `SpecError` from either ends here: `parsed` is `False`
+    and the one line is that error's own message, with nothing judged.
+    With no `judge`, a parsing draft gets no fault line. Otherwise
+    `judge` runs at `path`, or the spec's own `.saffron/specs/<id>.md`,
+    and its lines come back in order. A raise from `judge` reaches no
+    writer: `emit` names it once, and no fault line comes back."""
+    try:
+        spec = intake.parse_spec(text)
+        intake.refuse_inline_mutants(spec)
+    except intake.SpecError as exc:
+        return DraftFaults(parsed=False, lines=(str(exc),))
+    if judge is None:
+        return DraftFaults(parsed=True, lines=())
+    judged_path = path if path is not None else f".saffron/specs/{spec.id}.md"
+    try:
+        lines = judge(judged_path, text)
+    except Exception as exc:
+        emit(f"spec writer draft judge raised {type(exc).__name__}: {exc}")
+        return DraftFaults(parsed=True, lines=())
+    return DraftFaults(parsed=True, lines=tuple(lines))
+
+
+@dataclass(frozen=True)
 class SpecWriterSession:
     """What `run_spec_writer` returns for one draft or revision.
 
-    `text` is the extraction turn's validated `spec` field, stripped, plus
-    one newline. Neither turn's own `text` feeds it. `spec_sha` is
-    `hash_artifact` of it, or `None` beside empty text. `model` is every
-    distinct model this session's own turns named, first-seen order,
-    comma-joined (SA-0205)."""
+    `text` is the newest text `faults` found parsed, or the newest text
+    when none parsed (SA-0353). Neither turn's own `text` feeds it.
+    `spec_sha` is `hash_artifact` of it, or `None` beside empty text.
+    `model` is every distinct model this session's own turns named,
+    first-seen order, comma-joined (SA-0205)."""
 
     text: str
     cost_usd: float
@@ -631,16 +694,17 @@ def run_spec_writer(
     system_prompt: str,
     prompt: str,
     agent: Callable[..., implement.AttemptResult],
+    faults: Callable[[str], DraftFaults],
+    emit: Callable[[str], None],
 ) -> SpecWriterSession:
     """One host-invoked, tool-using session that drafts or revises a whole
     spec file (ADR 7). A second turn then extracts the file through
     `output_format`, resumed on the same session, never read from either
-    turn's own text.
+    turn's own text. `faults` can send a validated text back for a bounded
+    number of send-backs before it settles (SA-0353).
 
-    Calls `agent` directly, never through `session.stop_on_rejected`, for
-    the reason `run_spec_review` does: a rejected session must still be
-    charged for what it spent (§4.1).
-    """
+    Calls `agent` directly, never through `session.stop_on_rejected`: a
+    rejected session must still be charged for what it spent (§4.1)."""
     options = implement.agent_options(
         system_prompt=system_prompt,
         max_turns=SPEC_WRITER_MAX_TURNS,
@@ -750,6 +814,102 @@ def run_spec_writer(
             return None, error
         return report.spec.strip() + "\n", None
 
+    def _send_back_turn(
+        *,
+        turn_prompt: str,
+        resume: str | None,
+        turn_options: dict,
+        last_cost_usd: float,
+    ) -> implement.AttemptResult | str:
+        """One send-back's call: the clean `AttemptResult`, or a `str`
+        naming the failure. A send-back's own rate limit is a failure here,
+        never a wait (SA-0353). `_rejected` is for the turns before any
+        send-back alone."""
+        try:
+            got = agent(
+                container,
+                prompt=turn_prompt,
+                options=turn_options,
+                resume=resume,
+                last_cost_usd=last_cost_usd,
+            )
+        except implement.AgentFailed as failed:
+            _measure(failed.attempt)
+            return str(failed)
+        _measure(got)
+        if session.terminal_for_rate_limit(got.rate_limit_status):
+            return "rate limited"
+        return got
+
+    def _settle(text: str, last_cost_usd: float) -> SpecWriterSession:
+        """`text`, or a send-back's own replacement, judged by `faults`
+        until one is clean or `SPEC_WRITER_SEND_BACKS` is spent (SA-0353).
+        The session's own text is then the newest one `faults` found
+        parsed, or the newest of all when none did."""
+        newest_parsed: str | None = None
+        newest_any = text
+
+        def _record(candidate: str, outcome: DraftFaults) -> None:
+            nonlocal newest_parsed, newest_any
+            newest_any = candidate
+            if outcome.parsed:
+                newest_parsed = candidate
+
+        def _finish() -> SpecWriterSession:
+            return _writer_session(
+                text=newest_parsed if newest_parsed is not None else newest_any,
+                cost=cost,
+                error=None,
+                resets_at=None,
+                session_id=sid,
+                turns=turns,
+                model=model,
+            )
+
+        def _give_up(message: str, lines: Sequence[str]) -> SpecWriterSession:
+            emit(message)
+            for line in lines:
+                emit(line)
+            return _finish()
+
+        outcome = faults(text)
+        _record(text, outcome)
+        send_backs = 0
+        while outcome.lines and send_backs < SPEC_WRITER_SEND_BACKS:
+            send_backs += 1
+            lines = outcome.lines
+            work = _send_back_turn(
+                turn_prompt=SPEC_WRITER_SEND_BACK_PROMPT + "\n" + "\n".join(lines),
+                resume=sid,
+                turn_options=options
+                | {"max_budget_usd": SPEC_WRITER_SEND_BACK_BUDGET_USD},
+                last_cost_usd=min(last_cost_usd, SPEC_WRITER_SEND_BACK_BUDGET_USD),
+            )
+            if isinstance(work, str):
+                return _give_up(f"spec writer send-back's work turn {work}", lines)
+
+            extracted_again = _send_back_turn(
+                turn_prompt=SPEC_WRITER_EXTRACT_PROMPT,
+                resume=work.session_id,
+                turn_options=extract_options,
+                last_cost_usd=min(work.cost_usd_est, SPEC_WRITER_EXTRACT_BUDGET_USD),
+            )
+            if isinstance(extracted_again, str):
+                return _give_up(
+                    f"spec writer send-back's extraction turn {extracted_again}", lines
+                )
+
+            new_text, read_error = _read(extracted_again)
+            if new_text is None:
+                return _give_up(
+                    f"spec writer send-back's extraction {read_error}", lines
+                )
+
+            last_cost_usd = extracted_again.cost_usd_est
+            outcome = faults(new_text)
+            _record(new_text, outcome)
+        return _finish()
+
     extracted = _extraction_turn(
         turn_prompt=SPEC_WRITER_EXTRACT_PROMPT,
         resume=first.session_id,
@@ -759,15 +919,7 @@ def run_spec_writer(
         return extracted
     text, error = _read(extracted)
     if text is not None:
-        return _writer_session(
-            text=text,
-            cost=cost,
-            error=None,
-            resets_at=None,
-            session_id=sid,
-            turns=turns,
-            model=model,
-        )
+        return _settle(text, extracted.cost_usd_est)
 
     # One re-ask, as run_spec_review makes (§5.3 says two). The CLI already
     # retries the shape inside a turn.
@@ -780,15 +932,7 @@ def run_spec_writer(
         return reasked
     text, error = _read(reasked)
     if text is not None:
-        return _writer_session(
-            text=text,
-            cost=cost,
-            error=None,
-            resets_at=None,
-            session_id=sid,
-            turns=turns,
-            model=model,
-        )
+        return _settle(text, reasked.cost_usd_est)
     return _writer_session(
         text="",
         cost=cost,

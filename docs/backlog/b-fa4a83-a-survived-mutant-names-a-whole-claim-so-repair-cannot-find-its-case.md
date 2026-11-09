@@ -1,11 +1,12 @@
 ---
 id: b-fa4a83
 title: A survived mutant reaches REPAIR as a whole claim, so the repair turn cannot find the case it lacks
-status: open
+status: done
+closed: 2026-11-09
 tier: 1
 filed: 2026-11-04
 specs: [SA-0355]
-prs: []
+prs: [1097]
 commits: []
 cites: [§5.4.1]
 related: [b-78a590]
@@ -38,3 +39,4 @@ names beside its mutant, which the message quotes.
 ## Record
 
 - 2026-11-04: filed from the spec loop's run 53.
+- 2026-11-09: `SA-0355` (#1097) landed in the spec loop's run 56. A survived mutant's message quotes its declared `case`.

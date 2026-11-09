@@ -47,3 +47,4 @@ batch whose `depends_on` names none of its predecessors.
 - 2026-11-07: marked by hand in grooming. The work is in the spec loop's driver under
   `.claude/`, and `SA-0279` refuses any spec that touches that path.
 - 2026-11-08: partial by hand in #1067. `stack` orders a batch's layers by the predecessor the ledger records. A hand-packaged layer has no ledger pull request, so `stack` still leaves it out, and naming one on the command line is not built.
+- 2026-11-09: recurred in the spec loop's run 56. Batch 73 cut `SA-0353` and `SA-0354` both from `SA-0355`, and the delegate chained `SA-0354` onto `SA-0353`. `stack` put #1098 below #1099, and `size` measured `SA-0353` against its own head (0 tokens). The delegate linked the stack by hand.

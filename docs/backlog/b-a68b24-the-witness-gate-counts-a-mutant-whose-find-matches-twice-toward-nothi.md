@@ -1,11 +1,12 @@
 ---
 id: b-a68b24
 title: The witness gate counts a mutant whose find matches twice toward nothing, so a diff that repeats the line escapes it
-status: open
+status: done
+closed: 2026-11-09
 tier: 2
 filed: 2026-10-24
 specs: [SA-0351]
-prs: []
+prs: [1096]
 commits: []
 cites: [§5.4]
 related: [b-9efbe2]
@@ -31,3 +32,4 @@ failure names the criterion and the count. A cell sees it as a gate failure it c
 ## Record
 
 - 2026-10-24: filed from the spec loop's run 47.
+- 2026-11-09: `SA-0351` (#1096) landed in the spec loop's run 56. A declared mutant whose `find` matches other than once fails `witness`, naming its criterion and the count.

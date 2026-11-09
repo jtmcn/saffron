@@ -1879,12 +1879,12 @@ def test_a_hundred_dollar_night_writes_one_follow_up_at_the_writer_ceiling(tmp_p
     assert len(pooled) == 2
 
 
-@pytest.mark.parametrize(
-    "share, expected", [(0.18, []), (0.37, ["SA-0108", "SA-0109"])]
-)
+@pytest.mark.parametrize("share, expected", [(0.18, []), (0.37, ["SA-0108"])])
 def test_a_sub_cap_of_18_dollars_writes_none_and_37_writes_two(
     tmp_path, share, expected
 ):
+    """$18 is under one `SPEC_WRITER_SESSION_USD` ($23 today), so nothing
+    is written. $37 covers one session but not a second, so only one is."""
     from saffron import follow_up, spec_review
 
     built = _build(tmp_path)

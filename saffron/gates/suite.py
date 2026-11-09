@@ -171,7 +171,8 @@ class GateSuite:
             self.gates,
             cwd=tree.cwd,
             executor=tree.executor,
-            acceptance=[*spec.acceptance, *derived],
+            acceptance=spec.acceptance,
+            derived=derived,
             mutate=tree.mutated,
         )
         # After the declared gates (real `collected`/`failures` at head), before
@@ -195,6 +196,7 @@ class GateSuite:
                         executor=tree.executor,
                     ),
                     exempt=exempt,
+                    diff=diff,
                 )
             ]
             if "tests" in self.gates

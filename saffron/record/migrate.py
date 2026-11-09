@@ -19,9 +19,10 @@ Never a `Ledger`. Its open adds missing columns, so it would write the source.
 
 A ref that is neither empty nor an exact prefix is topped up instead of
 refused outright. The comparison runs kind by kind, under a normalisation
-that sets aside a fact's `at`, a `gate_result`'s `schema_version`,
-`collected` and `uncollected`, and a null `batch_key`. An agreeing ref gains every later fact of a compared
-kind, then the ledger's own `task_state` where its derived state still
+that sets aside a fact's `at` and a null `batch_key`. It also sets aside a
+`gate_result`'s `schema_version`, `collected`, `uncollected` and
+`locations`. An agreeing ref gains every later fact of a compared kind,
+then the ledger's own `task_state` where its derived state still
 disagrees.
 
 `migrate_and_push` is the orchestration the `saffron migrate` command runs.
@@ -79,9 +80,11 @@ _COMPARED_KINDS = (
     "stack_finish",
 )
 
-# The three `gate_result` keys the ledger's own fact never carries, set
+# The four `gate_result` keys the ledger's own fact never carries, set
 # aside here rather than compared.
-_GATE_RESULT_SET_ASIDE = frozenset({"schema_version", "collected", "uncollected"})
+_GATE_RESULT_SET_ASIDE = frozenset(
+    {"schema_version", "collected", "uncollected", "locations"}
+)
 
 # Item 42: a `rebuttal` fact's own `answer` and `error` keys, set aside
 # like `_GATE_RESULT_SET_ASIDE`. `_finding_facts` derives neither yet.
@@ -90,7 +93,7 @@ _REBUTTAL_SET_ASIDE = frozenset({"answer", "error"})
 
 def _normalized(fact: Fact) -> Fact:
     """`fact` with every difference the top-up sets aside already gone: its
-    `at`, the three `gate_result` keys above on a `gate_result`, and the two
+    `at`, the four `gate_result` keys above on a `gate_result`, and the two
     `rebuttal` keys above on a `rebuttal`."""
     payload = fact.payload
     if fact.kind == "gate_result":

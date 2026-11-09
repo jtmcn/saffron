@@ -2532,6 +2532,55 @@ def _assert_tops_up_to(
     assert seeded.read(key) == expected
 
 
+def test_a_gate_results_locations_is_set_aside_like_collected(tmp_path: Path) -> None:
+    """Backlog item 49. `saffron migrate` never writes a `gate_result` fact
+    carrying its own `locations` key. So a held ref that does, from a live
+    run, must still agree and gain nothing. That is exactly what
+    `collected` already does."""
+    from saffron.record.migrate import migrate
+
+    ledger = Ledger(tmp_path / "source.db")
+    repo_id = ledger.upsert_repo("saffron", "/o", "/m.git", None)
+    batch_id = ledger.create_batch(budget_usd=50.0)
+    task_id = _rich_task(ledger, repo_id, batch_id, "SA-9201")
+    key = _key(ledger, task_id)
+    source_path = tmp_path / "source.db"
+    ledger.close()
+
+    truth = MemoryRecord()
+    migrate(source_path, truth)
+    full = truth.read(key)
+    gate_result_index = next(i for i, f in enumerate(full) if f.kind == "gate_result")
+
+    def _tweaked_payload(**payload_changes: Any) -> list[Fact]:
+        copy = list(full)
+        copy[gate_result_index] = replace(
+            copy[gate_result_index],
+            payload={**copy[gate_result_index].payload, **payload_changes},
+        )
+        return copy
+
+    _assert_agrees_and_gains_nothing(source_path, key, _tweaked_payload(locations=None))
+    _assert_agrees_and_gains_nothing(
+        source_path,
+        key,
+        _tweaked_payload(
+            locations={"t.py::test_a": {"file": "t.py", "first": 1, "last": 2}}
+        ),
+    )
+
+
+def test_the_normalized_docstring_counts_every_set_aside_gate_result_key() -> None:
+    """`_normalized`'s docstring names one `gate_result` count, the
+    frozenset's own length, so a stale or second count fails."""
+    from saffron.record.migrate import _GATE_RESULT_SET_ASIDE, _normalized
+    from tests.test_citations import COUNTED
+
+    doc = " ".join((_normalized.__doc__ or "").split())
+    counts = re.findall(r"the (\w+) `gate_result` keys", doc)
+    assert counts == [COUNTED[len(_GATE_RESULT_SET_ASIDE) - 1]]
+
+
 def test_the_top_up_sets_aside_only_its_named_differences(tmp_path: Path) -> None:
     from saffron.record.migrate import migrate
 
