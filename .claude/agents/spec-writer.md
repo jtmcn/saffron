@@ -107,8 +107,11 @@ And optionally:
    quantifies over, such as the forms of a call or the spellings of a path.
    Beside each member, name the witness that drives it. Give an undriven member
    a witness, or narrow the claim and say in the notes what is left.
-   **Done when** every member of every set names its witness, and the report
-   carries the table. List each criterion's wrong versions under its
+   Some claims have a negative clause, such as "no fetch" or "no row". Each
+   needs a witness that first sees the positive case through one instrument. A spy that only asserts an absence passes when it is blind.
+   Five of six blockers on 2026-11-04 were this shape (b-c12d39).
+   **Done when** every member of every set names its witness, every negative
+   claim names its positive case, and the report carries the table. List each criterion's wrong versions under its
    `wrong_versions:` field, not as "These fail it" prose in the notes. The
    host then runs every one of them.
 7. **Review your draft** as the spec-reviewer would, on all six checks. Fix

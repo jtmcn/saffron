@@ -143,6 +143,10 @@ later one fits.
 **Placed 2026-11-08**, from `SA-0356`'s spec chain: **b-d1c277**. The queue's
 stack thresholds assume every earlier candidate ran.
 
+**Placed 2026-11-09**, from the spec chain speed review: **b-c12d39**. A
+criterion cannot name the members its claim covers, so no command sees one
+that no witness drives.
+
 **Placed 2026-11-08**, from the spec loop's run 55: **b-31e3c8**,
 **b-cbb6e7**, **b-c7858c**, **b-879e72**, then **b-3df181**. REBUT answers
 no concern, so every in-cell concern reached both seats. A finish minted a
@@ -372,6 +376,10 @@ Python. Record helpers sit under `tests/`, and the loop's driver imports them.
 A lens can search code only as text. The spec loop numbers its passes as runs,
 which is a ledger term. The spec chain records no cost per escaped defect, so
 no step can be cut on evidence.
+
+**Placed 2026-11-09**, from the spec chain speed review: **b-00f151**.
+`saffron draft` takes no decisions, parent or pre-flight, so the chain runs by
+hand.
 
 **Moved 2026-11-07 from tier 2**, on the operator's ruling: ~~**b-dc5212**~~ and
 ~~**b-4589be**~~. Each bites only on the driver's attended path, which is now the
