@@ -29,3 +29,4 @@ birth. A test feeds an end review's directories and asserts no hand-over.
 ## Record
 
 - 2026-11-08: filed from the spec loop's run 55.
+- 2026-11-09: recurred in the spec loop's run 56. Finish 73's end review layer for `SA-0355` woke the delegate with "`SA-0354` has packaged, and `SA-0355` started". The delegate told that watch to stop three times before (b-2d2014).
