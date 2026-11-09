@@ -11746,6 +11746,7 @@ def test_a_cell_run_produces_a_witness_result(monkeypatch, tmp_path):
         executor=None,
         acceptance: Sequence[Criterion] = (),
         mutate: Mutated | None = None,
+        derived: Sequence[Criterion] = (),
     ):
         captured.append((acceptance, mutate))
         assert mutate is not None  # `_suite` always supplies one
@@ -11811,6 +11812,7 @@ def test_a_cell_run_supplies_the_real_mutator(monkeypatch, tmp_path):
         executor=None,
         acceptance: Sequence = (),
         mutate: Mutated | None = None,
+        derived: Sequence = (),
     ):
         captured.append((acceptance, mutate))
         assert mutate is not None  # `_suite` always supplies one
@@ -11923,6 +11925,7 @@ def test_a_skipped_witness_blocks_nothing_at_either_tier(monkeypatch, tmp_path):
             executor=None,
             acceptance: Sequence[Criterion] = (),
             mutate: Mutated | None = None,
+            derived: Sequence[Criterion] = (),
         ):
             captured.append((acceptance, mutate))
             assert mutate is not None, "the wiring must hand run_suite a mutator"

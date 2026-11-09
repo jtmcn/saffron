@@ -28,10 +28,11 @@ mutant — collection crashed, the toolchain broke — has answered nothing
 about whether the witness guards its claim. It aborts this gate as `error`,
 charged to nobody, exactly the collapse `DESIGN.md` refuses everywhere else.
 
-A mutant that does not apply — `find` absent or ambiguous in the tree the
-spec anticipated a different implementation for — is the ordinary case, not
-a defect: it is named in the summary and counted toward nothing, never
-silently bought as a `pass`.
+A spec's own declared mutant whose `find` is absent or ambiguous in the
+tree now fails. The claim's code is not where the spec said it was. The
+count says so, not a summary line that counts toward nothing. A constant
+mutant, a criterion probe and a wrong version keep the older reading.
+Each stays unproven, never silently bought as a `pass`.
 
 Every mutant is applied to a clean tree and restored before the next is
 touched, and restoration is attempted on every exit path — `error`, `skip`,
@@ -100,6 +101,21 @@ RunTests = Callable[[list[str]], GateResult]
 Mutated = Callable[[Mutant], AbstractContextManager[str | None]]
 
 
+class FindCount(str):
+    """A `Mutated` reason that is the find text's match count, carried as
+    an `int` instead of parsed from prose. Every other refusal a mutator
+    yields stays a plain `str`. Only this subclass makes a declared
+    mutant's bad count a failure instead of unproven (§5.4.1).
+    """
+
+    count: int
+
+    def __new__(cls, reason: str, count: int) -> FindCount:
+        self = super().__new__(cls, reason)
+        self.count = count
+        return self
+
+
 def _named(criterion: Criterion, reason: str) -> str:
     return f"{criterion.witness} ({reason})"
 
@@ -115,17 +131,19 @@ def witness_gate(
     run_tests: RunTests,
     collected: Sequence[str] | None = None,
     edit_noun: EditNoun = "mutant",
+    derived: Sequence[Criterion] = (),
+    tests_tool: str | None = None,
 ) -> GateResult:
     """Each criterion's mutant, applied through `mutate`, tested alone, and
     undone.
 
-    `skip` answers when no criterion carries a mutant, declared by the spec
-    or derived from the repo's `witness:` patterns. No task fails for a
-    field its spec predates. `skip` also answers a spec whose every mutant
-    failed to apply, or whose mutator could not reach the tree at all: named in the
-    summary, never counted as a witness that did its job. `error` ends the
-    attempt the moment the repo's `tests` gate could not answer for one
-    mutant; nothing already restored is undone, and nothing not yet touched
+    `skip` answers when no criterion carries a mutant, declared by the spec or
+    derived from the repo's `witness:` patterns. No task fails for a field its
+    spec predates. `skip` also answers a spec whose mutator could not reach the
+    tree, or whose `derived` mutant's `find` is absent or repeated. The same bad
+    count on a declared criterion fails instead (§5.4.1). `error` ends the
+    attempt the moment the repo's `tests` gate could not answer for one mutant;
+    nothing already restored is undone, and nothing not yet touched
     is applied. The one exception is a restore that itself failed — `error`
     too, and it leaves the tree mutated, because nothing here can put back
     what it could not read or write, and this gate has no path of its own to
@@ -143,20 +161,26 @@ def witness_gate(
     enumeration to offer, which is not evidence about any witness: every
     criterion is tried, exactly as before this argument existed.
     """
+    # `derived` never fails on a bad count, only `acceptance` does.
+    # `tests_tool` names the result when no criterion here ever did.
     declared = [c for c in acceptance if c.mutant is not None]
-    if not declared:
+    worklist = [(c, True) for c in declared] + [
+        (c, False) for c in derived if c.mutant is not None
+    ]
+    if not worklist:
         return GateResult(
             gate="witness", status="skip", summary="the spec declares no mutants"
         )
 
     died: list[str] = []
     survived: list[Failure] = []
+    miscounted: list[Failure] = []
     unproven: list[str] = []
     tool: str | None = None
 
-    for criterion in declared:
+    for criterion, countable in worklist:
         mutant = criterion.mutant
-        assert mutant is not None  # narrowed by the `declared` filter above
+        assert mutant is not None  # narrowed by the `worklist` filter above
 
         # Before `mutate`, so nothing is written for a question that cannot be
         # answered and nothing has to be restored (item 83).
@@ -178,7 +202,25 @@ def witness_gate(
         try:
             with mutate(mutant) as reason:
                 if reason is not None:
-                    unproven.append(_named(criterion, reason))
+                    count = reason.count if isinstance(reason, FindCount) else None
+                    if countable and edit_noun == "mutant" and count is not None:
+                        code = (
+                            "mutant-find-absent"
+                            if count == 0
+                            else "mutant-find-repeated"
+                        )
+                        miscounted.append(
+                            Failure(
+                                file=criterion.witness,
+                                code=code,
+                                message=(
+                                    f"{mutant.file}'s mutant matched {count} "
+                                    f"time(s), not once — {criterion.claim}"
+                                ),
+                            )
+                        )
+                    else:
+                        unproven.append(_named(criterion, reason))
                     continue
                 # Past the reason check, so the tree really is mutated now.
                 # What this flag buys is the verb below: "could not restore"
@@ -284,17 +326,26 @@ def witness_gate(
         if unproven
         else ""
     )
+    tool = tool or tests_tool
 
-    if survived:
+    if survived or miscounted:
+        pieces = []
+        if survived:
+            pieces.append(
+                f"{len(survived)} of {len(worklist)} witness(es) survived "
+                f"their own {edit_noun}"
+            )
+        if miscounted:
+            pieces.append(
+                f"{len(miscounted)} of {len(declared)} declared mutant(s) did "
+                "not match once"
+            )
         return GateResult(
             gate="witness",
             status="fail",
             tool=tool,
-            failures=survived,
-            summary=(
-                f"{len(survived)} of {len(declared)} witness(es) survived their "
-                f"own {edit_noun}{note}"
-            ),
+            failures=[*survived, *miscounted],
+            summary=" and ".join(pieces) + note,
         )
     if died:
         return GateResult(
@@ -302,7 +353,7 @@ def witness_gate(
             status="pass",
             tool=tool,
             summary=(
-                f"{len(died)} of {len(declared)} witness(es) died under their "
+                f"{len(died)} of {len(worklist)} witness(es) died under their "
                 f"own {edit_noun}{note}"
             ),
         )

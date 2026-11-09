@@ -15,6 +15,10 @@ worktree a task is being packaged from, so anything it does must be undone
 exactly: byte-identical, including a trailing newline or a CRLF line ending
 that text mode would otherwise normalize away.
 
+A `find` absent or matching more than once carries its match count as
+data too, in `MutationResult.count` and `witness.FindCount`. A caller no
+longer has to parse the count back out of prose (§5.4.1).
+
 `host_mutator` (`SA-0060`) is the host-tree implementation of
 `witness.Mutated` — a callable from a `Mutant` to a context manager that
 applies on entry and undoes on exit, the shape `saffron/gates/core/witness.py`
@@ -39,13 +43,12 @@ from saffron.intake import Mutant
 
 
 class MutationError(ValueError):
-    """Restoring a mutant failed. Applying never raises this — it reports
-    `MutationResult(ok=False, ...)` instead, because a mutant that does not
-    apply is the ordinary case when an implementation is written differently
-    from what the spec anticipated (§5.4.1). Restoring is different: by the
-    time it is called, the caller believes the tree is in the mutated state
-    `apply_mutant` left it in, and a caller that cannot trust that has no safe
-    way to proceed silently."""
+    """Restoring a mutant failed. Applying never raises this. It reports
+    `MutationResult(ok=False, ...)` instead, since a bad count is only
+    sometimes this task's problem (§5.4.1). Restoring is different. By
+    the time it is called, the caller believes the tree already holds
+    the mutated state `apply_mutant` left it in. A caller that cannot
+    trust that has no safe way to proceed silently."""
 
 
 @dataclass(frozen=True)
@@ -81,6 +84,9 @@ class MutationResult:
     offset: int | None = None
     applied_digest: str | None = None
     reason: str = ""
+    count: int | None = None
+    """`find`'s match count, set only when `reason` is that count (0 or
+    more than one). `None` for every other way `apply_mutant` can refuse."""
 
 
 def _resolve_target(tree: Path, file: str) -> Path | None:
@@ -114,13 +120,11 @@ def apply_mutant(tree: Path, mutant: Mutant) -> MutationResult:
     """Replace `mutant.find` with `mutant.replace` in `tree / mutant.file`.
 
     Applies only when `find` matches the file's current bytes exactly once.
-    Zero matches is the ordinary case when the implementation reads
-    differently from what the spec anticipated; more than one match means the
-    mutant does not name one property, and picking one of them silently is
-    how a check comes to measure something other than what it claims — both
-    are refused the same way, as `ok=False` with a reason naming the file and
-    which of the two cases it was, never the edit itself, and never as a
-    silent edit of the first occurrence.
+    Zero matches, or more than one, is refused the same way: `ok=False` with
+    a reason naming the file and the count, never the edit itself, and never
+    as a silent edit of the first occurrence. The count travels in
+    `MutationResult.count` too. `witness_gate` reads that field, not the
+    prose, to decide whether a spec's own mutant now fails (§5.4.1).
 
     The reason carries no part of `find` or `replace`: through `witness`'s
     summary it reaches the gate table REVIEW's lenses are shown, a lens can
@@ -152,11 +156,13 @@ def apply_mutant(tree: Path, mutant: Mutant) -> MutationResult:
     if count == 0:
         return MutationResult(
             ok=False,
+            count=count,
             reason=f"{mutant.file}: find text not found",
         )
     if count > 1:
         return MutationResult(
             ok=False,
+            count=count,
             reason=(
                 f"{mutant.file}: find text matches {count} times, expected exactly once"
             ),
@@ -238,6 +244,8 @@ def host_mutator(tree: Path) -> Callable[[Mutant], AbstractContextManager[str | 
     and never a status, because that reading belongs to the gate that injects
     this, not to this module (§5.4.1).
     """
+    # A find matching zero or more than once yields `witness.FindCount`
+    # instead, a `str` subclass that carries the count as data too.
 
     def mutate(mutant: Mutant) -> AbstractContextManager[str | None]:
         return _mutated(tree, mutant)
@@ -270,9 +278,17 @@ def _mutated(tree: Path, mutant: Mutant) -> Iterator[str | None]:
     the worse fact, and the tree is left mutated because nothing here can put
     back what it could not read or write.
     """
+    # Deferred: a module-scope import of a name `witness.py` only now defines
+    # would make `revert`'s reverted run a collection error (§5.4.1).
+    from saffron.gates.core.witness import FindCount
+
     applied = apply_mutant(tree, mutant)
     if not applied.ok:
-        yield applied.reason
+        yield (
+            FindCount(applied.reason, applied.count)
+            if applied.count is not None
+            else applied.reason
+        )
         return
 
     failed_to_restore: MutationError | OSError | None = None

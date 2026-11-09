@@ -3,18 +3,22 @@ from __future__ import annotations
 import base64
 import inspect
 import os
+import re
 import shutil
 import subprocess
 import time
 import uuid
+from functools import partial
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from saffron.cell import proxy, runtime, worktree
+from saffron.gates.contract import GateResult
+from saffron.gates.core.witness import witness_gate
 from saffron.gates.runner import CellExecutor, run_gate
-from saffron.intake import Mutant
+from saffron.intake import Criterion, Mutant
 from saffron.phases import package as package_phase
 from saffron.repos import image
 from saffron.repos import mirror as mirror_ops
@@ -1462,6 +1466,59 @@ def test_a_find_that_does_not_match_once_applies_nothing(tmp_path, monkeypatch):
         assert reason is not None
         assert "not found" in reason
     assert target.read_text() == "value = 1\nvalue = 1\n"
+    assert _porcelain(tmp_path) == ""
+
+
+def test_the_cell_mutator_hands_the_gate_its_find_count(tmp_path, monkeypatch):
+    """`witness_gate`, driven through `source_mutated` on a committed host
+    git repo, fails with `mutant-find-absent` for a find matching zero
+    times. It fails with `mutant-find-repeated` for two and for three.
+    Each message carries its count as digits, as a whole word. A find
+    matching once is applied, and only its witness ever reaches the
+    `tests` gate. The tree is clean after (§5.4.1)."""
+    find = "TARGET = 1"
+    _repo_with_a_file(tmp_path, monkeypatch, "# padding\n")
+    for name, times in (("zero", 0), ("one", 1), ("two", 2), ("three", 3)):
+        (tmp_path / "src" / f"{name}.py").write_text(
+            "# padding\n" + f"{find}\n" * times
+        )
+    _commit(tmp_path, "four finds")
+
+    criteria = {
+        name: Criterion(
+            claim=f"the {name} guard holds",
+            witness=f"tests/test_{name}.py::test_{name}",
+            mutant=Mutant(file=f"src/{name}.py", find=find, replace="TARGET = 2"),
+        )
+        for name in ("zero", "one", "two", "three")
+    }
+
+    calls: list[list[str]] = []
+
+    def run_tests(subset):
+        calls.append(subset)
+        return GateResult(
+            gate="tests", status="fail", tool="pytest 0", collected=tuple(subset)
+        )
+
+    result = witness_gate(
+        acceptance=list(criteria.values()),
+        mutate=partial(worktree.source_mutated, "c"),
+        run_tests=run_tests,
+    )
+
+    assert result.status == "fail"
+    # Only the find that matched exactly once was ever applied and run.
+    assert calls == [[criteria["one"].witness]]
+
+    by_witness = {f.file: f for f in result.failures}
+    assert by_witness[criteria["zero"].witness].code == "mutant-find-absent"
+    assert by_witness[criteria["two"].witness].code == "mutant-find-repeated"
+    assert by_witness[criteria["three"].witness].code == "mutant-find-repeated"
+    for name, count in (("zero", 0), ("two", 2), ("three", 3)):
+        message = by_witness[criteria[name].witness].message
+        assert re.search(rf"\b{count}\b", message)
+
     assert _porcelain(tmp_path) == ""
 
 

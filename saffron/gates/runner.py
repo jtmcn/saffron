@@ -180,6 +180,7 @@ def run_witness(
     tests_result: GateResult | None,
     timeout_s: float = 900,
     executor: GateExecutor | None = None,
+    derived: Sequence[Criterion] = (),
 ) -> GateResult | None:
     """`witness` (§5.4.1), wired to the repo's declared `tests` gate.
 
@@ -218,6 +219,8 @@ def run_witness(
     every declared criterion — preserved exactly as `SA-0057` wrote it,
     inner-`error`-discards-an-earlier-survivor included.
     """
+    # `derived` is `constant_mutants`' own output, passed through apart
+    # from `acceptance`: only a spec-declared mutant can fail on a bad count.
     if "tests" not in gates:
         return None
 
@@ -232,12 +235,13 @@ def run_witness(
         )
 
     declared = [c for c in acceptance if c.mutant is not None]
+    derived_declared = [c for c in derived if c.mutant is not None]
     # Hoisted out of the `if` below because `witness_gate` takes it too: the
     # probe asks whether this repo's `tests` gate honours a subset at all, and
     # the same enumeration answers, per criterion, whether a named witness even
     # exists in this tree (item 83).
     collected = tests_result.collected if tests_result is not None else None
-    if declared:
+    if declared or derived_declared:
         if not collected:
             return GateResult(
                 gate="witness",
@@ -296,6 +300,8 @@ def run_witness(
         mutate=mutate,
         run_tests=run_tests,
         collected=collected,
+        derived=derived,
+        tests_tool=tests_result.tool if tests_result is not None else None,
     )
 
 
@@ -307,6 +313,7 @@ def run_suite(
     executor: GateExecutor | None = None,
     acceptance: Sequence[Criterion] = (),
     mutate: Mutated | None = None,
+    derived: Sequence[Criterion] = (),
 ) -> list[GateResult]:
     """Run every declared gate in declaration order.
 
@@ -321,6 +328,8 @@ def run_suite(
     here once said no production caller could, which `SA-0061` falsified and
     backlog item 75 records.
     """
+    # `derived` is `constant_mutants`' own criteria, kept apart from
+    # `acceptance`: only a spec-declared mutant can fail on a bad count.
     results = [
         run_gate(name, executable, cwd, timeout_s=timeout_s, executor=executor)
         for name, executable in gates.items()
@@ -335,6 +344,7 @@ def run_suite(
             tests_result=tests_result,
             timeout_s=timeout_s,
             executor=executor,
+            derived=derived,
         )
         if witness_result is not None:
             # After `tests`, never beside it — its own result is what

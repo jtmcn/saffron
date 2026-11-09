@@ -212,19 +212,19 @@ def test_a_stale_witness_id_does_not_discard_another_criterions_finding(tmp_path
 
 def test_the_result_names_each_criterion_not_a_count(tmp_path):
     """Two criteria, two different fates: one survives its mutant (a real
-    finding), one never applies at all. The composed result must still be
-    able to say which is which — not just "N of M" — so the survivor is
-    named in `failures` and the one that never applied is still traceable in
-    the summary."""
+    finding), one never applies at all. Its file is not there, so it
+    stays unproven rather than failing on a count (§5.4.1). The composed
+    result must still be able to say which is which — not just "N of M" —
+    so the survivor is named in `failures` and the one that never applied
+    is still traceable in the summary."""
     (tmp_path / "a.py").write_text("def total(x):\n    return max(x, 0)\n")
-    (tmp_path / "b.py").write_text("def other(y):\n    return min(y, 10)\n")
 
     survivor = _criterion(
         witness="tests/test_a.py::test_a", file="a.py", find="max(x, 0)", replace="0"
     )
     never_applies = _criterion(
         witness="tests/test_b.py::test_b",
-        file="b.py",
+        file="missing.py",
         find="not-there-at-all",
         replace="0",
     )
@@ -265,9 +265,10 @@ def test_the_result_names_each_criterion_not_a_count(tmp_path):
     # though it produced no `Failure` entry of its own.
     assert never_applies.witness in result.summary
 
-    # And the tree is restored: both files are back to their originals.
+    # And the tree is restored: the survivor's file is back to its original,
+    # and the missing one was never written.
     assert (tmp_path / "a.py").read_text() == "def total(x):\n    return max(x, 0)\n"
-    assert (tmp_path / "b.py").read_text() == "def other(y):\n    return min(y, 10)\n"
+    assert not (tmp_path / "missing.py").exists()
 
 
 def test_a_tests_gate_that_ignores_the_subset_cannot_attribute_a_death(tmp_path):
