@@ -135,7 +135,7 @@ session (`saffron/phases/review.py:732-737`). The comment above the floor says
 the cap is "never decremented between them" (`saffron/cell/session.py:80-89`).
 REVIEW's cost is summed into `spent` once, after every session has run
 (`saffron/cell/session.py:3397-3404`). `_over_budget` holds `spent` against
-the budget (`saffron/cell/session.py:2602-2617`). Its last call comes before
+the budget (`saffron/cell/session.py:2603-2618`). Its last call comes before
 the notes turn, ahead of REVIEW (`saffron/cell/session.py:3033`).
 
 **What a re-prompt spends.** `_parse_or_reprompt` resumes a session whose
@@ -148,7 +148,7 @@ cost. It returns both turns' summed cost
 **How REVIEW ends today.** `review_state` returns `REVIEW_INCOMPLETE` only for
 a lens with an `error` (`saffron/phases/review.py:976-989`). The cell calls it
 once, after every record is written, and passes its line to `_phase_start`
-(`saffron/cell/session.py:3420-3421`). An errored criterion probe or wrong
+(`saffron/cell/session.py:3421-3422`). An errored criterion probe or wrong
 version does not stop the task. Its entry carries an `error` and the REVIEW
 line names its witness (`saffron/phases/review.py:583-604`, `:766-787`). The
 cell pairs `criterion-probes` entries with `spec.acceptance`, and wrong-version
@@ -288,9 +288,9 @@ the re-prompt rule and the session per criterion. Two tests in
 `tests/test_session.py` assert that a later session holds the same cap as an
 earlier one. They are
 `test_each_claim_is_asked_of_its_own_session_that_is_never_shown_a_witness`
-(`tests/test_session.py:12090`, its assert at `:12184`) and
+(`tests/test_session.py:12326`, its assert at `:12420`) and
 `test_criterion_probes_and_wrong_versions_share_one_gate_only_cell_and_the_spend`
-(`tests/test_session.py:13802`, its assert at `:13895`). Assert the cap REVIEW's pool leaves instead.
+(`tests/test_session.py:14038`, its assert at `:14131`). Assert the cap REVIEW's pool leaves instead.
 A prototype of the change failed these seven tests and the `critic_budget`
 test, and no others.
 

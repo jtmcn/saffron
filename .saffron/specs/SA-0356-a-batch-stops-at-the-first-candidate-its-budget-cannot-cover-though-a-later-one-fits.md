@@ -173,7 +173,7 @@ stopped `BUDGET`. `SA-0294` needs $25 and never ran.
    this one left a layer unbuilt.
 5. **One existing test changes.** It is
    `test_a_follow_up_meets_until_the_budget_and_the_breaker_as_any_task_does`
-   (`tests/test_batch.py:6265`). Its batch 2 offers `TE-44` at $27 and then
+   (`tests/test_batch.py:6267`). Its batch 2 offers `TE-44` at $27 and then
    `TE-40` at $1 (`:6303-6340`). It asserts that no line says `refused`
    (`:6339`). `TE-44` is now
    passed over, and `TE-40` meets the open pull request's refusal on `x.py`.
@@ -185,7 +185,7 @@ stopped `BUDGET`. `SA-0294` needs $25 and never ran.
 
 ## Out of scope
 
-- `_print_stack_admission`'s thresholds (`saffron/cli.py:2171-2203`). Each
+- `_print_stack_admission`'s thresholds (`saffron/cli.py:2257-2289`). Each
   still assumes every earlier candidate ran. For a chain, criterion 5 holds
   that as the least `--budget` that starts the layer. A spec that reaches no
   earlier one now starts under a lower `--budget` whenever an earlier spec is
