@@ -131,7 +131,7 @@ def _changed_lines(diff: str) -> dict[str, set[int]] | None:
     return by_file
 
 
-def _rewritten_pool(
+def _second_subset(
     *,
     before: list[str],
     after: list[str],
@@ -144,9 +144,9 @@ def _rewritten_pool(
 ) -> list[str]:
     """Old names a diff-changed line reaches through their own location,
     net of every name the first subset already owns."""
-    pool = (set(before) & set(after)) - candidates - preserved - set(exempt)
+    old_names = (set(before) & set(after)) - candidates - preserved - set(exempt)
     rewritten = []
-    for name in sorted(pool):
+    for name in sorted(old_names):
         location = locations.get(name)
         if location is None:
             continue
@@ -164,20 +164,21 @@ def _rewritten_pool(
 
 
 def _rewritten_clause(
-    pool: list[str],
+    second_subset: list[str],
     result: GateResult | None,
     failed_to_run: Exception | None,
     *,
     diff_unreadable: bool,
 ) -> str:
-    """The advisory clause a second, rewritten-test run earns, or an empty
-    string where nothing ran or nothing was found to run."""
+    """The advisory clause a second, rewritten-test run earns. An unreadable
+    diff returns its own clause, and an empty second subset returns an empty
+    string."""
     if diff_unreadable:
         return (
             " — advisory, does not block: the diff could not be read, so no "
             "rewritten test could be checked"
         )
-    if not pool:
+    if not second_subset:
         return ""
     unreadable = (
         failed_to_run is not None
@@ -197,8 +198,10 @@ def _rewritten_clause(
         return (
             " — advisory, does not block: no readable verdict for the rewritten test(s)"
         )
-    passed = sorted(name for name in pool if name in collected and name not in failed)
-    base = f"{len(passed)} of {len(pool)} rewritten test(s) passed without their source"
+    passed = sorted(
+        name for name in second_subset if name in collected and name not in failed
+    )
+    base = f"{len(passed)} of {len(second_subset)} rewritten test(s) passed without their source"
     if passed:
         base += f": {', '.join(passed[:3])}"
     return f" — advisory, does not block: {base}"
@@ -219,13 +222,13 @@ def revert_gate(
 ) -> GateResult:
     """New tests, run with their own source reverted, must not pass.
 
-    `skip` is not evidence. Four cases touch neither `reverted` nor
+    `skip` is not evidence. Most skips touch neither `reverted` nor
     `run_tests`. No readable enumeration exists at base. The repo declares
-    no test paths. Every changed file sits inside those paths. Uncommitted
-    work sits on a path this would revert. A fifth touches both, only where
-    a rewritten test is found through `locations`: a diff adding neither a
-    new test nor one rewritten in place. A sixth comes later and always
-    touches both: a reverted run that returned no trustworthy result.
+    no test paths. Every changed file sits inside them. Uncommitted work sits on a
+    path this would revert. No new test is left to run, because none was
+    added, all are exempt or none reaches changed source. If `locations`
+    finds a rewritten test there, the second subset runs alone inside the
+    revert. A reverted run with no trustworthy result also skips.
     """
     before = _collected(prior)
     after = _collected(results)
@@ -285,8 +288,8 @@ def revert_gate(
     if locations:
         changed_lines = _changed_lines(diff)
         diff_unreadable = changed_lines is None
-    rewritten_pool = (
-        _rewritten_pool(
+    second_subset = (
+        _second_subset(
             before=before,
             after=after,
             candidates=candidates,
@@ -304,14 +307,14 @@ def revert_gate(
     # once narrowing itself empties `subset`.
     what = "every new test is exempt" if exempted else "the diff adds no new test"
     skip_summary = f"{what}{note}" if not subset else None
-    if not subset and not rewritten_pool:
+    if not subset and not second_subset:
         assert skip_summary is not None
         return GateResult(
             gate="revert",
             status="skip",
             summary=skip_summary
             + _rewritten_clause(
-                rewritten_pool, None, None, diff_unreadable=diff_unreadable
+                second_subset, None, None, diff_unreadable=diff_unreadable
             ),
         )
 
@@ -382,14 +385,14 @@ def revert_gate(
         )
     if not subset and subset_was_present:
         skip_summary = f"no new test depends on source this diff changed{note}"
-    if not subset and not rewritten_pool:
+    if not subset and not second_subset:
         assert skip_summary is not None
         return GateResult(
             gate="revert",
             status="skip",
             summary=skip_summary
             + _rewritten_clause(
-                rewritten_pool, None, None, diff_unreadable=diff_unreadable
+                second_subset, None, None, diff_unreadable=diff_unreadable
             ),
         )
 
@@ -429,8 +432,8 @@ def revert_gate(
             # A second, advisory run: a broken one only changes the clause
             # below, never the verdict above.
             try:
-                if rewritten_pool:
-                    rewritten_result = run_tests(rewritten_pool)
+                if second_subset:
+                    rewritten_result = run_tests(second_subset)
             except Exception as exc:
                 rewritten_failed = exc
     except Exception as exc:
@@ -443,13 +446,13 @@ def revert_gate(
         )
 
     clause = _rewritten_clause(
-        rewritten_pool,
+        second_subset,
         rewritten_result,
         rewritten_failed,
         diff_unreadable=diff_unreadable,
     )
     if not subset:
-        # `rewritten_pool` must be non-empty here, or an earlier check
+        # `second_subset` must be non-empty here, or an earlier check
         # already returned.
         assert skip_summary is not None
         return GateResult(gate="revert", status="skip", summary=skip_summary + clause)

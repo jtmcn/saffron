@@ -1442,6 +1442,13 @@ def test_the_second_subset_is_each_old_test_a_changed_line_falls_inside(tmp_path
         "--deselect=tests/test_thing.py::test_option",
         "tests/test_thing.py::test_context_only",
     ]
+    # A declared witness collected on both sides, reached by a changed line.
+    locations["tests/test_thing.py::test_declared"] = {
+        "file": "tests/test_thing.py",
+        "first": 1,
+        "last": 4,
+    }
+    both_sides.append("tests/test_thing.py::test_declared")
     before = [*both_sides, "tests/test_thing.py::test_only_base"]
     after = [*both_sides, "tests/test_thing.py::test_brand_new"]
     # A location for a name with none at head, read only if the baseline's
@@ -1455,9 +1462,11 @@ def test_the_second_subset_is_each_old_test_a_changed_line_falls_inside(tmp_path
     }
 
     calls: list[list[str]] = []
+    log: list = []
 
     def run_tests(subset):
         calls.append(list(subset))
+        log.append(("run", list(subset)))
         return _gate_result(subset, failed=tuple(subset))
 
     result = revert_gate(
@@ -1468,23 +1477,34 @@ def test_the_second_subset_is_each_old_test_a_changed_line_falls_inside(tmp_path
                 claim="preserved",
                 witness="tests/test_thing.py::test_preserved",
                 preserves=True,
-            )
+            ),
+            Criterion(claim="w", witness="tests/test_thing.py::test_declared"),
         ],
         changed_files=["src.py", "tests/test_thing.py"],
         test_paths=["tests/**"],
         dirty=lambda: [],
-        reverted=lambda paths: _reverted(paths, log=[]),
+        reverted=lambda paths: _reverted(paths, log=log),
         run_tests=run_tests,
         exempt=["tests/test_thing.py::test_exempt"],
         diff=diff,
     )
     assert result is not None
-    assert calls[0] == ["tests/test_thing.py::test_brand_new"]
+    assert calls[0] == [
+        "tests/test_thing.py::test_brand_new",
+        "tests/test_thing.py::test_declared",
+    ]
     assert calls[1] == [
         "tests/test_thing.py::test_added_at_first",
         "tests/test_thing.py::test_added_inside",
         "tests/test_thing.py::test_removed_above",
         "tests/test_thing.py::test_removed_last",
+    ]
+    # Both runs fall inside the one revert, never after the restore.
+    assert log == [
+        ("revert", ["src.py"]),
+        ("run", calls[0]),
+        ("run", calls[1]),
+        ("restore", ["src.py"]),
     ]
 
 
@@ -1494,7 +1514,7 @@ _RAISE = "raise"
 
 
 def _two_old_tests_fixture(tmp_path) -> str:
-    """A real diff rewriting both pool tests in place, each by one line
+    """A real diff rewriting both old tests in place, each by one line
     added inside it. A source file changes too, so a side exists to
     revert."""
     repo = tmp_path / "two_repo"
@@ -1674,7 +1694,8 @@ def test_the_second_subset_never_changes_what_revert_decides(tmp_path):
     for first_key, (first_behavior, subset_present) in first_outcomes.items():
         after = [*_POOL, _NEW] if subset_present else list(_POOL)
         for second_key, (second_behavior,) in second_outcomes.items():
-            run_tests = _crossed_run_tests(first_behavior, second_behavior)
+            with_calls: list[list[str]] = []
+            without_calls: list[list[str]] = []
             with_second = revert_gate(
                 prior=[_gate_result(_POOL)],
                 results=[_gate_result(after, locations=_POOL_LOCATIONS)],
@@ -1683,7 +1704,9 @@ def test_the_second_subset_never_changes_what_revert_decides(tmp_path):
                 test_paths=["tests/**"],
                 dirty=lambda: [],
                 reverted=lambda paths: _reverted(paths, log=[]),
-                run_tests=run_tests,
+                run_tests=_crossed_run_tests(
+                    first_behavior, second_behavior, calls=with_calls
+                ),
                 exempt=[],
                 diff=diff,
             )
@@ -1695,11 +1718,17 @@ def test_the_second_subset_never_changes_what_revert_decides(tmp_path):
                 test_paths=["tests/**"],
                 dirty=lambda: [],
                 reverted=lambda paths: _reverted(paths, log=[]),
-                run_tests=run_tests,
+                run_tests=_crossed_run_tests(
+                    first_behavior, second_behavior, calls=without_calls
+                ),
                 exempt=[],
                 diff=diff,
             )
             case = f"{first_key} x {second_key}"
+            first_calls = [[_NEW]] if subset_present else []
+            # Two runs, never one union, and the second runs with no new test.
+            assert with_calls == [*first_calls, _POOL], case
+            assert without_calls == first_calls, case
             assert with_second.status == without_second.status, case
             assert with_second.failures == without_second.failures, case
             assert with_second.tool == without_second.tool, case
@@ -1727,6 +1756,63 @@ def test_the_second_subset_never_changes_what_revert_decides(tmp_path):
     run_indices = [i for i, entry in enumerate(log) if isinstance(entry, list)]
     assert run_indices
     assert all(revert_index < i < restore_index for i in run_indices)
+
+    # A checkout or restore that fails is `error`, with a first subset and
+    # without one.
+    for after in ([*_POOL, _NEW], list(_POOL)):
+        for fails in ({"fail_on_enter": True}, {"fail_on_exit": True}):
+            broken = revert_gate(
+                prior=[_gate_result(_POOL)],
+                results=[_gate_result(after, locations=_POOL_LOCATIONS)],
+                acceptance=[],
+                changed_files=["src.py", "tests/t.py"],
+                test_paths=["tests/**"],
+                dirty=lambda: [],
+                reverted=lambda paths, fails=fails: _reverted(paths, log=[], **fails),
+                run_tests=_crossed_run_tests(
+                    first_outcomes["pass"][0], second_outcomes["all_passing"][0]
+                ),
+                exempt=[],
+                diff=diff,
+            )
+            case = f"{after} {fails}"
+            assert broken.status == "error", case
+            assert broken.failures == [], case
+            assert broken.tool is None, case
+
+    # A first subset that exemption empties still runs the second subset.
+    exempt_calls: dict[bool, list[list[str]]] = {True: [], False: []}
+    exempt_runs = {}
+    for located in (True, False):
+        exempt_runs[located] = revert_gate(
+            prior=[_gate_result(_POOL)],
+            results=[
+                _gate_result(
+                    [*_POOL, _NEW], locations=_POOL_LOCATIONS if located else None
+                )
+            ],
+            acceptance=[],
+            changed_files=["src.py", "tests/t.py"],
+            test_paths=["tests/**"],
+            dirty=lambda: [],
+            reverted=lambda paths: _reverted(paths, log=[]),
+            run_tests=_crossed_run_tests(
+                first_outcomes["pass"][0],
+                second_outcomes["all_passing"][0],
+                calls=exempt_calls[located],
+            ),
+            exempt=[_NEW],
+            diff=diff,
+        )
+    assert exempt_calls == {True: [_POOL], False: []}
+    with_exempt, without_exempt = exempt_runs[True], exempt_runs[False]
+    assert with_exempt.status == without_exempt.status
+    assert with_exempt.failures == without_exempt.failures
+    assert with_exempt.tool == without_exempt.tool
+    assert with_exempt.summary == without_exempt.summary + (
+        " — advisory, does not block: 2 of 2 rewritten test(s) passed "
+        "without their source: t.py::test_old1, t.py::test_old2"
+    )
 
 
 def test_each_verdict_after_the_reverted_run_carries_the_advisory(tmp_path):
@@ -1877,7 +1963,7 @@ def test_with_no_locations_the_rewritten_tests_are_never_run(tmp_path):
                 prior=[_gate_result(_POOL)],
                 results=[_gate_result(_POOL, locations=locations)],
                 acceptance=[],
-                changed_files=["src.py", "tests/t.py"],
+                changed_files=["tests/t.py"],
                 test_paths=["tests/**"],
                 dirty=_refuse_dirty,
                 reverted=_refuse,
@@ -1890,7 +1976,15 @@ def test_with_no_locations_the_rewritten_tests_are_never_run(tmp_path):
 
 
 def test_a_diff_revert_cannot_read_leaves_the_second_subset_unrun_and_says_so():
-    bad_diff = "diff --git a/x.py c/x.py\n"
+    # One diff `_split_blocks` rejects, and one block `_parse_block` rejects.
+    for bad_diff in (
+        "diff --git a/x.py c/x.py\n",
+        "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ bogus @@\n+x\n",
+    ):
+        _assert_unreadable_diff_unrun(bad_diff)
+
+
+def _assert_unreadable_diff_unrun(bad_diff):
     unreadable_clause = (
         " — advisory, does not block: the diff could not be read, so no "
         "rewritten test could be checked"

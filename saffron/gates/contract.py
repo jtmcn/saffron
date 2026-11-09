@@ -98,8 +98,8 @@ class GateResult(BaseModel):
     locations: dict[str, Location] | None = None
     """Where each collected name is defined at head, read from a gate's own
     JSON (backlog item 49). Only `revert` reads it. `None` means the gate
-    does not report where anything is defined; `{}` means it reports
-    locations and found none; a map names what it found. The three are
+    does not report where anything is defined. `{}` means it reports
+    locations and found none. A map names what it found. The three are
     three different facts, as they are for `collected`."""
     failures: list[Failure] = Field(default_factory=list)
     summary: str = ""
