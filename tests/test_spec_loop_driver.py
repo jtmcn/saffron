@@ -2147,7 +2147,7 @@ def test_check_blocks_the_ceilings_check_4_calls_blockers_and_no_others(
     # budget below the total (blocks) and level with it (does not).
     target = _spec("SA-0009", touches=2, criteria=3)
     target.max_turns = 100
-    target.budget_usd = 10.0
+    target.budget_usd = 12.0  # $3.00 over the total covers $0.80 review plus $2.00
 
     other = _cell("SA-2000", "bug", 2, 3)  # neither maximum, and not first
     other.peak_turns = 50
@@ -2199,9 +2199,55 @@ def test_check_blocks_the_ceilings_check_4_calls_blockers_and_no_others(
     assert rc == 1
     assert "blocker: budget_usd=8.0" in out and "blocker: max_turns" not in out
 
-    target.budget_usd = 9.0  # level with it: not a blocker
+    target.budget_usd = 9.0  # level with it: not this rule's blocker
+    rc, out = run()
+    assert "blocker: budget_usd" not in out
+    assert rc == 1 and "plus $2.00" in out  # no review headroom is
+
+
+def test_check_blocks_a_ceiling_under_a_fifth_over_a_cut_off_peak(monkeypatch, capsys):
+    # 2026-11-02: a cut-off peak is a floor, so clearing it bare is no margin.
+    target = _spec("SA-0009", touches=2, criteria=3)
+    target.budget_usd = 1000.0
+    floor = _cell("SA-5000", "bug", 2, 3, peak_cut_off=True)
+    floor.peak_turns = 200
+    rows = [floor]
+    monkeypatch.setattr(driver, "_known_specs", lambda: {"SA-0009": target})
+    monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (_StubLedger(), 1, "url"))
+    monkeypatch.setattr(driver, "_past_cells", lambda *a, **k: rows)
+
+    def run():
+        rc = driver.cmd_check(argparse.Namespace(spec=None, spec_id="SA-0009"))
+        return rc, capsys.readouterr().out
+
+    target.max_turns = 239  # 1.195x the floor
+    rc, out = run()
+    assert rc == 1 and "under 1.2x SA-5000's peak 200t" in out
+
+    target.max_turns = 240  # exactly 1.2x
     rc, out = run()
     assert rc == 0 and "blocker:" not in out
+
+    floor.peak_cut_off = False  # a peak the cell chose to stop at is no floor
+    target.max_turns = 201
+    rc, out = run()
+    assert rc == 0 and "blocker:" not in out
+
+
+def test_stale_commit_ids_names_a_commit_off_the_base_and_skips_other_hex(
+    empty_repo,
+):
+    # 2026-11-07: four specs cited commits a restack replaced, and cite passed.
+    on_main = _commit(empty_repo, "a.txt", "a\n")
+    _git(empty_repo, "checkout", "-q", "-b", "side")
+    off_main = _commit(empty_repo, "b.txt", "b\n")
+    _git(empty_repo, "checkout", "-q", "main")
+    text = (
+        f"Kept at `{on_main[:8]}`, replaced `{off_main[:8]}`, twice `{off_main}`. "
+        "A digest deadbeefcafe1234 and the number 1234567 name no commit."
+    )
+    stale = driver._stale_commit_ids(text, "main", cwd=empty_repo)
+    assert stale == [off_main[:8], off_main]
 
 
 def test_check_judges_the_rows_history_prints_and_no_others(monkeypatch, capsys):
@@ -2253,7 +2299,9 @@ def test_check_judges_the_spec_at_the_file_it_is_given(monkeypatch, capsys, tmp_
     assert "estimated_lines=7" in capsys.readouterr().out
 
 
-def test_check_reports_a_review_and_rebut_shortfall_as_a_concern(monkeypatch, capsys):
+def test_check_blocks_a_review_and_rebut_shortfall_and_a_thin_margin(
+    monkeypatch, capsys
+):
     # Worst review+rebut sum is a third row's ($5+$0, $0+$4, $3+$3 -> $6.00).
     # Each row's own pre-review total is distinct and non-zero too (below).
     target = _spec("SA-0009", touches=2, criteria=3)
@@ -2275,16 +2323,25 @@ def test_check_reports_a_review_and_rebut_shortfall_as_a_concern(monkeypatch, ca
     monkeypatch.setattr(driver, "_ledger_and_repo", lambda: (_StubLedger(), 1, "url"))
     monkeypatch.setattr(driver, "_past_cells", lambda *a, **k: rows)
 
-    # $11.00 minus the $4.00 pre-review total leaves $7.00, covering $6.00.
-    target.budget_usd = 11.0
-    assert driver.cmd_check(argparse.Namespace(spec=None, spec_id="SA-0009")) == 0
-    assert "concern:" not in capsys.readouterr().out
+    def run():
+        rc = driver.cmd_check(argparse.Namespace(spec=None, spec_id="SA-0009"))
+        return rc, capsys.readouterr().out
 
-    # $9.50 minus $4.00 leaves $5.50, which cannot cover $6.00 — a concern.
+    # $12.00 minus the $4.00 pre-review total leaves $8.00, covering $6.00 + $2.00.
+    target.budget_usd = 12.0
+    rc, out = run()
+    assert rc == 0 and "blocker:" not in out
+
+    # $11.00 leaves $7.00: it covers $6.00 but not the $2.00 margin (2026-11-07).
+    target.budget_usd = 11.0
+    rc, out = run()
+    assert rc == 1 and "$7.00 left" in out
+
+    # $9.50 minus $4.00 leaves $5.50, which cannot cover $6.00.
     # Reading $9.50 raw, or subtracting some other row's total, would not be.
     target.budget_usd = 9.5
-    assert driver.cmd_check(argparse.Namespace(spec=None, spec_id="SA-0009")) == 0
-    assert "concern:" in capsys.readouterr().out
+    rc, out = run()
+    assert rc == 1 and "$5.50 left" in out
 
 
 def test_check_with_nothing_to_compare_against_claims_no_pass(monkeypatch, capsys):

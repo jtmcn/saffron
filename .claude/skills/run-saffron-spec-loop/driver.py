@@ -2600,6 +2600,12 @@ def _turns_blocker(target: Spec, rows: list[PastCell]) -> str | None:
             f"max_turns={target.max_turns} at or below {row.spec_id}'s peak "
             f"{row.peak_turns}t"
         )
+    # A cut-off peak is the least that cell needed, so a bare clear is no margin.
+    if row.peak_cut_off and target.max_turns < row.peak_turns * _FLOOR_MARGIN:
+        return (
+            f"max_turns={target.max_turns} under {_FLOOR_MARGIN}x {row.spec_id}'s "
+            f"peak {row.peak_turns}t, a floor cut off at its own ceiling"
+        )
     return None
 
 
@@ -2616,20 +2622,27 @@ def _budget_blocker(target: Spec, rows: list[PastCell]) -> str | None:
     return None
 
 
-def _review_rebut_concern(target: Spec, rows: list[PastCell]) -> str | None:
+def _review_rebut_blocker(target: Spec, rows: list[PastCell]) -> str | None:
     """What's left of `budget_usd` after the same highest pre-review total
     `_budget_blocker` names, against the highest REVIEW+REBUT sum on one row —
     not two rows' maxima added, and not a mean. A row whose REBUT never ran
-    contributes its REVIEW cost alone."""
+    contributes its REVIEW cost alone. It blocks under `_REVIEW_MARGIN_USD`
+    of headroom: four budgets on 2026-11-07 cleared by $0.33 to $1.36."""
     remainder = target.budget_usd - _pre_review_total(_budget_row(rows))
     worst = max(rows, key=lambda c: c.review_usd + c.rebut_usd)
     worst_cost = worst.review_usd + worst.rebut_usd
-    if remainder < worst_cost:
+    if remainder < worst_cost + _REVIEW_MARGIN_USD:
         return (
-            f"${remainder:.2f} left after the pre-review total cannot cover "
-            f"{worst.spec_id}'s review+rebut ${worst_cost:.2f}"
+            f"${remainder:.2f} left after the pre-review total does not cover "
+            f"{worst.spec_id}'s review+rebut ${worst_cost:.2f} "
+            f"plus ${_REVIEW_MARGIN_USD:.2f}"
         )
     return None
+
+
+# A ceiling less than a fifth over a floor peak (2026-11-02 chain record).
+_FLOOR_MARGIN = 1.2
+_REVIEW_MARGIN_USD = 2.0
 
 
 # Landed lines over each spec's own estimate in spec loop run 19, median of nine
@@ -2879,16 +2892,14 @@ def cmd_check(args) -> int:
         for b in (
             _turns_blocker(target, rows),
             _budget_blocker(target, rows),
+            _review_rebut_blocker(target, rows),
             size_blocker,
         )
         if b
     ]
     for blocker in blockers:
         print(f"blocker: {blocker}")
-    concern = _review_rebut_concern(target, rows)
-    if concern:
-        print(f"concern: {concern}")
-    if not blockers and not concern:
+    if not blockers:
         print("check: ceilings clear this shape's history")
     if cite_blocker:
         print(f"blocker: {cite_blocker}")
@@ -2928,6 +2939,9 @@ def _cite_blocker(spec: Spec, specs: dict[str, Spec]) -> str | None:
         count, defects = _cite_defects(path, base)
     except GitError as err:
         return f"cite could not read {base}: {err}"
+    stale = _stale_commit_ids(path.read_text(), base)
+    count += len(stale)
+    defects += [f"commit {sha} is not an ancestor of {base}" for sha in stale]
     for defect in defects:
         print(f"cite: {defect}")
     if not defects:
@@ -3011,6 +3025,33 @@ def cmd_cite(args) -> int:
         print(defect)
     print(f"{count} citation(s) checked")
     return 1 if defects else 0
+
+
+# A short or full sha standing alone, with at least one letter so a bare number is not one.
+_COMMIT_ID = re.compile(r"(?<![\w/.-])(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}(?![\w-])")
+
+
+def _stale_commit_ids(text: str, base: str, cwd: Path = REPO) -> list[str]:
+    """Each id in `text` naming a commit that `base` does not contain. A
+    restack replaces the commits a spec cites, and `cite` resolves only
+    lines (2026-11-07 chain record). A hex word naming no commit is skipped."""
+    stale = []
+    for sha in dict.fromkeys(_COMMIT_ID.findall(text)):
+        exists = subprocess.run(
+            ["git", "cat-file", "-e", f"{sha}^{{commit}}"],
+            cwd=cwd,
+            capture_output=True,
+        )
+        if exists.returncode != 0:
+            continue
+        ancestor = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", sha, base],
+            cwd=cwd,
+            capture_output=True,
+        )
+        if ancestor.returncode != 0:
+            stale.append(sha)
+    return stale
 
 
 def _cite_defects(spec_path: Path, ref: str) -> tuple[int, list[str]]:

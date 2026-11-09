@@ -43,7 +43,7 @@ forbidden:
   - tests/test_rebut.py
 budget_usd: 52
 max_attempts: 3
-max_turns: 240
+max_turns: 242
 risk: elevated
 acceptance:
   - claim: >-
@@ -106,8 +106,8 @@ acceptance:
 Backlog item **b-d39d9a**, under `DESIGN.md` §4.3 and §5.5. Related:
 b-2f4746. Every line below was read at `03a610d3`, SA-0352's merge.
 
-**What the design now says.** Commits `5054cd61` and `01796b83` amended the
-design by hand, and `ad7049ad` amended the glossary by hand, in this pull
+**What the design now says.** Commits `b05cdf94` and `1b8a2878` amended the
+design by hand, and `bfaefbed` amended the glossary by hand, in this pull
 request.
 §4.3's paragraph now opens "REVIEW draws on one pool, and REBUT departs from
 the spend row" (`DESIGN.md:535`). It says REVIEW's pool is the remainder when
