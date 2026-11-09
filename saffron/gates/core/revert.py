@@ -4,9 +4,10 @@ The anti-theater gate. Revert the source *files* of the diff, keep the test
 files, run only the new tests, and require them to **fail** — file-level, not
 hunk-level, which is the ceiling the `ponytail:` below names. "New" is a set
 difference over names the host already holds (`collected(head) -
-collected(base)`, `census`'s own route); "changed-body-same-name" needs a
-hunk-to-node-id mapping, which is language knowledge §2.1 keeps out of core
-(backlog item 49).
+collected(base)`, `census`'s own route). "Changed-body-same-name" is a second
+subset instead. It is built from a name's own reported location and the
+diff's own changed lines, never a hunk-to-node-id mapping core computes
+itself (backlog item 49).
 
 The one sanctioned exception to "core executes nothing" (§2.1): it re-invokes
 a gate the repo already declared, through the same JSON contract as every
@@ -20,7 +21,8 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 
-from saffron.gates.contract import Failure, GateResult
+from saffron.gates.contract import Failure, GateResult, Location
+from saffron.gates.core.integrity import _DiffError, _parse_block, _split_blocks
 from saffron.gates.core.scope import NO_TEST_PATHS, matches
 from saffron.intake import Criterion
 
@@ -76,6 +78,132 @@ def _argv_safe(name: str) -> bool:
     return not name.startswith("-")
 
 
+def _locations(results: list[GateResult]) -> dict[str, Location] | None:
+    """`_collected`'s own route, for `locations`: merged across every head
+    result, never read from the baseline."""
+    reported = [r.locations for r in results if r.locations is not None]
+    if not reported:
+        return None
+    merged: dict[str, Location] = {}
+    for mapping in reported:
+        merged.update(mapping)
+    return merged
+
+
+def _hunk_changed_lines(hunk: list[tuple[str, str, int | None]]) -> set[int]:
+    """New-side lines one hunk changes. An added line always counts. A
+    removed line marks the kept lines on each side of it."""
+    changed: set[int] = set()
+    last_kept: int | None = None
+    after_deletion = False
+    for kind, _content, new_line in hunk:
+        if kind == "-":
+            if last_kept is not None:
+                changed.add(last_kept)
+            after_deletion = True
+            continue
+        assert new_line is not None  # only a "-" line carries no new-side line
+        if kind == "+" or after_deletion:
+            changed.add(new_line)
+        after_deletion = False
+        last_kept = new_line
+    return changed
+
+
+def _changed_lines(diff: str) -> dict[str, set[int]] | None:
+    """New-side lines the diff changes, keyed by new path. `None` when
+    `diff` is not the shape `integrity`'s own parser trusts."""
+    try:
+        blocks = _split_blocks(diff)
+    except _DiffError:
+        return None
+    by_file: dict[str, set[int]] = {}
+    for block in blocks:
+        try:
+            file_diff = _parse_block(block)
+        except _DiffError:
+            return None
+        if file_diff.unreadable or file_diff.new_path is None:
+            continue
+        lines = by_file.setdefault(file_diff.new_path, set())
+        for hunk in file_diff.hunks:
+            lines.update(_hunk_changed_lines(hunk))
+    return by_file
+
+
+def _rewritten_pool(
+    *,
+    before: list[str],
+    after: list[str],
+    candidates: set[str],
+    preserved: set[str],
+    exempt: Sequence[str],
+    locations: dict[str, Location],
+    changed_lines: dict[str, set[int]],
+    test_paths: Sequence[str],
+) -> list[str]:
+    """Old names a diff-changed line reaches through their own location,
+    net of every name the first subset already owns."""
+    pool = (set(before) & set(after)) - candidates - preserved - set(exempt)
+    rewritten = []
+    for name in sorted(pool):
+        location = locations.get(name)
+        if location is None:
+            continue
+        if not any(matches(location.file, pattern) for pattern in test_paths):
+            continue
+        lines = changed_lines.get(location.file)
+        if not lines:
+            continue
+        if not any(location.first <= line <= location.last for line in lines):
+            continue
+        if not _argv_safe(name):
+            continue
+        rewritten.append(name)
+    return rewritten
+
+
+def _rewritten_clause(
+    pool: list[str],
+    result: GateResult | None,
+    failed_to_run: Exception | None,
+    *,
+    diff_unreadable: bool,
+) -> str:
+    """The advisory clause a second, rewritten-test run earns, or an empty
+    string where nothing ran or nothing was found to run."""
+    if diff_unreadable:
+        return (
+            " — advisory, does not block: the diff could not be read, so no "
+            "rewritten test could be checked"
+        )
+    if not pool:
+        return ""
+    unreadable = (
+        failed_to_run is not None
+        or result is None
+        or result.status not in ("pass", "fail")
+        or result.collected is None
+    )
+    collected: set[str] = set()
+    failed: set[str] = set()
+    if not unreadable:
+        assert result is not None  # narrowed by the checks above
+        collected = set(result.collected or [])
+        failed = {f.code for f in result.failures}
+        if failed and not (failed & collected):
+            unreadable = True
+    if unreadable:
+        return (
+            " — advisory, does not block: no readable verdict for the rewritten test(s)"
+        )
+    passed = sorted(name for name in pool if name in collected and name not in failed)
+    base = f"{len(passed)} of {len(pool)} rewritten test(s) passed without their source"
+    if passed:
+        base += f": {', '.join(passed[:3])}"
+    return f" — advisory, does not block: {base}"
+
+
 def revert_gate(
     *,
     prior: list[GateResult],
@@ -87,17 +215,17 @@ def revert_gate(
     reverted: Reverted,
     run_tests: RunTests,
     exempt: Sequence[str],
+    diff: str,
 ) -> GateResult:
     """New tests, run with their own source reverted, must not pass.
 
-    `skip` is not evidence, and it is the answer to five different things, none
-    of which touches `reverted` or `run_tests`: no readable enumeration at base
-    (nothing to subtract from), a diff that adds no test (the subset is empty),
-    a repo that declares no test paths (source cannot be told from test), a
-    diff whose changed files are entirely inside those paths (nothing to
-    revert), and uncommitted work on a path this would revert (the restore
-    would destroy it). A sixth `skip` comes later and does touch both: a
-    reverted run that returned no trustworthy result.
+    `skip` is not evidence. Four cases touch neither `reverted` nor
+    `run_tests`. No readable enumeration exists at base. The repo declares
+    no test paths. Every changed file sits inside those paths. Uncommitted
+    work sits on a path this would revert. A fifth touches both, only where
+    a rewritten test is found through `locations`: a diff adding neither a
+    new test nor one rewritten in place. A sixth comes later and always
+    touches both: a reverted run that returned no trustworthy result.
     """
     before = _collected(prior)
     after = _collected(results)
@@ -148,16 +276,51 @@ def revert_gate(
     )
     if exempted:
         note += f" — {len(exempted)} exempt test(s): {', '.join(exempted)}"
-    if not subset:
-        what = "every new test is exempt" if exempted else "the diff adds no new test"
-        return GateResult(gate="revert", status="skip", summary=f"{what}{note}")
+
+    # Read only when a merged map names something: `None` and `{}` are both
+    # "not reported" for this gate's purposes (backlog item 49).
+    locations = _locations(results)
+    changed_lines: dict[str, set[int]] | None = None
+    diff_unreadable = False
+    if locations:
+        changed_lines = _changed_lines(diff)
+        diff_unreadable = changed_lines is None
+    rewritten_pool = (
+        _rewritten_pool(
+            before=before,
+            after=after,
+            candidates=candidates,
+            preserved=preserved,
+            exempt=exempt,
+            locations=locations,
+            changed_lines=changed_lines,
+            test_paths=test_paths,
+        )
+        if locations and changed_lines is not None
+        else []
+    )
+
+    # The message a `not subset` skip carries. Narrowing below replaces it
+    # once narrowing itself empties `subset`.
+    what = "every new test is exempt" if exempted else "the diff adds no new test"
+    skip_summary = f"{what}{note}" if not subset else None
+    if not subset and not rewritten_pool:
+        assert skip_summary is not None
+        return GateResult(
+            gate="revert",
+            status="skip",
+            summary=skip_summary
+            + _rewritten_clause(
+                rewritten_pool, None, None, diff_unreadable=diff_unreadable
+            ),
+        )
 
     # File-level, not hunk-level: a changed file matching none of the repo's
     # declared test paths is source.
     #
     # ponytail: a file that is half test and half source is therefore reverted
     # whole or not at all — the spec's own Out of scope names this and asks for
-    # the marker. backlog item 49 carries the sibling gap.
+    # the marker.
     if not test_paths:
         # A fourth kind of nothing, and it must be caught before the worktree is
         # touched: with no declared test paths every changed file reads as
@@ -181,6 +344,7 @@ def revert_gate(
 
     # A revert cannot reach a mutant outside `source` and the test paths
     # (item 84), unless a declared subject the diff reaches keeps it judged.
+    subset_was_present = bool(subset)
     aside: set[tuple[str, str]] = set()
     kept: set[tuple[str, str]] = set()
     for c in acceptance:
@@ -216,11 +380,17 @@ def revert_gate(
             f" — {len({w for w, _ in kept_by_subject})} witness(es) a declared subject kept "
             "judged: " + ", ".join(f"{w} ({s})" for w, s in kept_by_subject)
         )
-    if not subset:
+    if not subset and subset_was_present:
+        skip_summary = f"no new test depends on source this diff changed{note}"
+    if not subset and not rewritten_pool:
+        assert skip_summary is not None
         return GateResult(
             gate="revert",
             status="skip",
-            summary=f"no new test depends on source this diff changed{note}",
+            summary=skip_summary
+            + _rewritten_clause(
+                rewritten_pool, None, None, diff_unreadable=diff_unreadable
+            ),
         )
 
     # The restore checks out `HEAD`, not the tree as it stood a moment ago, so
@@ -242,6 +412,8 @@ def revert_gate(
 
     reverted_result: GateResult | None = None
     run_failed: Exception | None = None
+    rewritten_result: GateResult | None = None
+    rewritten_failed: Exception | None = None
     try:
         with reverted(source):
             # Recorded rather than raised, so the `with` unwinds normally and
@@ -250,9 +422,17 @@ def revert_gate(
             # failed checkout, and one message for both sends the operator to
             # the wrong subsystem.
             try:
-                reverted_result = run_tests(subset)
+                if subset:
+                    reverted_result = run_tests(subset)
             except Exception as exc:  # noqa: BLE001 — reported below, not swallowed
                 run_failed = exc
+            # A second, advisory run: a broken one only changes the clause
+            # below, never the verdict above.
+            try:
+                if rewritten_pool:
+                    rewritten_result = run_tests(rewritten_pool)
+            except Exception as exc:
+                rewritten_failed = exc
     except Exception as exc:
         # A checkout or a restore that did not happen means this gate never
         # ran — infrastructure, charged to nobody, never the task's `fail`.
@@ -261,6 +441,18 @@ def revert_gate(
             status="error",
             summary=f"could not revert or restore the source — {exc}",
         )
+
+    clause = _rewritten_clause(
+        rewritten_pool,
+        rewritten_result,
+        rewritten_failed,
+        diff_unreadable=diff_unreadable,
+    )
+    if not subset:
+        # `rewritten_pool` must be non-empty here, or an earlier check
+        # already returned.
+        assert skip_summary is not None
+        return GateResult(gate="revert", status="skip", summary=skip_summary + clause)
 
     if reverted_result is None:
         # `reverted_result is None` and `run_failed is not None` are the same
@@ -303,7 +495,8 @@ def revert_gate(
                 f"the reverted run returned {reverted_result.status} and no "
                 "readable verdict — no new test was seen to pass without its "
                 "source, which is not the same as one having failed"
-            ),
+            )
+            + clause,
         )
 
     # `criteria._side`'s readability guard, which the naive form of this
@@ -326,7 +519,8 @@ def revert_gate(
         return GateResult(
             gate="revert",
             status="skip",
-            summary="the reverted run reported no collected tests — nothing to read",
+            summary="the reverted run reported no collected tests — nothing to read"
+            + clause,
         )
     collected = set(reverted_result.collected)
 
@@ -377,7 +571,8 @@ def revert_gate(
             summary=(
                 "the reverted run keyed its failures on something other than a "
                 "node id, so a failing test cannot be told from a passing one"
-            ),
+            )
+            + clause,
         )
 
     # A name is theater iff it ran (is in `collected`) and did not fail (its
@@ -402,7 +597,8 @@ def revert_gate(
             summary=(
                 f"{len(passed)} of {len(subset)} new test(s) passed "
                 f"without their source{note}"
-            ),
+            )
+            + clause,
         )
     return GateResult(
         gate="revert",
@@ -413,5 +609,6 @@ def revert_gate(
         tool=reverted_result.tool,
         summary=(
             f"{len(subset)} new test(s) failed without their source, as required{note}"
-        ),
+        )
+        + clause,
     )

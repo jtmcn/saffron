@@ -58,6 +58,17 @@ class Failure(BaseModel):
     message: str = ""
 
 
+class Location(BaseModel):
+    """Where one collected name is defined at head, for `revert`'s own second
+    subset (backlog item 49). `first` and `last` are 1-indexed lines in the
+    post-image, inclusive, so a diff's new-side line number can be compared
+    against them directly."""
+
+    file: str
+    first: int
+    last: int
+
+
 class GateResult(BaseModel):
     """One execution of one gate against one tree — CONTEXT.md §4."""
 
@@ -84,6 +95,12 @@ class GateResult(BaseModel):
     Only `revert` reads it, and only for the subset it handed the gate.
     `None` means the gate does not report it. `[]` means `collected` holds
     every handed name. The two differ as they do for `collected`."""
+    locations: dict[str, Location] | None = None
+    """Where each collected name is defined at head, read from a gate's own
+    JSON (backlog item 49). Only `revert` reads it. `None` means the gate
+    does not report where anything is defined; `{}` means it reports
+    locations and found none; a map names what it found. The three are
+    three different facts, as they are for `collected`."""
     failures: list[Failure] = Field(default_factory=list)
     summary: str = ""
     duration_ms: int | None = Field(default=None, ge=0)

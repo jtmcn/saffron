@@ -195,6 +195,7 @@ class GateSuite:
                         executor=tree.executor,
                     ),
                     exempt=exempt,
+                    diff=diff,
                 )
             ]
             if "tests" in self.gates

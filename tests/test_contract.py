@@ -172,3 +172,34 @@ def test_a_gate_may_report_the_names_it_could_not_collect():
 
     absent = parse_gate_json(json.dumps({"gate": "tests", "status": "pass"}), "tests")
     assert absent.uncollected is None
+
+
+def test_a_gate_may_report_where_each_collected_test_is_defined():
+    """`locations` gives `revert` a fourth channel: where a collected name is
+    defined at head. A map, an empty map and no key at all are three
+    different facts, exactly as for `collected`. A value is a real object
+    with `.first`/`.last`. It is never a plain dict a reader would have to
+    index by hand."""
+    sent = parse_gate_json(
+        json.dumps(
+            {
+                "gate": "tests",
+                "status": "pass",
+                "locations": {"t.py::test_a": {"file": "t.py", "first": 3, "last": 5}},
+            }
+        ),
+        "tests",
+    )
+    assert sent.locations is not None
+    location = sent.locations["t.py::test_a"]
+    assert location.file == "t.py"
+    assert location.first == 3
+    assert location.last == 5
+
+    empty = parse_gate_json(
+        json.dumps({"gate": "tests", "status": "pass", "locations": {}}), "tests"
+    )
+    assert empty.locations == {}
+
+    absent = parse_gate_json(json.dumps({"gate": "tests", "status": "pass"}), "tests")
+    assert absent.locations is None
