@@ -110,9 +110,10 @@ class Mutant(BaseModel):
     find: str
     replace: str = ""
     case: str | None = Field(default=None, exclude_if=lambda value: value is None)
-    """One sentence naming the case `claim` leaves untested (§5.4.1, item
-    b-fa4a83). `None` by default, excluded from every dump in that state so
-    a `Mutant` predating this field still round-trips exactly as before."""
+    """One sentence naming the case `claim` leaves untested (§5.4.1).
+
+    Excluded from a dump while `None`, so an older `Mutant` round-trips
+    unchanged."""
 
     @field_validator("file")
     @classmethod
