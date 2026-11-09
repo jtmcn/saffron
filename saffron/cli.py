@@ -1038,6 +1038,7 @@ def _stack_end_review(
                 budget_usd=end_review.LENS_BUDGET_USD,
                 agent=agent,
                 resolve=resolve,
+                emit=_spec_session_emit(out_dir / f"{batch_key}.end-review"),
             )
         except Exception as exc:
             message = f"{type(exc).__name__}: {exc}"
@@ -1354,8 +1355,9 @@ def _spec_review_policy(exported: Path) -> Policy:
 
 
 def _spec_session_emit(log_dir: Path) -> Callable[[Event], None]:
-    """A spec review's or spec writer's `emit`: the terminal plus an
-    `EventLog(log_dir)`. A later session for the same spec appends to it.
+    """A spec review's, spec writer's, end review's or follow-up writer's
+    `emit`: the terminal plus an `EventLog(log_dir)`. A later session for
+    the same spec, or the same batch key, appends to it.
     """
     return partial(_default_emit, log=EventLog(log_dir))
 
@@ -1871,6 +1873,7 @@ def _stack_follow_ups(
                     implement.run_agent,
                     spec_id=f"follow-up-{origin.spec_id}",
                     timeout_s=spec_review.SPEC_WRITER_TIMEOUT_S,
+                    emit=_spec_session_emit(out_dir / f"{batch_key}.follow-ups"),
                 )
                 faults = _draft_faults(
                     pinned=pinned,

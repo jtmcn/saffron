@@ -11226,6 +11226,188 @@ def test_a_stack_batchs_spec_sessions_reach_the_follower_by_phase_across_rounds(
     ]
 
 
+def test_a_stack_batchs_end_review_and_follow_up_writer_reach_the_follower_by_batch(
+    tmp_path, monkeypatch, capsys
+):
+    """`cli._stack_end_review` passes its `emit` straight to
+    `end_review.run_end_review`, never bound into the agent's `partial`:
+    `review.run_lens` always passes its own `emit` at the call site. The
+    follow-up writer binds `emit` into its agent's `partial` instead, since
+    `run_spec_writer` calls agent with no `emit` keyword. Both reuse
+    `cli._spec_session_emit`, so every event lands in `<batch key>.end-review`
+    or `<batch key>.follow-ups` under `out_dir`, and on stdout too. A later
+    pass for the same batch key appends to the same log. `watch.follow_every_task`
+    follows both, prefixed by directory name (`b-e7b6a2`)."""
+    from saffron import watch
+    from saffron.events import Agent
+
+    rig = _spec_session_rig(tmp_path, monkeypatch)
+    rig.out_dir.mkdir()
+
+    ledger = Ledger(tmp_path / "ledger.db")
+    pinned_url = "https://github.com/o/r.git"
+    ledger.upsert_repo("r", pinned_url, str(rig.mirror), policy_sha=None)
+
+    pinned = task.PinnedBase(mirror=rig.mirror, url=pinned_url, base_sha=rig.base_sha)
+
+    spec_ids: list[str] = []
+
+    def _fake_run_agent(
+        container,
+        *,
+        prompt,
+        options,
+        spec_id,
+        timeout_s,
+        resume=None,
+        emit=_default_spec_session_emit,
+        last_cost_usd=0.0,
+    ):
+        n = len(spec_ids) + 1
+        spec_ids.append(spec_id)
+        emit(
+            Agent(
+                timestamp=0.0,
+                spec_id=spec_id,
+                raw=False,
+                event={"type": "text", "text": f"call {n}"},
+            )
+        )
+        return implement.AttemptResult(
+            session_id=f"s-{n}",
+            subtype="success",
+            terminal_reason=None,
+            num_turns=1,
+            cost_usd_est=0.1,
+            rate_limit_status="rejected",
+            rate_limit_resets_at=None,
+        )
+
+    monkeypatch.setattr(implement, "run_agent", _fake_run_agent)
+
+    def _fake_run_end_review(
+        ledger_arg,
+        batch_key,
+        reserve_usd,
+        specs,
+        *,
+        mirror,
+        open_cell,
+        context_md,
+        claude_md,
+        prompts_dir,
+        max_turns,
+        budget_usd,
+        agent,
+        resolve,
+        emit=_default_spec_session_emit,
+    ):
+        for lens in ("join", *end_review.END_LENSES):
+            with pytest.raises(session.RateLimited):
+                review.run_lens(
+                    "container",
+                    lens=lens,
+                    system_prompt="p",
+                    max_turns=1,
+                    budget_usd=1.0,
+                    agent=agent,
+                    spec_id=f"end-review-{batch_key}",
+                    emit=emit,
+                )
+        return end_review.StackReview(join=None, layers=[], fields={})
+
+    monkeypatch.setattr(end_review, "run_end_review", _fake_run_end_review)
+
+    def _fake_write_follow_ups(ledger_arg, stack, *, write, **kwargs):
+        write(_follow_up_group("k-top", "src/a.py", ["one"]), "prompt")
+        return []
+
+    monkeypatch.setattr(follow_up, "write_follow_ups", _fake_write_follow_ups)
+    monkeypatch.setattr(cli, "writer_left", lambda *a, **k: 5.0)
+
+    end_review_fn = cli._stack_end_review(
+        pinned=pinned, repo=rig.repo, ledger=ledger, out_dir=rig.out_dir
+    )
+    follow_ups_fn = cli._stack_follow_ups(
+        pinned=pinned,
+        repo=rig.repo,
+        ledger=ledger,
+        out_dir=rig.out_dir,
+        cap_usd=5.0,
+        pooled=[],
+    )
+
+    def _stack_for_follow_ups() -> end_review.StackReview:
+        return end_review.StackReview(
+            join=None,
+            layers=[end_review.LayerReview("k-top", [])],
+            fields={
+                "k-top": end_review.LayerFields(
+                    spec_id="SY-1",
+                    branch="saffron/SY-1",
+                    pr_url="",
+                    base=rig.base_sha,
+                    head=rig.base_sha,
+                    known="",
+                    diff_base=rig.base_sha,
+                )
+            },
+        )
+
+    sleeps: list[int] = []
+
+    def _sleep(_interval):
+        sleeps.append(1)
+        poll = len(sleeps)
+        if poll == 1:
+            end_review_fn("7", 10.0, {})
+            follow_ups_fn("7", _stack_for_follow_ups())
+            return True
+        if poll == 2:
+            end_review_fn("7", 10.0, {})
+            follow_ups_fn("7", _stack_for_follow_ups())
+            end_review_fn("8", 10.0, {})
+            follow_ups_fn("8", _stack_for_follow_ups())
+            return True
+        return False
+
+    lines = list(watch.follow_every_task(rig.out_dir, sleep=_sleep))
+
+    assert spec_ids == [
+        "end-review-7",
+        "end-review-7",
+        "end-review-7",
+        "follow-up-SY-1",
+        "end-review-7",
+        "end-review-7",
+        "end-review-7",
+        "follow-up-SY-1",
+        "end-review-8",
+        "end-review-8",
+        "end-review-8",
+        "follow-up-SY-1",
+    ]
+
+    assert lines == [
+        "7.end-review agent: call 1",
+        "7.end-review agent: call 2",
+        "7.end-review agent: call 3",
+        "7.follow-ups agent: call 4",
+        "7.end-review agent: call 5",
+        "7.end-review agent: call 6",
+        "7.end-review agent: call 7",
+        "7.follow-ups agent: call 8",
+        "8.end-review agent: call 9",
+        "8.end-review agent: call 10",
+        "8.end-review agent: call 11",
+        "8.follow-ups agent: call 12",
+    ]
+
+    printed = capsys.readouterr().out
+    agent_lines = [line for line in printed.splitlines() if line.startswith("agent: ")]
+    assert agent_lines == [f"agent: call {n}" for n in range(1, 13)]
+
+
 def test_a_stack_batch_holds_the_writer_share_and_passes_its_follow_up_writer(
     tmp_path, monkeypatch, capsys
 ):
@@ -11249,6 +11431,15 @@ def test_a_stack_batch_holds_the_writer_share_and_passes_its_follow_up_writer(
         return sentinel
 
     monkeypatch.setattr(cli, "_stack_follow_ups", _fake_stack_follow_ups)
+
+    end_review_sentinel = object()
+    end_review_builds: list[dict] = []
+
+    def _fake_stack_end_review(**kwargs):
+        end_review_builds.append(kwargs)
+        return end_review_sentinel
+
+    monkeypatch.setattr(cli, "_stack_end_review", _fake_stack_end_review)
 
     run_stack_batch_calls: list[dict] = []
 
@@ -11288,6 +11479,9 @@ def test_a_stack_batch_holds_the_writer_share_and_passes_its_follow_up_writer(
     assert built["out_dir"] == home1 / "batches" / "v0"
     assert built["cap_usd"] == 5.25
     assert built["pooled"] == []
+
+    assert len(end_review_builds) == 1
+    assert end_review_builds[0]["out_dir"] == home1 / "batches" / "v0"
 
     # Case 2: readiness fails.
     follow_ups_builds.clear()
@@ -14227,6 +14421,7 @@ def test_saffron_finish_runs_a_deferred_stack_batchs_tail_on_its_own_id_at_its_p
     [review_kwargs] = stack_end_review_calls
     assert review_kwargs["pinned"] == pinned
     assert review_kwargs["repo"] == fixture.repo.resolve()
+    assert review_kwargs["out_dir"] == fixture.out_dir
 
     [spec_review_kwargs] = stack_review_calls
     assert spec_review_kwargs["pinned"] == pinned
@@ -14254,6 +14449,7 @@ def test_saffron_finish_runs_a_deferred_stack_batchs_tail_on_its_own_id_at_its_p
     assert follow_ups_kwargs["pinned"] == pinned
     assert follow_ups_kwargs["repo"] == fixture.repo.resolve()
     assert follow_ups_kwargs["cap_usd"] == 3.0
+    assert follow_ups_kwargs["out_dir"] == fixture.out_dir
 
     assert stack_open_prs_calls == ["o/r"]
 
