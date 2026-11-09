@@ -29,10 +29,10 @@ about whether the witness guards its claim. It aborts this gate as `error`,
 charged to nobody, exactly the collapse `DESIGN.md` refuses everywhere else.
 
 A spec's own declared mutant whose `find` is absent or ambiguous in the
-tree now fails. The claim's code is not where the spec said it was. The
+tree fails. The claim's code is not where the spec said it was. The
 count says so, not a summary line that counts toward nothing. A constant
-mutant, a criterion probe and a wrong version keep the older reading.
-Each stays unproven, never silently bought as a `pass`.
+mutant, a criterion probe and a wrong version that do not apply stay
+unproven, never silently bought as a `pass`.
 
 Every mutant is applied to a clean tree and restored before the next is
 touched, and restoration is attempted on every exit path — `error`, `skip`,
@@ -74,10 +74,10 @@ RunTests = Callable[[list[str]], GateResult]
 # is the host-tree implementation, and a cell's volume can supply
 # another without this module changing at all (`SA-0060`).
 #
-# Entering yields `None` when the mutant is now live and must be undone, or a
-# `str` reason when it could not be applied or the mutator could not reach
-# the tree at all — both are the identical non-committal outcome, "unproven",
-# never a task's problem. Anything the context manager *raises*, on entry or
+# Entering yields `None` when the mutant is now live and must be undone.
+# It yields a `str` reason when the mutant could not be applied or the
+# mutator could not reach the tree. A `FindCount` reason on a declared mutant fails the gate. Every
+# other reason is "unproven", never a task's problem. Anything the context manager *raises*, on entry or
 # on exit, is instead this gate's `error`: something broke, rather than
 # something the spec merely got wrong.
 # Two obligations the type cannot carry, and `SA-0062`'s cell mutator is who
@@ -161,7 +161,7 @@ def witness_gate(
     enumeration to offer, which is not evidence about any witness: every
     criterion is tried, exactly as before this argument existed.
     """
-    # `derived` never fails on a bad count, only `acceptance` does.
+    # Only `acceptance` fails on a bad count, and only under `edit_noun="mutant"`.
     # `tests_tool` names the result when no criterion here ever did.
     declared = [c for c in acceptance if c.mutant is not None]
     worklist = [(c, True) for c in declared] + [
@@ -314,9 +314,8 @@ def witness_gate(
             )
             tool = tool or tests_result.tool
             continue
-        # `skip`, or any other status: no trustworthy verdict was produced,
-        # which is not evidence the witness guards its claim — the same
-        # non-answer as a mutant that never applied.
+        # `skip`, or any other status, is no trustworthy verdict. Like a mutant
+        # that could not reach its file, it is no evidence about the witness.
         unproven.append(
             _named(criterion, f"the `tests` gate reported {tests_result.status}")
         )

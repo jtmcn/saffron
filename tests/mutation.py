@@ -16,8 +16,8 @@ exactly: byte-identical, including a trailing newline or a CRLF line ending
 that text mode would otherwise normalize away.
 
 A `find` absent or matching more than once carries its match count as
-data too, in `MutationResult.count` and `witness.FindCount`. A caller no
-longer has to parse the count back out of prose (§5.4.1).
+data too. `MutationResult.count` and `witness.FindCount` hold it, so a
+caller reads it without parsing prose (§5.4.1).
 
 `host_mutator` (`SA-0060`) is the host-tree implementation of
 `witness.Mutated` — a callable from a `Mutant` to a context manager that
@@ -244,8 +244,8 @@ def host_mutator(tree: Path) -> Callable[[Mutant], AbstractContextManager[str | 
     and never a status, because that reading belongs to the gate that injects
     this, not to this module (§5.4.1).
     """
-    # A find matching zero or more than once yields `witness.FindCount`
-    # instead, a `str` subclass that carries the count as data too.
+    # Not the ordinary case: a find matching zero or more than once yields a
+    # `witness.FindCount`, which fails the gate for a declared mutant.
 
     def mutate(mutant: Mutant) -> AbstractContextManager[str | None]:
         return _mutated(tree, mutant)
