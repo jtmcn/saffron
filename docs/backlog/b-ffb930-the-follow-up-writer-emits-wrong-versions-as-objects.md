@@ -1,11 +1,12 @@
 ---
 id: b-ffb930
 title: "The follow-up writer emits `wrong_versions` as objects, so its first draft never parses"
-status: open
+status: done
+closed: 2026-11-09
 tier: 2
 filed: 2026-11-06
 specs: [SA-0353]
-prs: []
+prs: [1099]
 commits: []
 cites: [§3]
 related: [b-4a9207, b-01c53d]
@@ -30,3 +31,4 @@ inside its own session, before the finish reads it.
 ## Record
 
 - 2026-11-06: filed from the spec loop's run 54.
+- 2026-11-09: `SA-0353` (#1099) landed in the spec loop's run 56. The writer's session reads its own draft and sends a draft with faults back to itself. The cell ended `EXHAUSTED` on one aliased import REBUT added, and the delegate adopted the branch.

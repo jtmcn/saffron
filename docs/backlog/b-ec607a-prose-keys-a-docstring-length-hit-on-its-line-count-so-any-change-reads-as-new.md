@@ -1,10 +1,9 @@
 ---
 id: b-ec607a
 title: '`prose` keys a docstring-length hit on its line count, so a grow or a shrink reads as a new hit'
-status: done
+status: open
 tier: 3
 filed: 2026-09-27
-closed: 2026-09-30
 by_hand: true
 specs: []
 prs: []
@@ -41,3 +40,4 @@ edited sentence stays old. A test holds each case.
 - 2026-09-30: the third is fixed. A `docstring-length` hit is one per line past
   the limit, keyed by name and line. A shrink adds no hit, and a growth adds
   only the lines past its base.
+- 2026-11-09: reopened from the spec loop's run 56. On #1096 a review commit rewrote one stale sentence inside `witness_gate`'s docstring. That docstring is over ten lines, so `prose` read new hits on its unchanged lines. The fix went into a comment instead, and three docstrings the spec named stay stale.

@@ -30,3 +30,4 @@ shifts a cited line in a parent branch and asserts `cite` names it.
 ## Record
 
 - 2026-11-08: filed from the spec loop's run 55.
+- 2026-11-09: recurred in the spec loop's run 56. Batch 73 refused `SA-0343` before a cell. `SA-0341` added one line to `saffron/cell/session.py`, so the cited `3420-3421` moved to `3421-3422`. The batch's own rewrite guessed `def _phase_start` at 2162 as the construct and refused to move it. The refusal line names a count of citations, not which one.

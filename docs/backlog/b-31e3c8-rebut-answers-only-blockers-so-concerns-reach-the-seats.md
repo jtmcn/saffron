@@ -31,3 +31,4 @@ concern through REBUT and asserts its answer is recorded.
 ## Record
 
 - 2026-11-08: filed from the spec loop's run 55.
+- 2026-11-09: recurred in the spec loop's run 56. REBUT left a concern or note unanswered on `SA-0341`, `SA-0342` and `SA-0351`, and both PR seats raised each again. `SA-0341`'s was ADR 0004's two-turn sentence, which its `forbidden` held out of reach. Review commits fixed the rest as one-line comments.

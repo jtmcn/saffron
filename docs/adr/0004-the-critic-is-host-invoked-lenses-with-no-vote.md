@@ -204,7 +204,8 @@ Every lens and every criterion-probe session is a paid session on every
 reviewed diff. Each is capped at what is left of the budget, with a $2 floor,
 and the cap is not reduced between sessions. REBUT adds the rebuttal turn and
 one verdict session per lens with a blocker. The rebuttal is two turns, one
-to argue or fix and one to extract. REBUT's budget is its own: a
+to argue or fix and one to extract. An extraction that is not the schema gets
+one re-ask in the same session, so a third turn can run (`SA-0341`). REBUT's budget is its own: a
 $10.00 cap and two reserves, whatever the task has left (`SA-0231`,
 b-4901d2).
 

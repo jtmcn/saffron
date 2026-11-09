@@ -1,10 +1,9 @@
 ---
 id: b-619b7d
 title: "`saffron adopt` keeps a task `EXHAUSTED`, refuses `MERGE_FAILED`, and nothing moves a fixed task back to waiting, so its children stay refused"
-status: done
+status: partial
 tier: 2
 filed: 2026-10-19
-closed: 2026-10-25
 specs: [SA-0313]
 prs: [961]
 commits: []
@@ -45,3 +44,4 @@ as `regate` then `adopt`. A test drives each route and starts a child on it.
 - 2026-10-25: done in #961 (`SA-0313`), from the spec loop's run 48. `saffron adopt` records
   the adopted head as a `task_push` fact and moves the task to `READY_FOR_REVIEW` on a
   green re-gate.
+- 2026-11-09: partial from the spec loop's run 56. `saffron adopt SA-0353 1099` printed `regate: task 396 ran a recorded spec text, not a file at base_sha` and kept the task `EXHAUSTED`. The batch had rewritten the spec's moved citations, so the text it ran is in no file. `driver.py record` still prints the task `EXHAUSTED`.

@@ -39,3 +39,4 @@ the declared pairs. An undeclared disappearance still fails.
   made the ids the prompt names, so a prompt edit no longer renames a case.
   The spec told the cell to drop two parametrised cases, and neither the spec
   review nor the spec named `census`.
+- 2026-11-09: recurred in the spec loop's run 56. `SA-0353`'s notes asked for a rename of `test_a_sub_cap_of_18_dollars_writes_none_and_37_writes_two`. `census` refused it, and `revert` refused the ratio form the notes asked for, so the name stays false (#1099). Neither the spec writer nor its reviewer named `census`.

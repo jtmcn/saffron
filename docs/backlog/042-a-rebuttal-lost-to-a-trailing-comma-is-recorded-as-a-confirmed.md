@@ -1,10 +1,11 @@
 ---
 id: 42
 title: A rebuttal lost to a trailing comma is recorded as a confirmed disagreement
-status: partial
+status: done
+closed: 2026-11-09
 tier: 1
 specs: [SA-0040, SA-0071, SA-0340, SA-0341]
-prs: [93, 215, 1084]
+prs: [93, 215, 1084, 1094]
 commits: []
 cites: []
 related: [41]
@@ -72,3 +73,4 @@ Nothing needed to change, and there was no surviving argument to say so.
   ledger records each blocker's answer and a turn's error, and the queue
   ranks unread and unanswered blockers beside sustained ones. `SA-0341`, a
   second extraction for a rebuttal that is not the schema, stays open.
+- 2026-11-09: `SA-0341` (#1094) landed in the spec loop's run 56. A rebuttal extraction that is not the schema now gets one re-ask in the same session, so the remaining half is done.

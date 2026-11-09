@@ -1,10 +1,9 @@
 ---
 id: b-66e82d
 title: The gate results after REBUT are not in `events.jsonl`, so a red rebuttal names no gate
-status: done
+status: partial
 tier: 2
 filed: 2026-09-22
-closed: 2026-10-10
 specs: [SA-0118, SA-0242]
 prs: [433, 794]
 commits: []
@@ -41,3 +40,4 @@ Each gate result after REBUT is an event in `events.jsonl`, and the
   failing, and both failed at base too. So the log never said which new hits
   the repair was sent to fix. The repair went green on attempt 2.
 - 2026-10-10: done by `SA-0242` (#794), from the spec loop's run 33.
+- 2026-11-09: partial from the spec loop's run 56. `SA-0353`'s `GateResult` after REBUT named `tests` with `new_failures: 1` and no test. The delegate re-ran the suite at the cell's head to find it.

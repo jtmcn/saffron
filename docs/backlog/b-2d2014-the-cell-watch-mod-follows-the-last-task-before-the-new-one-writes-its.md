@@ -1,10 +1,9 @@
 ---
 id: b-2d2014
 title: The cell-watch mod follows the last task before the new one writes its log, and its stop re-attaches
-status: done
+status: open
 tier: 3
 filed: 2026-10-24
-closed: 2026-11-08
 by_hand: true
 specs: []
 prs: [1072]
@@ -34,3 +33,4 @@ The watch waits for a task the batch names, and a stop ends it.
 - 2026-10-27: in the spec loop's run 49 the hand-over wake-ups for four tasks arrived hours late, in one burst, after the delegate's review turns ended.
 - 2026-11-08: done by hand. Run 49's late wake-ups are left open. They read as the
   session holding each prompt until its turn ends, which nobody measured.
+- 2026-11-09: reopened from the spec loop's run 56. After batch 73 drained, `mcp__cell-watch__watch` with `stop: true` answered "Watching the newest task" three times in a row. The test for a stop through the tool passes, so the loaded mod and the tested one disagree.

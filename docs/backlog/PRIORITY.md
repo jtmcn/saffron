@@ -37,7 +37,8 @@ holds no open item.
 ### Tier 1 — breaks at 03:00 with nobody watching
 
 **Groomed 2026-11-07.** Every item the 2026-09-07 sort named here is closed but
-these: **79**, **80**, **119**, **42** and **49**, in that order. Each
+these: **79**, **80** and **119**, in that order. ~~**42**~~ and ~~**49**~~
+closed on 2026-11-09, in #1094 and #1095. Each
 closed one is listed at the end of this tier. Each open one's `## Record` says
 what is left.
 
@@ -47,8 +48,6 @@ three. It waits on a corpus pass under the current lens prompts, measured first
 for the metric's spread. The newest pass is from 2026-09-11. ~~**93**~~ folded
 into it on 2026-11-07. **80** withholds the mutant a witness is judged by and leaves it in
 the worktree. **119** leaves the plan turn's share of the budget undecided.
-**42** still reads an errored rebuttal as a confirmed disagreement. Under
-**49**, `revert` never checks a test whose body changed and whose name stayed.
 
 **Placed 2026-09-20, from the 16 open items that carried no tier**: **170**.
 Three records of a night disagree, and no rule says which wins. `CONTEXT.md` §8
@@ -90,7 +89,7 @@ for want of an anchor, so `SA-0288` packaged past its own blocker. A spec
 that added a refusal refused the specs queued below it, and its cell ended
 `EXHAUSTED`.
 
-**Placed 2026-11-04**, from the spec loop's run 53: **b-fa4a83**. A survived
+**Placed 2026-11-04**, from the spec loop's run 53: ~~**b-fa4a83**~~. A survived
 mutant reaches REPAIR as its whole claim, so `SA-0330`'s repair turns never
 found the two cases it lacked, and the cell ended `EXHAUSTED`.
 
@@ -126,7 +125,7 @@ refuses the ref.
 load a spec without the ref's mutants, so a regate can judge a witness the cell
 set aside.
 
-**Placed 2026-11-06**, from the spec loop's run 54: **b-fe3488**, **b-ffb930**,
+**Placed 2026-11-06**, from the spec loop's run 54: **b-fe3488**, ~~**b-ffb930**~~,
 ~~**b-0add4c**~~, then **b-71f95f**. A stack batch starts an order its budget
 cannot run. The follow-up writer's first draft never parses. The record's
 git calls can prompt and drop git's reason. A cell makes CONNECTs no git
@@ -153,7 +152,7 @@ Three commands take no home lock. An empty rebuttal error reads as no answer.
 **Placed 2026-10-17**, from the spec loop's run 43: **b-3a79a0**. The loop's
 driver orders a stack by `depends_on`, not by the stack base a batch built.
 
-**Placed 2026-10-19**, from the spec loop's run 44: ~~**b-619b7d**~~, **b-71e2df**,
+**Placed 2026-10-19**, from the spec loop's run 44: **b-619b7d**, **b-71e2df**,
 **b-32b3db**, **b-3a3081**, then ~~**b-80cc6e**~~. An adopted task keeps its
 failed state, so its children stay refused. A spec named a module its own
 `forbidden` list made impossible. A multi-line constant derives no mutant.
@@ -203,7 +202,7 @@ review spent a pass on it. Then **b-490c9c**, ~~**b-61993a**~~, **b-f45f73**
 and **b-0de0b3**. The last is the operator's decision to generate
 the loop's report in core, and it needs design before a spec.
 
-**From the spec loop's run 13** (2026-09-22): ~~**b-66e82d**~~, **b-055fa3** and
+**From the spec loop's run 13** (2026-09-22): **b-66e82d**, **b-055fa3** and
 ~~**b-a9ee32**~~. The first is why finding the gate behind #433's `EXHAUSTED` took
 reproducing every gate by hand. The second is a witness that fails once three
 local branches are pruned. The third opens when item b-b5f379 bumps the cell's
@@ -296,7 +295,7 @@ alone, so a blocker another test kills stands after REBUT. A stack batch's
 follow-ups are pooled for their own `depends_on`.
 
 **Placed 2026-10-11**, from the spec loop's run 34: **b-f7a591**,
-**b-d0fed8**, **b-2f4746**, then **b-e7b6a2**. A lens that errors drops the
+**b-d0fed8**, **b-2f4746**, then ~~**b-e7b6a2**~~. A lens that errors drops the
 host's own probe blockers filed under it. A batch stopped before its row
 exists leaves no row. A stack batch at a threshold spends into its shares.
 `watch` cannot follow the follow-up writer or the end review.
@@ -325,7 +324,7 @@ every cell.
 **Placed 2026-10-23**, from `SA-0312`'s spec review: **b-e39286**. A
 deferred finish exempts the stack base's branch but none on its chain.
 
-**Placed 2026-10-24**, from the spec loop's run 47: **b-a68b24**, then
+**Placed 2026-10-24**, from the spec loop's run 47: ~~**b-a68b24**~~, then
 ~~**b-781ea4**~~. The witness gate passes a mutant whose find matches twice. The
 finish's follow-up drafts fail to parse, so it files nothing.
 
@@ -409,7 +408,7 @@ seat or the run found and the stack left alone.
 
 **Placed 2026-10-24**, from the spec loop's run 47: **b-0c5afc**,
 **b-fa014a**, **b-22ed54**, **b-c3688d**, **b-7fa522**, **b-54c8b4**,
-**b-7655f9** and ~~**b-2d2014**~~. Each is a gap a seat or the run found and the
+**b-7655f9** and **b-2d2014**. Each is a gap a seat or the run found and the
 stack left alone.
 
 **Placed 2026-10-24**, from ADR 11 and the controlled vocabulary review:
@@ -470,7 +469,7 @@ compares the index to the records in that direction. It ranks here, beside
 as written, or a witness too weak at one boundary.
 
 **Placed 2026-09-27**, from the spec loop's run 19: **b-1e9a7a**,
-**b-146869**, ~~**b-ec607a**~~, ~~**b-ea3bb5**~~, ~~**b-a5d4af**~~, **b-6d3bcf**,
+**b-146869**, **b-ec607a**, ~~**b-ea3bb5**~~, ~~**b-a5d4af**~~, **b-6d3bcf**,
 **b-36d318**, then ~~**b-0e3528**~~. Each is a seam review kept as written, stale
 text a split left, or a defect in the loop's own tools.
 
