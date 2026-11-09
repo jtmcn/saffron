@@ -2026,14 +2026,12 @@ def test_a_draft_with_faults_goes_back_to_the_same_session_naming_each_line():
     # `faults` and `emit` are required: no default lets a caller omit either.
     from typing import Any
 
-    import pytest as _pytest
-
     incomplete: dict[str, Any] = {
         "system_prompt": _SYSTEM_PROMPT,
         "prompt": _PROMPT,
         "agent": _Agent([]),
     }
-    with _pytest.raises(TypeError):
+    with pytest.raises(TypeError):
         run_spec_writer(_CONTAINER, **incomplete)
 
     # A clean first draft never opens a send-back at all: two calls only.
