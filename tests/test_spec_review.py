@@ -1956,11 +1956,14 @@ _SECOND_SPEC = "---\nid: SY-2\n---\nfixed\n"
 _SECOND_V = {"spec": _SECOND_SPEC}
 
 
-def test_a_draft_with_faults_goes_back_to_the_same_session_naming_each_line():
+def test_a_draft_with_faults_goes_back_to_the_same_session_naming_each_line(
+    monkeypatch,
+):
     from saffron.agents.artifacts import hash_artifact
     from saffron.spec_review import (
         SPEC_WRITER_EXTRACT_PROMPT,
         SPEC_WRITER_SEND_BACK_PROMPT,
+        SPEC_WRITER_SESSION_USD,
         DraftFaults,
         SpecWriterSession,
         run_spec_writer,
@@ -2031,8 +2034,10 @@ def test_a_draft_with_faults_goes_back_to_the_same_session_naming_each_line():
         "prompt": _PROMPT,
         "agent": _Agent([]),
     }
-    with pytest.raises(TypeError):
-        run_spec_writer(_CONTAINER, **incomplete)
+    with pytest.raises(TypeError, match="'faults'"):
+        run_spec_writer(_CONTAINER, **incomplete, emit=lambda line: None)
+    with pytest.raises(TypeError, match="'emit'"):
+        run_spec_writer(_CONTAINER, **incomplete, faults=_no_faults)
 
     # A clean first draft never opens a send-back at all: two calls only.
     clean_double = _Agent(
@@ -2117,6 +2122,98 @@ def test_a_draft_with_faults_goes_back_to_the_same_session_naming_each_line():
         diverge_double, faults=diverge_faults, emit=lambda line: None
     )
     assert diverge_result.text == _WRITE_SPEC
+
+    # Neither text parses: the newest text of all is the session's.
+    unparsed_double = _Agent(list(diverge_script))
+    unparsed_faults = _faults_double(
+        [
+            DraftFaults(parsed=False, lines=("line one",)),
+            DraftFaults(parsed=False, lines=("line two",)),
+        ],
+        [],
+    )
+    unparsed_result = _run_writer(
+        unparsed_double, faults=unparsed_faults, emit=lambda line: None
+    )
+    assert unparsed_result.text == _SECOND_SPEC
+    assert unparsed_result.spec_sha == hash_artifact(_SECOND_SPEC)
+
+    # A text the re-ask returns reaches `faults` and opens a send-back
+    # resumed at the re-ask's own id.
+    reask_double = _Agent(
+        [
+            _draft(cost=0.5, session_id="s-1", num_turns=7),
+            _write_extract(session_id="s-2", structured_output=None),
+            _write_extract(session_id="s-3", cost=0.25, num_turns=7),
+            _attempt(session_id="s-4", cost=0.1, num_turns=3),
+            _write_extract(
+                session_id="s-5", cost=0.2, num_turns=2, structured_output=_SECOND_V
+            ),
+        ]
+    )
+    reask_calls: list[str] = []
+    reask_faults = _faults_double(
+        [
+            DraftFaults(parsed=True, lines=("line one",)),
+            DraftFaults(parsed=True, lines=()),
+        ],
+        reask_calls,
+    )
+    reask_result = _run_writer(
+        reask_double, faults=reask_faults, emit=lambda line: None
+    )
+    assert reask_calls == [_WRITE_SPEC, _SECOND_SPEC]
+    assert len(reask_double.calls) == 5
+    assert reask_double.calls[3][1]["resume"] == "s-3"
+    assert reask_double.calls[3][1]["last_cost_usd"] == 0.25
+    assert reask_result.text == _SECOND_SPEC
+
+    # The first turn, one extraction, one send-back's two turns.
+    assert SPEC_WRITER_SESSION_USD == 23.0
+
+    # Bound patched to 2: two full send-backs, read at call time.
+    monkeypatch.setattr("saffron.spec_review.SPEC_WRITER_SEND_BACKS", 2)
+    third_spec = "---\nid: SY-3\n---\nagain\n"
+    twice_double = _Agent(
+        [
+            _draft(cost=0.5, session_id="s-1", num_turns=7),
+            _write_extract(session_id="s-2", cost=0.25, num_turns=7),
+            _attempt(session_id="s-3", cost=0.1, num_turns=3),
+            _write_extract(
+                session_id="s-4", cost=0.2, num_turns=2, structured_output=_SECOND_V
+            ),
+            _attempt(session_id="s-5", cost=0.3, num_turns=4),
+            _write_extract(
+                session_id="s-6",
+                cost=0.4,
+                num_turns=1,
+                structured_output={"spec": third_spec},
+            ),
+        ]
+    )
+    twice_calls: list[str] = []
+    twice_faults = _faults_double(
+        [
+            DraftFaults(parsed=True, lines=("line one",)),
+            DraftFaults(parsed=True, lines=("line two",)),
+            DraftFaults(parsed=True, lines=()),
+        ],
+        twice_calls,
+    )
+    twice_result = _run_writer(
+        twice_double, faults=twice_faults, emit=lambda line: None
+    )
+    assert twice_calls == [_WRITE_SPEC, _SECOND_SPEC, third_spec]
+    assert len(twice_double.calls) == 6
+    assert twice_double.calls[4][1]["prompt"] == (
+        SPEC_WRITER_SEND_BACK_PROMPT + "\nline two"
+    )
+    assert twice_double.calls[4][1]["resume"] == "s-4"
+    assert twice_double.calls[5][1]["resume"] == "s-5"
+    assert twice_result.text == third_spec
+    assert twice_result.session_id == "s-6"
+    assert twice_result.num_turns == 7 + 7 + 3 + 2 + 4 + 1
+    assert twice_result.cost_usd == pytest.approx(0.5 + 0.25 + 0.1 + 0.2 + 0.3 + 0.4)
 
 
 def test_a_failed_send_back_keeps_the_last_draft_that_parsed_and_says_why(
@@ -2221,50 +2318,47 @@ def test_a_failed_send_back_keeps_the_last_draft_that_parsed_and_says_why(
                 spec_sha=hash_artifact(_WRITE_SPEC),
             )
 
-    # Bound patched to 2: an unparsed send-back, then a second that fails.
-    # The first draft's text survives, and the second failure still runs.
-    import saffron.spec_review as _spec_review_module
+    # Bound patched to 2: a first send-back whose text parses with faults,
+    # then a second that fails. The first send-back's text survives.
+    monkeypatch.setattr("saffron.spec_review.SPEC_WRITER_SEND_BACKS", 2)
+    script = [
+        _draft(cost=0.5, session_id="s-1", num_turns=7),
+        _write_extract(session_id="s-2", cost=0.25, num_turns=7),
+        _attempt(session_id="s-3", cost=0.1, num_turns=3),
+        _write_extract(
+            session_id="s-4", cost=0.2, num_turns=2, structured_output=_SECOND_V
+        ),
+        implement.AgentFailed(
+            "boom3", _attempt(session_id="s-6", cost=0.15, num_turns=1)
+        ),
+    ]
+    double = _Agent(script)
+    calls: list[str] = []
+    faults = _faults_double(
+        [
+            DraftFaults(parsed=True, lines=("line one", "line two")),
+            DraftFaults(parsed=True, lines=("line three", "line four")),
+        ],
+        calls,
+    )
+    emitted: list[str] = []
+    result = _run_writer(double, faults=faults, emit=emitted.append)
 
-    monkeypatch.setattr(_spec_review_module, "SPEC_WRITER_SEND_BACKS", 2)
-    if True:
-        script = [
-            _draft(cost=0.5, session_id="s-1", num_turns=7),
-            _write_extract(session_id="s-2", cost=0.25, num_turns=7),
-            _attempt(session_id="s-3", cost=0.1, num_turns=3),
-            _write_extract(
-                session_id="s-4", cost=0.2, num_turns=2, structured_output=_SECOND_V
-            ),
-            implement.AgentFailed(
-                "boom3", _attempt(session_id="s-6", cost=0.15, num_turns=1)
-            ),
-        ]
-        double = _Agent(script)
-        calls: list[str] = []
-        faults = _faults_double(
-            [
-                DraftFaults(parsed=True, lines=("line one", "line two")),
-                DraftFaults(parsed=False, lines=("line three", "line four")),
-            ],
-            calls,
-        )
-        emitted: list[str] = []
-        result = _run_writer(double, faults=faults, emit=emitted.append)
-
-        assert calls == [_WRITE_SPEC, _SECOND_SPEC]
-        assert emitted == [
-            "spec writer send-back's work turn boom3",
-            "line three",
-            "line four",
-        ]
-        assert result == SpecWriterSession(
-            text=_WRITE_SPEC,
-            cost_usd=0.5 + 0.25 + 0.1 + 0.2 + 0.15,
-            error=None,
-            resets_at=None,
-            session_id="s-6",
-            num_turns=7 + 7 + 3 + 2 + 1,
-            spec_sha=hash_artifact(_WRITE_SPEC),
-        )
+    assert calls == [_WRITE_SPEC, _SECOND_SPEC]
+    assert emitted == [
+        "spec writer send-back's work turn boom3",
+        "line three",
+        "line four",
+    ]
+    assert result == SpecWriterSession(
+        text=_SECOND_SPEC,
+        cost_usd=0.5 + 0.25 + 0.1 + 0.2 + 0.15,
+        error=None,
+        resets_at=None,
+        session_id="s-6",
+        num_turns=7 + 7 + 3 + 2 + 1,
+        spec_sha=hash_artifact(_SECOND_SPEC),
+    )
 
 
 def test_a_draft_intake_refuses_is_named_by_intakes_own_error_and_reaches_no_gate():

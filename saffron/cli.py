@@ -1135,7 +1135,7 @@ def _finish_verify(
     `package_phase.reverify` in the repo's own cell image. Returns the
     suite's own new failures. `only`, when given, narrows the loaded
     policy's declared `gates` to those names first (`_draft_faults`,
-    SA-0340). Core gates sit outside that dict, so they still run."""
+    SA-0353). Core gates sit outside that dict, so they still run."""
 
     def verify(sha: str, base: str) -> tuple[NewFailure, ...]:
         git_mirror.export_saffron_dir(pinned.mirror, pinned.base_sha, gates_dir)
@@ -1168,7 +1168,7 @@ def _draft_faults(
     workdir: Path,
     path: str | None,
 ) -> Callable[[str], spec_review.DraftFaults]:
-    """A writer session's own `faults` (SA-0340): `spec_review.draft_faults`
+    """A writer session's own `faults` (SA-0353): `spec_review.draft_faults`
     bound to `path` and `emit=print`, with a `judge` for the policy's own
     `form: true` gates, judged atop `head` through `finish.judge_draft`.
 

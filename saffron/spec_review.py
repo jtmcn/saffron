@@ -529,7 +529,7 @@ SPEC_WRITER_PROMPT = "spec-writer.md"
 SPEC_WRITER_EXTRACT_PROMPT = context.turn_prompt("spec-writer-extract")
 
 # Loaded once at import, as the other turn prompts are. Sent before a
-# send-back's own fault lines (SA-0340).
+# send-back's own fault lines (SA-0353).
 SPEC_WRITER_SEND_BACK_PROMPT = context.turn_prompt("spec-writer-send-back")
 
 
@@ -576,11 +576,11 @@ SPEC_WRITER_BUDGET_USD = 17.0
 SPEC_WRITER_EXTRACT_BUDGET_USD = 1.5
 
 # The operator's bound on how many send-backs one draft gets, read at
-# call time so a patched value holds (SA-0340).
+# call time so a patched value holds (SA-0353).
 SPEC_WRITER_SEND_BACKS = 1
 
 # Reasoned, unmeasured: twice the extraction turn's own budget. A
-# send-back's own work turn spends up to this much (SA-0340).
+# send-back's own work turn spends up to this much (SA-0353).
 SPEC_WRITER_SEND_BACK_BUDGET_USD = 3.0
 
 # What one session records at most, best effort: the writer's first turn,
@@ -604,7 +604,7 @@ SPEC_WRITER_TIMEOUT_S = 3600.0
 @dataclass(frozen=True)
 class DraftFaults:
     """One judgement of a draft `run_spec_writer` is about to settle on
-    (SA-0340). `parsed` is whether `intake.parse_spec` and
+    (SA-0353). `parsed` is whether `intake.parse_spec` and
     `intake.refuse_inline_mutants` could read it at all. `lines` is every
     fault line found, in order: the one line an unparseable draft gets, or
     a `judge`'s own rendering of each new failure. Empty `lines` means
@@ -650,12 +650,11 @@ def draft_faults(
 class SpecWriterSession:
     """What `run_spec_writer` returns for one draft or revision.
 
-    `text` is the newest text a turn validated with no fault, or the
-    newest validated text when none was clean (SA-0340). Neither turn's
-    own `text` feeds it. `spec_sha` is
-    `hash_artifact` of it, or `None` beside empty text. `model` is every
-    distinct model this session's own turns named, first-seen order,
-    comma-joined (SA-0205)."""
+    `text` is the newest text `faults` found parsed, or the newest text
+    when none parsed (SA-0353). Neither turn's own `text` feeds it.
+    `spec_sha` is `hash_artifact` of it, or `None` beside empty text.
+    `model` is every distinct model this session's own turns named,
+    first-seen order, comma-joined (SA-0205)."""
 
     text: str
     cost_usd: float
@@ -702,7 +701,7 @@ def run_spec_writer(
     spec file (ADR 7). A second turn then extracts the file through
     `output_format`, resumed on the same session, never read from either
     turn's own text. `faults` can send a validated text back for a bounded
-    number of work-turn-plus-extraction rounds before it settles (SA-0340).
+    number of send-backs before it settles (SA-0353).
 
     Calls `agent` directly, never through `session.stop_on_rejected`: a
     rejected session must still be charged for what it spent (§4.1)."""
@@ -822,10 +821,10 @@ def run_spec_writer(
         turn_options: dict,
         last_cost_usd: float,
     ) -> implement.AttemptResult | str:
-        """One raw call for a send-back round: the clean `AttemptResult`,
-        or a `str` naming the failure. A send-back's own rate limit is a
-        failure here, never a wait (item 4, SA-0340). `_rejected` is for
-        the session's first round alone."""
+        """One send-back's call: the clean `AttemptResult`, or a `str`
+        naming the failure. A send-back's own rate limit is a failure here,
+        never a wait (SA-0353). `_rejected` is for the turns before any
+        send-back alone."""
         try:
             got = agent(
                 container,
@@ -844,7 +843,7 @@ def run_spec_writer(
 
     def _settle(text: str, last_cost_usd: float) -> SpecWriterSession:
         """`text`, or a send-back's own replacement, judged by `faults`
-        until one is clean or `SPEC_WRITER_SEND_BACKS` is spent (SA-0340).
+        until one is clean or `SPEC_WRITER_SEND_BACKS` is spent (SA-0353).
         The session's own text is then the newest one `faults` found
         parsed, or the newest of all when none did."""
         newest_parsed: str | None = None
