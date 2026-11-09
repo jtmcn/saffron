@@ -93,7 +93,7 @@ _REBUTTAL_SET_ASIDE = frozenset({"answer", "error"})
 
 def _normalized(fact: Fact) -> Fact:
     """`fact` with every difference the top-up sets aside already gone: its
-    `at`, the three `gate_result` keys above on a `gate_result`, and the two
+    `at`, the four `gate_result` keys above on a `gate_result`, and the two
     `rebuttal` keys above on a `rebuttal`."""
     payload = fact.payload
     if fact.kind == "gate_result":
