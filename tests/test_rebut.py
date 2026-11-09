@@ -125,6 +125,251 @@ def _agent(*texts, record=None):
     return run
 
 
+def _rebuttal_turn(session_id, cost, *, text="", structured_output=None):
+    return implement.AttemptResult(
+        session_id=session_id,
+        subtype="success",
+        terminal_reason="completed",
+        num_turns=1,
+        cost_usd_est=cost,
+        text=text,
+        structured_output=structured_output,
+    )
+
+
+# --- SA-0341: the extraction's own re-prompt ---
+
+
+def test_an_extraction_that_is_not_the_schema_is_re_prompted_once_quoting_its_error():
+    """Criterion 1: an extraction answer `_validate` rejects earns one more
+    call. It resumes the extraction's own session with its own options,
+    prompted with the error, a blank line, then `EXTRACT_PROMPT`. A schema
+    answer then gives the turn its rebuttals, with no error, the first
+    error kept as `reprompt_error`, and every turn's cost summed. One
+    `PhaseStart` quoting the error is emitted between the first extraction
+    and the re-prompt. Driven on both shapes `_validate` rejects: an answer
+    with no structured output, and a value the model rejects."""
+    numbered = [(1, _blocker())]
+    for bad_value in (
+        None,
+        {"rebuttals": [{"finding": 1, "action": "maybe", "argument": "a"}]},
+    ):
+        first_error = rebut._validate(rebut._Rebuttals, bad_value)[1]
+        timeline: list = []
+        scripted = iter(
+            [
+                _rebuttal_turn("fix-sess", 0.10, text="Fixed."),
+                _rebuttal_turn("extract-sess", 0.20, structured_output=bad_value),
+                _rebuttal_turn(
+                    "reprompt-sess",
+                    0.05,
+                    structured_output={"rebuttals": [_argued()]},
+                ),
+            ]
+        )
+
+        def agent(
+            container,
+            *,
+            prompt,
+            options,
+            _timeline=timeline,
+            _scripted=scripted,
+            **kwargs,
+        ):
+            _timeline.append({"prompt": prompt, "options": options, "kwargs": kwargs})
+            return next(_scripted)
+
+        turn = rebut.run_rebuttal(
+            "cell",
+            blockers=numbered,
+            options=OPTIONS,
+            session_id="sess-1",
+            agent=agent,
+            spec_id="SY-1",
+            emit=timeline.append,
+            last_cost_usd=0.01,
+        )
+
+        assert turn.error is None
+        assert turn.reprompt_error == first_error
+        assert [r.action for r in turn.rebuttals] == ["argued"]
+        assert turn.cost_usd == pytest.approx(0.10 + 0.20 + 0.05)
+        assert turn.session_id == "reprompt-sess"
+
+        calls = [item for item in timeline if isinstance(item, dict)]
+        events = [item for item in timeline if not isinstance(item, dict)]
+        assert len(calls) == 3
+        assert len(events) == 1
+        assert calls[0]["kwargs"]["last_cost_usd"] == 0.01
+        assert calls[0]["kwargs"]["resume"] == "sess-1"
+        assert calls[1]["kwargs"]["resume"] == "fix-sess"
+        assert calls[1]["kwargs"]["last_cost_usd"] == pytest.approx(0.10)
+        assert calls[1]["options"]["output_format"] == rebut._REBUTTALS_FORMAT
+        assert calls[2]["prompt"] == f"{first_error}\n\n{rebut.EXTRACT_PROMPT}"
+        assert calls[2]["kwargs"]["resume"] == "extract-sess"
+        assert calls[2]["kwargs"]["last_cost_usd"] == pytest.approx(0.20)
+        assert calls[2]["options"]["output_format"] == rebut._REBUTTALS_FORMAT
+
+        (event,) = events
+        assert event.spec_id == "SY-1"
+        assert event.phase == "REBUT"
+        assert event.label == "REBUT"
+        assert "re-prompting once" in event.detail
+        assert first_error in event.detail
+        # Between the first extraction and the re-prompt: two calls, then
+        # the line, then the third call.
+        assert [type(item) for item in timeline] == [
+            dict,
+            dict,
+            type(event),
+            dict,
+        ]
+
+
+def test_a_second_unreadable_extraction_is_recorded_and_not_re_prompted():
+    """Criterion 1: a second answer that is not the schema is not re-prompted
+    again. The turn makes three calls in all, and its error is the second
+    answer's own `not the schema` error from `_validate`. Its rebuttals are
+    empty, and its cost sums all three calls. Driven with the two shapes in
+    both orders, a schema answer scripted after them never reached."""
+    numbered = [(1, _blocker())]
+    for first_bad, second_bad in (
+        (None, {"rebuttals": [{"finding": 1, "action": "maybe", "argument": "a"}]}),
+        ({"rebuttals": [{"finding": 1, "action": "maybe", "argument": "a"}]}, None),
+    ):
+        first_error = rebut._validate(rebut._Rebuttals, first_bad)[1]
+        second_error = rebut._validate(rebut._Rebuttals, second_bad)[1]
+        record: list = []
+        scripted = iter(
+            [
+                _rebuttal_turn("fix-sess", 0.10, text="Fixed."),
+                _rebuttal_turn("extract-sess", 0.20, structured_output=first_bad),
+                _rebuttal_turn("reprompt-sess", 0.05, structured_output=second_bad),
+                _rebuttal_turn(
+                    "unreached-sess",
+                    9.0,
+                    structured_output={"rebuttals": [_argued()]},
+                ),
+            ]
+        )
+
+        def agent(
+            container, *, prompt, options, _record=record, _scripted=scripted, **kwargs
+        ):
+            _record.append(prompt)
+            return next(_scripted)
+
+        turn = rebut.run_rebuttal(
+            "cell",
+            blockers=numbered,
+            options=OPTIONS,
+            session_id="sess-1",
+            agent=agent,
+            spec_id="SY-1",
+            emit=lambda _e: None,
+        )
+
+        assert turn.error == second_error
+        assert turn.reprompt_error == first_error
+        assert turn.rebuttals == []
+        assert turn.cost_usd == pytest.approx(0.10 + 0.20 + 0.05)
+        assert len(record) == 3  # the scripted schema answer is never reached
+
+
+def test_a_turn_that_raised_is_never_re_prompted_and_the_fix_turn_never_repeats():
+    """Criterion 1 & 3: a turn that raised `implement.AgentFailed` is never
+    re-prompted, and the fix turn runs once in every case. A failed fix turn
+    makes one call. A failed first extraction makes two. A failed re-prompt
+    makes three. Each keeps the raised error as its own, with the cost of
+    every call it made. Only the re-prompt's failure sets `reprompt_error`."""
+    numbered = [(1, _blocker())]
+
+    # A failed fix turn: one call, no extraction bought. Its message is
+    # distinct from any plausible stand-in, catching a hardcoded replacement.
+    record: list = []
+    failed_fix = implement.AgentFailed(
+        "sess-1 crashed mid-fix, 0x7f", _rebuttal_turn("fix-sess", 0.30)
+    )
+    scripted = iter([failed_fix, _rebuttals(_argued())])
+
+    def agent(container, *, prompt, options, **kwargs):
+        record.append(prompt)
+        turn = next(scripted)
+        if isinstance(turn, BaseException):
+            raise turn
+        return turn
+
+    turn = rebut.run_rebuttal(
+        "cell",
+        blockers=numbered,
+        options=OPTIONS,
+        session_id="sess-1",
+        agent=agent,
+        spec_id="SY-1",
+        emit=lambda _e: None,
+    )
+    assert turn.error == str(failed_fix)
+    assert turn.reprompt_error is None
+    assert turn.cost_usd == pytest.approx(0.30)
+    assert len(record) == 1
+
+    # A failed first extraction: two calls, no re-prompt bought.
+    record = []
+    failed_extraction = implement.AgentFailed(
+        "extract-sess crashed, 0x7f", _rebuttal_turn("extract-sess", 0.20)
+    )
+    scripted = iter(
+        [
+            _rebuttal_turn("fix-sess", 0.10, text="Fixed."),
+            failed_extraction,
+            _rebuttals(_argued()),
+        ]
+    )
+    turn = rebut.run_rebuttal(
+        "cell",
+        blockers=numbered,
+        options=OPTIONS,
+        session_id="sess-1",
+        agent=agent,
+        spec_id="SY-1",
+        emit=lambda _e: None,
+    )
+    assert turn.error == str(failed_extraction)
+    assert turn.reprompt_error is None
+    assert turn.cost_usd == pytest.approx(0.10 + 0.20)
+    assert len(record) == 2
+
+    # A failed re-prompt: three calls, charged in full, `reprompt_error` set.
+    record = []
+    first_bad = None
+    first_error = rebut._validate(rebut._Rebuttals, first_bad)[1]
+    failed_reprompt = implement.AgentFailed(
+        "reprompt-sess crashed, 0x7f", _rebuttal_turn("reprompt-sess", 0.05)
+    )
+    scripted = iter(
+        [
+            _rebuttal_turn("fix-sess", 0.10, text="Fixed."),
+            _rebuttal_turn("extract-sess", 0.20, structured_output=first_bad),
+            failed_reprompt,
+            _rebuttals(_argued()),
+        ]
+    )
+    turn = rebut.run_rebuttal(
+        "cell",
+        blockers=numbered,
+        options=OPTIONS,
+        session_id="sess-1",
+        agent=agent,
+        spec_id="SY-1",
+        emit=lambda _e: None,
+    )
+    assert turn.error == str(failed_reprompt)
+    assert turn.reprompt_error == first_error
+    assert turn.cost_usd == pytest.approx(0.10 + 0.20 + 0.05)
+    assert len(record) == 3
+
+
 # --- backlog item 117: `blocker_lines` shows a survived probe ---
 
 
@@ -291,7 +536,12 @@ def test_a_rebuttal_that_neither_moved_nor_argued_ends_rebuttal_unjudged():
     assert failed.state == "REBUTTAL_UNJUDGED"
     assert "moved no commit and made no argument" in failed.why
 
-    outside_schema = _run("Fixed.", "I still think it is wrong.", moved=False)
+    outside_schema = _run(
+        "Fixed.",
+        "I still think it is wrong.",
+        "still outside the schema.",
+        moved=False,
+    )
     assert outside_schema.state == "REBUTTAL_UNJUDGED"
     assert "moved no commit and made no argument" in outside_schema.why
 
@@ -656,7 +906,13 @@ def test_a_verdict_that_is_not_the_schema_is_not_a_clean_verdict():
 def test_a_commit_stands_even_when_the_rebuttal_was_not_recorded():
     """The measurement is HEAD *or* an argument. A commit the extraction turn
     failed to describe is still a commit."""
-    result = _run("Fixed.", "no output block here", _verdicts(_verdict()), moved=True)
+    result = _run(
+        "Fixed.",
+        "no output block here",
+        "still no output block",
+        _verdicts(_verdict()),
+        moved=True,
+    )
     assert result.state == "READY_FOR_REVIEW"
     assert result.rebuttal.error.startswith("not the schema")
 
@@ -680,7 +936,12 @@ def test_the_phase_charges_every_turn_it_bought():
 
 
 def test_an_empty_argument_is_not_an_argument():
-    result = _run("Fixed.", _rebuttals(_argued(argument="")), moved=False)
+    result = _run(
+        "Fixed.",
+        _rebuttals(_argued(argument="")),
+        _rebuttals(_argued(argument="")),
+        moved=False,
+    )
     assert result.state == "REBUTTAL_UNJUDGED"
     assert result.rebuttal.error.startswith("not the schema")
 
@@ -1271,13 +1532,13 @@ def test_a_rebuttal_turn_without_a_valid_structured_output_is_not_the_schema():
         extracted = _turn(
             text=_block({"rebuttals": [_argued()]}), structured_output=bad_value
         )
-        result = _run("Fixed.", extracted, moved=False, record=record)
+        result = _run("Fixed.", extracted, extracted, moved=False, record=record)
         assert result.state == "REBUTTAL_UNJUDGED"
         assert result.rebuttal.error is not None
         assert result.rebuttal.error.startswith("not the schema")
         assert result.rebuttal.rebuttals == []
         assert result.rebuttal.error in result.why
-        assert len(record) == 2
+        assert len(record) == 3
 
 
 def test_a_verdict_session_without_a_valid_structured_output_is_not_the_schema():

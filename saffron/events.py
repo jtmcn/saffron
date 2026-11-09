@@ -1088,6 +1088,9 @@ FAMILIES: tuple[_Family, ...] = (
     # fires from inside `run_lens`, one turn before the per-lens line above.
     _Family("REVIEW: not the schema", "phases/review.py:run_lens", PhaseStart),
     _Family("REBUT:", _S, PhaseStart),
+    # The extraction's own re-prompt line, one turn before the supervisor's
+    # own `REBUT:` line above: it fires from inside `run_rebuttal`.
+    _Family("REBUT: not the schema", "phases/rebut.py:run_rebuttal", PhaseStart),
     _Family("REBUT: (verdict)", "phases/rebut.py:run_rebut", PhaseStart),
     _Family("teardown", _S, Teardown),
     _Family("teardown: commit subjects unreadable", _EP, Teardown),

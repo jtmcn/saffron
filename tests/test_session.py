@@ -5811,6 +5811,237 @@ def test_a_rebuttal_the_cap_cut_reads_as_out_of_budget_not_as_silence(
     assert "REBUT ran out of its $8.00 budget" in _last_rebut_detail(capture)
 
 
+def test_the_extraction_re_prompt_draws_on_the_extraction_reserve_and_one_it_cannot_cover_does_not_start(
+    monkeypatch, tmp_path
+):
+    """Item 42: the re-prompt draws on the extraction's reserve under
+    `_RebutCap`. With that reserve's money left, its own `max_budget_usd`
+    is what the pool holds after the first extraction. With nothing left
+    the pool refuses it and it never starts. The task then ends `EXHAUSTED`
+    with the extraction's reserve line, and `rebuttal.json` carries the
+    pool's refusal as the error. The re-prompt's own line, which says it
+    is re-prompting once, comes before the line naming that refusal. A
+    re-prompt that fails having spent the rest ends the same way, naming
+    its own error."""
+
+    def _reprompt_index(cell):
+        return next(
+            i
+            for i, prompt in enumerate(cell.turns)
+            if prompt != rebut.EXTRACT_PROMPT and prompt.endswith(rebut.EXTRACT_PROMPT)
+        )
+
+    def _rebut_lines(capture, needle):
+        return [
+            e
+            for e in capture
+            if isinstance(e, PhaseStart) and e.phase == "REBUT" and needle in e.detail
+        ]
+
+    # With room left: the pool holds $14.00 less the $8.50 already spent
+    # on the fix and the first extraction.
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "has-room",
+        cell=cell,
+        turns=_through_rebut(
+            _turn("Fixed it.", cost=6.00),
+            _turn(structured_output={"not": "the schema"}, cost=2.50),
+            _turn(
+                structured_output={
+                    "rebuttals": [
+                        {"finding": 1, "action": "argued", "argument": "by design"}
+                    ]
+                },
+                cost=1.00,
+            ),
+            _turn(
+                structured_output={
+                    "verdicts": [
+                        {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
+                    ]
+                }
+            ),
+        ),
+        spec=_spec(budget_usd=100.0),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert cell.turn_options[_reprompt_index(cell)]["max_budget_usd"] == pytest.approx(
+        5.50
+    )
+
+    # Nothing left: the re-prompt is refused before the agent is ever called.
+    cell2 = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell2, rebut_commits=0)
+    capture2: list = []
+    outcome2, _ledger2 = _drive(
+        monkeypatch,
+        tmp_path / "no-room",
+        cell=cell2,
+        turns=_through_rebut(
+            _turn("Fixed it.", cost=6.00),
+            _turn(structured_output={"not": "the schema"}, cost=8.00),
+        ),
+        spec=_spec(budget_usd=100.0),
+        capture=capture2,
+    )
+    assert outcome2.state == "EXHAUSTED"
+    assert len(cell2.turns) == 8  # plan, implement, 4 lenses, the fix, the extraction
+    (reprompt_line,) = _rebut_lines(capture2, "re-prompting once")
+    refusal_lines = _rebut_lines(capture2, "already spent")
+    assert refusal_lines
+    assert capture2.index(reprompt_line) < min(
+        capture2.index(line) for line in refusal_lines
+    )
+    record2 = json.loads(
+        (tmp_path / "no-room" / "out" / "SY-1" / "rebuttal.json").read_text()
+    )
+    assert record2["rebuttal"]["error"] == "the REBUT extraction pool is already spent"
+    assert record2["rebuttal"]["reprompt_error"] is not None
+
+    # A re-prompt that itself fails, spending the rest, ends the same way,
+    # naming its own error instead of the pool's refusal.
+    cell3 = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell3, rebut_commits=0)
+    capture3: list = []
+    failed_reprompt = _budget_cut_turn(cost=5.50)
+    outcome3, _ledger3 = _drive(
+        monkeypatch,
+        tmp_path / "reprompt-fails",
+        cell=cell3,
+        turns=_through_rebut(
+            _turn("Fixed it.", cost=6.00),
+            _turn(structured_output={"not": "the schema"}, cost=2.50),
+            failed_reprompt,
+        ),
+        spec=_spec(budget_usd=100.0),
+        capture=capture3,
+    )
+    assert outcome3.state == "EXHAUSTED"
+    (reprompt_line3,) = _rebut_lines(capture3, "re-prompting once")
+    (final_line3,) = _rebut_lines(capture3, "ran out of its")
+    assert capture3.index(reprompt_line3) < capture3.index(final_line3)
+    record3 = json.loads(
+        (tmp_path / "reprompt-fails" / "out" / "SY-1" / "rebuttal.json").read_text()
+    )
+    assert record3["rebuttal"]["error"] == str(failed_reprompt)
+    assert record3["rebuttal"]["reprompt_error"] is not None
+
+
+def test_the_extraction_re_prompt_is_logged_in_events_jsonl_and_named_in_rebuttal_json(
+    monkeypatch, tmp_path
+):
+    """Item 42: the re-prompt is visible in `events.jsonl` and in
+    `rebuttal.json`. A first answer that is read writes `reprompt_error`
+    as null and logs no extra REBUT line. A re-prompt whose answer is read
+    logs one REBUT `PhaseStart` quoting the first error, before REBUT's own
+    summary line. `rebuttal.json` names that error under
+    `rebuttal.reprompt_error`. A re-prompt whose answer is not the schema
+    does the same, with the second error under `rebuttal.error`."""
+
+    def _rebut_lines(events):
+        return [e for e in events if isinstance(e, PhaseStart) and e.phase == "REBUT"]
+
+    # A first answer that is read: no re-prompt, `reprompt_error` null.
+    outcome, events = _rebuttal_log(
+        monkeypatch,
+        tmp_path / "read",
+        suites=(),
+        turns=_through_rebut(
+            _turn("Fixed it."),
+            _turn(
+                structured_output={
+                    "rebuttals": [
+                        {"finding": 1, "action": "argued", "argument": "by design"}
+                    ]
+                }
+            ),
+            _turn(
+                structured_output={
+                    "verdicts": [
+                        {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
+                    ]
+                }
+            ),
+        ),
+        rebut_commits=0,
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert not any("re-prompting once" in e.detail for e in _rebut_lines(events))
+    record = json.loads(
+        (tmp_path / "read" / "out" / "SY-1" / "rebuttal.json").read_text()
+    )
+    assert record["rebuttal"]["reprompt_error"] is None
+    assert record["rebuttal"]["error"] is None
+
+    # A re-prompt whose answer is read.
+    first_bad = {"not": "the schema"}
+    first_error = rebut._validate(rebut._Rebuttals, first_bad)[1]
+    outcome2, events2 = _rebuttal_log(
+        monkeypatch,
+        tmp_path / "reprompted-read",
+        suites=(),
+        turns=_through_rebut(
+            _turn("Fixed it."),
+            _turn(structured_output=first_bad),
+            _turn(
+                structured_output={
+                    "rebuttals": [
+                        {"finding": 1, "action": "argued", "argument": "by design"}
+                    ]
+                }
+            ),
+            _turn(
+                structured_output={
+                    "verdicts": [
+                        {"finding": 1, "verdict": "withdrawn", "reason": "fair"}
+                    ]
+                }
+            ),
+        ),
+        rebut_commits=0,
+    )
+    assert outcome2.state == "READY_FOR_REVIEW"
+    rebut_lines2 = _rebut_lines(events2)
+    (reprompt_line2,) = [e for e in rebut_lines2 if "re-prompting once" in e.detail]
+    assert first_error in reprompt_line2.detail
+    (summary_line2,) = [e for e in rebut_lines2 if "rebuttal(s), HEAD" in e.detail]
+    assert events2.index(reprompt_line2) < events2.index(summary_line2)
+    record2 = json.loads(
+        (tmp_path / "reprompted-read" / "out" / "SY-1" / "rebuttal.json").read_text()
+    )
+    assert record2["rebuttal"]["reprompt_error"] == first_error
+    assert record2["rebuttal"]["error"] is None
+
+    # A re-prompt whose answer is not the schema either.
+    second_bad = {"also": "not it"}
+    second_error = rebut._validate(rebut._Rebuttals, second_bad)[1]
+    outcome3, events3 = _rebuttal_log(
+        monkeypatch,
+        tmp_path / "reprompted-unread",
+        suites=(),
+        turns=_through_rebut(
+            _turn("Fixed it."),
+            _turn(structured_output=first_bad),
+            _turn(structured_output=second_bad),
+        ),
+        rebut_commits=0,
+    )
+    assert outcome3.state == "REBUTTAL_UNJUDGED"
+    rebut_lines3 = _rebut_lines(events3)
+    (reprompt_line3,) = [e for e in rebut_lines3 if "re-prompting once" in e.detail]
+    assert first_error in reprompt_line3.detail
+    (summary_line3,) = [e for e in rebut_lines3 if "rebuttal(s), HEAD" in e.detail]
+    assert events3.index(reprompt_line3) < events3.index(summary_line3)
+    record3 = json.loads(
+        (tmp_path / "reprompted-unread" / "out" / "SY-1" / "rebuttal.json").read_text()
+    )
+    assert record3["rebuttal"]["reprompt_error"] == first_error
+    assert record3["rebuttal"]["error"] == second_error
+
+
 def test_a_rebuttal_that_claims_a_fix_and_commits_nothing_stops_at_rebutting(
     monkeypatch, tmp_path
 ):

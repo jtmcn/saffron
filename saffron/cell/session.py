@@ -220,7 +220,8 @@ class _RebutCap:
         ) -> implement.AttemptResult:
             remaining = self.limit - self.spent
             if remaining <= 0:
-                # Only a verdict meets this: each earlier stage runs one session.
+                # A verdict or the extraction's own re-prompt meets this.
+                # Every other stage runs one session.
                 refused = implement.AgentFailed(
                     f"the REBUT {self.stage} pool is already spent"
                 )
@@ -2910,9 +2911,9 @@ def _drive_cell(
             # The turn that just closed, which is the repair turn under §5.4's
             # loop — the join the no-progress rule and §8 need, and the whole
             # point of not collapsing every attempt onto the task. Under §5.6
-            # it is the rebuttal's *extraction* turn rather than the turn that
-            # moved HEAD, because `run_rebuttal` buys two; that re-run decides
-            # EXHAUSTED-or-not and is not a term in either query.
+            # it is the rebuttal's *extraction* turn rather than the turn
+            # that moved HEAD. `run_rebuttal` buys two or three turns, and
+            # this re-run decides EXHAUSTED-or-not, a term in neither query.
             attempt_id = ledger.attempts(task_id)[-1]["attempt_id"]
             # A drifted or aborted suite trusts no subtraction (§5.4), so an
             # empty baseline is passed, not the run's own stored rows (item 170).

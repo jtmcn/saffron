@@ -105,6 +105,9 @@ class RebuttalTurn:
     error: str | None = None
     """Set when no rebuttal was recorded — a failed turn, or output that was not
     the schema. Never the same value as "argued nothing" (§4.3)."""
+    reprompt_error: str | None = None
+    """The first extraction's own `not the schema` error, set only when that
+    answer earned one re-prompt. `None` when the first answer was read."""
 
 
 @dataclass
@@ -147,6 +150,7 @@ class RebutResult:
             ],
             "rebuttal": {
                 "error": self.rebuttal.error,
+                "reprompt_error": self.rebuttal.reprompt_error,
                 "rebuttals": [r.model_dump() for r in self.rebuttal.rebuttals],
             },
             "verdicts": [
@@ -225,6 +229,9 @@ def run_rebuttal(
     options: dict,
     session_id: str,
     agent: Callable[..., implement.AttemptResult],
+    # Required, not defaulted, the same rule `run_rebut`'s own `spec_id`
+    # states: this turn authors its own re-prompt `PhaseStart` below.
+    spec_id: str,
     emit: Callable[[Event], None] = lambda event: print(describe(event)),
     last_cost_usd: float = 0.0,
     # Told before the extraction, so a caller can fund it apart from the fix.
@@ -232,9 +239,11 @@ def run_rebuttal(
 ) -> RebuttalTurn:
     """The implementer's one attempt, plus the turn that records it.
 
-    Two turns, because §5.3 allows exactly one way to produce a structured
-    artifact: an extraction turn that forbids further action. Asking for the fix
-    and the JSON in one breath produces neither reliably.
+    Three turns at most. §5.3 allows exactly one way to produce a structured
+    artifact: an extraction turn that forbids further action. Asking for the
+    fix and the JSON in one breath produces neither reliably. A rejected
+    extraction answer earns one more call, on the extraction's own session.
+    The fix turn never runs again (`DESIGN.md` §5.6).
     """
     try:
         attempt = agent(
@@ -254,11 +263,12 @@ def run_rebuttal(
 
     session_id = attempt.session_id or session_id
     open_pool("extraction")
+    extract_options = options | {"output_format": _REBUTTALS_FORMAT}
     try:
         extracted = agent(
             container,
             prompt=EXTRACT_PROMPT,
-            options=options | {"output_format": _REBUTTALS_FORMAT},
+            options=extract_options,
             resume=session_id,
             emit=emit,
             last_cost_usd=attempt.cost_usd_est,
@@ -271,16 +281,56 @@ def run_rebuttal(
 
     spent = attempt.cost_usd_est + extracted.cost_usd_est
     session_id = extracted.session_id or session_id
-    # No re-prompt, as with REVIEW's extraction: the plan checkpoint retries
-    # because a rejected plan costs an attempt that has not happened yet.
-    # This attempt is already made, and HEAD already says what it did.
     report, error = _validate(_Rebuttals, extracted.structured_output)
-    if error or report is None:
+    if error is None and report is not None:
         return RebuttalTurn(
-            cost_usd=spent, session_id=session_id, error=error or "not the schema"
+            rebuttals=report.rebuttals, cost_usd=spent, session_id=session_id
+        )
+
+    # The extraction's answer was not the schema: one re-prompt, quoting the
+    # error, on the extraction's own session (`DESIGN.md` §5.6).
+    emit(
+        PhaseStart(
+            timestamp=time.time(),
+            spec_id=spec_id,
+            phase="REBUT",
+            label="REBUT",
+            detail=f"not the schema, re-prompting once — {error}",
+        )
+    )
+    try:
+        reprompted = agent(
+            container,
+            prompt=f"{error}\n\n{EXTRACT_PROMPT}",
+            options=extract_options,
+            resume=session_id,
+            emit=emit,
+            last_cost_usd=extracted.cost_usd_est,
+        )
+    except implement.AgentFailed as failed:
+        cost = spent + (failed.attempt.cost_usd_est if failed.attempt else 0.0)
+        return RebuttalTurn(
+            cost_usd=cost,
+            session_id=session_id,
+            error=str(failed),
+            reprompt_error=error,
+        )
+
+    spent += reprompted.cost_usd_est
+    session_id = reprompted.session_id or session_id
+    report, second_error = _validate(_Rebuttals, reprompted.structured_output)
+    if second_error or report is None:
+        return RebuttalTurn(
+            cost_usd=spent,
+            session_id=session_id,
+            error=second_error or "not the schema",
+            reprompt_error=error,
         )
     return RebuttalTurn(
-        rebuttals=report.rebuttals, cost_usd=spent, session_id=session_id
+        rebuttals=report.rebuttals,
+        cost_usd=spent,
+        session_id=session_id,
+        reprompt_error=error,
     )
 
 
@@ -774,12 +824,12 @@ def run_rebut(
     turn = run_rebuttal(
         container,
         blockers=numbered,
-        # The implementer's own options, but never its budget: these two turns
-        # resume the IMPLEMENT session, whose `max_budget_usd` is the whole task
-        # budget. Uncapped here, REBUT re-spends it after REVIEW already has.
+        # The implementer's own options, but never its budget: its turns
+        # resume IMPLEMENT's own uncapped session (§5.6).
         options=options | {"max_budget_usd": budget_usd},
         session_id=session_id,
         agent=agent,
+        spec_id=spec_id,
         emit=emit,
         last_cost_usd=last_cost_usd,
         open_pool=open_pool,
