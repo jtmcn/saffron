@@ -824,8 +824,8 @@ def run_rebut(
     turn = run_rebuttal(
         container,
         blockers=numbered,
-        # The implementer's own options, but never its budget: its turns
-        # resume IMPLEMENT's own uncapped session (§5.6).
+        # The implementer's own options, but never its budget: its turns resume
+        # IMPLEMENT's session, whose cap is the whole task budget (§5.6).
         options=options | {"max_budget_usd": budget_usd},
         session_id=session_id,
         agent=agent,

@@ -6007,6 +6007,7 @@ def test_the_extraction_re_prompt_is_logged_in_events_jsonl_and_named_in_rebutta
     rebut_lines2 = _rebut_lines(events2)
     (reprompt_line2,) = [e for e in rebut_lines2 if "re-prompting once" in e.detail]
     assert first_error in reprompt_line2.detail
+    assert reprompt_line2.spec_id == "SY-1"
     (summary_line2,) = [e for e in rebut_lines2 if "rebuttal(s), HEAD" in e.detail]
     assert events2.index(reprompt_line2) < events2.index(summary_line2)
     record2 = json.loads(
@@ -6033,6 +6034,7 @@ def test_the_extraction_re_prompt_is_logged_in_events_jsonl_and_named_in_rebutta
     rebut_lines3 = _rebut_lines(events3)
     (reprompt_line3,) = [e for e in rebut_lines3 if "re-prompting once" in e.detail]
     assert first_error in reprompt_line3.detail
+    assert reprompt_line3.spec_id == "SY-1"
     (summary_line3,) = [e for e in rebut_lines3 if "rebuttal(s), HEAD" in e.detail]
     assert events3.index(reprompt_line3) < events3.index(summary_line3)
     record3 = json.loads(

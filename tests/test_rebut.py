@@ -57,9 +57,9 @@ def _blocker(lens="correctness", **kwargs) -> Finding:
     return Finding.model_validate(base.model_dump() | kwargs)
 
 
-def _turn(text="", cost=0.1, structured_output=None):
+def _turn(text="", cost=0.1, structured_output=None, *, session_id="sess-1"):
     return implement.AttemptResult(
-        session_id="sess-1",
+        session_id=session_id,
         subtype="success",
         terminal_reason="completed",
         num_turns=1,
@@ -125,18 +125,6 @@ def _agent(*texts, record=None):
     return run
 
 
-def _rebuttal_turn(session_id, cost, *, text="", structured_output=None):
-    return implement.AttemptResult(
-        session_id=session_id,
-        subtype="success",
-        terminal_reason="completed",
-        num_turns=1,
-        cost_usd_est=cost,
-        text=text,
-        structured_output=structured_output,
-    )
-
-
 # --- SA-0341: the extraction's own re-prompt ---
 
 
@@ -158,11 +146,13 @@ def test_an_extraction_that_is_not_the_schema_is_re_prompted_once_quoting_its_er
         timeline: list = []
         scripted = iter(
             [
-                _rebuttal_turn("fix-sess", 0.10, text="Fixed."),
-                _rebuttal_turn("extract-sess", 0.20, structured_output=bad_value),
-                _rebuttal_turn(
-                    "reprompt-sess",
-                    0.05,
+                _turn(session_id="fix-sess", cost=0.10, text="Fixed."),
+                _turn(
+                    session_id="extract-sess", cost=0.20, structured_output=bad_value
+                ),
+                _turn(
+                    session_id="reprompt-sess",
+                    cost=0.05,
                     structured_output={"rebuttals": [_argued()]},
                 ),
             ]
@@ -228,7 +218,7 @@ def test_an_extraction_that_is_not_the_schema_is_re_prompted_once_quoting_its_er
 
 
 def test_a_second_unreadable_extraction_is_recorded_and_not_re_prompted():
-    """Criterion 1: a second answer that is not the schema is not re-prompted
+    """Criterion 2: a second answer that is not the schema is not re-prompted
     again. The turn makes three calls in all, and its error is the second
     answer's own `not the schema` error from `_validate`. Its rebuttals are
     empty, and its cost sums all three calls. Driven with the two shapes in
@@ -243,12 +233,16 @@ def test_a_second_unreadable_extraction_is_recorded_and_not_re_prompted():
         record: list = []
         scripted = iter(
             [
-                _rebuttal_turn("fix-sess", 0.10, text="Fixed."),
-                _rebuttal_turn("extract-sess", 0.20, structured_output=first_bad),
-                _rebuttal_turn("reprompt-sess", 0.05, structured_output=second_bad),
-                _rebuttal_turn(
-                    "unreached-sess",
-                    9.0,
+                _turn(session_id="fix-sess", cost=0.10, text="Fixed."),
+                _turn(
+                    session_id="extract-sess", cost=0.20, structured_output=first_bad
+                ),
+                _turn(
+                    session_id="reprompt-sess", cost=0.05, structured_output=second_bad
+                ),
+                _turn(
+                    session_id="unreached-sess",
+                    cost=9.0,
                     structured_output={"rebuttals": [_argued()]},
                 ),
             ]
@@ -278,7 +272,7 @@ def test_a_second_unreadable_extraction_is_recorded_and_not_re_prompted():
 
 
 def test_a_turn_that_raised_is_never_re_prompted_and_the_fix_turn_never_repeats():
-    """Criterion 1 & 3: a turn that raised `implement.AgentFailed` is never
+    """Criterion 3: a turn that raised `implement.AgentFailed` is never
     re-prompted, and the fix turn runs once in every case. A failed fix turn
     makes one call. A failed first extraction makes two. A failed re-prompt
     makes three. Each keeps the raised error as its own, with the cost of
@@ -289,7 +283,7 @@ def test_a_turn_that_raised_is_never_re_prompted_and_the_fix_turn_never_repeats(
     # distinct from any plausible stand-in, catching a hardcoded replacement.
     record: list = []
     failed_fix = implement.AgentFailed(
-        "sess-1 crashed mid-fix, 0x7f", _rebuttal_turn("fix-sess", 0.30)
+        "sess-1 crashed mid-fix, 0x7f", _turn(session_id="fix-sess", cost=0.30)
     )
     scripted = iter([failed_fix, _rebuttals(_argued())])
 
@@ -317,11 +311,11 @@ def test_a_turn_that_raised_is_never_re_prompted_and_the_fix_turn_never_repeats(
     # A failed first extraction: two calls, no re-prompt bought.
     record = []
     failed_extraction = implement.AgentFailed(
-        "extract-sess crashed, 0x7f", _rebuttal_turn("extract-sess", 0.20)
+        "extract-sess crashed, 0x7f", _turn(session_id="extract-sess", cost=0.20)
     )
     scripted = iter(
         [
-            _rebuttal_turn("fix-sess", 0.10, text="Fixed."),
+            _turn(session_id="fix-sess", cost=0.10, text="Fixed."),
             failed_extraction,
             _rebuttals(_argued()),
         ]
@@ -345,12 +339,12 @@ def test_a_turn_that_raised_is_never_re_prompted_and_the_fix_turn_never_repeats(
     first_bad = None
     first_error = rebut._validate(rebut._Rebuttals, first_bad)[1]
     failed_reprompt = implement.AgentFailed(
-        "reprompt-sess crashed, 0x7f", _rebuttal_turn("reprompt-sess", 0.05)
+        "reprompt-sess crashed, 0x7f", _turn(session_id="reprompt-sess", cost=0.05)
     )
     scripted = iter(
         [
-            _rebuttal_turn("fix-sess", 0.10, text="Fixed."),
-            _rebuttal_turn("extract-sess", 0.20, structured_output=first_bad),
+            _turn(session_id="fix-sess", cost=0.10, text="Fixed."),
+            _turn(session_id="extract-sess", cost=0.20, structured_output=first_bad),
             failed_reprompt,
             _rebuttals(_argued()),
         ]
