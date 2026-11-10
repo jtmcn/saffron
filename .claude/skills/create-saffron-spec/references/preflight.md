@@ -23,7 +23,7 @@ a cell handling that one member passes.
 Then check the complement. A claim that says "only the recursive forms" is also
 a claim about the non-recursive ones, and the witness drives those too.
 
-**Pin every measurement.** A writer who prototypes a behaviour on the real tree
+**Pin every measurement.** A writer who prototypes a behaviour on real code
 quotes what it printed. A witness asserts that output, or the cell does not
 build it. `SA-0115` quoted 19 of 35 calls resolving, pinned nothing, and
 shipped a resolver that resolves none.

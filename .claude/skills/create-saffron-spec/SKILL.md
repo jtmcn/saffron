@@ -73,19 +73,26 @@ dispatched. Before the commit, check each new file with
 after the commit it reports zero whatever the file holds.
 
 The writer ran the tree checks in `.claude/agents/spec-writer.md`, not the
-suite. Commit only the spec and its bookkeeping, never the writer's
-prototype. Then start `make check` in the background and run step 6 beside
-it. Step 7's dispatch does not wait on the check, because the reviewer reads
-the commit and never the check. Fix a failure in the next commit. Across 32 suite results from twelve
-writers, the failed hooks were `prose` five times and `ty` once. Run one full
-suite at a time: two started together failed two timing tests.
-Redirect the output to a file and echo `$?`, never pipe it into `tail`.
+suite, and built its prototype in a worktree of its own. After the commit,
+`git status --porcelain` is empty. A file left over is a prototype in the
+wrong tree, so move it to the saved diff before going on.
 
 ### 6. Pre-flight the spec
 
 This is the step that earns the skill. `references/preflight.md` holds the
 checks, each with its command and the findings it removes. Run them all before
 any reviewer is dispatched, and fix what they surface.
+
+Then land check 12's hand edits, commit the fixes and the edits, and re-run
+the writer's tree checks. The tree is clean again. Start `make check` in the
+background on that commit, and dispatch step 7 at the same commit. The
+reviewer reads the commit and never the check. Redirect the output to a file
+and echo `$?`, never pipe it into `tail`.
+
+A failure is fixed in a commit before step 8 dispatches anything. Across 47
+suite results from twelve writers, the failed hooks were `prose` five times
+and `ty` once (`docs/evidence/2026-11-09-spec-writer-suite-waits.md`). Run
+one full suite at a time, since two started together failed two timing tests.
 
 The ones that catch the most, in the order that costs least:
 
@@ -131,6 +138,10 @@ chain from 2026-11-02 to 2026-11-07 ran a third review. Then re-run the
 writer's tree checks, step 3's size estimate and pre-flight check 2. A
 second-review blocker that needs a redesign goes back to a writer, or to the
 operator, rather than into a hand edit.
+
+Every commit in this step gets the same background `make check` as step 6.
+Step 9 waits until it exits 0 on the last commit. A fix after a review ended
+the chain is named in the pull request's **Not covered**.
 
 Every finding is verified at the base before it is applied. A review's premise
 that does not hold is answered with evidence, not applied. Roughly one finding

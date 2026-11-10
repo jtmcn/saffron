@@ -28,8 +28,11 @@ decisions (settled, do not re-argue):
 <Protected edits the caller lands after your prototype, one line each with
 its file and section. Describe each as already amended.>
 
-<For a child spec: the path of the parent's prototype diff. Draft on top of
-it.>
+<For a child spec: the path of the parent's prototype diff. Apply it in
+your prototype worktree first, and draft on top of it.>
+
+Build your prototype in a worktree of your own under <your scratch dir>,
+never in this checkout, as spec-writer.md says.
 
 Report back with: the spec's path and id, its touches, depends_on,
 ceilings and estimated size, which of the six checks it settled with
@@ -44,10 +47,11 @@ saves most of that for each child.
 
 Draft coupled specs in sequence. Specs are coupled when one reads a name, a
 function or a refusal the other adds. A child waits for its parent's
-prototype, and its brief names that diff's path. Dispatch the child after the
-parent's background `make check` ends, since the child runs a whole suite on
-that prototype. Independent specs run in parallel. Parallel coupled drafts cost three caller rounds on 2026-10-03. On
-2026-11-07, two children assumed names their parents had not yet chosen.
+prototype, and its brief names that diff's path. A child runs a whole suite
+on that prototype. So dispatch it after the parent's background `make check`
+ends, and dispatch one parent's children one at a time. Independent specs run
+in parallel. Parallel coupled drafts cost three caller rounds on 2026-10-03.
+On 2026-11-07, two children assumed names their parents had not yet chosen.
 
 Hand it the pre-flight commands by name. A writer that knows `driver.py cite`
 exists runs it on its own draft. One that does not writes a throwaway resolver
@@ -98,6 +102,9 @@ spec: <path>
 
 base: <commit>, the head of branch <branch> in the checkout at <path>,
 the base the reviewer read at. Revise in place. Do not commit.
+
+prototype: <the worktree and saved diff the draft reported>. Revise the
+prototype there, and save its diff again.
 
 <Apply all, unless reading the line at base shows a finding is wrong.
 Then say so with the evidence and do not apply it.>

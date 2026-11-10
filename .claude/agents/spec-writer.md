@@ -124,9 +124,10 @@ And optionally:
 
 ## Tree checks, not the whole suite
 
-Run no `make check` and no bare `pytest`. A full suite costs 3 to 10 minutes,
-and writers spent about 40% of their active time waiting on one (b-98a3be).
-The caller runs `make check` once, after its commit, beside the review.
+Run no `make check` and no bare `pytest` in the spec's tree. A full suite
+costs 3 to 10 minutes, and writers spent about 40% of their active time
+waiting on one (`docs/evidence/2026-11-09-spec-writer-suite-waits.md`). The
+caller runs `make check` on the commit the reviewer reads.
 
 - This command reads the live specs and backlog in about 20 seconds:
 
@@ -139,14 +140,22 @@ The caller runs `make check` once, after its commit, beside the review.
   index, so it passes an unstaged file it never read (measured).
 - `uv run ruff check <path>` and `uv run ruff format --check <path>` for each
   Python file the spec's commit edits, such as the queue smoke test.
-- On a prototype, run each wrong version against its witness's test file
-  alone. Run the whole suite on a prototype only when it sits on a parent's
-  diff. That full suite found `SA-0336`'s broken regate test. When the
-  caller's `make check` overlaps it, read a timing failure in
-  `test_runtime.py` or `test_view_server.py` as contention first.
-- The prototype stays out of the spec's commit. Save its diff to a file in
-  your scratch directory, and name that path in your report. The caller
-  reads hand edits against it and hands it to a child spec.
+
+## The prototype lives in its own worktree
+
+The spec's tree holds the spec and its bookkeeping, and nothing else. The
+reviewer reads that tree as a clean snapshot of its commit.
+
+- Build the prototype in `git worktree add <scratch>/proto <base>`, with
+  `<scratch>` your own scratch directory. A child spec applies its parent's
+  diff there first, with `git apply`.
+- Run each wrong version against its witness's test file alone. Run
+  `uv run pytest -q` there, the one whole suite you run, only when the
+  prototype sits on a parent's diff. That suite found `SA-0336`'s broken
+  regate test.
+- Before you report, save the diff from that worktree's own index:
+  `git add -A && git diff --cached --binary <base> > <scratch>/proto.diff`.
+  It carries the untracked witnesses too. Name both paths in your report.
 
 ## Revising against a review
 
@@ -170,7 +179,9 @@ reading its line and the review's error becomes the spec's.
 4. **Re-run steps 4 to 7.** A criterion the review added moves the size
    estimate, and the bookkeeping follows the spec.
 
-**Done when** every finding is applied or answered, and the tree checks exit 0.
+**Done when** every finding is applied or answered, the tree checks exit 0,
+and the prototype diff is saved again. The brief names the prototype
+worktree. Revise there, and build a new one from the saved diff if it is gone.
 Your report replaces its Checks section with one line per finding: `applied`
 or `answered`, its severity, and the evidence you read.
 
@@ -186,7 +197,9 @@ A run that ended on a split reports the split alone, as step 1 says.
    `narrowed: <members left>`.
 4. **For the operator**: each judgement call you made (priority, a split, a
    scope cut), one line each.
-5. **Prototype**: the path of its saved diff, or "none".
+5. **Prototype**: its worktree and its saved diff, or "none". Confirm that
+   `git status --porcelain` in the spec's tree lists only the spec and its
+   bookkeeping.
 6. **Next**: each tree check's exit code, then "commit on its own branch, run
    `make check`, the pre-flight, and spec-reviewer with `base:` that branch's
    head".
