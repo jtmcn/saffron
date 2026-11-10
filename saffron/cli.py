@@ -2256,14 +2256,14 @@ def _ceil_cents(amount: float) -> float:
 
 def _print_stack_admission(candidates: list[Candidate]) -> None:
     """What `--budget` a stack queue's own order would need, one line per
-    candidate, printed after `_print_queue`'s own output (backlog item
-    b-0a08bf, `DESIGN.md` §7.1). Every earlier candidate has already spent
-    its own `budget_usd` plus one spec review by the time the next one's
-    admission is checked (`saffron/batch.py`'s `wrapped`). Candidate `k`'s
-    threshold adds those to its own `budget_usd`, divided by what admission
-    compares against: `1 - reserve share - writer share` of `--budget`
-    (`_drive`'s own comparison). The total adds the last spec review too,
-    so draining the whole order leaves both shares whole.
+    candidate, printed after `_print_queue`'s own output (b-0a08bf, §7.1).
+    Candidate `k`'s threshold is the least `--budget` from which every larger
+    one starts it: each earlier candidate's `budget_usd` plus one spec review,
+    plus `k`'s own, over `1 - reserve share - writer share` (`_drive`). A
+    smaller budget can start `k` by passing over an earlier one (b-f73cd0).
+    A larger budget below the line can then lose `k`, so no lower figure
+    holds for every budget above it (b-d1c277). The total adds
+    the last spec review, so draining the order leaves both shares whole.
     """
     if not candidates:
         return
