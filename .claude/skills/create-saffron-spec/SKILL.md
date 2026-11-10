@@ -70,16 +70,29 @@ match. A decision left open returns as a question and costs a round.
 The reviewer reads at a commit, so the draft is committed before the review is
 dispatched. Before the commit, check each new file with
 `python3 hooks/prose_limit.py --file <path>`. It compares against `HEAD`, so
-after the commit it reports zero whatever the file holds. Then stage the draft
-and run `make check`. Its `prose-limit-tree` hook reads the working tree,
-untracked files included. The other lint hooks read tracked files only, so
-stage the draft before trusting them.
+after the commit it reports zero whatever the file holds.
+
+The writer ran the tree checks in `.claude/agents/spec-writer.md`, not the
+suite, and built its prototype in a worktree of its own. After the commit,
+`git status --porcelain` is empty. A file left over is a prototype in the
+wrong tree, so move it to the saved diff before going on.
 
 ### 6. Pre-flight the spec
 
 This is the step that earns the skill. `references/preflight.md` holds the
 checks, each with its command and the findings it removes. Run them all before
 any reviewer is dispatched, and fix what they surface.
+
+Then land check 12's hand edits, commit the fixes and the edits, and re-run
+the writer's tree checks. The tree is clean again. Start `make check` in the
+background on that commit, and dispatch step 7 at the same commit. The
+reviewer reads the commit and never the check. Redirect the output to a file
+and echo `$?`, never pipe it into `tail`.
+
+A failure is fixed in a commit before step 8 dispatches anything. Across 47
+suite results from twelve writers, the failed hooks were `prose` five times
+and `ty` once (`docs/evidence/2026-11-09-spec-writer-suite-waits.md`). Run
+one full suite at a time, since two started together failed two timing tests.
 
 The ones that catch the most, in the order that costs least:
 
@@ -120,6 +133,15 @@ read for finds more than one told nothing.
 
 Two rounds is the working stop rule. A third round means the spec's subject is
 unsettled, which is a question for the operator rather than another review.
+Apply the second review's findings yourself, each verified at the base. No
+chain from 2026-11-02 to 2026-11-07 ran a third review. Then re-run the
+writer's tree checks, step 3's size estimate and pre-flight check 2. A
+second-review blocker that needs a redesign goes back to a writer, or to the
+operator, rather than into a hand edit.
+
+Every commit in this step gets the same background `make check` as step 6.
+Step 9 waits until it exits 0 on the last commit. A fix after a review ended
+the chain is named in the pull request's **Not covered**.
 
 Every finding is verified at the base before it is applied. A review's premise
 that does not hold is answered with evidence, not applied. Roughly one finding

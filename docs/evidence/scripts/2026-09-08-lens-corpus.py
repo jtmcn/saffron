@@ -295,7 +295,7 @@ def main() -> int:
         "--runs",
         type=int,
         default=1,
-        help="scored runs of the three lenses, per fixture (default 1 — a "
+        help="scored runs of the four lenses, per fixture (default 1 — a "
         "corpus pass already multiplies cost by fixture count, where the "
         "single-fixture driver multiplies by --runs instead).",
     )
@@ -303,8 +303,9 @@ def main() -> int:
         "--budget-usd",
         type=float,
         default=4.0,
-        help="per lens, per run, the way `run_review` spends it. Bounded for "
-        "real by --max-spend-usd.",
+        help="per lens, per run: this times the four lenses in "
+        "`review.LENSES` sets the whole review pool for one run. Bounded "
+        "for real by --max-spend-usd.",
     )
     parser.add_argument(
         "--max-spend-usd",
@@ -445,7 +446,12 @@ def main() -> int:
                     # resolve fails inside the loop, after a cell has started.
                     prompts_dir=ROOT / "saffron" / "agents" / "prompts",
                     max_turns=args.max_turns,
-                    budget_usd=args.budget_usd,
+                    # REVIEW's own pool, built the way `session.py` builds
+                    # it: the per-lens figure times every declared lens.
+                    pool=review.ReviewPool(
+                        remaining=args.budget_usd * len(review.LENSES),
+                        floor=session.REVIEW_FLOOR_USD,
+                    ),
                     agent=agent,
                     spec_id=f"{fixture.spec_id}-lenscorpus-{index}",
                     emit=lambda event: print(f"  {events.describe(event)}"),

@@ -6786,6 +6786,46 @@ def test_each_stack_layers_threshold_agrees_with_what_run_stack_batch_admits(
     assert cli._ceil_cents(0.07 / 0.5) == 0.14
 
 
+def test_a_sibling_threshold_is_the_least_budget_every_larger_one_admits(
+    tmp_path, monkeypatch, capsys
+):
+    """Three siblings: `SY-3`'s printed threshold starts it, and so does
+    every larger budget tried. A cent below starts the other two and passes
+    `SY-3` over. $60 starts `SY-3` too, by passing over `SY-2`, so a lower
+    budget can admit a layer the line does not price (b-d1c277)."""
+
+    def _sibling(i, budget_usd):
+        return Candidate(
+            path=Path(f"SY-{i}.md"),
+            spec=intake.Spec(
+                id=f"SY-{i}", title="t", type="chore", budget_usd=budget_usd
+            ),
+            spec_sha=str(i) * 64,
+            task_id=None,
+        )
+
+    def _order():
+        return [_sibling(1, 10.0), _sibling(2, 50.0), _sibling(3, 5.0)]
+
+    cli._print_stack_admission(_order())
+    lines = capsys.readouterr().out.splitlines()
+    thresholds = [
+        float(line.split()[1].lstrip("$")) for line in lines if " admits SY-" in line
+    ]
+    assert thresholds == [20.0, 136.0, 162.0]
+
+    def _started(budget):
+        _, started, _, _ = _drive_fake_stack_batch(
+            _order(), budget, tmp_path / f"home-{budget}", monkeypatch
+        )
+        return started
+
+    for budget in (162.0, 162.01, 200.0, 400.0):
+        assert "SY-3" in _started(budget)
+    assert _started(161.99) == ["SY-1", "SY-2"]
+    assert _started(60.0) == ["SY-1", "SY-3"]
+
+
 def test_looking_at_the_queue_still_never_stamps_a_corpse(tmp_path):
     """The existing guarantee, re-asserted at the level where it could
     regress: the extraction is what put a stamping switch within reach of

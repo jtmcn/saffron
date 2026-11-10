@@ -93,7 +93,7 @@ that added a refusal refused the specs queued below it, and its cell ended
 mutant reaches REPAIR as its whole claim, so `SA-0330`'s repair turns never
 found the two cases it lacked, and the cell ended `EXHAUSTED`.
 
-**Placed 2026-11-06**, from the spec loop's run 54: **b-d39d9a**. `SA-0335`
+**Placed 2026-11-06**, from the spec loop's run 54: ~~**b-d39d9a**~~. `SA-0335`
 spent $76.77 against its $69 budget during REVIEW and REBUT, and nothing
 stopped it. The overrun stopped its batch after two of four specs.
 
@@ -136,12 +136,16 @@ call explains.
 its batch. The `tests` gate takes a printed warning for every failure.
 
 **Placed 2026-10-16**, from the spec loop's run 42: ~~**b-2da959**~~, then
-**b-f73cd0**. `cite` passes a drifted range and flags a correct one, and
+~~**b-f73cd0**~~. `cite` passes a drifted range and flags a correct one, and
 `SA-0294` ports it. A batch stops at a candidate it cannot pay for, though a
 later one fits.
 
-**Placed 2026-11-08**, from `SA-0356`'s spec chain: **b-d1c277**. The queue's
+**Placed 2026-11-08**, from `SA-0356`'s spec chain: ~~**b-d1c277**~~. The queue's
 stack thresholds assume every earlier candidate ran.
+
+**Placed 2026-11-09**, from the spec chain speed review: **b-c12d39**. A
+criterion cannot name the members its claim covers, so no command sees one
+that no witness drives.
 
 **Placed 2026-11-08**, from the spec loop's run 55: **b-31e3c8**,
 **b-cbb6e7**, **b-c7858c**, **b-879e72**, then **b-3df181**. REBUT answers
@@ -372,6 +376,10 @@ Python. Record helpers sit under `tests/`, and the loop's driver imports them.
 A lens can search code only as text. The spec loop numbers its passes as runs,
 which is a ledger term. The spec chain records no cost per escaped defect, so
 no step can be cut on evidence.
+
+**Placed 2026-11-09**, from the spec chain speed review: **b-00f151**.
+`saffron draft` takes no decisions, parent or pre-flight, so the chain runs by
+hand.
 
 **Moved 2026-11-07 from tier 2**, on the operator's ruling: ~~**b-dc5212**~~ and
 ~~**b-4589be**~~. Each bites only on the driver's attended path, which is now the

@@ -34,3 +34,4 @@ The watch waits for a task the batch names, and a stop ends it.
 - 2026-11-08: done by hand. Run 49's late wake-ups are left open. They read as the
   session holding each prompt until its turn ends, which nobody measured.
 - 2026-11-09: reopened from the spec loop's run 56. After batch 73 drained, `mcp__cell-watch__watch` with `stop: true` answered "Watching the newest task" three times in a row. The test for a stop through the tool passes, so the loaded mod and the tested one disagree.
+- 2026-11-09: recurred in the spec loop's run 57. After batch 75 drained, `stop: true` answered "Watching the newest task" again.

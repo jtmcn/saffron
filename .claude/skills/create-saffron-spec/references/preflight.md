@@ -23,7 +23,7 @@ a cell handling that one member passes.
 Then check the complement. A claim that says "only the recursive forms" is also
 a claim about the non-recursive ones, and the witness drives those too.
 
-**Pin every measurement.** A writer who prototypes a behaviour on the real tree
+**Pin every measurement.** A writer who prototypes a behaviour on real code
 quotes what it printed. A witness asserts that output, or the cell does not
 build it. `SA-0115` quoted 19 of 35 calls resolving, pinned nothing, and
 shipped a resolver that resolves none.
@@ -162,11 +162,13 @@ looks for.
 
 ## 12. The delegate's own edits
 
-Land a spec's `protected` edits by hand in its branch before the first
-review. Two first reviews on 2026-09-29 spent a concern on a `DESIGN.md`
-sentence the spec already listed. Tell the second reviewer to read each hand
-edit against the build. The one second-round concern on `SA-0195`'s docs
-was an edit the delegate wrote.
+Land a spec's `protected` edits by hand in its branch after the writer's
+prototype exists and before the first review. Read each one against that
+prototype. Brief the writer that they will land, and to describe them as
+amended. Six findings on 2026-11-07 came from edits written before any
+prototype. Edits landed after the draft but unannounced went stale in its
+notes on 2026-10-30. Tell the second reviewer to read each hand edit against
+the build.
 
 Run `python3 hooks/prose_limit.py --file` on a copy of each file a spec
 dictates text into, with the text in place. A dictated sentence the `prose`
