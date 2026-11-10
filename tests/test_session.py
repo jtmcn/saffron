@@ -6205,6 +6205,251 @@ def test_a_lens_that_errored_ends_its_task_in_a_state_no_batch_scan_takes_back(
     assert candidates[0].task_id == second_task
 
 
+# --- SA-0343: REVIEW's own pool, shared across lenses, probes, versions ---
+
+
+def _two_wrong_version_criteria():
+    from saffron.intake import Criterion
+
+    return [
+        Criterion(claim="claim a", witness="t.py::a", wrong_versions=["a v1"]),
+        Criterion(claim="claim b", witness="t.py::b", wrong_versions=["b v1"]),
+    ]
+
+
+def test_a_review_that_crosses_its_pool_starts_no_later_session(monkeypatch, tmp_path):
+    """REVIEW's pool opens once and every lens, criterion probe and
+    wrong-version session draws on it. A session the pool cannot cover
+    does not start: it is filed with an error, like a failed turn, and
+    costs nothing. The task ends `REVIEW_INCOMPLETE`, and REVIEW's own
+    last line names that session, apart from any other session's own
+    error line."""
+    # Cell A: the pool opens at $8.00. Three lenses spend $3.00, $1.25
+    # (a failure) and $2.00, leaving $1.75, under the floor: the fourth is cut.
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path / "lens-cut",
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            _turn(),
+            _turn(_EMPTY, cost=3.0),
+            implement.AgentFailed("contract lens crashed", _turn("", cost=1.25)),
+            _turn(_EMPTY, cost=2.0),
+        ],
+        spec=_spec(budget_usd=8.2, acceptance=_two_wrong_version_criteria()),
+    )
+    assert [o["max_budget_usd"] for o in cell.turn_options[2:5]] == [
+        pytest.approx(8.0),
+        pytest.approx(5.0),
+        pytest.approx(3.75),
+    ]
+    assert outcome.state == "REVIEW_INCOMPLETE"
+    assert [r.error is None for r in outcome.reviews] == [True, False, True, False]
+    assert outcome.reviews[-1].lens == "conventions"
+    assert "conventions" in outcome.reviews[-1].error
+    findings = json.loads((outcome.task_dir / "findings.json").read_text())
+    assert [f["error"] is None for f in findings] == [True, False, True, False]
+    probes = json.loads((outcome.task_dir / "criterion-probes.json").read_text())
+    assert [p["error"] is None for p in probes] == [False, False]
+    assert [wv["error"] is None for wv in outcome.wrong_versions] == [False, False]
+    assert outcome.spent_usd == pytest.approx(0.2 + 3.0 + 1.25 + 2.0)
+    (row,) = ledger._db.execute(
+        "SELECT state FROM tasks WHERE task_id = ?", (outcome.task_id,)
+    ).fetchall()
+    assert row["state"] == "REVIEW_INCOMPLETE"
+    review_lines = [line for line in cell.watched if line.startswith("REVIEW:")]
+    assert review_lines[-1] == (
+        "REVIEW: REVIEW's pool could not cover conventions — "
+        "the review was cut at its budget"
+    )
+    assert any("contract produced nothing" in line for line in review_lines[:-1])
+
+    # Cell B: four lenses spend the $8.00 pool down to $2.50. The first
+    # criterion probe spends $0.75 of it, and the second is cut at $1.75.
+    cell_b = _stub_the_runtime(monkeypatch)
+    outcome_b, ledger_b = _drive(
+        monkeypatch,
+        tmp_path / "probe-cut",
+        cell=cell_b,
+        turns=[
+            _turn(_block(_PLAN)),
+            _turn(),
+            _turn(_EMPTY, cost=2.0),
+            _turn(_EMPTY, cost=1.5),
+            _turn(_EMPTY, cost=1.0),
+            _turn(_EMPTY, cost=1.0),
+            _turn(_probe_answer(None, "reason a"), cost=0.75),
+        ],
+        spec=_spec(budget_usd=8.2, acceptance=_two_wrong_version_criteria()),
+    )
+    assert [o["max_budget_usd"] for o in cell_b.turn_options[2:6]] == [
+        pytest.approx(8.0),
+        pytest.approx(6.0),
+        pytest.approx(4.5),
+        pytest.approx(3.5),
+    ]
+    assert cell_b.turn_options[6]["max_budget_usd"] == pytest.approx(2.5)
+    assert outcome_b.state == "REVIEW_INCOMPLETE"
+    assert [r.error is None for r in outcome_b.reviews] == [True, True, True, True]
+    probes_b = json.loads((outcome_b.task_dir / "criterion-probes.json").read_text())
+    assert [p["error"] is None for p in probes_b] == [True, False]
+    assert [wv["error"] is None for wv in outcome_b.wrong_versions] == [False, False]
+    assert outcome_b.spent_usd == pytest.approx(0.2 + 2.0 + 1.5 + 1.0 + 1.0 + 0.75)
+    review_lines_b = [line for line in cell_b.watched if line.startswith("REVIEW:")]
+    assert review_lines_b[-1] == (
+        "REVIEW: REVIEW's pool could not cover t.py::b — "
+        "the review was cut at its budget"
+    )
+
+    # Cell C: the lenses and both probes leave $3.50. The first
+    # wrong-version session spends $2.00, and the second is cut at $1.50.
+    cell_c = _stub_the_runtime(monkeypatch)
+    outcome_c, ledger_c = _drive(
+        monkeypatch,
+        tmp_path / "wrong-version-cut",
+        cell=cell_c,
+        turns=[
+            _turn(_block(_PLAN)),
+            _turn(),
+            _turn(_EMPTY, cost=1.0),
+            _turn(_EMPTY, cost=1.0),
+            _turn(_EMPTY, cost=1.0),
+            _turn(_EMPTY, cost=1.0),
+            _turn(_probe_answer(None, "reason a"), cost=0.3),
+            _turn(_probe_answer(None, "reason b"), cost=0.2),
+            _turn(_wrong_version_answer((None, "fine")), cost=2.0),
+        ],
+        spec=_spec(budget_usd=8.2, acceptance=_two_wrong_version_criteria()),
+    )
+    assert cell_c.turn_options[6]["max_budget_usd"] == pytest.approx(4.0)
+    assert cell_c.turn_options[7]["max_budget_usd"] == pytest.approx(3.7)
+    assert cell_c.turn_options[8]["max_budget_usd"] == pytest.approx(3.5)
+    assert outcome_c.state == "REVIEW_INCOMPLETE"
+    probes_c = json.loads((outcome_c.task_dir / "criterion-probes.json").read_text())
+    assert [p["error"] is None for p in probes_c] == [True, True]
+    assert [wv["error"] is None for wv in outcome_c.wrong_versions] == [True, False]
+    assert outcome_c.spent_usd == pytest.approx(0.2 + 4.0 + 0.3 + 0.2 + 2.0)
+    review_lines_c = [line for line in cell_c.watched if line.startswith("REVIEW:")]
+    assert review_lines_c[-1] == (
+        "REVIEW: REVIEW's pool could not cover t.py::b — "
+        "the review was cut at its budget"
+    )
+
+
+def _three_wrong_version_criteria():
+    from saffron.intake import Criterion
+
+    return [
+        Criterion(claim="claim a", witness="t.py::a", wrong_versions=["a v1"]),
+        Criterion(claim="claim b", witness="t.py::b", wrong_versions=["b v1"]),
+        Criterion(claim="claim c", witness="t.py::c", wrong_versions=["c v1"]),
+    ]
+
+
+def test_a_review_that_fits_its_pool_runs_every_session_capped_at_what_is_left(
+    monkeypatch, tmp_path
+):
+    """A REVIEW within REVIEW's pool runs every lens, criterion probe and
+    wrong-version session and reaches `READY_FOR_REVIEW`, each capped at
+    what the pool holds left. The pool opens at the task's remainder,
+    floored once per declared lens. A remainder above the floor opens
+    there, and one below it opens at the floor instead."""
+    bad = "I could not find anything wrong."
+
+    # Cell A: the pool opens at $20. The second lens, probe and
+    # version session each re-prompt. The first of each fails too.
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, ledger = _drive(
+        monkeypatch,
+        tmp_path / "fits",
+        cell=cell,
+        turns=[
+            _turn(_block(_PLAN)),
+            _turn(),
+            _turn(_EMPTY, cost=1.0),
+            _turn(bad, cost=1.0),
+            _turn(_EMPTY, cost=0.5),
+            _turn(_EMPTY, cost=1.0),
+            _turn(_EMPTY, cost=1.0),
+            implement.AgentFailed("probe a crashed", _turn("", cost=0.5)),
+            _turn(bad, cost=1.0),
+            _turn(_probe_answer(None, "reason b"), cost=0.5),
+            _turn(_probe_answer(None, "reason c"), cost=1.0),
+            implement.AgentFailed("wrong version a crashed", _turn("", cost=0.5)),
+            _turn(bad, cost=1.0),
+            _turn(_wrong_version_answer((None, "fine")), cost=0.5),
+            _turn(_wrong_version_answer((None, "fine")), cost=1.0),
+        ],
+        spec=_spec(budget_usd=20.2, acceptance=_three_wrong_version_criteria()),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert [r.error is None for r in outcome.reviews] == [True, True, True, True]
+    # The first lens opens at the $20.00 remainder, not the $20.20 budget.
+    # Probe b's and wrong-version b's caps each reflect the prior failure.
+    assert cell.turn_options[2]["max_budget_usd"] == pytest.approx(20.0)
+    assert cell.turn_options[8]["max_budget_usd"] == pytest.approx(15.0)
+    assert cell.turn_options[12]["max_budget_usd"] == pytest.approx(12.0)
+    probes = json.loads((outcome.task_dir / "criterion-probes.json").read_text())
+    assert [p["error"] is None for p in probes] == [False, True, True]
+    assert [wv["error"] is None for wv in outcome.wrong_versions] == [
+        False,
+        True,
+        True,
+    ]
+    assert outcome.spent_usd == pytest.approx(
+        0.2 + (1.0 + 1.5 + 1.0 + 1.0) + (0.5 + 1.5 + 1.0) + (0.5 + 1.5 + 1.0)
+    )
+
+    # Cell B: the $1.00 remainder is under the $8.00 floor, so the pool
+    # opens at the floor: ten sessions of $0.50 each, well inside it.
+    cell_b = _stub_the_runtime(monkeypatch)
+    turns_b = (
+        [_turn(_block(_PLAN)), _turn()]
+        + [_turn(_EMPTY, cost=0.5) for _ in range(4)]
+        + [_turn(_probe_answer(None, f"reason {letter}"), cost=0.5) for letter in "abc"]
+        + [_turn(_wrong_version_answer((None, "fine")), cost=0.5) for _ in "abc"]
+    )
+    outcome_b, ledger_b = _drive(
+        monkeypatch,
+        tmp_path / "floor",
+        cell=cell_b,
+        turns=turns_b,
+        spec=_spec(budget_usd=1.2, acceptance=_three_wrong_version_criteria()),
+    )
+    assert outcome_b.state == "READY_FOR_REVIEW"
+    assert [o["max_budget_usd"] for o in cell_b.turn_options[2:]] == [
+        pytest.approx(8.0 - 0.5 * i) for i in range(10)
+    ]
+
+    # Cell C: nine sessions at $0.50, with `conventions` dropped from
+    # `review.LENSES`, read live so the pool opens at $6.00 instead.
+    monkeypatch.setattr(
+        review,
+        "LENSES",
+        {k: v for k, v in review.LENSES.items() if k != "conventions"},
+    )
+    cell_c = _stub_the_runtime(monkeypatch)
+    turns_c = (
+        [_turn(_block(_PLAN)), _turn()]
+        + [_turn(_EMPTY, cost=0.5) for _ in range(3)]
+        + [_turn(_probe_answer(None, f"reason {letter}"), cost=0.5) for letter in "abc"]
+        + [_turn(_wrong_version_answer((None, "fine")), cost=0.5) for _ in "abc"]
+    )
+    outcome_c, ledger_c = _drive(
+        monkeypatch,
+        tmp_path / "floor-three-lenses",
+        cell=cell_c,
+        turns=turns_c,
+        spec=_spec(budget_usd=1.2, acceptance=_three_wrong_version_criteria()),
+    )
+    assert outcome_c.state == "READY_FOR_REVIEW"
+    assert [o["max_budget_usd"] for o in cell_c.turn_options[2:]] == [
+        pytest.approx(6.0 - 0.5 * i) for i in range(9)
+    ]
+
+
 # --- backlog item 117: the adequacy lens's own probe, run for real ---
 
 
@@ -8014,13 +8259,17 @@ def test_a_crashed_plan_turn_keeps_its_own_exception_and_its_cost():
 
 
 def test_a_critic_session_is_capped_at_what_is_left_not_at_the_whole_budget():
-    """REVIEW is deliberately not gated on the ceiling, so the cap is the only
+    """REVIEW is not gated on the ceiling, so REVIEW's pool is the only
     thing standing between a $12 task and a $40 bill."""
-    assert session.critic_budget(12.0, 4.0) == 8.0
-    # The floor is what keeps "not gated" true: a lens with no room is a task
-    # that reaches the operator unreviewed.
-    assert session.critic_budget(12.0, 12.0) == session.REVIEW_FLOOR_USD
-    assert session.critic_budget(12.0, 99.0) == session.REVIEW_FLOOR_USD
+    pool = review.ReviewPool(remaining=8.0, floor=session.REVIEW_FLOOR_USD)
+    assert pool.cover("a") == 8.0
+    pool.spend(4.0)
+    assert pool.cover("b") == 4.0
+    pool.spend(2.5)
+    # The floor is what keeps "not gated" true: a session with no room
+    # left is a task that reaches the operator unreviewed.
+    assert pool.cover("c") is None
+    assert pool.cut == "c"
 
 
 def test_a_volume_create_that_fails_reports_only_that_volume(monkeypatch, tmp_path):
@@ -12412,12 +12661,14 @@ def test_each_claim_is_asked_of_its_own_session_that_is_never_shown_a_witness(
         f"removed:container:{_CRITIC_CONTAINER}",
     ]
 
-    # The same read-only tools and the same per-session ceiling a lens holds.
+    # Not the same cap: REVIEW's pool drains across the four lenses
+    # before either probe opens, leaving $11.40 then $11.35.
     lens_options = cell.turn_options[2]
-    for options in probe_options:
+    expected_probe_caps = [11.4, 11.35]
+    for options, expected_cap in zip(probe_options, expected_probe_caps, strict=True):
         assert options["tools"] == review.REVIEW_TOOLS
         assert options["max_turns"] == lens_options["max_turns"]
-        assert options["max_budget_usd"] == lens_options["max_budget_usd"]
+        assert options["max_budget_usd"] == pytest.approx(expected_cap)
 
     # Charged to the task beside the lenses' own cost.
     assert outcome.spent_usd == pytest.approx(0.1 * 6 + 0.05 + 0.07)
@@ -14128,7 +14379,11 @@ def test_criterion_probes_and_wrong_versions_share_one_gate_only_cell_and_the_sp
         wrong_options = cell.turn_options[7]
         assert wrong_options["tools"] == probe_options["tools"]
         assert wrong_options["max_turns"] == probe_options["max_turns"]
-        assert wrong_options["max_budget_usd"] == probe_options["max_budget_usd"]
+        # Not the same cap: REVIEW's pool took the criterion-probe session's
+        # own cost off before the wrong-version session's cap was read.
+        assert wrong_options["max_budget_usd"] == pytest.approx(
+            probe_options["max_budget_usd"] - probe_turn_cost
+        )
         assert cell.turn_containers[7] == _CRITIC_CONTAINER
 
         total_cost = sum(turn.cost_usd_est for turn in turns_list)

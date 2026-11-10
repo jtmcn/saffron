@@ -353,6 +353,44 @@ def run_lens(
     return _from_report(lens, findings, cost)
 
 
+@dataclass
+class ReviewPool:
+    """REVIEW's one pool, shared by every lens, criterion-probe and
+    wrong-version session in this REVIEW (`DESIGN.md` §4.3). `remaining` is
+    read as a session's own cap, then taken down by its reported cost once
+    the session ends. `cut` holds the first session's name the pool could
+    not cover, the one `review_state` names in its `REVIEW_INCOMPLETE` line.
+    """
+
+    remaining: float
+    floor: float
+    cut: str | None = None
+
+    def cover(self, name: str) -> float | None:
+        """What a session named `name` can spend, or `None` once the pool
+        holds less than its floor. Records the first name it could not
+        cover, and never overwrites it with a later one."""
+        if self.remaining < self.floor:
+            if self.cut is None:
+                self.cut = name
+            return None
+        return self.remaining
+
+    def spend(self, cost: float) -> None:
+        """Takes a session's own reported cost off what is left."""
+        self.remaining -= cost
+
+
+def _review_pool_cut(pool: ReviewPool, name: str) -> str:
+    """The error filed for a session REVIEW's pool could not cover. Named
+    once, so a lens, a criterion probe and a wrong-version session file
+    the same words."""
+    return (
+        f"REVIEW's pool held ${pool.remaining:.2f}, under the "
+        f"${pool.floor:.2f} floor — {name} never started"
+    )
+
+
 def run_review(
     container: str,
     *,
@@ -364,7 +402,7 @@ def run_review(
     claude_md: str | None,
     prompts_dir: Path,
     max_turns: int,
-    budget_usd: float,
+    pool: ReviewPool,
     # Passed, never defaulted — the same shape `plan_checkpoint` uses, and a
     # module-level default would bind `run_agent` at import time.
     agent: Callable[..., implement.AttemptResult],
@@ -374,27 +412,35 @@ def run_review(
     spec_id: str,
     emit: Callable[[Event], None] = lambda event: print(describe(event)),
 ) -> list[LensReview]:
-    """Every declared lens, in order, on this diff. The host drives the loop."""
+    """Every declared lens, in order, on this diff, each capped at what
+    REVIEW's pool has left. A lens the pool cannot cover does not start, and
+    is filed with an error naming the cut rather than skipped. The host
+    drives the loop."""
     reviews = []
     for lens in LENSES:
-        review = run_lens(
-            container,
-            lens=lens,
-            system_prompt=lens_prompt(
-                lens,
-                context_md=context_md,
-                claude_md=claude_md,
-                prompts_dir=prompts_dir,
-                spec_body=spec_body,
-                diff=diff,
-                gates=gates,
-            ),
-            max_turns=max_turns,
-            budget_usd=budget_usd,
-            agent=agent,
-            spec_id=spec_id,
-            emit=emit,
-        )
+        cap = pool.cover(lens)
+        if cap is None:
+            review = LensReview(lens, error=_review_pool_cut(pool, lens))
+        else:
+            review = run_lens(
+                container,
+                lens=lens,
+                system_prompt=lens_prompt(
+                    lens,
+                    context_md=context_md,
+                    claude_md=claude_md,
+                    prompts_dir=prompts_dir,
+                    spec_body=spec_body,
+                    diff=diff,
+                    gates=gates,
+                ),
+                max_turns=max_turns,
+                budget_usd=cap,
+                agent=agent,
+                spec_id=spec_id,
+                emit=emit,
+            )
+            pool.spend(review.cost_usd)
         review.findings = anchor(review.findings, diff, read_head=read_head)
         emit(
             PhaseStart(
@@ -486,6 +532,19 @@ def _parse_criterion_probe_report(text: str) -> _CriterionProbeReport:
     return _CriterionProbeReport.model_validate(json.loads(parse_output_block(text)))
 
 
+def _unresolved_criterion_probe(criterion: Criterion, cost: float, error: str) -> dict:
+    """The entry filed for a criterion whose session bought no usable
+    answer: a failed turn, a schema the model never gave, or a session
+    REVIEW's pool could not cover."""
+    return {
+        "witness": criterion.witness,
+        "claim": criterion.claim,
+        "cost_usd": cost,
+        "error": error,
+        "probes": [],
+    }
+
+
 def run_criterion_probes(
     container: str,
     *,
@@ -495,7 +554,7 @@ def run_criterion_probes(
     claude_md: str | None,
     prompts_dir: Path,
     max_turns: int,
-    budget_usd: float,
+    pool: ReviewPool,
     agent: Callable[..., implement.AttemptResult],
     spec_id: str,
     emit: Callable[[Event], None] = lambda event: print(describe(event)),
@@ -503,13 +562,23 @@ def run_criterion_probes(
     """One fresh session per criterion, in the spec's own declared order
     (backlog items b-2750d5, b-78a590). Every entry is asked about, a
     `preserves` one included, and a spec declaring none buys no session at
-    all. Each session lists the claim's own sentences and names one edit
-    per sentence, so a bad shape is re-prompted once through
+    all. Each session is capped at what REVIEW's pool has left. One the
+    pool cannot cover does not start, and is filed the same way a failed
+    turn is. Each session lists the claim's own sentences and names one
+    edit per sentence, so a bad shape is re-prompted once through
     `_parse_or_reprompt`: the session covers a whole claim, not one edit,
     so the re-prompt is worth paying for.
     """
     entries = []
     for criterion in acceptance:
+        cap = pool.cover(criterion.witness)
+        if cap is None:
+            entries.append(
+                _unresolved_criterion_probe(
+                    criterion, 0.0, _review_pool_cut(pool, criterion.witness)
+                )
+            )
+            continue
         system_prompt = criterion_probe_prompt(
             claim=criterion.claim,
             diff=diff,
@@ -520,7 +589,7 @@ def run_criterion_probes(
         options = implement.agent_options(
             system_prompt=system_prompt,
             max_turns=max_turns,
-            budget_usd=budget_usd,
+            budget_usd=cap,
             tools=REVIEW_TOOLS,
         )
         try:
@@ -529,15 +598,8 @@ def run_criterion_probes(
             )
         except implement.AgentFailed as failed:
             cost = failed.attempt.cost_usd_est if failed.attempt else 0.0
-            entries.append(
-                {
-                    "witness": criterion.witness,
-                    "claim": criterion.claim,
-                    "cost_usd": cost,
-                    "error": str(failed),
-                    "probes": [],
-                }
-            )
+            pool.spend(cost)
+            entries.append(_unresolved_criterion_probe(criterion, cost, str(failed)))
             continue
         report, error, cost = _parse_or_reprompt(
             container,
@@ -545,20 +607,13 @@ def run_criterion_probes(
             _parse_criterion_probe_report,
             system_prompt=system_prompt,
             max_turns=max_turns,
-            budget_usd=budget_usd,
+            budget_usd=cap,
             agent=agent,
             emit=emit,
         )
+        pool.spend(cost)
         if error is not None:
-            entries.append(
-                {
-                    "witness": criterion.witness,
-                    "claim": criterion.claim,
-                    "cost_usd": cost,
-                    "error": error,
-                    "probes": [],
-                }
-            )
+            entries.append(_unresolved_criterion_probe(criterion, cost, error))
             continue
         assert report is not None  # `error is None` only when `parse` returned
         entries.append(
@@ -703,24 +758,32 @@ def run_wrong_versions(
     claude_md: str | None,
     prompts_dir: Path,
     max_turns: int,
-    budget_usd: float,
+    pool: ReviewPool,
     agent: Callable[..., implement.AttemptResult],
     spec_id: str,
     emit: Callable[[Event], None] = lambda event: print(describe(event)),
 ) -> list[dict]:
-    """One fresh session per criterion that declares wrong versions, in the
-    spec's own declared order (backlog item b-7e69d0). A criterion declaring
-    none buys no session, exactly like `run_criterion_probes`.
+    """One fresh session per criterion that declares wrong versions, in
+    the spec's own declared order (backlog item b-7e69d0). A criterion
+    declaring none buys no session, exactly like `run_criterion_probes`.
+    Each session is capped at what REVIEW's pool has left, and one the
+    pool cannot cover does not start.
 
     An answer that is not the schema gets one re-prompt, through
     `_parse_or_reprompt`: refused when the ceiling left is less than the
-    failed turn spent, or the turn carries no session id. The retry resumes
-    that same session with the error then `EXTRACTION_PROMPT`, on the budget
-    the first turn left. An `AgentFailed` turn is never re-prompted.
-    """
+    failed turn spent, or the turn carries no session id. The retry
+    resumes that session with the error, then `EXTRACTION_PROMPT`."""
     entries = []
     for criterion in acceptance:
         if not criterion.wrong_versions:
+            continue
+        cap = pool.cover(criterion.witness)
+        if cap is None:
+            entries.append(
+                _unresolved_wrong_versions(
+                    criterion, 0.0, _review_pool_cut(pool, criterion.witness)
+                )
+            )
             continue
         system_prompt = wrong_version_prompt(
             claim=criterion.claim,
@@ -733,7 +796,7 @@ def run_wrong_versions(
         options = implement.agent_options(
             system_prompt=system_prompt,
             max_turns=max_turns,
-            budget_usd=budget_usd,
+            budget_usd=cap,
             tools=REVIEW_TOOLS,
         )
         declared = len(criterion.wrong_versions)
@@ -743,6 +806,7 @@ def run_wrong_versions(
             )
         except implement.AgentFailed as failed:
             cost = failed.attempt.cost_usd_est if failed.attempt else 0.0
+            pool.spend(cost)
             entries.append(_unresolved_wrong_versions(criterion, cost, str(failed)))
             continue
         report, error, cost = _parse_or_reprompt(
@@ -751,10 +815,11 @@ def run_wrong_versions(
             functools.partial(_parse_wrong_version_report, declared=declared),
             system_prompt=system_prompt,
             max_turns=max_turns,
-            budget_usd=budget_usd,
+            budget_usd=cap,
             agent=agent,
             emit=emit,
         )
+        pool.spend(cost)
         if error is not None:
             entries.append(_unresolved_wrong_versions(criterion, cost, error))
             continue
@@ -973,7 +1038,9 @@ def anchored_concerns(reviews: Sequence[LensReview]) -> int:
     )
 
 
-def review_state(reviews: Sequence[LensReview]) -> tuple[str, str]:
+def review_state(
+    reviews: Sequence[LensReview], cut: str | None = None
+) -> tuple[str, str]:
     """The task's state after REVIEW, and the one line that says why.
 
     Any single anchored blocker routes to REBUT (§5.5), so `REBUTTING` here is
@@ -981,7 +1048,14 @@ def review_state(reviews: Sequence[LensReview]) -> tuple[str, str]:
     not: the host already ran its own edit. A lens that errored *is* a stop,
     at `REVIEW_INCOMPLETE`. An unrun lens must not read as a clean review,
     and there is no finding set to rebut against.
-    """
+
+    `cut` is REVIEW's own `ReviewPool.cut`, checked first and worded apart
+    from the errored-lens line below."""
+    if cut is not None:
+        return (
+            "REVIEW_INCOMPLETE",
+            f"REVIEW's pool could not cover {cut} — the review was cut at its budget",
+        )
     if errored := [r.lens for r in reviews if r.error]:
         return (
             "REVIEW_INCOMPLETE",

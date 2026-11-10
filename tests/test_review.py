@@ -79,7 +79,7 @@ def _review(*texts, read_head=lambda _p: None, record=None, claude_md=None):
         claude_md=claude_md,
         prompts_dir=PROMPTS,
         max_turns=20,
-        budget_usd=2.0,
+        pool=review.ReviewPool(remaining=2.0, floor=0.0),
         agent=_agent(*texts, record=record),
         spec_id="SY-1",
         emit=lambda _e: None,
@@ -1294,7 +1294,7 @@ def test_a_session_that_answers_nothing_usable_is_recorded_and_the_next_is_still
         claude_md=None,
         prompts_dir=PROMPTS,
         max_turns=20,
-        budget_usd=2.0,
+        pool=review.ReviewPool(remaining=2.0, floor=0.0),
         agent=agent,
         spec_id="SY-1",
         emit=lambda _e: None,
@@ -1376,7 +1376,7 @@ def test_a_criterion_probe_session_names_one_edit_per_sentence_of_the_claim_it_i
         claude_md=None,
         prompts_dir=PROMPTS,
         max_turns=20,
-        budget_usd=2.0,
+        pool=review.ReviewPool(remaining=2.0, floor=0.0),
         agent=agent,
         spec_id="SY-1",
         emit=lambda _e: None,
@@ -1520,7 +1520,9 @@ def test_a_criterion_probe_answer_that_is_not_the_schema_is_reprompted_once_in_i
         claude_md=None,
         prompts_dir=PROMPTS,
         max_turns=20,
-        budget_usd=2.0,
+        # REVIEW's pool, shared across the eight criteria: each of the
+        # first six spends 0.5, draining it before the next one's cap is read.
+        pool=review.ReviewPool(remaining=10.0, floor=0.0),
         agent=agent,
         spec_id="SY-1",
         emit=lambda _e: None,
@@ -1529,8 +1531,11 @@ def test_a_criterion_probe_answer_that_is_not_the_schema_is_reprompted_once_in_i
     assert len(record) == 14  # six re-prompted pairs, then two single turns
     first_calls, second_calls = record[0:12:2], record[1:12:2]
     assert all(call["kwargs"].get("resume") is None for call in first_calls)
-    for letter, first_call, second_call in zip(
-        letters[:6], first_calls, second_calls, strict=True
+    # Each criterion's own cap is the pool's remaining when its session
+    # starts. The reprompt's own cap is that figure less the first turn's 0.3.
+    expected_reprompt_caps = [9.7, 9.2, 8.7, 8.2, 7.7, 7.2]
+    for letter, first_call, second_call, expected_cap in zip(
+        letters[:6], first_calls, second_calls, expected_reprompt_caps, strict=True
     ):
         assert second_call["kwargs"]["resume"] == f"s-{letter}"
         assert (
@@ -1538,7 +1543,7 @@ def test_a_criterion_probe_answer_that_is_not_the_schema_is_reprompted_once_in_i
             == first_call["options"]["system_prompt"]
         )
         assert second_call["options"]["tools"] == review.REVIEW_TOOLS
-        assert second_call["options"]["max_budget_usd"] == pytest.approx(1.7)
+        assert second_call["options"]["max_budget_usd"] == pytest.approx(expected_cap)
         assert second_call["kwargs"]["last_cost_usd"] == pytest.approx(0.3)
 
     for fragment, call in zip(
@@ -1597,7 +1602,7 @@ def test_a_criterion_probe_answer_with_a_key_the_schema_does_not_name_is_repromp
             claude_md=None,
             prompts_dir=PROMPTS,
             max_turns=20,
-            budget_usd=2.0,
+            pool=review.ReviewPool(remaining=2.0, floor=0.0),
             agent=_probe_agent(
                 _turn(first_answer, cost=0.3, session_id="s"),
                 _turn(good, cost=0.2, session_id="s"),
@@ -1650,7 +1655,7 @@ def test_a_criterion_whose_session_answers_nothing_usable_is_an_error_with_no_pr
         claude_md=None,
         prompts_dir=PROMPTS,
         max_turns=20,
-        budget_usd=2.0,
+        pool=review.ReviewPool(remaining=2.0, floor=0.0),
         agent=agent,
         spec_id="SY-1",
         emit=lambda _e: None,
@@ -1712,7 +1717,7 @@ def test_a_criterion_whose_session_answers_nothing_usable_is_an_error_with_no_pr
         claude_md=None,
         prompts_dir=PROMPTS,
         max_turns=20,
-        budget_usd=1.0,
+        pool=review.ReviewPool(remaining=1.0, floor=0.0),
         agent=agent2,
         spec_id="SY-1",
         emit=lambda _e: None,
@@ -1866,7 +1871,7 @@ def test_each_criterion_with_wrong_versions_gets_one_session_that_turns_each_int
         claude_md=None,
         prompts_dir=PROMPTS,
         max_turns=20,
-        budget_usd=2.0,
+        pool=review.ReviewPool(remaining=2.0, floor=0.0),
         agent=agent,
         spec_id="SY-1",
         emit=lambda _e: None,
@@ -1899,7 +1904,8 @@ def test_each_criterion_with_wrong_versions_gets_one_session_that_turns_each_int
     assert record[0]["options"]["max_budget_usd"] == 2.0
     assert record[1]["options"]["tools"] == review.REVIEW_TOOLS
     assert record[1]["options"]["max_turns"] == 20
-    assert record[1]["options"]["max_budget_usd"] == 2.0
+    # c's own cap is the pool's remainder once a's own $0.35 came off.
+    assert record[1]["options"]["max_budget_usd"] == pytest.approx(1.65)
 
     assert entries == [
         {
@@ -1957,7 +1963,7 @@ def test_each_criterion_with_wrong_versions_gets_one_session_that_turns_each_int
         claude_md=None,
         prompts_dir=PROMPTS,
         max_turns=20,
-        budget_usd=2.0,
+        pool=review.ReviewPool(remaining=2.0, floor=0.0),
         agent=probe_agent,
         spec_id="SY-1",
         emit=lambda _e: None,
@@ -2044,7 +2050,7 @@ def test_a_wrong_version_session_that_answers_nothing_usable_keeps_every_version
         claude_md=None,
         prompts_dir=PROMPTS,
         max_turns=20,
-        budget_usd=2.0,
+        pool=review.ReviewPool(remaining=2.0, floor=0.0),
         agent=agent,
         spec_id="SY-1",
         emit=lambda _e: None,
@@ -2166,7 +2172,9 @@ def test_a_wrong_version_answer_that_is_not_the_schema_is_reprompted_once_in_its
         claude_md=None,
         prompts_dir=PROMPTS,
         max_turns=20,
-        budget_usd=2.0,
+        # REVIEW's pool, shared across all four criteria: each spends 0.5
+        # (0.3 then a 0.2 reprompt) before the next one's own cap is read.
+        pool=review.ReviewPool(remaining=10.0, floor=0.0),
         agent=agent,
         spec_id="SY-1",
         emit=lambda _e: None,
@@ -2175,8 +2183,11 @@ def test_a_wrong_version_answer_that_is_not_the_schema_is_reprompted_once_in_its
     assert len(record) == 8
     first_calls, second_calls = record[0::2], record[1::2]
     assert all(call["kwargs"].get("resume") is None for call in first_calls)
-    for letter, first_call, second_call in zip(
-        "abcd", first_calls, second_calls, strict=True
+    # Each criterion's own cap is the pool's remaining when its session
+    # starts. The reprompt's own cap is that figure less the first turn's 0.3.
+    expected_reprompt_caps = [9.7, 9.2, 8.7, 8.2]
+    for letter, first_call, second_call, expected_cap in zip(
+        "abcd", first_calls, second_calls, expected_reprompt_caps, strict=True
     ):
         assert second_call["kwargs"]["resume"] == f"s-{letter}"
         assert (
@@ -2184,7 +2195,7 @@ def test_a_wrong_version_answer_that_is_not_the_schema_is_reprompted_once_in_its
             == (first_call["options"]["system_prompt"])
         )
         assert second_call["options"]["tools"] == review.REVIEW_TOOLS
-        assert second_call["options"]["max_budget_usd"] == pytest.approx(1.7)
+        assert second_call["options"]["max_budget_usd"] == pytest.approx(expected_cap)
         assert second_call["kwargs"]["last_cost_usd"] == pytest.approx(0.3)
 
     for fragment, call in zip(
@@ -2242,11 +2253,13 @@ def test_a_wrong_version_reprompt_fires_once_and_only_where_a_lens_would():
     bad_quote = 'Here it is.\n<output>\n{"versions": [{"reason": "a "q" b", "edit": null}]}\n</output>'
 
     turns = [
-        # a: left exactly what it spent, so the re-prompt fires, and fails again.
-        _wv_turn("s-a", bad, 1.0),
+        # a: the pool's first session. Its cap equals the pool's own $20.
+        # Spending exactly half fires the re-prompt, which fails again.
+        _wv_turn("s-a", bad, 10.0),
         _wv_turn("s-a", bad, 0.2),
-        # b: left less than it spent, so no re-prompt.
-        _wv_turn("s-b", bad, 1.5),
+        # b: the pool held $9.80 here. Spending more than half of it
+        # leaves less than it spent, so no re-prompt fires.
+        _wv_turn("s-b", bad, 5.0),
         # c: no session id, so no re-prompt.
         _wv_turn(None, bad, 0.3),
         # d: AgentFailed outright, so no re-prompt can fire.
@@ -2274,7 +2287,9 @@ def test_a_wrong_version_reprompt_fires_once_and_only_where_a_lens_would():
         claude_md=None,
         prompts_dir=PROMPTS,
         max_turns=20,
-        budget_usd=2.0,
+        # Large enough that only a's and b's own costs decide their fire.
+        # Every criterion after them keeps the headroom it needs.
+        pool=review.ReviewPool(remaining=20.0, floor=0.0),
         agent=agent,
         spec_id="SY-1",
         emit=lambda _e: None,
@@ -2298,8 +2313,8 @@ def test_a_wrong_version_reprompt_fires_once_and_only_where_a_lens_would():
     ]
     costs = [e["cost_usd"] for e in entries]
     assert costs == [
-        pytest.approx(1.2),
-        pytest.approx(1.5),
+        pytest.approx(10.2),
+        pytest.approx(5.0),
         pytest.approx(0.3),
         pytest.approx(0.4),
         pytest.approx(0.1),
@@ -2371,7 +2386,7 @@ def _run_wrong_version_entries(agent, n, emit=lambda _e: None):
         claude_md=None,
         prompts_dir=PROMPTS,
         max_turns=20,
-        budget_usd=2.0,
+        pool=review.ReviewPool(remaining=3.0, floor=0.0),
         agent=agent,
         spec_id="SY-1",
         emit=emit,
@@ -2516,7 +2531,7 @@ def test_both_callers_build_one_reprompt_turn(monkeypatch):
         claude_md=None,
         prompts_dir=PROMPTS,
         max_turns=7,
-        budget_usd=2.0,
+        pool=review.ReviewPool(remaining=2.0, floor=0.0),
         agent=wv_agent,
         spec_id="SY-1",
         emit=wv_emit_fn,
