@@ -35,7 +35,7 @@ forbidden:
   - saffron/cell/**
   - tests/test_cli.py
   - tests/test_scheduler.py
-budget_usd: 31
+budget_usd: 30
 max_attempts: 3
 max_turns: 150
 risk: standard
