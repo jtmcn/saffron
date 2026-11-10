@@ -205,6 +205,11 @@ so printing them under each gate too would print each twice.
 **The `Attempt` lines that count nothing.** An IMPLEMENT line, and an aborted
 or drifted suite's line, print as they do at base.
 
+**Redaction.** `EventLog.append` redacts only `Agent` events (§4.7). The new
+`failures` text is a gate's message, as `PhaseStart.detail` and
+`Terminal.detail` carry cell text unredacted today. Redacting every event
+is a separate question.
+
 **The cell-watch hook.** `.claude/skills/cell-watch/hooks/progress.ts` reads
 `new_failures` from the log. It ignores a key it does not know, and
 `.claude/**` is forbidden.
@@ -263,8 +268,8 @@ does. Construct no new field at module scope: the reverted test would be a
 collection error, which `revert` reads as `skip`.
 
 **Criterion 1's suites.** Declare an advisory gate with
-`policy="gates:\n  dead: { blocking: false }\n"` and `gates=("dead",)`, as
-`test_a_declared_gate_with_blocking_false_does_not_repair` does
+`policy="gates:\n  dead: { blocking: false }\n"` and `gates=("dead",)`, the
+way `test_a_declared_gate_with_blocking_false_does_not_repair` declares `lint`
 (`tests/test_session.py:4094-4121`). Give it a failure at head. `size` is
 advisory at `standard` too. Keep each gate's `tool` the same on every suite, or
 the suites drift. Give the two-failure gate files whose sorted order differs
@@ -274,7 +279,7 @@ from their order in the result. Give one failure a line number, so `render`'s
 **Criterion 2's cells.** `test_an_aborted_or_drifted_suite_counts_nothing_on_any_gate`
 (`tests/test_session.py:7985`) and
 `test_an_errored_or_drifted_rebuttal_re_run_logs_each_gate_with_no_count`
-(`:7834`) build the four suite shapes. Put a failing gate in each aborted or
+(`:7832`) build the four suite shapes. Put a failing gate in each aborted or
 drifted suite. In a loop cell, let attempt 1 count a red gate and attempt 2
 abort or drift, with one repair turn between.
 
