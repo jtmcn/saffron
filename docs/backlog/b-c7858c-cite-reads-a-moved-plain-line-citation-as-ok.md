@@ -1,11 +1,12 @@
 ---
 id: b-c7858c
 title: '`driver.py cite` reads a plain line citation as ok after the code it named moved'
-status: open
+status: done
 tier: 2
 filed: 2026-11-08
+closed: 2026-11-10
 specs: []
-prs: []
+prs: [1123]
 commits: []
 cites: []
 related: [b-d31930, b-2da959]
@@ -31,3 +32,5 @@ shifts a cited line in a parent branch and asserts `cite` names it.
 
 - 2026-11-08: filed from the spec loop's run 55.
 - 2026-11-09: recurred in the spec loop's run 56. Batch 73 refused `SA-0343` before a cell. `SA-0341` added one line to `saffron/cell/session.py`, so the cited `3420-3421` moved to `3421-3422`. The batch's own rewrite guessed `def _phase_start` at 2162 as the construct and refused to move it. The refusal line names a count of citations, not which one.
+- 2026-11-10: done by hand in #1123. `cite` and `check` map each citation
+  through a parent branch's diff and name each one it moved or rewrote.

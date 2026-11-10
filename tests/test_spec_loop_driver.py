@@ -2320,6 +2320,40 @@ def test_cite_blocks_a_spec_naming_a_commit_off_the_base(
     ]
 
 
+def test_cite_names_a_citation_a_parent_branch_moved_or_rewrote(
+    empty_repo, monkeypatch, capsys
+):
+    """b-c7858c: a parent that shifts a cited line leaves the line in place,
+    so a plain resolve passes it. `cite` at the parent's branch maps each
+    citation through the parent's diff and names the moved and the rewritten."""
+    monkeypatch.setattr(driver, "REPO", empty_repo)
+    monkeypatch.setattr(driver, "_TRUNK", "main")
+    body = "".join(f"line {n}\n" for n in range(1, 9))
+    _commit(empty_repo, "f.py", body)
+    _git(empty_repo, "checkout", "-q", "-b", "parent")
+    lines = body.splitlines(keepends=True)
+    lines.insert(1, "added\n")  # shifts line 2 onward by one
+    lines[7] = "line 7 rewritten\n"  # the trunk's line 7, now at 8
+    _commit(empty_repo, "f.py", "".join(lines))
+    _git(empty_repo, "checkout", "-q", "main")
+    spec = empty_repo / "spec.md"
+    spec.write_text(
+        "Kept `f.py:1`. Moved `f.py:3-4`. Rewritten `f.py:7`. Past it `f.py:8`.\n\n"
+        "Ending on the rewrite `f.py:5-7`.\n"
+    )
+
+    assert driver.cmd_cite(SimpleNamespace(spec_path=str(spec), base="parent")) == 1
+    out = capsys.readouterr().out
+    assert "f.py:3-4: parent moved it to f.py:4-5" in out
+    assert "f.py:7: parent rewrote the cited text" in out
+    assert "f.py:5-7: parent rewrote the cited text" in out
+    assert "f.py:8: parent moved it to f.py:9" in out
+    assert "f.py:1:" not in out
+
+    # At the trunk itself nothing is mapped.
+    assert driver.cmd_cite(SimpleNamespace(spec_path=str(spec), base="main")) == 0
+
+
 def test_check_judges_the_rows_history_prints_and_no_others(monkeypatch, capsys):
     # A far-shaped, an off-type, and a past-the-limit row each carry a peak
     # above the ceiling — only the rows `history` prints may vote (b-281f0a).
