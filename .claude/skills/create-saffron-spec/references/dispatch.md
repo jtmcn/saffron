@@ -12,7 +12,7 @@ item: <backlog id>
 
 base: <commit>, the head of branch <branch> in the checkout at <path>.
 The working tree is a clean snapshot of it. Write the spec there.
-Do not commit. Stage what you write, so prek reads it.
+Do not commit, and stage nothing.
 
 <What the base carries that the writer would not assume: unmerged specs it
 may overlap, a rule added to docs/agents/issue-tracker.md this week, a
@@ -24,6 +24,12 @@ decisions (settled, do not re-argue):
 - <Which queued spec is the parent, and that it verifies this rather than
   assuming it.>
 - <Ceilings to match, when a sibling of the same shape has not run.>
+
+<Protected edits the caller lands after your prototype, one line each with
+its file and section. Describe each as already amended.>
+
+<For a child spec: the path of the parent's prototype diff. Draft on top of
+it.>
 
 Report back with: the spec's path and id, its touches, depends_on,
 ceilings and estimated size, which of the six checks it settled with
@@ -38,7 +44,9 @@ saves most of that for each child.
 
 Draft coupled specs in sequence. Specs are coupled when one reads a name, a
 function or a refusal the other adds. A child waits for its parent's
-prototype, and its brief carries that diff. Independent specs run in parallel. Parallel coupled drafts cost three caller rounds on 2026-10-03. On
+prototype, and its brief names that diff's path. Dispatch the child after the
+parent's background `make check` ends, since the child runs a whole suite on
+that prototype. Independent specs run in parallel. Parallel coupled drafts cost three caller rounds on 2026-10-03. On
 2026-11-07, two children assumed names their parents had not yet chosen.
 
 Hand it the pre-flight commands by name. A writer that knows `driver.py cite`
@@ -90,7 +98,6 @@ spec: <path>
 
 base: <commit>, the head of branch <branch> in the checkout at <path>,
 the base the reviewer read at. Revise in place. Do not commit.
-Stage what you change, so prek reads it.
 
 <Apply all, unless reading the line at base shows a finding is wrong.
 Then say so with the evidence and do not apply it.>

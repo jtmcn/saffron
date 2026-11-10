@@ -73,9 +73,10 @@ dispatched. Before the commit, check each new file with
 after the commit it reports zero whatever the file holds.
 
 The writer ran the tree checks in `.claude/agents/spec-writer.md`, not the
-suite. Commit, then start `make check` in the background and dispatch the
-review in the same turn. The reviewer reads the commit and never the check.
-Fix a failure in the next commit. Across 32 suite results from twelve
+suite. Commit only the spec and its bookkeeping, never the writer's
+prototype. Then start `make check` in the background and run step 6 beside
+it. Step 7's dispatch does not wait on the check, because the reviewer reads
+the commit and never the check. Fix a failure in the next commit. Across 32 suite results from twelve
 writers, the failed hooks were `prose` five times and `ty` once. Run one full
 suite at a time: two started together failed two timing tests.
 Redirect the output to a file and echo `$?`, never pipe it into `tail`.
@@ -126,7 +127,10 @@ read for finds more than one told nothing.
 Two rounds is the working stop rule. A third round means the spec's subject is
 unsettled, which is a question for the operator rather than another review.
 Apply the second review's findings yourself, each verified at the base. No
-chain from 2026-11-02 to 2026-11-07 ran a third review.
+chain from 2026-11-02 to 2026-11-07 ran a third review. Then re-run the
+writer's tree checks, step 3's size estimate and pre-flight check 2. A
+second-review blocker that needs a redesign goes back to a writer, or to the
+operator, rather than into a hand edit.
 
 Every finding is verified at the base before it is applied. A review's premise
 that does not hold is answered with evidence, not applied. Roughly one finding

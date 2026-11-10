@@ -108,12 +108,13 @@ And optionally:
    Beside each member, name the witness that drives it. Give an undriven member
    a witness, or narrow the claim and say in the notes what is left.
    Some claims have a negative clause, such as "no fetch" or "no row". Each
-   needs a witness that first sees the positive case through one instrument. A spy that only asserts an absence passes when it is blind.
-   Five of six blockers on 2026-11-04 were this shape (b-c12d39).
+   needs a witness that first sees the positive case through one instrument.
+   A spy that only asserts an absence passes when it is blind. Five of six
+   blockers on 2026-11-04 were this shape (b-c12d39).
    **Done when** every member of every set names its witness, every negative
-   claim names its positive case, and the report carries the table. List each criterion's wrong versions under its
-   `wrong_versions:` field, not as "These fail it" prose in the notes. The
-   host then runs every one of them.
+   claim names its positive case, and the report carries the table. List each
+   criterion's wrong versions under its `wrong_versions:` field, not as "These
+   fail it" prose in the notes. The host then runs every one of them.
 7. **Review your draft** as the spec-reviewer would, on all six checks. Fix
    everything it would call a blocker or a concern. Re-run step 1's estimate
    against the `size:` line of every row step 4 printed, the rows that
@@ -127,14 +128,25 @@ Run no `make check` and no bare `pytest`. A full suite costs 3 to 10 minutes,
 and writers spent about 40% of their active time waiting on one (b-98a3be).
 The caller runs `make check` once, after its commit, beside the review.
 
-- `uv run pytest -q tests/test_queued_specs.py tests/records tests/ontology tests/test_scheduler.py`
-  reads the live specs and backlog in about 20 seconds.
-- `git add` every file you changed or added, then `prek run --files <path> ...`
-  over them. Measured: prek passes an untracked file it never read.
+- This command reads the live specs and backlog in about 20 seconds:
+
+  ```
+  uv run pytest -q tests/test_queued_specs.py tests/records tests/ontology tests/test_scheduler.py tests/test_citations.py::test_every_section_citation_resolves tests/test_dead_gate.py::test_the_gate_reads_the_same_entries_intake_does
+  ```
+
 - `python3 hooks/prose_limit.py --file <path>` for each new or edited file.
+  It reads the working tree. The `prose-limit` hook in prek reads only the
+  index, so it passes an unstaged file it never read (measured).
+- `uv run ruff check <path>` and `uv run ruff format --check <path>` for each
+  Python file the spec's commit edits, such as the queue smoke test.
 - On a prototype, run each wrong version against its witness's test file
   alone. Run the whole suite on a prototype only when it sits on a parent's
-  diff. That full suite found `SA-0336`'s broken regate test.
+  diff. That full suite found `SA-0336`'s broken regate test. When the
+  caller's `make check` overlaps it, read a timing failure in
+  `test_runtime.py` or `test_view_server.py` as contention first.
+- The prototype stays out of the spec's commit. Save its diff to a file in
+  your scratch directory, and name that path in your report. The caller
+  reads hand edits against it and hands it to a child spec.
 
 ## Revising against a review
 
@@ -174,5 +186,7 @@ A run that ended on a split reports the split alone, as step 1 says.
    `narrowed: <members left>`.
 4. **For the operator**: each judgement call you made (priority, a split, a
    scope cut), one line each.
-5. **Next**: each tree check's exit code, then "commit on its own branch, run
-   `make check` and spec-reviewer with `base:` that branch's head".
+5. **Prototype**: the path of its saved diff, or "none".
+6. **Next**: each tree check's exit code, then "commit on its own branch, run
+   `make check`, the pre-flight, and spec-reviewer with `base:` that branch's
+   head".
