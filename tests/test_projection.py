@@ -489,6 +489,27 @@ def test_spec_version_is_chosen_by_content_hash_not_by_being_seen_first(tmp_path
     assert result.left_out[unusable_id].reason == "spec_unusable"
 
 
+def test_a_test_or_docs_task_reaches_the_projection(tmp_path):
+    """Intake takes six spec types, and the shapes once held three, so a
+    `test` or `docs` task was left out as `spec_unusable` (b-60d804)."""
+    from saffron.projection import materialize
+
+    as_test = spec_text("SA-8502").replace("type: feature", "type: test")
+    as_docs = spec_text("SA-8503").replace("type: feature", "type: docs")
+    ledger, out_dir, (test_id, docs_id) = build(
+        tmp_path,
+        [
+            T("SA-8502", "PREFLIGHT_FAILED", spec_text=as_test),
+            T("SA-8503", "PREFLIGHT_FAILED", spec_text=as_docs),
+        ],
+    )
+
+    result = materialize(ledger, out_dir, tmp_path / "projection.ttl")
+
+    assert test_id in result.kept
+    assert docs_id in result.kept
+
+
 def test_tasks_that_match_their_spans_in_count_but_not_time_are_unattributable(
     tmp_path,
 ):

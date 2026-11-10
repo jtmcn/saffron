@@ -1,7 +1,8 @@
 ---
 id: b-60d804
 title: The ontology knows three spec types and intake knows six, so a merged `test` or `docs` task never enters the projection
-status: open
+status: done
+closed: 2026-11-09
 tier: 2
 filed: 2026-09-19
 specs: []
@@ -45,3 +46,4 @@ projection.
   #366 ← #353). The cell restated the three types as `_SPEC_TYPES`, and the
   review commit `5bce64a` made the projection read them from the shapes. Both
   leave the same tasks out.
+- 2026-11-09: done by hand. `factory:SpecType` and `SpecShape`'s `sh:in` now hold all six types. A test holds the vocabulary equal to `saffron.intake.SpecType`, and a projection test keeps a `test` and a `docs` task. Both failed against the three-type shapes.
