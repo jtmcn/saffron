@@ -2919,6 +2919,9 @@ def cmd_check(args) -> int:
     return 1 if blockers or cite_blocker else 0
 
 
+_TRUNK = "origin/main"  # the ref a spec's citations are written against
+
+
 def _cite_base(spec: Spec, specs: dict[str, Spec]) -> str | None:
     """The ref a cell would cut `spec` from: its queued parent's branch, or
     the trunk. `None` when that parent has no branch on origin yet."""
@@ -2955,6 +2958,8 @@ def _cite_blocker(spec: Spec, specs: dict[str, Spec]) -> str | None:
     resolved, stale, unknown = _commit_ids(path.read_text(), base)
     count += resolved
     defects += [f"commit {sha} is not an ancestor of {base}" for sha in stale]
+    if base != _TRUNK:
+        defects += _moved_citations(path.read_text(), base, _TRUNK)
     for sha in unknown:
         print(
             f"note: cite: {sha} names no commit this clone holds, so it went unchecked"
@@ -3041,6 +3046,8 @@ def cmd_cite(args) -> int:
     resolved, stale, unknown = _commit_ids(spec_path.read_text(), args.base)
     count += resolved
     defects += [f"commit {sha} is not an ancestor of {args.base}" for sha in stale]
+    if args.base != _TRUNK:
+        defects += _moved_citations(spec_path.read_text(), args.base, _TRUNK)
     for sha in unknown:
         print(f"note: {sha} names no commit this clone holds, so it went unchecked")
     for defect in defects:
@@ -3094,6 +3101,59 @@ def _cite_defects(spec_path: Path, ref: str) -> tuple[int, list[str]]:
         raise GitError(str(err)) from err
     # SA-0321 makes each defect a structured value whose `str` is its line.
     return count, [str(defect) for defect in defects]
+
+
+def _moved_citations(
+    text: str, base: str, trunk: str, cwd: Path | None = None
+) -> list[str]:
+    """Each citation written against `trunk` that `base`, a parent's branch,
+    moved or rewrote. A plain line still exists after a parent shifts it, so
+    the batch refuses what `cite` passed (b-c7858c). Maps old lines to new
+    with difflib, one cited file at a time."""
+    import difflib
+
+    from saffron.spec_citations import _extract_citations
+
+    cwd = cwd or REPO
+    try:
+        names = set(_git("ls-tree", "-r", "--name-only", base, cwd=cwd).splitlines())
+    except GitError:
+        return []  # a base nothing can read is the resolve check's to report
+    suffixes = {Path(n).suffix for n in names if Path(n).suffix}
+    maps: dict[str, tuple[int, dict[int, int]] | None] = {}
+    found = []
+    for cite in _extract_citations(text, suffixes):
+        if cite.path is None or cite.path not in names:
+            continue
+        if cite.path not in maps:
+            try:
+                old = _git("show", f"{trunk}:{cite.path}", cwd=cwd).splitlines()
+            except GitError:
+                maps[cite.path] = None
+                continue
+            new = _git("show", f"{base}:{cite.path}", cwd=cwd).splitlines()
+            matcher = difflib.SequenceMatcher(None, old, new, autojunk=False)
+            fresh: dict[int, int] = {}
+            for tag, i1, i2, j1, _j2 in matcher.get_opcodes():
+                if tag == "equal":
+                    fresh.update({i + 1: j1 + (i - i1) + 1 for i in range(i1, i2)})
+            maps[cite.path] = (len(old), fresh)
+        mapped = maps[cite.path]
+        # A line past the trunk's end was written against the parent itself.
+        if mapped is None or cite.end > mapped[0]:
+            continue
+        line_map = mapped[1]
+        span = range(cite.start, cite.end + 1)
+        cited = f"{cite.path}:{cite.start}" + (
+            f"-{cite.end}" if cite.end != cite.start else ""
+        )
+        if any(n not in line_map for n in span):
+            found.append(f"{cited}: {base} rewrote the cited text")
+        elif line_map[cite.start] != cite.start:
+            start, end = line_map[cite.start], line_map[cite.end]
+            moved = f"{start}" + (f"-{end}" if end != start else "")
+            found.append(f"{cited}: {base} moved it to {cite.path}:{moved}")
+    return found
 
 
 # --------------------------------------------------------- enumerators
