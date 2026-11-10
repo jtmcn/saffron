@@ -4,7 +4,7 @@ title: Cell images and the build cache are never reclaimed, so every worktree a 
 status: open
 tier: 2
 filed: 2026-10-11
-specs: []
+specs: [SA-0365]
 prs: []
 commits: []
 cites: [§4.5, §5.1]

@@ -42,3 +42,36 @@ The delegate applied the concern and two notes by hand, with no third round.
 
 18. Pre-flight 4 should list every reader of a field the change starts to fill, not only the reader the item names.
 19. After a revision adds a case to one criterion, re-run pre-flight 2 against each criterion that shares its input.
+
+## SA-0364 (b-3cf039) and SA-0365 (b-2bc0d5), written in parallel
+
+The two writers drafted in 28 and 27 minutes, with no question back. Each revised once. Each spec took two reviews, and the delegate applied the second review's findings by hand.
+
+### SA-0364
+
+**Review 1: 1 blocker, 2 concerns, 2 notes.**
+
+- The live cell appends every blocker's `rebuttal` fact before any concern's, while REVIEW positions findings in lens order. `migrate` derived in position order, so a concern ahead of a blocker was still refused. Pre-flight 4 missed it. The brief named the writer and the derivation but not the order each one writes in.
+- An edit declared no mutant. The writer wrote two, but `refs/saffron/mutants` does not exist at origin, so none was placed. Creating it is the operator's call.
+- Ending the set-aside could refuse a ref base `migrate` topped up. Measured absent on 405 refs.
+
+**Review 2: 0 blockers, 2 concerns, 3 notes.** Both concerns were witness gaps in the new order: no task held two blockers, and no task held an unanchored host-filed blocker. Pre-flight 1 missed both, since the revision added a set (the order within a group) without naming its members.
+
+### SA-0365
+
+**Review 1: 1 blocker, 6 concerns, 4 notes.**
+
+- Every origin name ended outside {., g, i, t}, so `rstrip(".git")` passed. Pre-flight 1 missed it: the set was the origin forms, and the members that tell a suffix strip from a character strip were never named.
+- An unmeasured podman spelling in the `Dialect`, against its own docstring. Pre-flight 8 missed it.
+- A timeout that carries stderr fell under two rules. Pre-flight 2 missed it.
+- Two hazards were named in Out of scope: a tag shared across worktrees, and a delete under a build in flight.
+
+**Review 2: 0 blockers, 4 concerns, 4 notes.** Two were more members of the origin set: `.git` inside a name, and an empty segment in a directory that matches it. Two were docstrings the new member makes false.
+
+The delegate measured the one fact the writer could not, since it was told to stay read-only. `container builder delete --force` exits 0, and the next build starts a fresh builder in 42 s.
+
+## Checks to build (SA-0364, SA-0365)
+
+20. Pre-flight 4 should name the order each writer of a compared sequence writes in, as well as the writer.
+21. For a string transform, pre-flight 1 should list the inputs that tell the intended transform from its near neighbours (suffix and character strip, end and anywhere).
+22. The writer's brief should say whether a live measurement that changes host state is allowed. A read-only brief left a fact open that the delegate settled in a minute.
