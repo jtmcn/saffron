@@ -1,0 +1,1 @@
+{"at": "2026-11-10T04:08:59.982989+00:00", "batch_key": "74", "kind": "end_review", "payload": {"cost_usd": 0.0, "error": "ValueError: layer branch 'saffron/SA-0343' could not be fetched", "lens": "spec", "status": "error"}, "repo": "saffron", "task_key": "91589c68c3eb0c0a399fd342b4c4801e"}
