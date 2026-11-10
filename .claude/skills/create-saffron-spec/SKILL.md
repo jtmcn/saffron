@@ -75,7 +75,9 @@ after the commit it reports zero whatever the file holds.
 The writer ran the tree checks in `.claude/agents/spec-writer.md`, not the
 suite. Commit, then start `make check` in the background and dispatch the
 review in the same turn. The reviewer reads the commit and never the check.
-A failure is nearly always prose or format, so fix it in the next commit.
+Fix a failure in the next commit. Across 32 suite results from twelve
+writers, the failed hooks were `prose` five times and `ty` once. Run one full
+suite at a time: two started together failed two timing tests.
 Redirect the output to a file and echo `$?`, never pipe it into `tail`.
 
 ### 6. Pre-flight the spec
