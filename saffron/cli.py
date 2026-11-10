@@ -2266,20 +2266,19 @@ def _format_budget(amount: float) -> str:
     rounded = round(amount, 2)
     if abs(amount - rounded) < 1e-9:
         return f"{amount:.2f}"
-    return f"{amount:g}"
+    return repr(amount)
 
 
 def _print_stack_admission(candidates: list[Candidate]) -> float:
-    """What `--budget` a stack queue's own order would need, one line per
-    candidate, read by `_queue` and `_batch`, which reads the total (b-0a08bf, §7.1).
-    Candidate `k`'s threshold is the least `--budget` from which every larger
-    one starts it: each earlier candidate's `budget_usd` plus one spec review,
-    plus `k`'s own, over `1 - reserve share - writer share` (`_drive`). A
-    smaller budget can start `k` by passing over an earlier one (b-f73cd0).
-    A larger budget below the line can then lose `k`, so no lower figure
-    holds for every budget above it (b-d1c277). The total adds
-    the last spec review, so draining the order leaves both shares whole.
-    """
+    """What `--budget` a stack queue's order needs, one line per candidate,
+    printed for `_queue` and `_batch`. Returns the total, which `_batch`
+    compares with `--budget` (b-0a08bf, §7.1). Candidate `k`'s threshold is
+    the least `--budget` from which every larger one starts it: each earlier
+    `budget_usd` plus one spec review, plus `k`'s own, over `1 - reserve share
+    - writer share` (`_drive`). A smaller budget can start `k` by passing over
+    an earlier one (b-f73cd0), and a larger one below the line can lose it
+    (b-d1c277). The total adds the last spec review, so draining the order
+    leaves both shares whole."""
     if not candidates:
         return 0.0
     reserve_share, writer_share = _stack_admission_shares(1.0)

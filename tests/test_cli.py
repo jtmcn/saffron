@@ -33,6 +33,7 @@ from saffron import (
 )
 from saffron.agents import context
 from saffron.agents.findings import Finding
+from saffron.batch import StopReason
 from saffron.cell import proxy, runtime, session
 from saffron.cell.runtimes import apple
 from saffron.cell.session import CellOutcome
@@ -6696,39 +6697,7 @@ def test_each_stack_layers_threshold_agrees_with_what_run_stack_batch_admits(
     assert thresholds == [20.0, 64.0, 92.0]
     assert total == 108.0
 
-    def _order():
-        return [
-            Candidate(
-                path=Path("SY-1.md"),
-                spec=intake.Spec(id="SY-1", title="t", type="chore", budget_usd=10.0),
-                spec_sha="a" * 64,
-                task_id=None,
-            ),
-            Candidate(
-                path=Path("SY-2.md"),
-                spec=intake.Spec(
-                    id="SY-2",
-                    title="t",
-                    type="chore",
-                    budget_usd=14.0,
-                    depends_on=["SY-1"],
-                ),
-                spec_sha="b" * 64,
-                task_id=None,
-            ),
-            Candidate(
-                path=Path("SY-3.md"),
-                spec=intake.Spec(
-                    id="SY-3",
-                    title="t",
-                    type="chore",
-                    budget_usd=6.0,
-                    depends_on=["SY-2"],
-                ),
-                spec_sha="c" * 64,
-                task_id=None,
-            ),
-        ]
+    _order = _fe3488_order
 
     def _run_case(case_label, thresholds, total):
         spec_ids = ["SY-1", "SY-2", "SY-3"]
@@ -6879,8 +6848,8 @@ def _drive_stack_admission_batch(
     stamped corpse via `ReconcileResult(orphaned=[1])`. Returns a
     `SimpleNamespace` holding the exit code, the stdout, each spy's call
     count and the started spec ids. It also holds the `batches` row
-    count, the batch's own stop line (`None` if it never closed) and
-    every `batch: refused` line. A missing `batches` row is no error."""
+    count, the closed row's `status` (`None` with no row), every stop line
+    and every `batch: refused` line. A missing `batches` row is no error."""
     real_run_stack_batch = cli.run_stack_batch
     real_write_stack_view = cli.write_stack_view
     real_orphan_rows = cli.orphan_rows
@@ -6955,9 +6924,10 @@ def _drive_stack_admission_batch(
             "--repo",
             str(repo_dir),
             "--stack",
-            "--budget",
-            str(budget),
         ]
+        # `None` gives no `--budget`, so the parser's default is the budget.
+        if budget is not None:
+            argv += ["--budget", str(budget)]
         if partial:
             argv.append("--partial")
         exit_code = cli.main(argv)
@@ -6975,11 +6945,7 @@ def _drive_stack_admission_batch(
     stop_lines = [
         line
         for line in stdout.splitlines()
-        if line.startswith("batch: DRAINED")
-        or line.startswith("batch: BUDGET")
-        or line.startswith("batch: UNTIL")
-        or line.startswith("batch: INFRASTRUCTURE")
-        or line.startswith("batch: INCOMPLETE")
+        if line.startswith(tuple(f"batch: {r}" for r in typing.get_args(StopReason)))
     ]
     refusal_lines = [
         line for line in stdout.splitlines() if line.startswith("batch: refused")
@@ -7120,7 +7086,7 @@ def test_a_stack_batch_below_its_total_is_refused_before_any_batch_row(
     assert with_corpse.orphan_rows_calls == 1
 
     no_corpse_default = _drive_stack_admission_batch(
-        order, 50.0, tmp_path / "home-fe3488-default", monkeypatch, capsys
+        order, None, tmp_path / "home-fe3488-default", monkeypatch, capsys
     )
     assert no_corpse_default.exit_code == 2
     assert "$50.00" in no_corpse_default.refusal_lines[0]
@@ -7135,6 +7101,12 @@ def test_a_stack_batch_below_its_total_is_refused_before_any_batch_row(
     refusal_subcent = no_corpse_subcent.refusal_lines[0]
     assert "$107.999" in refusal_subcent
     assert "$108.00" in refusal_subcent
+
+    # Past six significant digits too: never rounded.
+    many_digits = _drive_stack_admission_batch(
+        order, 100.1234, tmp_path / "home-fe3488-digits", monkeypatch, capsys
+    )
+    assert "$100.1234 " in many_digits.refusal_lines[0]
     assert no_corpse_subcent.orphan_rows_calls == 0
     assert no_corpse_subcent.batch_row_count == 0
 
