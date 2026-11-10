@@ -692,6 +692,7 @@ TURN_PROMPTS = {
     "salvage": implement.SALVAGE_PROMPT,
     "review": review.REVIEW_PROMPT,
     "rebut": rebut.REBUT_PROMPT,
+    "rebut-concerns": rebut.CONCERNS_PROMPT,
     "rebut-extract": rebut.EXTRACT_PROMPT,
     "verdict": rebut.VERDICT_TURN_PROMPT,
     "notes": artifacts.NOTES_PROMPT,
@@ -720,11 +721,15 @@ def test_a_turn_prompt_constant_is_its_file(name, constant):
 
 @pytest.mark.parametrize("name", sorted(TURN_PROMPTS))
 def test_a_loaded_turn_prompt_keeps_no_unfilled_slot(name):
-    """`{extraction}` is filled at load. Only `rebut` carries a runtime slot."""
+    """`{extraction}` is filled at load. `rebut` carries two runtime slots,
+    and `rebut-concerns` carries the one it is filled with."""
     rendered = context.turn_prompt(name)
-    assert re.findall(r"\{[a-z_]+\}", rendered) == (
-        ["{blockers}"] if name == "rebut" else []
-    )
+    expected: list[str] = []
+    if name == "rebut":
+        expected = ["{blockers}", "{concerns}"]
+    elif name == "rebut-concerns":
+        expected = ["{concerns}"]
+    assert re.findall(r"\{[a-z_]+\}", rendered) == expected
 
 
 @pytest.mark.parametrize("name", ["plan", "review", "notes"])
@@ -748,9 +753,12 @@ def test_rebuts_prompts_ask_for_no_output_block():
 
 def test_the_rebuttal_prompt_still_formats_its_blockers():
     """Filling `{extraction}` with `str.format` would consume this slot too."""
-    filled = rebut.REBUT_PROMPT.format(blockers="1. [lens] a.py:1 — a claim")
+    filled = rebut.REBUT_PROMPT.format(
+        blockers="1. [lens] a.py:1 — a claim", concerns=""
+    )
     assert "1. [lens] a.py:1 — a claim" in filled
     assert "{blockers}" not in filled
+    assert "{concerns}" not in filled
 
 
 def test_the_prompt_sha_covers_every_prompt_file(tmp_path, monkeypatch):

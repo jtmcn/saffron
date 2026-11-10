@@ -16,7 +16,7 @@ from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import GateResult, split_lines
 from saffron.intake import Spec
 from saffron.phases.rebut import RebutResult, first_answers
-from saffron.phases.review import LensReview, anchored_blockers
+from saffron.phases.review import LensReview, anchored_blockers, rebut_concerns
 
 # ponytail: covers #N, GH-N, and owner/repo#N — not the full issue-URL form
 # (`https://github.com/o/r/issues/12`), which GitHub also closes on. The
@@ -120,6 +120,7 @@ def render_pr_body(
         _verification(verified_on),
         _new_failures(new_failures, advisory_failures),
         _disagreements(reviews, rebut_result),
+        _concern_answers(reviews, rebut_result),
         None,  # _test_diff, sized last: it is the only unbounded section.
         _gate_table(results, advisory_gates),
         _findings(reviews),
@@ -379,6 +380,53 @@ def _disagreements(
             f"| {_cell(finding.claim)} "
             f"| {_cell(implementer_cell)} "
             f"| {_cell(critic_cell)} |"
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _concern_answers(
+    reviews: Sequence[LensReview], rebut_result: RebutResult | None
+) -> str:
+    """§6: a concern's answer, numbered on from the blockers `_disagreements`
+    already numbered. No critic column: no lens verdicts a concern (§5.6),
+    so there is no verdict to show beside the implementer's own answer.
+
+    Keyed on `rebuttal.error`, the same rule `_disagreements` follows, but
+    its fixed sentence drops `_disagreements`'s own HEAD clause: that clause
+    answers whether a *blocker's* fix landed, and a concern's answer never
+    decides that question (§5.6).
+    """
+    concerns = rebut_concerns(reviews)
+    if not concerns or rebut_result is None:
+        return ""
+    start = len(anchored_blockers(reviews)) + 1
+    errored = _rebuttal_errored(rebut_result)
+    rebuttals = {} if errored else first_answers(rebut_result.rebuttal)
+    no_rebuttal_recorded = (
+        "no rebuttal was recorded for this turn (see `rebuttal.json`)"
+        if errored
+        else ""
+    )
+    lines = [
+        "### Concern answers",
+        "",
+        "| # | lens | where | claim | implementer |",
+        "|---|---|---|---|---|",
+    ]
+    for number, finding in enumerate(concerns, start=start):
+        if errored:
+            implementer_cell = no_rebuttal_recorded
+        else:
+            rebuttal = rebuttals.get(number)
+            implementer_cell = (
+                rebuttal.action + ": " + rebuttal.argument if rebuttal else _NONE_MARK
+            )
+        lines.append(
+            f"| {number} | `{_cell(finding.lens)}` "
+            f"| {_cell(finding.file)}:{finding.line} "
+            f"| {_cell(finding.claim)} "
+            f"| {_cell(implementer_cell)} |"
         )
     lines.append("")
     return "\n".join(lines)

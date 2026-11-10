@@ -442,6 +442,7 @@ def test_a_survivor_whose_suite_failed_tests_is_not_shown_as_undecided():
 def _run(
     *texts,
     blockers=None,
+    concerns=(),
     acceptance=(),
     moved=True,
     gates=None,
@@ -469,6 +470,7 @@ def _run(
     return rebut.run_rebut(
         "cell",
         blockers=blockers if blockers is not None else [_blocker()],
+        concerns=list(concerns),
         acceptance=list(acceptance),
         options=OPTIONS,
         session_id="sess-1",
@@ -538,6 +540,224 @@ def test_a_rebuttal_that_neither_moved_nor_argued_ends_rebuttal_unjudged():
     )
     assert outside_schema.state == "REBUTTAL_UNJUDGED"
     assert "moved no commit and made no argument" in outside_schema.why
+
+
+# --- b-31e3c8: REBUT rebuts anchored concerns beside blockers (§5.6) ---
+
+
+def test_each_anchored_concern_reaches_the_rebuttal_turn_numbered_after_the_blockers():
+    """Problem items 1-2 (§5.6): `run_rebut` hands every concern to the
+    rebuttal turn, numbered on from the last blocker, in `blocker_lines`'
+    own format. One concern shares a blocker's lens, so a leak into that
+    lens's verdict session would be visible. The other's lens, adequacy,
+    raised no blocker, so it must start no verdict session at all."""
+    blocker_a = _blocker(lens="correctness", claim="blocker A")
+    blocker_b = _blocker(lens="conventions", claim="blocker B")
+    concern_shared = _blocker(lens="correctness", severity="concern", claim="concern C")
+    concern_other = _blocker(lens="adequacy", severity="concern", claim="concern D")
+    record: list[dict] = []
+    result = _run(
+        "Fixed and argued.",
+        _rebuttals(
+            _fixed(1),
+            _fixed(2),
+            _argued(3, argument="concern three argument text"),
+            _fixed(4, argument="concern four argument text"),
+        ),
+        _verdicts(_verdict(1, verdict="withdrawn")),
+        _verdicts(_verdict(2, verdict="withdrawn")),
+        blockers=[blocker_a, blocker_b],
+        concerns=[concern_shared, concern_other],
+        moved=True,
+        record=record,
+    )
+    assert result.state == "READY_FOR_REVIEW"
+    # One rebuttal turn, one extraction, two verdict sessions. Never four:
+    # adequacy raised no blocker, so it starts no session of its own.
+    assert len(record) == 4
+    rebuttal_prompt = record[0]["prompt"]
+    assert "1. [correctness] src/gap.py:1 — blocker A" in rebuttal_prompt
+    assert "2. [conventions] src/gap.py:1 — blocker B" in rebuttal_prompt
+    assert "3. [correctness] src/gap.py:1 — concern C" in rebuttal_prompt
+    assert "4. [adequacy] src/gap.py:1 — concern D" in rebuttal_prompt
+    concerns_intro = rebut.CONCERNS_PROMPT.split("{concerns}")[0]
+    assert concerns_intro in rebuttal_prompt
+    # The blockers lead, every concern follows, numbered on from the last one.
+    assert (
+        rebuttal_prompt.index("2. [conventions]")
+        < rebuttal_prompt.index(concerns_intro)
+        < rebuttal_prompt.index("3. [correctness]")
+        < rebuttal_prompt.index("4. [adequacy]")
+    )
+
+    verdict_prompts = [call["options"]["system_prompt"] for call in record[2:]]
+    assert len(verdict_prompts) == 2
+    for prompt in verdict_prompts:
+        assert "concern C" not in prompt
+        assert "concern D" not in prompt
+        # Beyond the claim text: a concern's own rebuttal answer, and its
+        # finding number, must not leak into a lens's verdict session either.
+        assert "concern three argument text" not in prompt
+        assert "concern four argument text" not in prompt
+        assert "On finding 3" not in prompt
+        assert "On finding 4" not in prompt
+    assert [v.lens for v in result.verdicts] == ["correctness", "conventions"]
+
+    # Every entry recorded, concerns included.
+    assert [r.finding for r in result.rebuttal.rebuttals] == [1, 2, 3, 4]
+    as_dict = result.as_dict([blocker_a, blocker_b], [concern_shared, concern_other])
+    assert [c["finding"] for c in as_dict["concerns"]] == [3, 4]
+
+    # With no concern, the prompt carries no concerns paragraph.
+    empty_record: list[dict] = []
+    _run(
+        "Fixed both.",
+        _rebuttals(_fixed(1), _fixed(2)),
+        _verdicts(_verdict(1, verdict="withdrawn")),
+        _verdicts(_verdict(2, verdict="withdrawn")),
+        blockers=[blocker_a, blocker_b],
+        concerns=[],
+        moved=True,
+        record=empty_record,
+    )
+    assert (
+        empty_record[0]["prompt"]
+        .rstrip()
+        .endswith("host measures HEAD, not your report.")
+    )
+
+    # `concerns` is required, not defaulted: a caller cannot silently drop it.
+    with pytest.raises(TypeError):
+        rebut.run_rebut(
+            "cell",
+            blockers=[blocker_a],
+            acceptance=[],
+            options=OPTIONS,
+            session_id="sess-1",
+            spec_body="fix the gap",
+            context_md=CONTEXT_MD,
+            claude_md=None,
+            prompts_dir=PROMPTS,
+            max_turns=20,
+            budget_usd=2.0,
+            head_moved=lambda: True,
+            rerun_gates=lambda _session_id: None,
+            critic_container=lambda: "critic-cell",
+            diff=lambda _critic: DIFF,
+            agent=_agent(),
+            spec_id="SY-1",
+            reviewed_diff=DIFF,
+        )
+
+
+def test_a_concerns_answer_never_changes_the_state_rebut_reaches():
+    """Problem item 3 (§5.6): a concern's rebuttal entry counts toward
+    neither `argued` nor `claimed` in the state `run_rebut` reaches, or its
+    line. `moved` stays one bit for the whole rebuttal, concerns included."""
+    blocker = _blocker(lens="correctness")
+    concern = _blocker(lens="correctness", severity="concern", claim="a concern")
+
+    # Shape 1: a claimed blocker fix with no commit, beside an argued
+    # concern. Ends REBUTTAL_UNJUDGED, claiming a fix for 1 blocker.
+    gate_suites: list[bool] = []
+    critic_calls: list[bool] = []
+    shape1 = _run(
+        "Addressed.",
+        _rebuttals(_fixed(1), _argued(2)),
+        moved=False,
+        blockers=[blocker],
+        concerns=[concern],
+        gate_suites=gate_suites,
+        critic_calls=critic_calls,
+    )
+    assert shape1.state == "REBUTTAL_UNJUDGED"
+    assert "made no argument against a blocker" in shape1.why
+    assert "claimed a fix for 1 blocker(s) and committed nothing" in shape1.why
+    assert gate_suites == []
+    assert critic_calls == []
+
+    # The same claim with no concern at all: the filter drops nothing, so
+    # today's exact wording stands, with no "against a blocker" clause.
+    no_concern = _run(
+        "Addressed.", _rebuttals(_fixed(1)), moved=False, blockers=[blocker]
+    )
+    assert no_concern.state == "REBUTTAL_UNJUDGED"
+    assert "made no argument: claimed a fix for 1 blocker(s)" in no_concern.why
+    assert "against a blocker" not in no_concern.why
+
+    # Shape 2: a blocker argued and confirmed, beside an argued concern.
+    # The concern adds nothing to the confirmed or argued counts named.
+    shape2 = _run(
+        "Argued both.",
+        _rebuttals(_argued(1), _argued(2)),
+        _verdicts(_verdict(1, verdict="confirmed")),
+        moved=False,
+        blockers=[blocker],
+        concerns=[concern],
+    )
+    assert shape2.state == "READY_FOR_REVIEW"
+    assert "1 blocker(s) confirmed" in shape2.why
+    assert "1 argued" in shape2.why
+
+    # The same shape with the second finding a blocker too, both argued and
+    # confirmed, counts 2 argued: the concern above is why shape2 stayed at 1.
+    second_blocker = _blocker(lens="correctness", claim="blocker two")
+    both_blockers = _run(
+        "Argued both.",
+        _rebuttals(_argued(1), _argued(2)),
+        _verdicts(_verdict(1, verdict="confirmed"), _verdict(2, verdict="confirmed")),
+        moved=False,
+        blockers=[blocker, second_blocker],
+    )
+    assert "2 argued" in both_blockers.why
+
+    # Shape 3: a blocker claimed fixed with no commit, beside a concern
+    # also claimed fixed with no commit. The detail still names 1 blocker.
+    shape3 = _run(
+        "Fixed both, I think.",
+        _rebuttals(_fixed(1), _fixed(2)),
+        moved=False,
+        blockers=[blocker],
+        concerns=[concern],
+    )
+    assert shape3.state == "REBUTTAL_UNJUDGED"
+    assert "claimed a fix for 1 blocker(s) and committed nothing" in shape3.why
+
+    # Shape 4: a concern's own fix moves HEAD, with no blocker answered.
+    # The early return does not fire, so a red re-run still ends EXHAUSTED.
+    gate_suites_moved: list[bool] = []
+    shape4 = _run(
+        "Fixed the concern.",
+        _rebuttals(_fixed(2)),
+        moved=True,
+        blockers=[blocker],
+        concerns=[concern],
+        gates="EXHAUSTED",
+        gate_suites=gate_suites_moved,
+    )
+    assert shape4.state == "EXHAUSTED"
+    assert gate_suites_moved == [True]
+
+    # Shape 5: a turn that argued only the concern, with HEAD unmoved, ends
+    # REBUTTAL_UNJUDGED, its line saying no blocker was answered.
+    shape5 = _run(
+        "Only the concern is wrong.",
+        _rebuttals(_argued(2)),
+        moved=False,
+        blockers=[blocker],
+        concerns=[concern],
+    )
+    assert shape5.state == "REBUTTAL_UNJUDGED"
+    assert "made no argument against a blocker: answered no blocker" in shape5.why
+
+    # An empty turn loses no entry to the filter, so it keeps today's exact
+    # line and still says it recorded nothing.
+    shape6 = _run(
+        "Fixed.", _rebuttals(), moved=False, blockers=[blocker], concerns=[concern]
+    )
+    assert shape6.state == "REBUTTAL_UNJUDGED"
+    assert "made no argument: recorded nothing" in shape6.why
+    assert "against a blocker" not in shape6.why
 
 
 def test_a_lens_that_started_and_gave_no_verdict_ends_rebuttal_unjudged():

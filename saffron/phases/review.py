@@ -972,6 +972,19 @@ def anchored_blockers(reviews: Sequence[LensReview]) -> list[Finding]:
     ]
 
 
+def rebut_concerns(reviews: Sequence[LensReview]) -> list[Finding]:
+    """Anchored concerns, in order. ORDER IS LOAD-BEARING, the same way as
+    for `anchored_blockers`. `rebut.py` numbers this on from the last
+    blocker, and `_concern_answers` renders against those same numbers: the
+    one selection rule every caller of the concern list shares.
+
+    No host-filed carve-out: a host-filed survivor is always severity
+    `blocker` (`review.apply_probe_verdict`), so it never reaches here."""
+    return [
+        f for r in reviews for f in r.findings if f.severity == "concern" and f.anchored
+    ]
+
+
 def adequacy_probes(reviews: Sequence[LensReview]) -> list[Finding]:
     """Anchored adequacy findings that carry a probe — the set the Gate-only
     cell is asked about (backlog item 117). Unanchored ones are excluded: they
