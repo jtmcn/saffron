@@ -2914,3 +2914,9 @@ critic's own, so they have no line.
 - `SA-0361` (#1118): a docstring that never said it returns the total, the
   stop reasons spelled out, and a third copy of one test order.
   **Bucket 3**, conventions. **Landed:** a review commit on #1118.
+
+## 2026-11-10, spec loop run 59 (#1127)
+
+- `SA-0362` (#1127): a new test helper restated `_rebuttal_log` line for
+  line, and two tests re-imported `Attempt` under an alias. **Bucket 3**,
+  conventions. **Landed:** a review commit on #1127.
