@@ -210,7 +210,8 @@ export const register: Register = on => {
 
   // The delegate is the model, and the model cannot type a slash command.
   on('tool.call', { tool: TOOL }, async ($, e) => {
-    const input = (e.input ?? {}) as { spec?: unknown; stop?: unknown }
+    // The engine spreads a tool's arguments beside `tool`, never under `input` (b-2d2014).
+    const input = e as { spec?: unknown; stop?: unknown }
     // A model can send the boolean as a string, and "true" then read as follow mode.
     if (input.stop === true || input.stop === 'true') return { result: await halt($) }
     const spec = typeof input.spec === 'string' ? input.spec : ''

@@ -45,12 +45,12 @@ const outcome = (spec: string, t: number) =>
 
 test('the delegate can stop a watch through the tool', async ($, on) => {
   world(on, new Map())
-  const out = await $.tool.call({ tool: TOOL, input: { stop: true, spec: 'SA-0001' } })
+  const out = await $.tool.call({ tool: TOOL, stop: true, spec: 'SA-0001' })
   expect(out.result).toBe('cell-watch stopped.')
 })
 
 test('a spec that is no SA-NNNN id is refused before any watch starts', async $ => {
-  const out = await $.tool.call({ tool: TOOL, input: { spec: '../../etc' } })
+  const out = await $.tool.call({ tool: TOOL, spec: '../../etc' })
   expect(out.deny).toContain('not an SA-NNNN id')
 })
 
@@ -59,7 +59,7 @@ test('a pinned watch wakes the delegate on an outcome, and not for what the log 
   const start = `${opened('SA-0001', 1)}\n${ended}`
   const logs = new Map([['SA-0001', { text: start, mtimeMs: 1 }]])
   const { woken, clock } = world(on, logs)
-  const out = await $.tool.call({ tool: TOOL, input: { spec: 'SA-0001' } })
+  const out = await $.tool.call({ tool: TOOL, spec: 'SA-0001' })
   expect(out.result).toContain('Already in the log: terminal')
   await clock.advance(3000)
   expect(woken).toEqual([])
@@ -72,7 +72,7 @@ test('a pinned watch wakes the delegate on an outcome, and not for what the log 
 test('following a batch wakes the delegate when the next task starts, since the last one packaged', async ($, on) => {
   const logs = new Map([['SA-0001', { text: opened('SA-0001', 1), mtimeMs: 12 }]])
   const { woken, clock } = world(on, logs)
-  await $.tool.call({ tool: TOOL, input: {} })
+  await $.tool.call({ tool: TOOL })
   logs.set('SA-0002', { text: opened('SA-0002', 5), mtimeMs: 20 })
   await clock.advance(3000)
   expect(woken.length).toBe(1)
@@ -90,7 +90,7 @@ test('a stray word to /cell-watch is refused rather than read as follow mode', a
 test('following a batch waits for a log written after the watch began', async ($, on) => {
   const logs = new Map([['SA-0305', { text: opened('SA-0305', 1), mtimeMs: 1 }]])
   const { woken, clock, statuses } = world(on, logs)
-  const out = await $.tool.call({ tool: TOOL, input: {} })
+  const out = await $.tool.call({ tool: TOOL })
   expect(out.result).not.toContain('SA-0305')
   logs.set('SA-0311', { text: opened('SA-0311', 12), mtimeMs: 12 })
   await clock.advance(3000)
@@ -102,9 +102,9 @@ test('following a batch waits for a log written after the watch began', async ($
 test('a new watch does not report the task the last watch followed as packaged', async ($, on) => {
   const logs = new Map([['SA-0305', { text: opened('SA-0305', 1), mtimeMs: 1 }]])
   const { woken, clock } = world(on, logs)
-  await $.tool.call({ tool: TOOL, input: { spec: 'SA-0305' } })
+  await $.tool.call({ tool: TOOL, spec: 'SA-0305' })
   logs.set('SA-0311', { text: opened('SA-0311', 12), mtimeMs: 12 })
-  const out = await $.tool.call({ tool: TOOL, input: {} })
+  const out = await $.tool.call({ tool: TOOL })
   expect(out.result).not.toContain('has packaged')
   await clock.advance(3000)
   expect(woken).toEqual([])
@@ -114,8 +114,8 @@ test('a new watch does not report the task the last watch followed as packaged',
 test('a stop spelled as a string ends a running watch', async ($, on) => {
   const logs = new Map([['SA-0001', { text: opened('SA-0001', 1), mtimeMs: 12 }]])
   const { woken, clock } = world(on, logs)
-  await $.tool.call({ tool: TOOL, input: {} })
-  const out = await $.tool.call({ tool: TOOL, input: { stop: 'true' } })
+  await $.tool.call({ tool: TOOL })
+  const out = await $.tool.call({ tool: TOOL, stop: 'true' })
   expect(out.result).toBe('cell-watch stopped.')
   logs.set('SA-0002', { text: opened('SA-0002', 5), mtimeMs: 20 })
   await clock.advance(3000)
