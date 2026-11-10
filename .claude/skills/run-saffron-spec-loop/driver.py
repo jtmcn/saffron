@@ -2642,6 +2642,7 @@ def _review_rebut_blocker(target: Spec, rows: list[PastCell]) -> str | None:
 
 # A ceiling less than a fifth over a floor peak (2026-11-02 chain record).
 _FLOOR_MARGIN = 1.2
+# Headroom over the worst REVIEW plus REBUT, so a blocker's rebuttal is paid for.
 _REVIEW_MARGIN_USD = 2.0
 
 
@@ -2939,9 +2940,13 @@ def _cite_blocker(spec: Spec, specs: dict[str, Spec]) -> str | None:
         count, defects = _cite_defects(path, base)
     except GitError as err:
         return f"cite could not read {base}: {err}"
-    stale = _stale_commit_ids(path.read_text(), base)
-    count += len(stale)
+    resolved, stale, unknown = _commit_ids(path.read_text(), base)
+    count += resolved
     defects += [f"commit {sha} is not an ancestor of {base}" for sha in stale]
+    for sha in unknown:
+        print(
+            f"note: cite: {sha} names no commit this clone holds, so it went unchecked"
+        )
     for defect in defects:
         print(f"cite: {defect}")
     if not defects:
@@ -3021,9 +3026,11 @@ def cmd_cite(args) -> int:
         count, defects = _cite_defects(spec_path, args.base)
     except GitError as err:
         return _fail(str(err))
-    stale = _stale_commit_ids(spec_path.read_text(), args.base)
-    count += len(stale)
+    resolved, stale, unknown = _commit_ids(spec_path.read_text(), args.base)
+    count += resolved
     defects += [f"commit {sha} is not an ancestor of {args.base}" for sha in stale]
+    for sha in unknown:
+        print(f"note: {sha} names no commit this clone holds, so it went unchecked")
     for defect in defects:
         print(defect)
     print(f"{count} citation(s) checked")
@@ -3034,11 +3041,15 @@ def cmd_cite(args) -> int:
 _COMMIT_ID = re.compile(r"(?<![\w/.-])(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}(?![\w-])")
 
 
-def _stale_commit_ids(text: str, base: str, cwd: Path = REPO) -> list[str]:
-    """Each id in `text` naming a commit that `base` does not contain. A
-    restack replaces the commits a spec cites, and `cite` resolves only
-    lines (2026-11-07 chain record). A hex word naming no commit is skipped."""
-    stale = []
+def _commit_ids(
+    text: str, base: str, cwd: Path | None = None
+) -> tuple[int, list[str], list[str]]:
+    """The ids in `text` naming a commit, those `base` lacks, and those naming
+    nothing here. A restack replaces the commits a spec cites, and `cite`
+    resolves only lines (2026-11-07 chain record). Only commits this clone
+    holds can be judged, so an unknown id is reported, never blocked."""
+    cwd = cwd or REPO  # read at call time, so a patched REPO holds
+    resolved, stale, unknown = 0, [], []
     for sha in dict.fromkeys(_COMMIT_ID.findall(text)):
         exists = subprocess.run(
             ["git", "cat-file", "-e", f"{sha}^{{commit}}"],
@@ -3046,7 +3057,9 @@ def _stale_commit_ids(text: str, base: str, cwd: Path = REPO) -> list[str]:
             capture_output=True,
         )
         if exists.returncode != 0:
+            unknown.append(sha)
             continue
+        resolved += 1
         ancestor = subprocess.run(
             ["git", "merge-base", "--is-ancestor", sha, base],
             cwd=cwd,
@@ -3054,7 +3067,7 @@ def _stale_commit_ids(text: str, base: str, cwd: Path = REPO) -> list[str]:
         )
         if ancestor.returncode != 0:
             stale.append(sha)
-    return stale
+    return resolved, stale, unknown
 
 
 def _cite_defects(spec_path: Path, ref: str) -> tuple[int, list[str]]:

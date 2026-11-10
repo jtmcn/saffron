@@ -98,7 +98,8 @@ trivial.
    above by $6.86
    ```
 
-   Each half names the row it compared against, whether the declared ceiling
+   That sample is a blocker under the floor rule below, since 90 is under
+   1.2x 81. Each half names the row it compared against, whether the declared ceiling
    is above or below it and by how much, and — for turns — whether that peak
    is a floor (the row was cut off at its own ceiling, so it says what the
    cell *needed at least*, not what it used) or a use.
@@ -120,9 +121,10 @@ trivial.
      from the rows themselves, because the line does not compute it. REBUT is
      gated on budget before the rebuttal turn, so a spec that draws a blocker
      and cannot pay ends `EXHAUSTED` with no verdict.
-   - **Blocker** when a peak marked **a floor** sits less than a fifth under
-     `max_turns`. That row never found its own ceiling, so a bare clear is no
-     margin. `driver.py check` blocks on both rules.
+   - **Blocker** when `max_turns` is under 1.2x a peak marked **a floor**.
+     That row never found its own ceiling, so a bare clear is no margin.
+     `driver.py check` blocks on this rule and on the `review` plus `rebut`
+     rule above.
    - `ceilings: no past cells of this shape to compare against` means the
      check has no evidence. That is a note, not a pass and not a blocker.
 

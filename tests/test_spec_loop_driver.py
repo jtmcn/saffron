@@ -2234,7 +2234,7 @@ def test_check_blocks_a_ceiling_under_a_fifth_over_a_cut_off_peak(monkeypatch, c
     assert rc == 0 and "blocker:" not in out
 
 
-def test_stale_commit_ids_names_a_commit_off_the_base_and_skips_other_hex(
+def test_commit_ids_names_a_commit_off_the_base_and_sets_other_hex_aside(
     empty_repo,
 ):
     # 2026-11-07: four specs cited commits a restack replaced, and cite passed.
@@ -2246,8 +2246,29 @@ def test_stale_commit_ids_names_a_commit_off_the_base_and_skips_other_hex(
         f"Kept at `{on_main[:8]}`, replaced `{off_main[:8]}`, twice `{off_main}`. "
         "A digest deadbeefcafe1234 and the number 1234567 name no commit."
     )
-    stale = driver._stale_commit_ids(text, "main", cwd=empty_repo)
+    resolved, stale, unknown = driver._commit_ids(text, "main", cwd=empty_repo)
+    assert resolved == 3
     assert stale == [off_main[:8], off_main]
+    assert unknown == ["deadbeefcafe1234"]
+
+
+def test_cite_blocks_a_spec_naming_a_commit_off_the_base(
+    empty_repo, monkeypatch, capsys
+):
+    # Both callers must pass the ids through, not only the helper.
+    monkeypatch.setattr(driver, "REPO", empty_repo)
+    on_main = _commit(empty_repo, "a.txt", "a\n")
+    _git(empty_repo, "checkout", "-q", "-b", "side")
+    off_main = _commit(empty_repo, "b.txt", "b\n")
+    _git(empty_repo, "checkout", "-q", "main")
+    spec = empty_repo / "spec.md"
+    spec.write_text(f"Kept `{on_main[:8]}`. Replaced `{off_main[:8]}`.")
+    assert driver.cmd_cite(SimpleNamespace(spec_path=str(spec), base="main")) == 1
+    lines = capsys.readouterr().out.splitlines()
+    assert lines == [
+        f"commit {off_main[:8]} is not an ancestor of main",
+        "2 citation(s) checked",
+    ]
 
 
 def test_check_judges_the_rows_history_prints_and_no_others(monkeypatch, capsys):
