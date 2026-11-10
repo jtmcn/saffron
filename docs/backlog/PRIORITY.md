@@ -140,7 +140,7 @@ its batch. The `tests` gate takes a printed warning for every failure.
 `SA-0294` ports it. A batch stops at a candidate it cannot pay for, though a
 later one fits.
 
-**Placed 2026-11-08**, from `SA-0356`'s spec chain: **b-d1c277**. The queue's
+**Placed 2026-11-08**, from `SA-0356`'s spec chain: ~~**b-d1c277**~~. The queue's
 stack thresholds assume every earlier candidate ran.
 
 **Placed 2026-11-09**, from the spec chain speed review: **b-c12d39**. A
