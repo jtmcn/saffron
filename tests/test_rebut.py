@@ -1080,10 +1080,10 @@ def test_a_verdict_session_is_shown_only_its_own_lens_arguments():
     assert "the contract lens" not in prompt
 
 
-def test_the_rebuttal_turns_are_capped_at_the_critic_budget_not_the_task_one():
+def test_the_rebuttal_turns_are_capped_at_rebuts_own_cap_not_the_task_budget():
     """These two turns resume the IMPLEMENT session, whose `max_budget_usd` is
     the whole task budget. Uncapped, REBUT re-spends it after REVIEW already
-    has — the overrun the critic cap was introduced to close."""
+    has. REBUT's own cap was introduced to close that overrun (§5.6)."""
     record: list[dict] = []
     _run("Fixed.", _rebuttals(_fixed()), _verdicts(_verdict()), record=record)
     assert OPTIONS["max_budget_usd"] == 1.0  # what IMPLEMENT was given

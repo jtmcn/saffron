@@ -93,7 +93,7 @@ that added a refusal refused the specs queued below it, and its cell ended
 mutant reaches REPAIR as its whole claim, so `SA-0330`'s repair turns never
 found the two cases it lacked, and the cell ended `EXHAUSTED`.
 
-**Placed 2026-11-06**, from the spec loop's run 54: **b-d39d9a**. `SA-0335`
+**Placed 2026-11-06**, from the spec loop's run 54: ~~**b-d39d9a**~~. `SA-0335`
 spent $76.77 against its $69 budget during REVIEW and REBUT, and nothing
 stopped it. The overrun stopped its batch after two of four specs.
 
