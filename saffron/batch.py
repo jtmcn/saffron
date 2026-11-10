@@ -219,7 +219,7 @@ def _drive(
     package_raised: list[str],
     after_attach: Callable[[Candidate, CellOutcome, int], None] | None = None,
     # Given the candidate `_drive` passed over for budget (`b-f73cd0`).
-    # `run_stack_batch` uses one to record such a spec as a missed layer.
+    # `run_stack_batch` uses one to record such a spec as missed.
     on_passed_over: Callable[[Candidate], Sequence[Candidate]] | None = None,
     reserve_usd: float = 0.0,
     writer_usd: float = 0.0,
@@ -656,7 +656,7 @@ def run_stack_batch(
 
     def record_budget_miss(candidate: Candidate) -> list[Candidate]:
         """`_drive`'s `on_passed_over` hook for the order's own pass
-        (`b-f73cd0`). A spec passed over for budget is a missed layer like
+        (`b-f73cd0`). A spec passed over for budget counts as missed like
         any other, so its dependents are refused through `resolve_prefix`."""
         missed[candidate.spec.id] = frozenset({candidate.spec.id})
         remaining.remove(candidate)
