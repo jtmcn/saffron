@@ -4,7 +4,7 @@ title: "`saffron batch --stack` starts an order its budget cannot run, and print
 status: open
 tier: 2
 filed: 2026-11-06
-specs: []
+specs: [SA-0361]
 prs: []
 commits: []
 cites: [§7.1]
@@ -30,3 +30,4 @@ order holds, unless told to run a prefix.
 ## Record
 
 - 2026-11-06: filed from the spec loop's run 54.
+- 2026-11-09: recurred in the spec loop's run 57. Batch 74 ran `--budget 120` for `SA-0343` ($52) and `SA-0356` ($30), so tasks got $60. `SA-0343` spent $52.44, and the batch ended `BUDGET` before `SA-0356`. A second batch, with its own reserve and finish, ran `SA-0356`. Specced as `SA-0361`.
