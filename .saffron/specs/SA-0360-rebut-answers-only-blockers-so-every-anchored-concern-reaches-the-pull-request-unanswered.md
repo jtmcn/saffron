@@ -3,7 +3,7 @@ id: SA-0360
 title: REBUT answers only blockers, so every anchored concern reaches the pull request unanswered
 type: bug
 priority: 2
-estimated_lines: 107
+estimated_lines: 123
 estimate_measured: true
 touches:
   - saffron/phases/rebut.py
@@ -48,7 +48,7 @@ forbidden:
   - tests/test_scheduler.py
 budget_usd: 60
 max_attempts: 3
-max_turns: 260
+max_turns: 300
 risk: standard
 acceptance:
   - claim: >-
@@ -73,15 +73,18 @@ acceptance:
   - claim: >-
       A concern's rebuttal entry counts neither as an argument nor as a
       claimed fix toward the state `run_rebut` reaches or its line. HEAD
-      stays one measurement for the whole rebuttal. The witness drives four
-      shapes, each with the second answer once a blocker's and once a
-      concern's. A claimed blocker fix with no commit
+      stays one measurement for the whole rebuttal. The witness drives five
+      shapes. The first three run twice, the second answer once a blocker's
+      and once a concern's. The fourth and fifth run with a concern alone. A claimed blocker fix with no commit
       beside an argued concern ends `REBUTTAL_UNJUDGED`, claiming a fix for 1
       blocker, with no gate re-run and no critic cell. An argued blocker that
       is confirmed beside an argued concern counts 1 argued. An argued
       blocker beside a concern claimed fixed with no commit carries no
       claimed-fix clause. A concern fix that moves HEAD, with no blocker
-      answered, is still re-gated, and a red re-run ends `EXHAUSTED`.
+      answered, is still re-gated, and a red re-run ends `EXHAUSTED`. A turn
+      that argued only a concern and moved nothing ends `REBUTTAL_UNJUDGED`,
+      and its line says the rebuttal answered no blocker. The same turn with
+      no concern removed, an empty turn, still says it recorded nothing.
     witness: tests/test_rebut.py::test_a_concerns_answer_never_changes_the_state_rebut_reaches
     wrong_versions:
       - "`rebut_state` and the early return both count every rebuttal entry, a concern's included."
@@ -89,6 +92,8 @@ acceptance:
       - The final `rebut_state` call counts blocker answers only, and the early return counts every entry.
       - A turn that answered no blocker returns early even when HEAD moved, so a concern's commit is never re-gated.
       - The early return's `rebut_state` call is handed every entry, so its line counts a concern's claimed fix.
+      - A turn that answered only concerns keeps today's line, which says the rebuttal recorded nothing.
+      - Every empty turn's line says it answered no blocker, though no concern entry was removed.
   - claim: >-
       The pull request body gains a `### Concern answers` table after
       `### Disagreements`, one row per anchored concern, numbered after the
@@ -139,8 +144,8 @@ at `e537e5ca`.
 request: "The implementer session resumes and gets the confirmed blockers, then
 each anchored concern numbered after them. **One** attempt to either fix each
 or argue the finding is wrong. Both outcomes recorded. Gates re-run. A
-concern's answer is recorded and shown in the pull request, and no lens
-verdicts it." `CONTEXT.md`'s **Rebuttal** opens, as amended there: "The
+concern's answer is recorded, and the pull request shows it whenever REBUT's
+result stands. No lens verdicts it." `CONTEXT.md`'s **Rebuttal** opens, as amended there: "The
 implementer's single response to confirmed blockers, and to each anchored
 concern beside them: either a fix or an argument that the finding is wrong."
 
@@ -214,7 +219,12 @@ saw them, because nothing hands it a concern.
    The turn on `RebutResult.rebuttal` keeps every entry. `moved` stays one
    bit for the whole rebuttal (`saffron/phases/rebut.py:754-756`). So a
    concern's commit moves HEAD, and the gates judge it as they judge any
-   commit. A red result ends `EXHAUSTED`.
+   commit. A red result ends `EXHAUSTED`. Today a turn with no commit and no
+   argument ends `REBUTTAL_UNJUDGED` with a line ending "recorded nothing"
+   (`saffron/phases/rebut.py:589-597`). When the filter removed a concern
+   entry and left no blocker answer, that line is false. Say instead that the
+   rebuttal moved no commit and answered no blocker. A turn that recorded no
+   entry at all keeps today's line.
 4. **The record.** `as_dict` takes the concerns as a second argument and lists
    them under a new `concerns` key, each with its number. In `session.py`,
    select the concerns beside the blockers and pass them to `run_rebut`. Keep
@@ -253,6 +263,10 @@ saw them, because nothing hands it a concern.
   makes it false, as it is false today.
 - The queue's `unread` and `unanswered` counts. They stay per blocker
   (`saffron/cell/session.py:3721-3722`).
+- Readers outside `touches` that need no change. `_left_by_critic` reads each
+  finding row's verdict, which stays `None` for a concern
+  (`saffron/finish.py:309-330`). The queue's concern count stays
+  `anchored_concerns` (`saffron/phases/review.py:1032-1038`).
 
 ## Notes for the agent
 
@@ -284,6 +298,13 @@ witnesses below, left these files green: `tests/test_rebut.py`,
   `test_the_rebuttal_prompt_still_formats_its_blockers`
   (`tests/test_context.py:749-753`) passes `concerns=""` to `.format`.
 
+**Comments that turn stale.** `blocker_answers`, `BlockerAnswer` and their
+docstring speak of blockers alone (`saffron/phases/rebut.py:657-671`), and so
+does `first_answers`' docstring (`saffron/phases/rebut.py:641-650`). The
+comment at `saffron/cell/session.py:3728-3730` says each answer is keyed by
+the blocker's number. Each now covers concerns too, so reword each. Renaming
+the function is your choice.
+
 `_rebuttal_fixed_prefix` in `tests/test_session.py:5151-5155` splits
 `REBUT_PROMPT` on `{blockers}`, so the `{concerns}` slot goes after it.
 
@@ -306,7 +327,7 @@ witnesses below, left these files green: `tests/test_rebut.py`,
 witnesses failed with `saffron/` reverted. Each wrong version listed above
 failed its own witness there.
 
-**Size.** The prototype measured 426 changed tokens by `size_gate` outside the
-test paths, against the `bug` ceiling of 1300. It measured 1379 more under
+**Size.** The prototype measured 491 changed tokens by `size_gate` outside the
+test paths, against the `bug` ceiling of 1300. It measured 1457 more under
 them. `estimated_lines` is the first figure over four. The diff touches
 `saffron/cell/session.py`, which `elevate_on` names, so `size` blocks.
