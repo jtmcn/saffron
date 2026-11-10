@@ -2619,6 +2619,7 @@ def test_the_watch_shaped_callable_phases_still_receive_does_not_raise():
     rebut.run_rebut(
         "cell",
         blockers=[blocker],
+        concerns=[],
         acceptance=[],
         options=options,
         session_id="sess-1",

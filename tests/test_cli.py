@@ -33,6 +33,7 @@ from saffron import (
 )
 from saffron.agents import context
 from saffron.agents.findings import Finding
+from saffron.batch import StopReason
 from saffron.cell import proxy, runtime, session
 from saffron.cell.runtimes import apple
 from saffron.cell.session import CellOutcome
@@ -6564,7 +6565,9 @@ def _drive_fake_stack_batch(order, budget, home, monkeypatch):
     was given, plus the `reserve_usd`/`writer_usd` `_batch` computed, to
     the real `saffron.batch.run_stack_batch`. It substitutes its own
     runner, review and mint, and passes no end review, follow-ups or
-    finish. Returns the started spec ids and the closed batch row."""
+    finish. Passes `--partial`, so a budget below the printed total still
+    starts what it covers. Returns the started spec ids and the closed
+    batch row."""
     real_run_stack_batch = cli.run_stack_batch
     runners: list[_AdmissionRunner] = []
 
@@ -6621,6 +6624,7 @@ def _drive_fake_stack_batch(order, budget, home, monkeypatch):
                 "--repo",
                 str(repo_dir),
                 "--stack",
+                "--partial",
                 "--budget",
                 str(budget),
             ]
@@ -6649,6 +6653,9 @@ def _parse_admission_block(tmp_path, capsys, dirname):
     the review cap, so a header that stops reading them is caught here."""
     repo = _stack_admission_repo(tmp_path, dirname=dirname)
     home = tmp_path / f"{dirname}-home"
+    # A prior `batch --stack` call leaves its own block in the buffer.
+    # Drop it before reading this one.
+    capsys.readouterr()
     assert cli.main(["--home", str(home), "queue", "--repo", str(repo), "--stack"]) == 0
     out = capsys.readouterr().out
     block = out[out.index("admission:") :]
@@ -6690,39 +6697,7 @@ def test_each_stack_layers_threshold_agrees_with_what_run_stack_batch_admits(
     assert thresholds == [20.0, 64.0, 92.0]
     assert total == 108.0
 
-    def _order():
-        return [
-            Candidate(
-                path=Path("SY-1.md"),
-                spec=intake.Spec(id="SY-1", title="t", type="chore", budget_usd=10.0),
-                spec_sha="a" * 64,
-                task_id=None,
-            ),
-            Candidate(
-                path=Path("SY-2.md"),
-                spec=intake.Spec(
-                    id="SY-2",
-                    title="t",
-                    type="chore",
-                    budget_usd=14.0,
-                    depends_on=["SY-1"],
-                ),
-                spec_sha="b" * 64,
-                task_id=None,
-            ),
-            Candidate(
-                path=Path("SY-3.md"),
-                spec=intake.Spec(
-                    id="SY-3",
-                    title="t",
-                    type="chore",
-                    budget_usd=6.0,
-                    depends_on=["SY-2"],
-                ),
-                spec_sha="c" * 64,
-                task_id=None,
-            ),
-        ]
+    _order = _fe3488_order
 
     def _run_case(case_label, thresholds, total):
         spec_ids = ["SY-1", "SY-2", "SY-3"]
@@ -6824,6 +6799,395 @@ def test_a_sibling_threshold_is_the_least_budget_every_larger_one_admits(
         assert "SY-3" in _started(budget)
     assert _started(161.99) == ["SY-1", "SY-2"]
     assert _started(60.0) == ["SY-1", "SY-3"]
+
+
+def _fe3488_order():
+    """`SY-1` at $10, `SY-2` at $14 on `SY-1`, `SY-3` at $6 on `SY-2`.
+    Thresholds $20/$64/$92, total $108 under the real shares and cap,
+    the same figures `_stack_admission_repo` pins (b-fe3488)."""
+    return [
+        Candidate(
+            path=Path("SY-1.md"),
+            spec=intake.Spec(id="SY-1", title="t", type="chore", budget_usd=10.0),
+            spec_sha="a" * 64,
+            task_id=None,
+        ),
+        Candidate(
+            path=Path("SY-2.md"),
+            spec=intake.Spec(
+                id="SY-2",
+                title="t",
+                type="chore",
+                budget_usd=14.0,
+                depends_on=["SY-1"],
+            ),
+            spec_sha="b" * 64,
+            task_id=None,
+        ),
+        Candidate(
+            path=Path("SY-3.md"),
+            spec=intake.Spec(
+                id="SY-3",
+                title="t",
+                type="chore",
+                budget_usd=6.0,
+                depends_on=["SY-2"],
+            ),
+            spec_sha="c" * 64,
+            task_id=None,
+        ),
+    ]
+
+
+def _drive_stack_admission_batch(
+    order, budget, home, monkeypatch, capsys, *, partial=False, corpse=False
+):
+    """`saffron batch --stack --budget {budget}` over `order`, instrumented
+    for the refusal witnesses: like `_drive_fake_stack_batch`, but also
+    spies `cli.write_stack_view` and `cli.orphan_rows`, and can ask for a
+    stamped corpse via `ReconcileResult(orphaned=[1])`. Returns a
+    `SimpleNamespace` holding the exit code, the stdout, each spy's call
+    count and the started spec ids. It also holds the `batches` row
+    count, the closed row's `status` (`None` with no row), every stop line
+    and every `batch: refused` line. A missing `batches` row is no error."""
+    real_run_stack_batch = cli.run_stack_batch
+    real_write_stack_view = cli.write_stack_view
+    real_orphan_rows = cli.orphan_rows
+    runners: list[_AdmissionRunner] = []
+    write_stack_view_calls: list[tuple] = []
+    orphan_rows_calls: list[tuple] = []
+
+    def _fake_resolve_queue(
+        repo, home_arg, ledger, *, stamp_orphaned, pinned=None, stack=False
+    ):
+        reconciled = ReconcileResult(orphaned=[1]) if corpse else ReconcileResult()
+        return replace(
+            _fake_batch_resolution(home, repo_id=1, candidates=list(order)),
+            reconciled=reconciled,
+        )
+
+    def _fake_run_stack_batch(
+        candidates,
+        ledger,
+        budget_usd,
+        until,
+        _runner,
+        *,
+        readiness_check,
+        reserve_usd=0.0,
+        writer_usd=0.0,
+        **_ignored,
+    ):
+        repo_id = ledger.upsert_repo(
+            "r",
+            "https://github.com/o/r.git",
+            str(_bare(Path(tempfile.mkdtemp(dir=home.parent)) / "mirror.git")),
+            policy_sha=None,
+        )
+        mint = MintDouble(ledger, repo_id)
+        runner = _AdmissionRunner(ledger)
+        runners.append(runner)
+        return real_run_stack_batch(
+            candidates,
+            ledger,
+            budget_usd,
+            until,
+            runner,
+            readiness_check=readiness_check,
+            reserve_usd=reserve_usd,
+            writer_usd=writer_usd,
+            review=_review_double,
+            mint=mint,
+        )
+
+    def _spy_write_stack_view(*a, **k):
+        write_stack_view_calls.append((a, k))
+        return real_write_stack_view(*a, **k)
+
+    def _spy_orphan_rows(*a, **k):
+        orphan_rows_calls.append((a, k))
+        return real_orphan_rows(*a, **k)
+
+    with monkeypatch.context() as m:
+        _readiness_passes(m, home.parent)
+        m.setattr(cli, "_resolve_queue", _fake_resolve_queue)
+        m.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
+        m.setattr(cli, "write_stack_view", _spy_write_stack_view)
+        m.setattr(cli, "orphan_rows", _spy_orphan_rows)
+        m.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+        repo_dir = home.parent / f"{home.name}-repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        argv = [
+            "--home",
+            str(home),
+            "batch",
+            "--repo",
+            str(repo_dir),
+            "--stack",
+        ]
+        # `None` gives no `--budget`, so the parser's default is the budget.
+        if budget is not None:
+            argv += ["--budget", str(budget)]
+        if partial:
+            argv.append("--partial")
+        exit_code = cli.main(argv)
+        stdout = capsys.readouterr().out
+
+    ledger = Ledger(home / "ledger.db")
+    row = ledger._db.execute(
+        "SELECT status FROM batches ORDER BY batch_id DESC LIMIT 1"
+    ).fetchone()
+    batch_row_count = ledger._db.execute(
+        "SELECT COUNT(*) AS n FROM batches"
+    ).fetchone()["n"]
+    ledger.close()
+    started = runners[0].started if runners else []
+    stop_lines = [
+        line
+        for line in stdout.splitlines()
+        if line.startswith(tuple(f"batch: {r}" for r in typing.get_args(StopReason)))
+    ]
+    refusal_lines = [
+        line for line in stdout.splitlines() if line.startswith("batch: refused")
+    ]
+    return SimpleNamespace(
+        exit_code=exit_code,
+        stdout=stdout,
+        write_stack_view_calls=len(write_stack_view_calls),
+        orphan_rows_calls=len(orphan_rows_calls),
+        started=started,
+        batch_row_count=batch_row_count,
+        status=row["status"] if row is not None else None,
+        stop_lines=stop_lines,
+        refusal_lines=refusal_lines,
+    )
+
+
+def test_a_stack_batch_prints_the_admission_block_saffron_queue_prints(
+    tmp_path, monkeypatch, capsys
+):
+    """`saffron batch --stack` prints `_print_stack_admission`'s block for
+    the order it hands `run_stack_batch`, below `_print_batch_plan`'s own
+    `refusals:` line. It matches `saffron queue --stack`'s own block at
+    the printed total, below it with `--partial`, and below it when the
+    batch is refused. It matches again under patched shares and a
+    patched spec review cap. An empty order and a plain `saffron batch`
+    print none."""
+
+    def _block_from(home, budget, *, partial):
+        result = _drive_stack_admission_batch(
+            _fe3488_order(), budget, home, monkeypatch, capsys, partial=partial
+        )
+        out = result.stdout
+        start = out.index("admission:")
+        plan_index = out.index("refusals:")
+        assert plan_index < start
+        return out[start:].splitlines()[:5], result
+
+    def _queue_block(dirname):
+        capsys.readouterr()
+        repo = _stack_admission_repo(tmp_path, dirname=dirname)
+        qhome = tmp_path / f"{dirname}-home"
+        assert (
+            cli.main(["--home", str(qhome), "queue", "--repo", str(repo), "--stack"])
+            == 0
+        )
+        out = capsys.readouterr().out
+        return out[out.index("admission:") :].splitlines()[:5]
+
+    expected = _queue_block("fe3488-queue-at-total")
+
+    at_total, at_result = _block_from(
+        tmp_path / "home-fe3488-total", 108.0, partial=False
+    )
+    assert at_total == expected
+    assert at_result.exit_code == 0
+
+    below_partial, below_result = _block_from(
+        tmp_path / "home-fe3488-partial", 91.99, partial=True
+    )
+    assert below_partial == expected
+    assert below_result.exit_code == 0
+
+    below_refused, refused_result = _block_from(
+        tmp_path / "home-fe3488-refused", 107.99, partial=False
+    )
+    assert below_refused == expected
+    assert refused_result.exit_code == 2
+    assert refused_result.refusal_lines
+
+    with monkeypatch.context() as m:
+        m.setattr(end_review, "RESERVE_SHARE", 0.375)
+        m.setattr(follow_up, "WRITER_SHARE", 0.375)
+        m.setattr(spec_review, "SPEC_REVIEW_SESSION_USD", 3.0)
+        patched_expected = _queue_block("fe3488-queue-patched")
+        patched_block, patched_result = _block_from(
+            tmp_path / "home-fe3488-patched", 156.0, partial=False
+        )
+        assert patched_block == patched_expected
+        assert patched_result.exit_code == 0
+
+    capsys.readouterr()
+    assert cli._print_stack_admission([]) == 0.0
+    assert capsys.readouterr().out == ""
+
+    def _fake_run_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        return "DRAINED"
+
+    with monkeypatch.context() as m:
+        _readiness_passes(m, tmp_path)
+        m.setattr(
+            cli,
+            "_resolve_queue",
+            lambda *a, **k: _fake_batch_resolution(
+                tmp_path, repo_id=None, candidates=_fe3488_order()
+            ),
+        )
+        m.setattr(cli, "run_batch", _fake_run_batch)
+        m.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+        home_plain = tmp_path / "home-fe3488-plain"
+        assert cli.main(["--home", str(home_plain), "batch"]) == 0
+    plain_out = capsys.readouterr().out
+    assert "admission" not in plain_out
+
+
+def test_a_stack_batch_below_its_total_is_refused_before_any_batch_row(
+    tmp_path, monkeypatch, capsys
+):
+    """A `--budget` strictly below the printed total, with no `--partial`,
+    refuses the batch: one `batch: refused` line naming the total and the
+    budget, exit 2, no `batches` row, no layer, no stop line and no
+    stack view. The page is still rewritten for a stamped corpse, since
+    reconcile already ran. At the total the batch is admitted: one page
+    rewrite, one `batches` row, every layer started, `batch: DRAINED` and
+    one stack view."""
+    order = _fe3488_order()
+
+    with_corpse = _drive_stack_admission_batch(
+        order,
+        107.99,
+        tmp_path / "home-fe3488-corpse",
+        monkeypatch,
+        capsys,
+        corpse=True,
+    )
+    assert with_corpse.exit_code == 2
+    assert len(with_corpse.refusal_lines) == 1
+    refusal = with_corpse.refusal_lines[0]
+    assert refusal.startswith("batch: refused")
+    assert "$107.99" in refusal
+    assert "$108.00" in refusal
+    assert "--partial" in refusal
+    assert with_corpse.started == []
+    assert with_corpse.batch_row_count == 0
+    assert with_corpse.status is None
+    assert with_corpse.stop_lines == []
+    assert with_corpse.write_stack_view_calls == 0
+    assert with_corpse.orphan_rows_calls == 1
+
+    no_corpse_default = _drive_stack_admission_batch(
+        order, None, tmp_path / "home-fe3488-default", monkeypatch, capsys
+    )
+    assert no_corpse_default.exit_code == 2
+    assert "$50.00" in no_corpse_default.refusal_lines[0]
+    assert "$108.00" in no_corpse_default.refusal_lines[0]
+    assert no_corpse_default.orphan_rows_calls == 0
+    assert no_corpse_default.batch_row_count == 0
+
+    no_corpse_subcent = _drive_stack_admission_batch(
+        order, 107.999, tmp_path / "home-fe3488-subcent", monkeypatch, capsys
+    )
+    assert no_corpse_subcent.exit_code == 2
+    refusal_subcent = no_corpse_subcent.refusal_lines[0]
+    assert "$107.999" in refusal_subcent
+    assert "$108.00" in refusal_subcent
+
+    # Past six significant digits too: never rounded.
+    many_digits = _drive_stack_admission_batch(
+        order, 100.1234, tmp_path / "home-fe3488-digits", monkeypatch, capsys
+    )
+    assert "$100.1234 " in many_digits.refusal_lines[0]
+    assert no_corpse_subcent.orphan_rows_calls == 0
+    assert no_corpse_subcent.batch_row_count == 0
+
+    at_total = _drive_stack_admission_batch(
+        order,
+        108.0,
+        tmp_path / "home-fe3488-at-total",
+        monkeypatch,
+        capsys,
+        corpse=True,
+    )
+    assert at_total.exit_code == 0
+    assert at_total.refusal_lines == []
+    assert at_total.orphan_rows_calls == 1
+    assert at_total.batch_row_count == 1
+    assert at_total.started == ["SY-1", "SY-2", "SY-3"]
+    assert at_total.stop_lines == ["batch: DRAINED"]
+    assert at_total.write_stack_view_calls == 1
+
+
+def test_partial_runs_a_stack_order_below_its_total(tmp_path, monkeypatch, capsys):
+    """`--partial` starts the order at a budget below the total, as a
+    stack batch did before this change. It admits what the budget covers
+    and passes the rest over. At the total no flag is needed."""
+    order = _fe3488_order()
+
+    below = _drive_stack_admission_batch(
+        order,
+        91.99,
+        tmp_path / "home-fe3488-partial-below",
+        monkeypatch,
+        capsys,
+        partial=True,
+    )
+    assert below.exit_code == 0
+    assert below.refusal_lines == []
+    assert below.started == ["SY-1", "SY-2"]
+    assert below.stop_lines == ["batch: BUDGET"]
+
+    at_total = _drive_stack_admission_batch(
+        order, 108.0, tmp_path / "home-fe3488-partial-at-total", monkeypatch, capsys
+    )
+    assert at_total.exit_code == 0
+    assert at_total.started == ["SY-1", "SY-2", "SY-3"]
+    assert at_total.stop_lines == ["batch: DRAINED"]
+
+
+def test_partial_without_stack_is_refused_before_readiness(
+    tmp_path, monkeypatch, capsys
+):
+    """`saffron batch --partial` without `--stack` exits 2 at parse time,
+    naming both flags, before any readiness probe or ledger row. The same
+    double sees `saffron batch --stack --partial` reach readiness and
+    open the ledger."""
+    readiness_calls: list[tuple] = []
+    monkeypatch.setattr(
+        cli.preflight,
+        "check_readiness",
+        lambda *a, **k: (
+            readiness_calls.append((a, k))
+            or preflight.Readiness(False, "auth", "token invalid")
+        ),
+    )
+
+    home = tmp_path / "home-no-stack"
+    with pytest.raises(SystemExit) as exited:
+        main(["--home", str(home), "batch", "--partial"])
+
+    assert exited.value.code == 2
+    error_line = capsys.readouterr().err.strip().splitlines()[-1]
+    assert "error:" in error_line
+    assert "--partial" in error_line
+    assert "--stack" in error_line
+    assert readiness_calls == []
+    assert not (home / "ledger.db").exists()
+
+    home_with_stack = tmp_path / "home-with-stack"
+    assert main(["--home", str(home_with_stack), "batch", "--stack", "--partial"]) == 2
+
+    assert len(readiness_calls) == 1
+    assert (home_with_stack / "ledger.db").exists()
 
 
 def test_looking_at_the_queue_still_never_stamps_a_corpse(tmp_path):
@@ -7484,7 +7848,7 @@ def test_saffron_batch_stack_plans_once_and_runs_that_order(
     monkeypatch.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
 
     home_pass = tmp_path / "home-pass"
-    assert main(["--home", str(home_pass), "batch", "--stack"]) == 0
+    assert main(["--home", str(home_pass), "batch", "--stack", "--partial"]) == 0
 
     assert len(resolve_calls) == 1
     assert resolve_calls[0]["stack"] is True
@@ -7623,7 +7987,10 @@ def test_a_stack_batch_writes_its_stack_view_into_the_queue_page(
         )
         _readiness_passes(monkeypatch, tmp_path)
         home = tmp_path / f"home-{stop_reason}"
-        assert main(["--home", str(home), "batch", "--stack"]) == expected_exit
+        assert (
+            main(["--home", str(home), "batch", "--stack", "--partial"])
+            == expected_exit
+        )
 
         reopened = _Ledger(home / "ledger.db")
         view = stack_view(
@@ -7676,7 +8043,7 @@ def test_a_stack_batch_writes_its_stack_view_into_the_queue_page(
     )
     _readiness_passes(monkeypatch, tmp_path)
     home_raise = tmp_path / "home-write-raises"
-    assert main(["--home", str(home_raise), "batch", "--stack"]) == 2
+    assert main(["--home", str(home_raise), "batch", "--stack", "--partial"]) == 2
     printed = capsys.readouterr().out
     assert "saffron: OSError: disk full" in printed
 

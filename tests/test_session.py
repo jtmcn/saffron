@@ -11188,6 +11188,164 @@ def test_rebut_records_each_blockers_answer_and_an_unread_turns_error(
     assert (second["answer"], second["rebuttal_error"]) == ("unread", "")
 
 
+# One lens filing a blocker, a concern and a note on `src/x.py` line 1,
+# which `_ANCHORING_DIFF` changes. Plus a concern on a line it does not.
+_BLOCKER_CONCERN_NOTE = {
+    "findings": [
+        {
+            "file": "src/x.py",
+            "line": 1,
+            "severity": "blocker",
+            "claim": "x returns nothing",
+        },
+        {
+            "file": "src/x.py",
+            "line": 1,
+            "severity": "concern",
+            "claim": "a concern on the changed line",
+        },
+        {
+            "file": "src/x.py",
+            "line": 1,
+            "severity": "note",
+            "claim": "a note on the changed line",
+        },
+        {
+            "file": "src/never-touched.py",
+            "line": 4,
+            "severity": "concern",
+            "claim": "a concern the diff does not change",
+        },
+    ]
+}
+
+
+def test_rebut_hands_each_anchored_concern_to_the_rebuttal_and_records_its_answer(
+    monkeypatch, tmp_path
+):
+    """b-31e3c8 (§5.6): REBUT hands each anchored concern to the rebuttal
+    turn, numbered after the blockers. Neither a note nor an unanchored
+    concern reaches it. Item 42's three answers apply to a concern's own
+    row exactly as they do to a blocker's."""
+
+    def _run(path, rebut_turns, *, rebut_commits):
+        cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+        _rebuttable(monkeypatch, cell, rebut_commits=rebut_commits)
+        _outcome, ledger = _drive(
+            monkeypatch,
+            tmp_path / path,
+            cell=cell,
+            turns=[
+                _turn(_block(_PLAN)),
+                _turn(),
+                _turn(_block(_BLOCKER_CONCERN_NOTE)),
+                _turn(_block({"findings": []})),
+                _turn(_block({"findings": []})),
+                _turn(_block({"findings": []})),
+                *rebut_turns,
+            ],
+        )
+        (task_id,) = [row["task_id"] for row in ledger.queue_lines()]
+        rows = {r["claim"]: r for r in ledger.findings(task_id)}
+        return rows, cell, tmp_path / path / "out" / "SY-1" / "rebuttal.json"
+
+    # A readable turn that answers the concern `fixed`, with its argument.
+    rows, answered_cell, rebuttal_json = _run(
+        "answered",
+        (
+            _turn("Fixed both."),
+            _turn(
+                structured_output={
+                    "rebuttals": [
+                        {"finding": 1, "action": "fixed", "argument": "fixed the bug"},
+                        {
+                            "finding": 2,
+                            "action": "fixed",
+                            "argument": "fixed the concern",
+                        },
+                    ]
+                }
+            ),
+            _turn(
+                structured_output={
+                    "verdicts": [{"finding": 1, "verdict": "withdrawn", "reason": "r"}]
+                }
+            ),
+        ),
+        rebut_commits=1,
+    )
+    concern = rows["a concern on the changed line"]
+    assert (concern["answer"], concern["rebuttal"], concern["rebuttal_error"]) == (
+        "answered",
+        "fixed: fixed the concern",
+        None,
+    )
+    # No lens verdicts a concern.
+    assert concern["verdict"] is None
+    note = rows["a note on the changed line"]
+    assert (note["answer"], note["rebuttal"], note["verdict"]) == (None, None, None)
+    unanchored = rows["a concern the diff does not change"]
+    assert (unanchored["answer"], unanchored["rebuttal"], unanchored["verdict"]) == (
+        None,
+        None,
+        None,
+    )
+
+    # The concern reached `run_rebut`'s own prompt, numbered after the one
+    # blocker, and is not a ledger row a side channel alone populated.
+    fixed_prefix = rebut.REBUT_PROMPT.split("{blockers}")[0]
+    rebuttal_prompt = next(
+        prompt for prompt in answered_cell.turns if prompt.startswith(fixed_prefix)
+    )
+    assert "1. [correctness] src/x.py:1 — x returns nothing" in rebuttal_prompt
+    assert (
+        "2. [correctness] src/x.py:1 — a concern on the changed line" in rebuttal_prompt
+    )
+    assert "never-touched" not in rebuttal_prompt
+    assert "a note on the changed line" not in rebuttal_prompt
+
+    # `rebuttal.json` lists the concern under `concerns`, by its own number.
+    recorded = json.loads(rebuttal_json.read_text())
+    assert [c["claim"] for c in recorded["concerns"]] == [
+        "a concern on the changed line"
+    ]
+    assert recorded["concerns"][0]["finding"] == 2
+
+    # A readable turn that leaves the concern out, answering the blocker alone.
+    rows, _cell, _rebuttal_json = _run(
+        "unanswered",
+        (
+            _turn("Argued the blocker only."),
+            _turn(
+                structured_output={
+                    "rebuttals": [
+                        {"finding": 1, "action": "argued", "argument": "by design"}
+                    ]
+                }
+            ),
+            _turn(
+                structured_output={
+                    "verdicts": [{"finding": 1, "verdict": "withdrawn", "reason": "r"}]
+                }
+            ),
+        ),
+        rebut_commits=0,
+    )
+    concern = rows["a concern on the changed line"]
+    assert (concern["answer"], concern["rebuttal"], concern["rebuttal_error"]) == (
+        "unanswered",
+        None,
+        None,
+    )
+
+    # The rebuttal turn's own session raises outright: unread, with its error.
+    rows, _cell, _rebuttal_json = _run(
+        "unread", (implement.AgentFailed("", _cut_off_turn(cost=0.4)),), rebut_commits=0
+    )
+    concern = rows["a concern on the changed line"]
+    assert (concern["answer"], concern["rebuttal_error"]) == ("unread", "")
+
+
 def test_a_rebut_carries_its_unread_and_unanswered_counts_past_a_pool_cut(
     monkeypatch, tmp_path
 ):

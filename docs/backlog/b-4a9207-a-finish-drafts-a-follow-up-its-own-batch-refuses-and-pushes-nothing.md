@@ -37,3 +37,7 @@ gate that failed.
 - 2026-11-02: filed from the spec loop's run 52.
 - 2026-11-06: recurred in the spec loop's run 54. Finish 67's one real finding was a one-line docstring in `saffron/record/routed.py`. Its follow-up `SA-0338` failed to parse, then failed `prose`, and was pooled. The delegate fixed the line by hand on #1024. b-ffb930 holds the parse failure.
 - 2026-11-09: recurred in the spec loop's run 56. Finish 73 ran `main`'s engine, which lacks this stack's #1099 fix for the writer's own validation. Its follow-up drafts failed to parse three times. `SA-0357` and `SA-0358` were refused for overlapping #1099. The finishing layer went red with one unnamed failure and pushed nothing.
+- 2026-11-10: recurred in the spec loop's run 58. Finish 74 and finish 75
+  graded cell heads, not reviewed heads, and pooled concerns that review
+  commits had already fixed. After #1106 merged, finish 74 could not read
+  its head: "unable to read tree 1b7a3e4e".
