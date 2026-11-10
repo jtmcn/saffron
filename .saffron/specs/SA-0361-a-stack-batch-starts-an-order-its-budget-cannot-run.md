@@ -3,7 +3,7 @@ id: SA-0361
 title: A stack batch starts an order its budget cannot run, and prints no admission line
 type: bug
 priority: 2
-estimated_lines: 18
+estimated_lines: 29
 estimate_measured: true
 touches:
   - saffron/cli.py
@@ -60,14 +60,16 @@ acceptance:
   - claim: >-
       `saffron batch --stack` whose `--budget` is below the printed total, with
       no `--partial`, prints exactly one line starting `batch: refused` after
-      the block. That line names the budget and the total, each as dollars to
-      the cent. The batch then exits `2`. It never reaches `run_stack_batch`,
-      so it writes no `batches` row, starts no layer, prints no stop line and
-      writes no stack view. The witness drives a cent below the total, above
-      the last layer's threshold, and the default `--budget` with no flag
-      given. At the total itself the same instruments see `run_stack_batch`
-      reached, one `batches` row, every layer started, a `batch: DRAINED`
-      line and one stack view written.
+      the block. That line names the total to the cent. It names the budget
+      to the cent, or as given when the budget carries digits past the cent.
+      The batch then exits `2`. It never reaches `run_stack_batch`, so it
+      writes no `batches` row, starts no layer, prints no stop line and
+      writes no stack view. A scan that stamped a corpse still has its queue
+      page rewritten once before the refusal. The witness drives $107.99
+      with a stamped corpse, the default `--budget` with no flag given, and
+      $107.999. At the total, with a stamped corpse, the same instruments
+      see one page rewrite, `run_stack_batch` reached, one `batches` row,
+      every layer started, a `batch: DRAINED` line and one stack view.
     witness: tests/test_cli.py::test_a_stack_batch_below_its_total_is_refused_before_any_batch_row
     wrong_versions:
       - The comparison is `<=`, so a budget equal to the printed total is refused.
@@ -76,6 +78,8 @@ acceptance:
       - The refusal line is printed and the batch goes on into `run_stack_batch`.
       - The refusal is decided after a `batches` row is created, so a refused batch leaves a row behind.
       - The refusal line names the total but not the budget.
+      - The refusal line rounds the budget to the cent, so $107.999 reads as `$108.00 is below $108.00`.
+      - The refusal returns straight after `_print_batch_plan`, before the queue page rewrite, so a stamped corpse never reaches the page.
   - claim: >-
       `--partial` starts the order at a budget below the total as a stack
       batch did before this change. At $91.99 over the witness's order it
@@ -146,13 +150,17 @@ before `SA-0356`, and a second batch with its own reserve and finish ran it.
 
 1. **Print the block.** Under `--stack`, once the scan resolves, `_batch`
    prints `_print_stack_admission(candidates)` for the order it is about to
-   hand `run_stack_batch`. It prints after `_print_batch_plan`. Make the
-   function return the total it printed, and `0.0` for an empty order, so
-   `_batch` compares against the figure the operator read. `_queue` keeps
-   ignoring the return.
+   hand `run_stack_batch`. The block and the refusal below both come after
+   the queue page rewrite (`saffron/cli.py:2479-2496`), at the head of the
+   `--stack` branch. Make the function return the total it printed, and
+   `0.0` for an empty order, so `_batch` compares against the figure the
+   operator read. `_queue` keeps ignoring the return.
 2. **Refuse below the total.** A `--budget` below that total, with no
-   `--partial`, prints one line starting `batch: refused`. It
-   names the budget and the total, each as `$` to the cent, and says
+   `--partial`, prints one line starting `batch: refused`. It names the
+   total as `$` to the cent. It names the budget the same way, unless the
+   budget carries digits past the cent. `_night_budget` takes any positive
+   float (`saffron/cli.py:2152-2162`), and `f"{107.999:.2f}"` is `108.00`.
+   So such a budget prints as given, never rounded. The line also says
    `--partial` starts the order anyway. Then return `2`. Equal to the total
    is admitted. Decide it before `run_stack_batch`, so no `batches` row, no
    layer, no stop line and no stack view exist for the refused batch.
@@ -167,12 +175,19 @@ before `SA-0356`, and a second batch with its own reserve and finish ran it.
    its budget cannot cover (#1107), so do not call the order it starts a
    prefix. `--partial` without `--stack` is refused at parse time, as
    `--defer-end-review` is (`saffron/cli.py:343-344`).
-5. **Docstrings.** The `_batch` docstring's exit-code paragraph stays as it
-   is (`saffron/cli.py:2349`), since the refusal never exits `1`. The
-   `_print_stack_admission` docstring is ten lines at base
-   (`saffron/cli.py:2257-2267`). The `prose`
-   gate counts each line past the tenth, so a line added there is a new
-   hit. On the prototype one added line gave one new hit.
+5. **Docstrings.** The `_print_stack_admission` docstring
+   (`saffron/cli.py:2257-2267`) opens by saying the block prints after
+   `_print_queue`'s output, and it names no return. Reword its opening to
+   name both callers, `_queue` and `_batch`, and to say it returns the
+   total. It is ten lines at base, and the `prose` gate counts each line
+   past the tenth, so keep it to ten. On the prototype, rewording its first
+   two lines gave no new hit, and one added line gave one. The `_batch`
+   docstring stays as it is, its exit-code paragraph included
+   (`saffron/cli.py:2349`). It says `--stack` hands its adapters to
+   `run_stack_batch` (`saffron/cli.py:2343-2344`), which a refused batch
+   now skips. Every line of that sentence sits in a sentence over 25 words
+   or past the docstring's tenth line. On the prototype, a short clause
+   added to its line `readiness or not.` gave one new hit.
 6. **Existing tests that drive a stack batch below its total.** A prototype
    failed four tests in `tests/test_cli.py` and no other in
    `tests/test_cli.py` or `tests/test_finish.py`.
@@ -215,16 +230,21 @@ nothing the change adds, so each collects at base and fails there.
   `_resolve_queue` with `_fake_batch_resolution` and readiness with
   `_readiness_passes`. It wraps the real `run_stack_batch` in a spy that
   passes `_AdmissionRunner`, `_review_double` and a `MintDouble`. It also
-  spies `cli.write_stack_view`. It returns the exit code, the stdout and
-  the spy's call count. It also returns the started ids, the `batches` row
-  count, the stop lines and the stack view count. A missing row is no error.
+  spies `cli.write_stack_view` and `cli.orphan_rows`. Asked for a stamped
+  corpse, its resolution carries a `repo_id` and `ReconcileResult(orphaned=
+  [1])`. It returns a `SimpleNamespace` of the exit code, the stdout and
+  each spy's call count. The namespace also holds the started ids, the
+  `batches` row count, the stop lines and the refusal lines. A missing row
+  is no error.
 - Criterion 1 reads the batch's block from `admission:` through the total
   line. It compares that with the pinned five lines at $108, at $91.99 with
   `--partial` and at $107.99. Under shares of 0.375 and a $3 cap it
   compares with what `cli._print_stack_admission(order)` prints under the
   same patch. Then an empty order and a plain `saffron batch` with
   `cli.run_batch` faked.
-- Criterion 2 drives $108 first, then $107.99 and no `--budget`.
+- Criterion 2 drives $108 with a stamped corpse first. Then it drives
+  $107.99 with one, no `--budget` without one, and $107.999 without one.
+  The page rewrite count is one with a corpse and zero without.
 - Criterion 4 makes the readiness double return a failing `Readiness`, so
   the `--stack --partial` call exits `2` after one probe.
 
