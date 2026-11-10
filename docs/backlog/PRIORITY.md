@@ -125,7 +125,7 @@ refuses the ref.
 load a spec without the ref's mutants, so a regate can judge a witness the cell
 set aside.
 
-**Placed 2026-11-06**, from the spec loop's run 54: **b-fe3488**, ~~**b-ffb930**~~,
+**Placed 2026-11-06**, from the spec loop's run 54: ~~**b-fe3488**~~, ~~**b-ffb930**~~,
 ~~**b-0add4c**~~, then **b-71f95f**. A stack batch starts an order its budget
 cannot run. The follow-up writer's first draft never parses. The record's
 git calls can prompt and drop git's reason. A cell makes CONNECTs no git
@@ -147,7 +147,7 @@ stack thresholds assume every earlier candidate ran.
 criterion cannot name the members its claim covers, so no command sees one
 that no witness drives.
 
-**Placed 2026-11-08**, from the spec loop's run 55: **b-31e3c8**,
+**Placed 2026-11-08**, from the spec loop's run 55: ~~**b-31e3c8**~~,
 **b-cbb6e7**, **b-c7858c**, **b-879e72**, then **b-3df181**. REBUT answers
 no concern, so every in-cell concern reached both seats. A finish minted a
 follow-up id `main` already held. `cite` passes a citation whose code moved.
@@ -318,7 +318,7 @@ then passed it. No gate re-runs a parent's wrong versions.
 **b-a12047**. Fakes kept a reordered function's old signature, so a revert
 passed. PACKAGE leaves a spec's deferred check out of `## Not covered`.
 
-**Placed 2026-10-23**, from the spec loop's run 46: ~~**b-0bd346**~~, then
+**Placed 2026-10-23**, from the spec loop's run 46: **b-0bd346**, then
 ~~**b-066901**~~, ~~**b-1572e7**~~, **b-cc87b1** and ~~**b-7c1c99**~~. REBUT ends a task
 `EXHAUSTED` on a gate failure its own fix made. A layer cut from a review
 commit cannot be packaged again. A child stacks on its lowest open parent.
