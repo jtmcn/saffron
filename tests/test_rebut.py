@@ -627,27 +627,10 @@ def test_each_anchored_concern_reaches_the_rebuttal_turn_numbered_after_the_bloc
     )
 
     # `concerns` is required, not defaulted: a caller cannot silently drop it.
-    with pytest.raises(TypeError):
-        rebut.run_rebut(
-            "cell",
-            blockers=[blocker_a],
-            acceptance=[],
-            options=OPTIONS,
-            session_id="sess-1",
-            spec_body="fix the gap",
-            context_md=CONTEXT_MD,
-            claude_md=None,
-            prompts_dir=PROMPTS,
-            max_turns=20,
-            budget_usd=2.0,
-            head_moved=lambda: True,
-            rerun_gates=lambda _session_id: None,
-            critic_container=lambda: "critic-cell",
-            diff=lambda _critic: DIFF,
-            agent=_agent(),
-            spec_id="SY-1",
-            reviewed_diff=DIFF,
-        )
+    import inspect
+
+    concerns = inspect.signature(rebut.run_rebut).parameters["concerns"]
+    assert concerns.default is inspect.Parameter.empty
 
 
 def test_a_concerns_answer_never_changes_the_state_rebut_reaches():
