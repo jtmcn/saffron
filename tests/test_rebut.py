@@ -581,7 +581,7 @@ def test_each_anchored_concern_reaches_the_rebuttal_turn_numbered_after_the_bloc
     assert "3. [correctness] src/gap.py:1 — concern C" in rebuttal_prompt
     assert "4. [adequacy] src/gap.py:1 — concern D" in rebuttal_prompt
     concerns_intro = rebut.CONCERNS_PROMPT.split("{concerns}")[0]
-    assert concerns_intro in rebuttal_prompt
+    assert "not your report.\n\n" + concerns_intro in rebuttal_prompt
     # The blockers lead, every concern follows, numbered on from the last one.
     assert (
         rebuttal_prompt.index("2. [conventions]")
@@ -602,6 +602,20 @@ def test_each_anchored_concern_reaches_the_rebuttal_turn_numbered_after_the_bloc
         assert "On finding 3" not in prompt
         assert "On finding 4" not in prompt
     assert [v.lens for v in result.verdicts] == ["correctness", "conventions"]
+    # Each session is shown its own blocker and that blocker's answer.
+    own = [
+        (
+            "1. [correctness] src/gap.py:1 — blocker A",
+            "On finding 1, the implementer fixed:",
+        ),
+        (
+            "2. [conventions] src/gap.py:1 — blocker B",
+            "On finding 2, the implementer fixed:",
+        ),
+    ]
+    for prompt, (line, answer) in zip(verdict_prompts, own, strict=True):
+        assert line in prompt
+        assert answer in prompt
 
     # Every entry recorded, concerns included.
     assert [r.finding for r in result.rebuttal.rebuttals] == [1, 2, 3, 4]
@@ -705,6 +719,37 @@ def test_a_concerns_answer_never_changes_the_state_rebut_reaches():
     )
     assert shape3.state == "REBUTTAL_UNJUDGED"
     assert "claimed a fix for 1 blocker(s) and committed nothing" in shape3.why
+
+    # A concern's fix claimed beside an argued blocker adds no claimed-fix
+    # clause. Its twin, with the second finding a blocker, carries one.
+    argued_beside = _run(
+        "Argued one, fixed the other.",
+        _rebuttals(_argued(1), _fixed(2)),
+        _verdicts(_verdict(1, verdict="confirmed")),
+        moved=False,
+        blockers=[blocker],
+        concerns=[concern],
+    )
+    assert argued_beside.state == "READY_FOR_REVIEW"
+    assert "a fix was claimed" not in argued_beside.why
+    argued_twin = _run(
+        "Argued one, fixed the other.",
+        _rebuttals(_argued(1), _fixed(2)),
+        _verdicts(_verdict(1, verdict="confirmed"), _verdict(2, verdict="confirmed")),
+        moved=False,
+        blockers=[blocker, second_blocker],
+    )
+    assert "a fix was claimed" in argued_twin.why
+
+    # Only concern numbers are dropped: an out-of-range entry counts as it did.
+    out_of_range = _run(
+        "Argued.",
+        _rebuttals(_argued(5)),
+        _verdicts(_verdict(1, verdict="confirmed")),
+        moved=False,
+        blockers=[blocker],
+    )
+    assert out_of_range.state == "READY_FOR_REVIEW"
 
     # Shape 4: a concern's own fix moves HEAD, with no blocker answered.
     # The early return does not fire, so a red re-run still ends EXHAUSTED.

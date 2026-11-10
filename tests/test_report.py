@@ -1555,7 +1555,13 @@ def test_the_pull_request_body_shows_each_concerns_answer_under_its_number():
     unreadable_section = unreadable.split("### Concern answers", 1)[1].split("###", 1)[
         0
     ]
-    for row in (r for r in unreadable_section.splitlines() if r.startswith("| 2 ")):
+    rows = [
+        r
+        for r in unreadable_section.splitlines()
+        if r.startswith("| ") and r[2:3].isdigit()
+    ]
+    assert len(rows) == 3
+    for row in rows:
         assert row.split("|")[5].strip() == (
             "no rebuttal was recorded for this turn (see `rebuttal.json`)"
         )

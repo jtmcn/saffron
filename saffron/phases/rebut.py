@@ -145,9 +145,8 @@ class RebutResult:
         self, blockers: Sequence[Finding], concerns: Sequence[Finding] = ()
     ) -> dict:
         """The phase's record. The ledger has no `findings` table, so `verdict`
-        and `rebuttal` have nowhere to go but this artifact (§4.1). `concerns`
-        defaults to empty so `tests/test_task.py`'s existing `as_dict(blockers=[])`
-        calls keep working untouched."""
+        and `rebuttal` have nowhere to go but this artifact (§4.1). A caller with
+        no concerns passes none."""
         return {
             "state": self.state,
             "why": self.why,
@@ -262,8 +261,11 @@ def run_rebuttal(
     extraction answer earns one more call, on the extraction's own session.
     The fix turn never runs again (`DESIGN.md` §5.6).
     """
+    # The leading newline opens a paragraph after the template's last line.
     concerns_text = (
-        CONCERNS_PROMPT.format(concerns=blocker_lines(concerns)) if concerns else ""
+        "\n" + CONCERNS_PROMPT.format(concerns=blocker_lines(concerns))
+        if concerns
+        else ""
     )
     try:
         attempt = agent(
@@ -893,8 +895,9 @@ def run_rebut(
 
     # Only a blocker's answer counts toward the state below (§5.6). Both the
     # early return and its `rebut_state` call drop every concern's entry.
+    concern_numbers = range(len(blockers) + 1, len(blockers) + len(concerns) + 1)
     blocker_only = replace(
-        turn, rebuttals=[r for r in turn.rebuttals if r.finding <= len(blockers)]
+        turn, rebuttals=[r for r in turn.rebuttals if r.finding not in concern_numbers]
     )
     if not moved and not any(r.action == "argued" for r in blocker_only.rebuttals):
         # Nothing was fixed and nothing argued, so HEAD is where the gates last

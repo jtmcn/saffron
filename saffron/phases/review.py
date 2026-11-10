@@ -1045,10 +1045,9 @@ def describe_probes(entries: Sequence[Mapping[str, object]]) -> str:
 def anchored_concerns(reviews: Sequence[LensReview]) -> int:
     """How many anchored concerns the review left. One rule, two callers:
     `review_state` and the queue line the operator sorts on (§6) — a second
-    hand-written copy silently reorders the morning page."""
-    return sum(
-        f.anchored and f.severity == "concern" for r in reviews for f in r.findings
-    )
+    hand-written copy silently reorders the morning page. It counts
+    `rebut_concerns`, so REBUT and this count share one rule."""
+    return len(rebut_concerns(reviews))
 
 
 def review_state(

@@ -309,6 +309,9 @@ def _new_failures(
     return "\n".join(lines)
 
 
+_NO_REBUTTAL_RECORDED = "no rebuttal was recorded for this turn (see `rebuttal.json`)"
+
+
 def _disagreements(
     reviews: Sequence[LensReview], rebut_result: RebutResult | None
 ) -> str:
@@ -338,7 +341,8 @@ def _disagreements(
             v.finding: v for lens in rebut_result.verdicts for v in lens.verdicts
         }
     no_rebuttal_recorded = (
-        "no rebuttal was recorded for this turn (see `rebuttal.json`) — HEAD "
+        _NO_REBUTTAL_RECORDED
+        + " — HEAD "
         + (
             "moved"
             if rebut_result is not None and rebut_result.moved
@@ -403,11 +407,7 @@ def _concern_answers(
     start = len(anchored_blockers(reviews)) + 1
     errored = _rebuttal_errored(rebut_result)
     rebuttals = {} if errored else first_answers(rebut_result.rebuttal)
-    no_rebuttal_recorded = (
-        "no rebuttal was recorded for this turn (see `rebuttal.json`)"
-        if errored
-        else ""
-    )
+    no_rebuttal_recorded = _NO_REBUTTAL_RECORDED if errored else ""
     lines = [
         "### Concern answers",
         "",
