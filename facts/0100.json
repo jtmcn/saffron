@@ -1,0 +1,1 @@
+{"at": "2026-11-10T10:34:14.894088+00:00", "batch_key": "76", "kind": "task_regate", "payload": {"baseline_sha": "b1091fa4189557188c81da12e3ac51d2d2d2d1b2", "head_sha": "8a5968a9ed4dd62be98de3b0aee3d245b6242a9a", "new_failures": 2}, "repo": "saffron", "task_key": "a0109f78cd2e6aa4a4ff06fc262c9b6c"}
