@@ -51,16 +51,20 @@ class Pooled:
 
 
 def next_spec_id(
-    origin_id: str, specs_dir: Path, ledger: Ledger | None, repo_id: int | None
+    origin_id: str,
+    specs_dir: Path,
+    ledger: Ledger | None,
+    repo_id: int | None,
+    *,
+    tree: tuple[Path, str] | None = None,
 ) -> str:
     """One more than the highest number sharing `origin_id`'s prefix.
 
-    Reads three places: the live spec files, their `done/` retirees, and
-    this repo's own tasks. Each carries a spec id whether or not the file
-    that named it still parses, or still exists. The result is
-    zero-padded to `origin_id`'s own digit width. A width already
-    exceeded stays as is. Either being `None` skips the third place: a
-    caller with no ledger, or a repo the ledger holds no row for.
+    Reads the live spec files, their `done/` retirees and this repo's own
+    tasks. `tree`, a mirror and a commit such as the default branch's head,
+    adds that commit's spec paths (b-cbb6e7). The result is zero-padded to
+    `origin_id`'s own digit width, and a wider width stays. A `None`
+    ledger or repo id skips the tasks.
     """
     match = _SPEC_ID.match(origin_id)
     if match is None:
@@ -74,6 +78,18 @@ def next_spec_id(
             continue
         for path in directory.glob("*.md"):
             found = file_id.match(path.name)
+            if found is not None:
+                highest = max(highest, int(found.group(1)))
+    if tree is not None:
+        listed = subprocess.run(
+            git_argv("ls-tree", "-r", "--name-only", tree[1], "--", ".saffron/specs"),
+            cwd=tree[0],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        for name in listed.stdout.splitlines():
+            found = file_id.match(Path(name).name)
             if found is not None:
                 highest = max(highest, int(found.group(1)))
     if ledger is not None and repo_id is not None:
@@ -239,6 +255,7 @@ def write_follow_ups(
     cap_usd: float,
     emit: Callable[[str], None],
     pooled: list[Pooled],
+    main_head: str | None = None,
 ) -> list[Candidate]:
     """One stack's qualified findings, turned into follow-up candidates.
 
@@ -364,7 +381,13 @@ def write_follow_ups(
             else None
         )
 
-        candidate_id = next_spec_id(origin_fields.spec_id, specs_dir, ledger, repo_id)
+        candidate_id = next_spec_id(
+            origin_fields.spec_id,
+            specs_dir,
+            ledger,
+            repo_id,
+            tree=(mirror, main_head) if main_head is not None else None,
+        )
         prompt = _prompt(
             candidate_id=candidate_id,
             allowed=sorted(allowed),

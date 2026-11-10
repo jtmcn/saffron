@@ -12378,6 +12378,10 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
     finding its walk never reached."""
     rig = _follow_ups_mirror(tmp_path)
     mirror, broken_sha, base_sha = rig.mirror, rig.broken_sha, rig.base_sha
+    # b-cbb6e7: the finish reads the default branch's head for follow-up ids.
+    monkeypatch.setattr(
+        cli.package_phase, "fetch_default_branch", lambda _m, _u: ("main", base_sha)
+    )
 
     checkout = tmp_path / "checkout"
     (checkout / ".saffron").mkdir(parents=True)
@@ -12572,6 +12576,7 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
         cap_usd,
         emit,
         pooled,
+        main_head=None,
     ):
         write_follow_ups_calls.append(
             {
@@ -12584,6 +12589,7 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
                 "test_paths": test_paths,
                 "cap_usd": cap_usd,
                 "pooled": pooled,
+                "main_head": main_head,
             }
         )
         qualification = qualify(stack_arg.layers, stack_arg.join)
@@ -12644,6 +12650,7 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
     # --- the success path ---
     assert len(result) == 1
     assert write_follow_ups_calls[0]["pooled"] is pooled
+    assert write_follow_ups_calls[0]["main_head"] == base_sha
     assert [p.reason for p in pooled] == ["pre-existing", "p1"]
     assert "pooled line" in printed
 
@@ -12829,6 +12836,7 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
             cap_usd,
             emit,
             pooled,
+            main_head=None,
         ):
             qualification = qualify(stack_arg.layers, stack_arg.join)
             a, b, c, d, _e = qualification.groups
