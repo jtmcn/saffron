@@ -1,11 +1,12 @@
 ---
 id: b-cbb6e7
 title: A finish mints its follow-up's id from the stack top's specs, so a spec merged to main since the batch took the same id
-status: open
+status: done
 tier: 2
 filed: 2026-11-08
+closed: 2026-11-10
 specs: []
-prs: []
+prs: [1126]
 commits: []
 cites: [§3.4]
 related: [b-589cf6]
@@ -32,3 +33,5 @@ mints the next id.
 ## Record
 
 - 2026-11-08: filed from the spec loop's run 55.
+- 2026-11-10: done by hand in #1126. A finish counts the spec paths at the
+  default branch's head when it mints a follow-up id.
