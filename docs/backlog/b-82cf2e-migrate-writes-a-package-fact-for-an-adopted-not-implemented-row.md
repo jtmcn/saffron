@@ -33,3 +33,8 @@ was forbidden to `SA-0264`.
 ## Record
 
 - 2026-10-12: filed from the spec loop's run 35 (#830).
+- 2026-11-10: a second shape, found by `SA-0364`'s writer across the mirror's
+  405 refs. `SA-0338`, `SA-0353` and `SA-0360` were adopted from `EXHAUSTED`
+  and then merged. Each ref's `task_package` fact reads `EXHAUSTED`, where
+  `_outcome_facts` derives `READY_FOR_REVIEW` from the `pr_url`. So `migrate`
+  refuses all three refs.
