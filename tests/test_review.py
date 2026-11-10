@@ -1531,7 +1531,7 @@ def test_a_criterion_probe_answer_that_is_not_the_schema_is_reprompted_once_in_i
     assert len(record) == 14  # six re-prompted pairs, then two single turns
     first_calls, second_calls = record[0:12:2], record[1:12:2]
     assert all(call["kwargs"].get("resume") is None for call in first_calls)
-    # Each criterion's own cap is the pool's remaining when its session
+    # Each criterion's own cap is what REVIEW's pool holds when its session
     # starts. The reprompt's own cap is that figure less the first turn's 0.3.
     expected_reprompt_caps = [9.7, 9.2, 8.7, 8.2, 7.7, 7.2]
     for letter, first_call, second_call, expected_cap in zip(
@@ -1904,7 +1904,7 @@ def test_each_criterion_with_wrong_versions_gets_one_session_that_turns_each_int
     assert record[0]["options"]["max_budget_usd"] == 2.0
     assert record[1]["options"]["tools"] == review.REVIEW_TOOLS
     assert record[1]["options"]["max_turns"] == 20
-    # c's own cap is the pool's remainder once a's own $0.35 came off.
+    # c's own cap is what REVIEW's pool holds once a's own $0.35 came off.
     assert record[1]["options"]["max_budget_usd"] == pytest.approx(1.65)
 
     assert entries == [
@@ -2183,7 +2183,7 @@ def test_a_wrong_version_answer_that_is_not_the_schema_is_reprompted_once_in_its
     assert len(record) == 8
     first_calls, second_calls = record[0::2], record[1::2]
     assert all(call["kwargs"].get("resume") is None for call in first_calls)
-    # Each criterion's own cap is the pool's remaining when its session
+    # Each criterion's own cap is what REVIEW's pool holds when its session
     # starts. The reprompt's own cap is that figure less the first turn's 0.3.
     expected_reprompt_caps = [9.7, 9.2, 8.7, 8.2]
     for letter, first_call, second_call, expected_cap in zip(
@@ -2253,11 +2253,11 @@ def test_a_wrong_version_reprompt_fires_once_and_only_where_a_lens_would():
     bad_quote = 'Here it is.\n<output>\n{"versions": [{"reason": "a "q" b", "edit": null}]}\n</output>'
 
     turns = [
-        # a: the pool's first session. Its cap equals the pool's own $20.
+        # a: the first session of REVIEW's pool. Its cap equals all $20 of it.
         # Spending exactly half fires the re-prompt, which fails again.
         _wv_turn("s-a", bad, 10.0),
         _wv_turn("s-a", bad, 0.2),
-        # b: the pool held $9.80 here. Spending more than half of it
+        # b: REVIEW's pool held $9.80 here. Spending more than half of it
         # leaves less than it spent, so no re-prompt fires.
         _wv_turn("s-b", bad, 5.0),
         # c: no session id, so no re-prompt.

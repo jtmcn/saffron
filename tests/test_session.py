@@ -6219,12 +6219,12 @@ def _two_wrong_version_criteria():
 
 def test_a_review_that_crosses_its_pool_starts_no_later_session(monkeypatch, tmp_path):
     """REVIEW's pool opens once and every lens, criterion probe and
-    wrong-version session draws on it. A session the pool cannot cover
+    wrong-version session draws on it. A session REVIEW's pool cannot cover
     does not start: it is filed with an error, like a failed turn, and
     costs nothing. The task ends `REVIEW_INCOMPLETE`, and REVIEW's own
     last line names that session, apart from any other session's own
     error line."""
-    # Cell A: the pool opens at $8.00. Three lenses spend $3.00, $1.25
+    # Cell A: REVIEW's pool opens at $8.00. Three lenses spend $3.00, $1.25
     # (a failure) and $2.00, leaving $1.75, under the floor: the fourth is cut.
     cell = _stub_the_runtime(monkeypatch)
     outcome, ledger = _drive(
@@ -6254,11 +6254,14 @@ def test_a_review_that_crosses_its_pool_starts_no_later_session(monkeypatch, tmp
     probes = json.loads((outcome.task_dir / "criterion-probes.json").read_text())
     assert [p["error"] is None for p in probes] == [False, False]
     assert [wv["error"] is None for wv in outcome.wrong_versions] == [False, False]
+    wvs = json.loads((outcome.task_dir / "wrong-versions.json").read_text())
+    assert [wv["error"] is None for wv in wvs] == [False, False]
     assert outcome.spent_usd == pytest.approx(0.2 + 3.0 + 1.25 + 2.0)
     (row,) = ledger._db.execute(
         "SELECT state FROM tasks WHERE task_id = ?", (outcome.task_id,)
     ).fetchall()
     assert row["state"] == "REVIEW_INCOMPLETE"
+    assert "REVIEW_INCOMPLETE: $6.45 spent, session sess-1" in cell.watched
     review_lines = [line for line in cell.watched if line.startswith("REVIEW:")]
     assert review_lines[-1] == (
         "REVIEW: REVIEW's pool could not cover conventions — "
@@ -6266,7 +6269,7 @@ def test_a_review_that_crosses_its_pool_starts_no_later_session(monkeypatch, tmp
     )
     assert any("contract produced nothing" in line for line in review_lines[:-1])
 
-    # Cell B: four lenses spend the $8.00 pool down to $2.50. The first
+    # Cell B: four lenses spend REVIEW's $8.00 pool down to $2.50. The first
     # criterion probe spends $0.75 of it, and the second is cut at $1.75.
     cell_b = _stub_the_runtime(monkeypatch)
     outcome_b, ledger_b = _drive(
@@ -6297,6 +6300,7 @@ def test_a_review_that_crosses_its_pool_starts_no_later_session(monkeypatch, tmp
     assert [p["error"] is None for p in probes_b] == [True, False]
     assert [wv["error"] is None for wv in outcome_b.wrong_versions] == [False, False]
     assert outcome_b.spent_usd == pytest.approx(0.2 + 2.0 + 1.5 + 1.0 + 1.0 + 0.75)
+    assert "REVIEW_INCOMPLETE: $6.45 spent, session sess-1" in cell_b.watched
     review_lines_b = [line for line in cell_b.watched if line.startswith("REVIEW:")]
     assert review_lines_b[-1] == (
         "REVIEW: REVIEW's pool could not cover t.py::b — "
@@ -6331,6 +6335,7 @@ def test_a_review_that_crosses_its_pool_starts_no_later_session(monkeypatch, tmp
     assert [p["error"] is None for p in probes_c] == [True, True]
     assert [wv["error"] is None for wv in outcome_c.wrong_versions] == [True, False]
     assert outcome_c.spent_usd == pytest.approx(0.2 + 4.0 + 0.3 + 0.2 + 2.0)
+    assert "REVIEW_INCOMPLETE: $6.70 spent, session sess-1" in cell_c.watched
     review_lines_c = [line for line in cell_c.watched if line.startswith("REVIEW:")]
     assert review_lines_c[-1] == (
         "REVIEW: REVIEW's pool could not cover t.py::b — "
@@ -6353,12 +6358,12 @@ def test_a_review_that_fits_its_pool_runs_every_session_capped_at_what_is_left(
 ):
     """A REVIEW within REVIEW's pool runs every lens, criterion probe and
     wrong-version session and reaches `READY_FOR_REVIEW`, each capped at
-    what the pool holds left. The pool opens at the task's remainder,
+    what REVIEW's pool holds left. It opens at the task's remainder,
     floored once per declared lens. A remainder above the floor opens
     there, and one below it opens at the floor instead."""
     bad = "I could not find anything wrong."
 
-    # Cell A: the pool opens at $20. The second lens, probe and
+    # Cell A: REVIEW's pool opens at $20. The second lens, probe and
     # version session each re-prompt. The first of each fails too.
     cell = _stub_the_runtime(monkeypatch)
     outcome, ledger = _drive(
@@ -6387,10 +6392,25 @@ def test_a_review_that_fits_its_pool_runs_every_session_capped_at_what_is_left(
     assert outcome.state == "READY_FOR_REVIEW"
     assert [r.error is None for r in outcome.reviews] == [True, True, True, True]
     # The first lens opens at the $20.00 remainder, not the $20.20 budget.
-    # Probe b's and wrong-version b's caps each reflect the prior failure.
-    assert cell.turn_options[2]["max_budget_usd"] == pytest.approx(20.0)
-    assert cell.turn_options[8]["max_budget_usd"] == pytest.approx(15.0)
-    assert cell.turn_options[12]["max_budget_usd"] == pytest.approx(12.0)
+    # Each failure and each re-prompt turn lowers every later cap.
+    caps = [
+        20.0,
+        19.0,
+        18.0,
+        17.5,
+        16.5,
+        15.5,
+        15.0,
+        14.0,
+        13.5,
+        12.5,
+        12.0,
+        11.0,
+        10.5,
+    ]
+    assert [o["max_budget_usd"] for o in cell.turn_options[2:]] == [
+        pytest.approx(cap) for cap in caps
+    ]
     probes = json.loads((outcome.task_dir / "criterion-probes.json").read_text())
     assert [p["error"] is None for p in probes] == [False, True, True]
     assert [wv["error"] is None for wv in outcome.wrong_versions] == [
@@ -6402,8 +6422,8 @@ def test_a_review_that_fits_its_pool_runs_every_session_capped_at_what_is_left(
         0.2 + (1.0 + 1.5 + 1.0 + 1.0) + (0.5 + 1.5 + 1.0) + (0.5 + 1.5 + 1.0)
     )
 
-    # Cell B: the $1.00 remainder is under the $8.00 floor, so the pool
-    # opens at the floor: ten sessions of $0.50 each, well inside it.
+    # Cell B: the $1.00 remainder is under the $8.00 floor, so REVIEW's
+    # pool opens at the floor: ten sessions of $0.50 each, well inside it.
     cell_b = _stub_the_runtime(monkeypatch)
     turns_b = (
         [_turn(_block(_PLAN)), _turn()]
@@ -6424,7 +6444,7 @@ def test_a_review_that_fits_its_pool_runs_every_session_capped_at_what_is_left(
     ]
 
     # Cell C: nine sessions at $0.50, with `conventions` dropped from
-    # `review.LENSES`, read live so the pool opens at $6.00 instead.
+    # `review.LENSES`, read live so REVIEW's pool opens at $6.00 instead.
     monkeypatch.setattr(
         review,
         "LENSES",

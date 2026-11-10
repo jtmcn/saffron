@@ -358,8 +358,8 @@ class ReviewPool:
     """REVIEW's one pool, shared by every lens, criterion-probe and
     wrong-version session in this REVIEW (`DESIGN.md` §4.3). `remaining` is
     read as a session's own cap, then taken down by its reported cost once
-    the session ends. `cut` holds the first session's name the pool could
-    not cover, the one `review_state` names in its `REVIEW_INCOMPLETE` line.
+    the session ends. `cut` holds the first session's name REVIEW's pool
+    could not cover, the one `review_state` names in its `REVIEW_INCOMPLETE` line.
     """
 
     remaining: float
@@ -367,8 +367,8 @@ class ReviewPool:
     cut: str | None = None
 
     def cover(self, name: str) -> float | None:
-        """What a session named `name` can spend, or `None` once the pool
-        holds less than its floor. Records the first name it could not
+        """What a session named `name` can spend, or `None` once REVIEW's
+        pool holds less than its floor. Records the first name it could not
         cover, and never overwrites it with a later one."""
         if self.remaining < self.floor:
             if self.cut is None:
@@ -413,8 +413,8 @@ def run_review(
     emit: Callable[[Event], None] = lambda event: print(describe(event)),
 ) -> list[LensReview]:
     """Every declared lens, in order, on this diff, each capped at what
-    REVIEW's pool has left. A lens the pool cannot cover does not start, and
-    is filed with an error naming the cut rather than skipped. The host
+    REVIEW's pool has left. A lens REVIEW's pool cannot cover does not
+    start, and is filed with an error naming the cut rather than skipped. The host
     drives the loop."""
     reviews = []
     for lens in LENSES:
@@ -562,9 +562,9 @@ def run_criterion_probes(
     """One fresh session per criterion, in the spec's own declared order
     (backlog items b-2750d5, b-78a590). Every entry is asked about, a
     `preserves` one included, and a spec declaring none buys no session at
-    all. Each session is capped at what REVIEW's pool has left. One the
-    pool cannot cover does not start, and is filed the same way a failed
-    turn is. Each session lists the claim's own sentences and names one
+    all. Each session is capped at what REVIEW's pool has left. One that
+    REVIEW's pool cannot cover does not start, and is filed the same way a
+    failed turn is. Each session lists the claim's own sentences and names one
     edit per sentence, so a bad shape is re-prompted once through
     `_parse_or_reprompt`: the session covers a whole claim, not one edit,
     so the re-prompt is worth paying for.
@@ -763,16 +763,16 @@ def run_wrong_versions(
     spec_id: str,
     emit: Callable[[Event], None] = lambda event: print(describe(event)),
 ) -> list[dict]:
-    """One fresh session per criterion that declares wrong versions, in
-    the spec's own declared order (backlog item b-7e69d0). A criterion
-    declaring none buys no session, exactly like `run_criterion_probes`.
-    Each session is capped at what REVIEW's pool has left, and one the
-    pool cannot cover does not start.
+    """One fresh session per criterion that declares wrong versions, in the spec's
+    own declared order (backlog item b-7e69d0). A criterion declaring none buys no
+    session, exactly like `run_criterion_probes`. Each session is capped at what
+    REVIEW's pool has left, and one it cannot cover does not start.
 
     An answer that is not the schema gets one re-prompt, through
-    `_parse_or_reprompt`: refused when the ceiling left is less than the
-    failed turn spent, or the turn carries no session id. The retry
-    resumes that session with the error, then `EXTRACTION_PROMPT`."""
+    `_parse_or_reprompt`: refused when the ceiling left is less than the failed
+    turn spent, or the turn carries no session id. The retry resumes that session
+    with the error, then `EXTRACTION_PROMPT`. An `AgentFailed` turn is never
+    re-prompted."""
     entries = []
     for criterion in acceptance:
         if not criterion.wrong_versions:
