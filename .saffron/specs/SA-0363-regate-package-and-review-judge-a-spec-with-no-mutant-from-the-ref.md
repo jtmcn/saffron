@@ -3,7 +3,7 @@ id: SA-0363
 title: Regate, package and review load a spec with no mutant from the ref, so they judge a witness the cell set aside
 type: bug
 priority: 2
-estimated_lines: 50
+estimated_lines: 61
 estimate_measured: true
 touches:
   - saffron/mutants.py
@@ -43,7 +43,7 @@ forbidden:
   - tests/test_queued_specs.py
 budget_usd: 64
 max_attempts: 3
-max_turns: 290
+max_turns: 300
 risk: standard
 acceptance:
   - claim: >-
@@ -54,12 +54,16 @@ acceptance:
       the diff's own file. The spec `reverify` receives carries the pinned
       commit's mutant. A task whose row pins no commit attaches no mutant,
       though the ref holds one. Its witness is judged, so it records one new
-      failure and exits 1.
+      failure and exits 1. A spec at base that declares the witness's mutant
+      inline, outside the diff, keeps that inline mutant and regates green,
+      though its row pins the commit whose mutant names the diff's file.
     witness: tests/test_regate.py::test_regate_judges_a_witness_its_cells_revert_set_aside_and_finds_no_new_failure
     wrong_versions:
       - Regate reads the mutants at the ref's current head rather than at the commit the task's row pins.
       - A task whose row pins no commit reads the ref's current head instead of attaching nothing.
       - Regate attaches the mutants to a copy and still hands `reverify` the spec it loaded from the base export.
+      - A spec declaring a mutant inline reaches `attach_mutants`, so the pinned commit's mutant replaces the inline one.
+      - A spec declaring a mutant inline is declined, as `run_task` refuses it.
   - claim: >-
       `saffron regate` declines a task whose pinned mutants commit it cannot
       read, before the image or any cell. A commit the mirror lacks, and a
@@ -85,12 +89,16 @@ acceptance:
       `saffron package` hands `package()` the spec with the mutants the task's
       row pins. A row pinning a commit packages that commit's mutant, though
       the ref has moved on, and builds the image. A row pinning none packages
-      no mutant, though the ref holds one.
+      no mutant, though the ref holds one. A spec declaring its mutant inline
+      packages that inline mutant, though its row pins a commit the mirror
+      lacks.
     witness: tests/test_task.py::test_package_hands_package_the_mutants_the_tasks_row_pins
     wrong_versions:
       - "`package_ready_task` attaches the mutants and still passes `ready.spec` to `package()`."
       - The package path reads the ref's current head rather than the row's commit.
       - A row pinning no commit reads the ref's current head.
+      - A spec declaring a mutant inline reaches `attach_mutants` and loses the inline mutant.
+      - The pinned commit is looked for before the inline mutant is kept, so a spec declaring one is refused for a commit the mirror lacks.
   - claim: >-
       `package_ready_task` returns `Refused` for a pinned mutants commit it
       cannot read. A commit the mirror lacks, and one whose `<spec id>.yaml`
@@ -107,11 +115,14 @@ acceptance:
       `saffron review` hands its lenses the spec with the mutants the task's
       row pins. A row pinning a commit reviews with that commit's mutant,
       though the ref has moved on. A row pinning none attaches no mutant,
-      though the ref holds one. Both read a recorded spec text.
+      though the ref holds one. A recorded text declaring its mutant inline
+      keeps that inline mutant, though its row pins a readable commit. All
+      three read a recorded spec text.
     witness: tests/test_commit_review.py::test_review_hands_its_lenses_the_spec_with_the_mutants_the_tasks_row_pins
     wrong_versions:
       - Review reads the mutants at the ref's current head.
       - Review attaches the mutants only to a spec loaded from the base export, so a recorded spec text reaches the lenses with none.
+      - A recorded text declaring a mutant inline reaches the lenses with the pinned commit's mutant instead.
   - claim: >-
       `saffron review` declines a task whose pinned mutants commit it cannot
       read, before any cell. A commit the mirror lacks, and one whose
@@ -187,6 +198,21 @@ can then count a new failure on a witness the cell's `revert` set aside.
 `adopt` then keeps the task where it was. `package()`'s own
 re-verification reads the spec it is handed the same way.
 
+**The `witness` gate is armed too, by intent.** With a mutant attached, the
+`witness` gate inside `reverify` applies it. A review commit that rewrites a
+mutant's `find` text then records `mutant-find-absent` as a new failure, and
+`adopt` keeps the task where it was. PACKAGE already judges the attached
+spec this way (`saffron/task.py:966-968`), and a regate judges with "the
+task's own gates" (`DESIGN.md` §5.7).
+
+**An inline mutant is refused only for a cell.** `run_task` refuses one
+because a cell would read it from `HEAD` (`DESIGN.md` §5.4.1). Regate,
+package and review run no implementing cell. A task whose spec at its base
+predates `SA-0338` declares its mutants inline, and its cell was judged by
+them. `attach_mutants` sets every criterion's mutant from the file it is
+given (`saffron/mutants.py:117-121`), so an inline mutant that reaches it
+is replaced.
+
 **The mirror holds a pinned commit.** `ensure_mirror` fetches
 `refs/saffron/mutants*` in a second fetch (`saffron/repos/mirror.py:84-92`).
 `saffron mutant` builds each commit on top of the previous one
@@ -196,13 +222,17 @@ re-verification reads the spec it is handed the same way.
 
 1. **One helper.** Add a function to `saffron/mutants.py`, beside
    `attach_mutants`. It takes the mirror, a mutants commit or `None`, and
-   the spec. It raises `MutantsError` for a commit the mirror lacks, with
-   `run_task`'s reason text. It then runs `refuse_inline_mutants`,
-   `read_mutants` and `attach_mutants`, in `run_task`'s order, and returns
-   the attached copy. `has_commit` comes from `saffron/repos/mirror.py`.
-2. **`run_task` calls it.** Replace `saffron/task.py:780-787` with one call
-   inside the existing `try`. The printed line and the `Refused` stay as
-   they are. Drop the imports nothing else uses.
+   the spec. A spec declaring any mutant inline comes back untouched, and
+   nothing is read from the ref or the mirror for it. Otherwise it raises
+   `MutantsError` for a commit the mirror lacks, with `run_task`'s reason
+   text. It then runs `read_mutants` and `attach_mutants` and returns the
+   attached copy. `has_commit` comes from `saffron/repos/mirror.py`. Add
+   the three new readers to the module docstring, which names only
+   `run_task` and `cli._stack_mint` (`saffron/mutants.py:4`).
+2. **`run_task` calls it.** Replace `saffron/task.py:780-787` with a call
+   to `refuse_inline_mutants`, then the helper, both inside the existing
+   `try`. Only `run_task` refuses an inline mutant. The printed line and
+   the `Refused` stay as they are. Drop the imports nothing else uses.
 3. **`run_regate` calls it** after `_spec_at_base`, inside the `try`, with
    `ledger.task_mutants_commit(task_id)`. A `SpecError` becomes a
    `_Declined` whose reason is the error's text on one line. It declines
@@ -212,8 +242,9 @@ re-verification reads the spec it is handed the same way.
    A `SpecError` returns `Refused` with the error's text on one line. The
    attached spec reaches `package()`. Update its docstring's step list.
 5. **`run_commit_review` calls it** after `_spec_for_task`, inside the
-   `try`. A `SpecError` becomes a `_Declined`, so it prints `review:` and
-   exits 2 like every other decline there.
+   `try`. A `SpecError` becomes a `_Declined` whose reason is the error's
+   text on one line. It prints `review:` and exits 2 like every other
+   decline there.
 
 Each refusal matches its command's existing kind: regate's `_Declined` and
 exit 1, package's `Refused` and exit 1, review's `_Declined` and exit 2.
@@ -227,9 +258,6 @@ exit 1, package's `Refused` and exit 1, review's `_Declined` and exit 2.
   package` is its one caller through `package_ready_task`.
 - `cli.py`. PR #1130 wraps `package` and `finish` there, and no edit here
   needs it.
-- Keeping an inline mutant for an older task. The helper refuses one as
-  `run_task` does, so the three commands decline such a task. That is
-  only a spec at its base that predates `SA-0338`.
 
 ## Notes for the agent
 
@@ -251,6 +279,10 @@ test body.
   witness's mutant in `src/elsewhere.py`, outside the diff. The next names
   `work.txt`, the packaged commit's own file. Its `find` must appear in
   neither the spec's body nor its claim.
+- The regate witness's inline case builds a second fixture in its own
+  `tmp_path` subdirectory. Its spec at base declares the witness's mutant
+  inline in `src/elsewhere.py`, and its row pins the commit naming
+  `work.txt`.
 - The regate fake for `package_phase.reverify` runs the real
   `saffron.gates.core.revert.revert_gate` over `kwargs["spec"].acceptance`.
   Use `changed_files=["work.txt"]`, `test_paths=["tests/**"]` and a
@@ -274,9 +306,12 @@ test body.
   does in `tests/test_cli.py`. Spy on `package_phase.package`. Reuse
   `_mutants_commit` and `_set_mutants_ref`. Each case needs its own
   `tmp_path` subdirectory, since `_recorded_ledger` builds a mirror there.
+  The inline case hands `ReadyTask` a spec from `_rev_text(mutant_find=...)`
+  and pins a commit the mirror lacks.
 - `tests/test_commit_review.py`. Record a spec text that declares one
   criterion, since the fixture's file at base declares none. Monkeypatch
-  `end_review._review_one_layer` with a spy that returns `[]`.
+  `end_review._review_one_layer` with a spy that returns `[]`. The inline
+  case records a text whose criterion declares a `mutant:`.
 - Each decline witness first runs one task with a readable pinned commit
   through the same fakes. It sees the image, `reverify` or the layer review
   reached. Only then does it run the two unreadable ones.
@@ -293,6 +328,6 @@ existing failure in `tests/test_task.py`, `tests/test_cli.py`,
 `tests/test_mutants.py`, `tests/test_batch.py` and `tests/test_package.py`
 on the prototype.
 
-**Size.** The prototype measured 196 changed tokens by `size_gate`
-against the `bug` ceiling of 1300. It measured 1722 more under the test
+**Size.** The prototype measured 244 changed tokens by `size_gate`
+against the `bug` ceiling of 1300. It measured 2062 more under the test
 paths.
