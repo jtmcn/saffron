@@ -55,9 +55,14 @@ acceptance:
       Two tasks each hold a blocker, a note and a concern. REBUT recorded the
       blocker and the concern with no verdict and no rebuttal. On one task
       both read `unread` with an error. On the other both read `unanswered`
-      with none. A third task holds a concern at position 1 and a blocker at
-      position 2, and REBUT recorded the blocker first, both `unread`.
-      `migrate` against that live record counts all three tasks as migrated,
+      with none. A third task holds, in position order,
+      lens A's concern, lens A's blocker, lens B's concern and lens B's
+      blocker. REBUT recorded both blockers first, then both concerns, all
+      `unread`. A fourth task holds a concern at position 1 and, at position
+      2, an unanchored blocker whose claim starts with `review.HOST_FILED`.
+      REBUT recorded that blocker first, both `unread`. The blocker group is
+      chosen by the row's `severity` alone. `migrate` against that live
+      record counts all four tasks as migrated,
       refuses none, and appends nothing. Into an empty record it derives, per
       task, the two `rebuttal` payloads the live `Ledger` wrote, in its order.
       A fold of that record gives back each finding's `verdict`, `rebuttal`,
@@ -72,14 +77,17 @@ acceptance:
       - The fact's `answer` and `error` are swapped.
       - A `rebuttal` fact's `position` counts only the findings REBUT asked about, so the concern reads 2.
       - The `rebuttal` facts are derived in position order, so a concern recorded before a blocker comes first.
+      - The blockers' facts are derived in reverse position order, or lens by lens in reverse.
+      - The blocker group holds only anchored blockers, so an unanchored host-filed blocker falls among the rest.
   - claim: >-
       `migrate` derives no `rebuttal` fact for a finding whose row holds no
       `verdict`, no `rebuttal` and no `answer`. The witness drives three
       tasks holding only such rows. One holds a concern and a note and no
       blocker. One holds a blocker and ended before REBUT. One holds a
       blocker, opened a `REBUTTING` attempt, and ended `ORPHANED` before
-      recording any rebuttal. Each derives none. A fourth task holds the same
-      findings, and its REBUT recorded the blocker and the concern `unread`.
+      recording any rebuttal. Each derives none. A fourth task holds a blocker, a
+      note and a concern, in that position order, and its REBUT recorded the
+      blocker and the concern `unread`.
       It derives two, at positions 1 and 3, through the same count. Against
       the live record its `Ledger` wrote, all four tasks are migrated, none is
       refused, and no ref gains a fact.
