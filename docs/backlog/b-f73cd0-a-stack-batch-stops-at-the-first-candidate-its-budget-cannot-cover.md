@@ -1,11 +1,12 @@
 ---
 id: b-f73cd0
 title: A batch stops at the first candidate its budget cannot cover, though a later one fits
-status: open
+status: done
+closed: 2026-11-09
 tier: 2
 filed: 2026-10-16
 specs: [SA-0356]
-prs: []
+prs: [1107]
 commits: []
 cites: [§4.2.1]
 related: [b-b24cf7]
@@ -35,3 +36,4 @@ layer's dependents are refused, as a missed layer's are.
 
 - 2026-10-16: filed from the spec loop's run 42.
 - 2026-10-17: recurred in the spec loop's run 43. A plain batch rescans into `SA-0276` after `SA-0284`. A `--stack` batch orders `SA-0294` behind 13 chained specs. The operator ran `SA-0294` as an attended cell first.
+- 2026-11-09: done in #1107 (`SA-0356`), from the spec loop's run 57. A batch now passes over a candidate its budget cannot cover, names it once, and runs the next that fits. Follow-ups are passed over the same way.

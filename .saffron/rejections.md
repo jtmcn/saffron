@@ -2875,3 +2875,16 @@ critic's own, so they have no line.
 - `SA-0359` (#1101): the docstring witness passed a second `gate_result`
   count beside the right one, and its word map stopped at five.
   **Bucket 3**, adequacy. **Landed:** a review commit on #1101.
+
+## 2026-11-09, spec loop run 57 (#1106, #1107)
+
+- `SA-0343` (#1106): criterion 1's witness never read
+  `wrong-versions.json`, and criterion 2's checked three caps of thirteen.
+  Five wrong versions survived. **Bucket 3**, adequacy. **Landed:** a
+  review commit on #1106.
+- `SA-0343` (#1106): no cell asserted its `REVIEW_INCOMPLETE` line, though
+  the spec's notes asked each cell for it. **Bucket 3**, adequacy.
+  **Landed:** a review commit on #1106.
+- `SA-0343` (#1106): the cell dropped the sentence "An `AgentFailed` turn
+  is never re-prompted." from a docstring it kept. **Bucket 3**,
+  conventions. **Landed:** a review commit on #1106.

@@ -31,3 +31,4 @@ candidates a batch passes over. The docstring says what the code computes.
 ## Record
 
 - 2026-11-08: filed from `SA-0356`'s spec writer and its first review.
+- 2026-11-09: #1107 (`SA-0356`) landed the pass-over. Both PR seats and the in-cell contract lens found `_print_stack_admission`'s docstring premise now false (`saffron/cli.py:2259-2263`).
