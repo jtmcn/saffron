@@ -107,16 +107,55 @@ And optionally:
    quantifies over, such as the forms of a call or the spellings of a path.
    Beside each member, name the witness that drives it. Give an undriven member
    a witness, or narrow the claim and say in the notes what is left.
-   **Done when** every member of every set names its witness, and the report
-   carries the table. List each criterion's wrong versions under its
-   `wrong_versions:` field, not as "These fail it" prose in the notes. The
-   host then runs every one of them.
+   Some claims have a negative clause, such as "no fetch" or "no row". Each
+   needs a witness that first sees the positive case through one instrument.
+   A spy that only asserts an absence passes when it is blind. Five of six
+   blockers on 2026-11-04 were this shape (b-c12d39).
+   **Done when** every member of every set names its witness, every negative
+   claim names its positive case, and the report carries the table. List each
+   criterion's wrong versions under its `wrong_versions:` field, not as "These
+   fail it" prose in the notes. The host then runs every one of them.
 7. **Review your draft** as the spec-reviewer would, on all six checks. Fix
    everything it would call a blocker or a concern. Re-run step 1's estimate
    against the `size:` line of every row step 4 printed, the rows that
    exceeded their ceiling included. **Done when** each check has evidence you
-   read and `make check` exits 0. A check you cannot settle stays open, and
-   the report says so.
+   read and the tree checks below exit 0. A check you cannot settle stays
+   open, and the report says so.
+
+## Tree checks, not the whole suite
+
+Run no `make check` and no bare `pytest` in the spec's tree. A full suite
+costs 3 to 10 minutes, and writers spent about 40% of their active time
+waiting on one (`docs/evidence/2026-11-09-spec-writer-suite-waits.md`). The
+caller runs `make check` on the commit the reviewer reads.
+
+- This command reads the live specs and backlog in about 20 seconds:
+
+  ```
+  uv run pytest -q tests/test_queued_specs.py tests/records tests/ontology tests/test_scheduler.py tests/test_citations.py::test_every_section_citation_resolves tests/test_dead_gate.py::test_the_gate_reads_the_same_entries_intake_does
+  ```
+
+- `python3 hooks/prose_limit.py --file <path>` for each new or edited file.
+  It reads the working tree. The `prose-limit` hook in prek reads only the
+  index, so it passes an unstaged file it never read (measured).
+- `uv run ruff check <path>` and `uv run ruff format --check <path>` for each
+  Python file the spec's commit edits, such as the queue smoke test.
+
+## The prototype lives in its own worktree
+
+The spec's tree holds the spec and its bookkeeping, and nothing else. The
+reviewer reads that tree as a clean snapshot of its commit.
+
+- Build the prototype in `git worktree add <scratch>/proto <base>`, with
+  `<scratch>` your own scratch directory. A child spec applies its parent's
+  diff there first, with `git apply`.
+- Run each wrong version against its witness's test file alone. Run
+  `uv run pytest -q` there, the one whole suite you run, only when the
+  prototype sits on a parent's diff. That suite found `SA-0336`'s broken
+  regate test.
+- Before you report, save the diff from that worktree's own index:
+  `git add -A && git diff --cached --binary <base> > <scratch>/proto.diff`.
+  It carries the untracked witnesses too. Name both paths in your report.
 
 ## Revising against a review
 
@@ -140,7 +179,9 @@ reading its line and the review's error becomes the spec's.
 4. **Re-run steps 4 to 7.** A criterion the review added moves the size
    estimate, and the bookkeeping follows the spec.
 
-**Done when** every finding is applied or answered, and `make check` exits 0.
+**Done when** every finding is applied or answered, the tree checks exit 0,
+and the prototype diff is saved again. The brief names the prototype
+worktree. Revise there, and build a new one from the saved diff if it is gone.
 Your report replaces its Checks section with one line per finding: `applied`
 or `answered`, its severity, and the evidence you read.
 
@@ -156,5 +197,9 @@ A run that ended on a split reports the split alone, as step 1 says.
    `narrowed: <members left>`.
 4. **For the operator**: each judgement call you made (priority, a split, a
    scope cut), one line each.
-5. **Next**: the `make check` exit code, then "commit on its own branch and
-   run spec-reviewer with `base:` that branch's head".
+5. **Prototype**: its worktree and its saved diff, or "none". Confirm that
+   `git status --porcelain` in the spec's tree lists only the spec and its
+   bookkeeping.
+6. **Next**: each tree check's exit code, then "commit on its own branch, run
+   `make check`, the pre-flight, and spec-reviewer with `base:` that branch's
+   head".
