@@ -4,7 +4,7 @@ title: "`migrate` derives no `rebuttal` fact for a blocker no verdict reached, s
 status: open
 tier: 2
 filed: 2026-11-07
-specs: []
+specs: [SA-0364]
 prs: []
 commits: []
 cites: [§5.6]
