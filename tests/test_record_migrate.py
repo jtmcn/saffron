@@ -2885,8 +2885,8 @@ def test_a_live_ref_whose_rebut_reached_no_verdict_and_no_rebuttal_tops_up(
     ledger = Ledger(tmp_path / "source.db", record=live)
     repo_id = ledger.upsert_repo("saffron", "/o", "/m.git", None)
 
-    # Task 1: a blocker and a concern, both left `unread` with an error.
-    # The fix or extraction turn failed outright.
+    # Task 1: a blocker, a note and a concern. A failed turn left the
+    # blocker and the concern `unread`, and REBUT never asked about the note.
     _, task1 = _task(ledger, repo_id, "SA-9601")
     findings1 = ledger.record_findings(
         task1,
@@ -2897,6 +2897,14 @@ def test_a_live_ref_whose_rebut_reached_no_verdict_and_no_rebuttal_tops_up(
                 file="a.py",
                 line=1,
                 claim="c1",
+                anchored=True,
+            ),
+            Finding(
+                lens="l1",
+                severity="note",
+                file="n.py",
+                line=3,
+                claim="cn",
                 anchored=True,
             ),
             Finding(
@@ -2913,10 +2921,10 @@ def test_a_live_ref_whose_rebut_reached_no_verdict_and_no_rebuttal_tops_up(
         findings1[0], verdict=None, rebuttal=None, answer="unread", error="boom"
     )
     ledger.record_rebuttal(
-        findings1[1], verdict=None, rebuttal=None, answer="unread", error="boom"
+        findings1[2], verdict=None, rebuttal=None, answer="unread", error="boom"
     )
 
-    # Task 2: same shape, but a readable turn that answered nothing.
+    # Task 2: the same shape, but a readable turn that answered nothing.
     _, task2 = _task(ledger, repo_id, "SA-9602")
     findings2 = ledger.record_findings(
         task2,
@@ -2927,6 +2935,14 @@ def test_a_live_ref_whose_rebut_reached_no_verdict_and_no_rebuttal_tops_up(
                 file="a.py",
                 line=1,
                 claim="c1",
+                anchored=True,
+            ),
+            Finding(
+                lens="l1",
+                severity="note",
+                file="n.py",
+                line=3,
+                claim="cn",
                 anchored=True,
             ),
             Finding(
@@ -2943,7 +2959,7 @@ def test_a_live_ref_whose_rebut_reached_no_verdict_and_no_rebuttal_tops_up(
         findings2[0], verdict=None, rebuttal=None, answer="unanswered", error=None
     )
     ledger.record_rebuttal(
-        findings2[1], verdict=None, rebuttal=None, answer="unanswered", error=None
+        findings2[2], verdict=None, rebuttal=None, answer="unanswered", error=None
     )
 
     # Task 3: lens A's concern, its blocker, lens B's concern, then its
@@ -3029,6 +3045,12 @@ def test_a_live_ref_whose_rebut_reached_no_verdict_and_no_rebuttal_tops_up(
     source_path = tmp_path / "source.db"
     ledger.close()
 
+    held = {n: list(live.read(keys[n])) for n in keys}
+    on_live = migrate(source_path, live)
+    assert sorted(on_live.migrated) == sorted(keys.values())
+    assert on_live.refused == []
+    assert {n: live.read(keys[n]) for n in keys} == held
+
     truth = MemoryRecord()
     result = migrate(source_path, truth)
     assert sorted(result.migrated) == sorted(keys.values())
@@ -3069,22 +3091,22 @@ def test_a_live_ref_whose_rebut_reached_no_verdict_and_no_rebuttal_tops_up(
         "ORDER BY finding_id",
         (keys[1],),
     ).fetchall()
+    assert [row["answer"] for row in rows1] == ["unread", None, "unread"]
+    assert [row["rebuttal_error"] for row in rows1] == ["boom", None, "boom"]
     for row in rows1:
         assert row["verdict"] is None
         assert row["rebuttal"] is None
-        assert row["answer"] == "unread"
-        assert row["rebuttal_error"] == "boom"
     rows2 = rebuilt._db.execute(
         "SELECT verdict, rebuttal, answer, rebuttal_error FROM findings "
         "WHERE task_id = (SELECT task_id FROM tasks WHERE record_key = ?) "
         "ORDER BY finding_id",
         (keys[2],),
     ).fetchall()
+    assert [row["answer"] for row in rows2] == ["unanswered", None, "unanswered"]
+    assert [row["rebuttal_error"] for row in rows2] == [None, None, None]
     for row in rows2:
         assert row["verdict"] is None
         assert row["rebuttal"] is None
-        assert row["answer"] == "unanswered"
-        assert row["rebuttal_error"] is None
     rebuilt.close()
 
 
@@ -3096,7 +3118,8 @@ def test_migrate_derives_no_rebuttal_fact_where_no_rebut_recorded_one(
     REBUT never started or ended before recording one."""
     from saffron.record.migrate import migrate
 
-    ledger = Ledger(tmp_path / "source.db")
+    live = MemoryRecord()
+    ledger = Ledger(tmp_path / "source.db", record=live)
     repo_id = ledger.upsert_repo("saffron", "/o", "/m.git", None)
 
     # Task 1: a concern and a note, no blocker, and no rebuttal recorded.
@@ -3204,6 +3227,12 @@ def test_migrate_derives_no_rebuttal_fact_where_no_rebut_recorded_one(
     source_path = tmp_path / "source.db"
     ledger.close()
 
+    held = {n: list(live.read(keys[n])) for n in keys}
+    on_live = migrate(source_path, live)
+    assert sorted(on_live.migrated) == sorted(keys.values())
+    assert on_live.refused == []
+    assert {n: live.read(keys[n]) for n in keys} == held
+
     truth = MemoryRecord()
     result = migrate(source_path, truth)
     assert sorted(result.migrated) == sorted(keys.values())
@@ -3224,7 +3253,8 @@ def test_the_top_up_compares_a_rebuttals_answer_and_error(tmp_path: Path) -> Non
     diluted by the other row's task."""
     # Source 1: one task holding a concern then a blocker. REBUT recorded
     # the blocker's rebuttal first, both `unread` with an error.
-    ledger1 = Ledger(tmp_path / "source1.db")
+    live1 = MemoryRecord()
+    ledger1 = Ledger(tmp_path / "source1.db", record=live1)
     repo_id1 = ledger1.upsert_repo("saffron", "/o", "/m.git", None)
     _, task1 = _task(ledger1, repo_id1, "SA-9801")
     findings1 = ledger1.record_findings(
@@ -3318,6 +3348,7 @@ def test_the_top_up_compares_a_rebuttals_answer_and_error(tmp_path: Path) -> Non
         source_path1, key1, _dropped(rebuttal_index1, full1, "answer", "error")
     )
     _assert_agrees_and_gains_nothing(source_path1, key1, full1)
+    _assert_agrees_and_gains_nothing(source_path1, key1, live1.read(key1))
 
     # Against task 2's row (a verdict and a rebuttal, no answer), a fact
     # lacking both keys agrees. One carrying either set is refused.

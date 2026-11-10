@@ -523,7 +523,7 @@ def _finding_facts(
 ) -> list[Fact]:
     """Every `finding` fact, in position order, then every `rebuttal` fact
     REBUT itself wrote: every blocker's, in position order, then every
-    other one, in position order (`saffron/cell/session.py:3763-3780`).
+    other one, in position order, as REBUT records them in session.py.
     `has_answer` is `False` for a source predating `answer` and
     `rebuttal_error`, so both read null there rather than touching columns
     the row does not have."""
@@ -533,8 +533,8 @@ def _finding_facts(
         "SELECT * FROM findings WHERE task_id = ? ORDER BY finding_id",
         (task["task_id"],),
     ).fetchall()
-    blocker_rebuttals: list[tuple[int, dict[str, Any]]] = []
-    other_rebuttals: list[tuple[int, dict[str, Any]]] = []
+    blocker_rebuttals: list[dict[str, Any]] = []
+    other_rebuttals: list[dict[str, Any]] = []
     for position, finding in enumerate(rows, start=1):
         facts.append(
             one(
@@ -556,7 +556,7 @@ def _finding_facts(
         if (
             finding["verdict"] is not None
             or finding["rebuttal"] is not None
-            or (answer is not None)
+            or answer is not None
         ):
             payload = {
                 "position": position,
@@ -566,10 +566,10 @@ def _finding_facts(
                 "error": error,
             }
             if finding["severity"] == "blocker":
-                blocker_rebuttals.append((position, payload))
+                blocker_rebuttals.append(payload)
             else:
-                other_rebuttals.append((position, payload))
-    for _, payload in (*blocker_rebuttals, *other_rebuttals):
+                other_rebuttals.append(payload)
+    for payload in (*blocker_rebuttals, *other_rebuttals):
         facts.append(one("rebuttal", at, payload))
     return facts
 
