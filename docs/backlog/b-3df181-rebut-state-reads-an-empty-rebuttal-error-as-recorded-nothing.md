@@ -1,11 +1,12 @@
 ---
 id: b-3df181
 title: '`rebut_state` reads an empty rebuttal error as no answer, so an unreadable turn''s why line says "recorded nothing"'
-status: open
+status: done
 tier: 2
 filed: 2026-11-08
+closed: 2026-11-10
 specs: []
-prs: []
+prs: [1125]
 commits: []
 cites: [§5.6]
 related: [42, b-31e3c8]
@@ -31,3 +32,5 @@ the rebuttal was unreadable.
 ## Record
 
 - 2026-11-08: filed from the spec loop's run 55.
+- 2026-11-10: done by hand in #1125. `rebut_state` tests `error is not None`,
+  and an empty error reads as an unreadable turn.
