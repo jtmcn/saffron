@@ -1463,6 +1463,17 @@ def _say_stale_branch_spec(path: str, ran_text: str, branch_sha: str) -> None:
     """Name the text the cell ran when the branch carries another copy of
     the spec. A stacked branch keeps the copy its base held (b-c375d6)."""
     try:
+        _git("cat-file", "-e", f"{branch_sha}^{{commit}}", cwd=REPO)
+    except GitError:
+        # PACKAGE pushes from the mirror, and a checkout that never fetched lacks it.
+        try:
+            _git("fetch", "-q", "origin", branch_sha, cwd=REPO)
+        except GitError as exc:
+            print(
+                f"spec: the branch's head could not be fetched: {exc}", file=sys.stderr
+            )
+            return
+    try:
         on_branch = _git("show", f"{branch_sha}:{path}", cwd=REPO)
     except GitError as exc:
         print(f"spec: the branch's copy is unreadable: {exc}", file=sys.stderr)
