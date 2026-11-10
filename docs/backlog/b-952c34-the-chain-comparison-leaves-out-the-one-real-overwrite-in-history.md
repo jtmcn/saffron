@@ -41,3 +41,4 @@ decides whether the tasks still left out are migrated or abandoned.
 
 - 2026-09-19: filed from the spec loop's run 8 (stack #351 ← #360 ← #355 ←
   #366 ← #353). The numbers are the Spec seat's run over a ledger copy.
+- 2026-11-09: b-60d804 closed. The projection no longer leaves a `test` or `docs` task out on its type, so `SA-0013` task 8 can reach the comparison.
