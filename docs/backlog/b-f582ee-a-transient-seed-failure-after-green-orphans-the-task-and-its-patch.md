@@ -49,3 +49,9 @@ command can package it, and says which command does.
 - 2026-10-09: recurred in run 32 on the mirror's loose object 6c8cc03b. It
   failed `SA-0233`'s PACKAGE seed and `SA-0251`'s first seed. `git repack -d`
   and moving the mirror aside cleared it again.
+- 2026-11-10: a new shape in the spec loop's run 59. `SA-0362` went green and
+  finished REBUT. Then the cell runtime failed to start any process in its
+  container ("no PID data from sync pipe"). The patch export ran inside that
+  container, so no `patch.diff` was written and the task ended `ORPHANED` at
+  $31.46 of $32. `saffron adopt` refuses an `ORPHANED` task, so the hand
+  rebuild (#1127) is no task's pull request.

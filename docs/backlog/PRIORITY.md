@@ -206,7 +206,7 @@ review spent a pass on it. Then **b-490c9c**, ~~**b-61993a**~~, **b-f45f73**
 and **b-0de0b3**. The last is the operator's decision to generate
 the loop's report in core, and it needs design before a spec.
 
-**From the spec loop's run 13** (2026-09-22): **b-66e82d**, **b-055fa3** and
+**From the spec loop's run 13** (2026-09-22): ~~**b-66e82d**~~, **b-055fa3** and
 ~~**b-a9ee32**~~. The first is why finding the gate behind #433's `EXHAUSTED` took
 reproducing every gate by hand. The second is a witness that fails once three
 local branches are pruned. The third opens when item b-b5f379 bumps the cell's

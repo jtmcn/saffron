@@ -47,7 +47,7 @@ from saffron.events import (
 
 # Aliased: `GateResult` below is the gate contract's; this is `events.GateResult`.
 from saffron.events import GateResult as GateResultEvent
-from saffron.gates.baseline import NewFailure, is_no_progress
+from saffron.gates.baseline import NewFailure, is_no_progress, render
 from saffron.gates.contract import GateResult
 from saffron.intake import Criterion, History, Mutant
 from saffron.phases import implement, rebut, review
@@ -788,7 +788,8 @@ def attempt_event(
 
     `gates` is non-empty only on the call `decision=None` makes, REBUT's
     own, never a GATE suite's. Derived from `comparison.new_failures`,
-    never from a gate's status (b-66e82d)."""
+    never from a gate's status (b-66e82d). `failures` renders every one of
+    them, on both phases' lines."""
     if comparison.aborted:
         return Attempt(
             timestamp=time.time(),
@@ -824,6 +825,7 @@ def attempt_event(
         new_failures=len(comparison.new_failures),
         decision=decision,
         gates=names,
+        failures=tuple(render(nf) for nf in comparison.new_failures),
     )
 
 
@@ -2924,12 +2926,18 @@ def _drive_cell(
             )
             for result in latest.results:
                 count = None
+                failures = None
                 if (
                     counted is not None
                     and result.status not in ("skip", "error")
                     and result.gate not in latest.advisory_gates
                 ):
                     count = counted.get(result.gate, 0)
+                    failures = tuple(
+                        render(nf)
+                        for nf in comparison.new_failures
+                        if nf.gate == result.gate
+                    )
                 emit(
                     GateResultEvent(
                         timestamp=time.time(),
@@ -2939,6 +2947,7 @@ def _drive_cell(
                         against=against,
                         attempt=attempt,
                         new_failures=count,
+                        failures=failures,
                     )
                 )
             return comparison
