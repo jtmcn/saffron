@@ -2234,14 +2234,25 @@ def test_check_blocks_a_ceiling_under_a_fifth_over_a_cut_off_peak(monkeypatch, c
     assert rc == 0 and "blocker:" not in out
 
 
+def _on_and_off_main(repo, monkeypatch):
+    """A commit on `main` and one off it, at fixed shas. A clock-dated sha has
+    an all-digit 8-char prefix about 2% of the time, which `_COMMIT_ID` skips."""
+    monkeypatch.setenv("GIT_AUTHOR_DATE", "2026-11-09T12:00:00Z")
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2026-11-09T12:00:00Z")
+    on_main = _commit(repo, "a.txt", "a\n")
+    _git(repo, "checkout", "-q", "-b", "side")
+    off_main = _commit(repo, "b.txt", "b\n")
+    _git(repo, "checkout", "-q", "main")
+    assert driver._COMMIT_ID.fullmatch(on_main[:8])
+    assert driver._COMMIT_ID.fullmatch(off_main[:8])
+    return on_main, off_main
+
+
 def test_commit_ids_names_a_commit_off_the_base_and_sets_other_hex_aside(
-    empty_repo,
+    empty_repo, monkeypatch
 ):
     # 2026-11-07: four specs cited commits a restack replaced, and cite passed.
-    on_main = _commit(empty_repo, "a.txt", "a\n")
-    _git(empty_repo, "checkout", "-q", "-b", "side")
-    off_main = _commit(empty_repo, "b.txt", "b\n")
-    _git(empty_repo, "checkout", "-q", "main")
+    on_main, off_main = _on_and_off_main(empty_repo, monkeypatch)
     text = (
         f"Kept at `{on_main[:8]}`, replaced `{off_main[:8]}`, twice `{off_main}`. "
         "A digest deadbeefcafe1234 and the number 1234567 name no commit."
@@ -2257,10 +2268,7 @@ def test_cite_blocks_a_spec_naming_a_commit_off_the_base(
 ):
     # Both callers must pass the ids through, not only the helper.
     monkeypatch.setattr(driver, "REPO", empty_repo)
-    on_main = _commit(empty_repo, "a.txt", "a\n")
-    _git(empty_repo, "checkout", "-q", "-b", "side")
-    off_main = _commit(empty_repo, "b.txt", "b\n")
-    _git(empty_repo, "checkout", "-q", "main")
+    on_main, off_main = _on_and_off_main(empty_repo, monkeypatch)
     spec = empty_repo / "spec.md"
     spec.write_text(f"Kept `{on_main[:8]}`. Replaced `{off_main[:8]}`.")
     assert driver.cmd_cite(SimpleNamespace(spec_path=str(spec), base="main")) == 1
