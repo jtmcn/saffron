@@ -1,7 +1,7 @@
 """One exclusive lock per `--home`.
 
-It keeps a batch scan from running beside a live `cell`, `batch` or
-`draft` on the same home. Without it, that scan can mistake a live task's
+It keeps a batch scan from running beside a live `cell`, `batch`,
+`draft`, `package` or `finish` on the same home. Without it, that scan can mistake a live task's
 row for the corpse `DESIGN.md` §4.2.1 lets it assume (backlog item
 b-a714d2, b-615466).
 

@@ -16,9 +16,9 @@ stamp `REJECTED` on a healthy branch — so every failure path below returns
 first run carries no `pr_url`, since `set_task_package` writes one only once
 PACKAGE ends. A cell bound for PACKAGE leaves its row in flight, `REVIEWING`
 or `REBUTTING`, until PACKAGE ends (backlog item b-dce9a4). `cli.main` takes
-the home lock (`saffron/home_lock.py`) before `cell`, `batch` or `draft`.
-So a batch scan never runs beside a live row one of them holds. `replay`,
-`finish` and `package` take no lock.
+the home lock (`saffron/home_lock.py`) before `cell`, `batch`, `draft`,
+`package` and `finish`. So a batch scan never runs beside a live row one of
+them holds. `replay` takes no lock, since v1 deletes it.
 """
 
 from __future__ import annotations
