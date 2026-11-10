@@ -9,6 +9,7 @@ and `gh` are faked. The mirror, the fetches and the merge base stay real git.
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import hashlib
 import json
@@ -23,12 +24,14 @@ import pytest
 from saffron import cli, preflight
 from saffron.cell import runtime
 from saffron.gates.baseline import NewFailure
-from saffron.gates.contract import Failure
+from saffron.gates.contract import Failure, GateResult
+from saffron.gates.core.revert import revert_gate
 from saffron.gates.suite import SuiteComparison, SuiteRun
 from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
 from saffron.record.routed import RoutedRecord
 from saffron.repos import image as repo_image
+from saffron.repos import mirror as git_mirror
 
 SPEC_ID = "SA-0005"
 SPEC_FILENAME = f"{SPEC_ID}-regate-test.md"
@@ -55,12 +58,38 @@ def _git(repo, *args: str) -> str:
     ).stdout.strip()
 
 
-def _spec_text(title: str) -> str:
-    return (
-        "---\nid: SA-0005\n"
-        f"title: {title}\ntype: feature\nrisk: standard\ntouches: ['src/**']\n---\n\n"
-        "## Acceptance criteria\n- [ ] it works\n"
-    )
+def _spec_text(
+    title: str, witness: str | None = None, mutant: dict | None = None
+) -> str:
+    """With no `witness`, the plain free-text criterion every other witness
+    reads. With one, a single `acceptance:` criterion declaring it, plus
+    an inline `mutant` where given (`b-c5da95`)."""
+    if witness is None:
+        return (
+            "---\nid: SA-0005\n"
+            f"title: {title}\ntype: feature\nrisk: standard\ntouches: ['src/**']\n---\n\n"
+            "## Acceptance criteria\n- [ ] it works\n"
+        )
+    lines = [
+        "---",
+        "id: SA-0005",
+        f"title: {title}",
+        "type: feature",
+        "risk: standard",
+        "touches: ['src/**']",
+        "acceptance:",
+        "  - claim: it works",
+        f"    witness: {witness}",
+    ]
+    if mutant is not None:
+        lines += [
+            "    mutant:",
+            f"      file: {mutant['file']}",
+            f"      find: {mutant['find']}",
+            f"      replace: {mutant.get('replace', 'replaced')}",
+        ]
+    lines += ["---", ""]
+    return "\n".join(lines)
 
 
 def _write_policy(work, marker: str) -> None:
@@ -75,10 +104,12 @@ def _write_policy(work, marker: str) -> None:
     )
 
 
-def _write_spec(work, title: str) -> None:
+def _write_spec(
+    work, title: str, witness: str | None = None, mutant: dict | None = None
+) -> None:
     specs_dir = work / ".saffron" / "specs"
     specs_dir.mkdir(parents=True, exist_ok=True)
-    (specs_dir / SPEC_FILENAME).write_text(_spec_text(title))
+    (specs_dir / SPEC_FILENAME).write_text(_spec_text(title, witness, mutant))
 
 
 @dataclass
@@ -99,7 +130,9 @@ class Fixture:
     origin_url: str
 
 
-def _build_fixture(tmp_path) -> Fixture:
+def _build_fixture(
+    tmp_path, witness: str | None = None, mutant: dict | None = None
+) -> Fixture:
     origin = tmp_path / "origin.git"
     subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
     work = tmp_path / "work"
@@ -115,7 +148,7 @@ def _build_fixture(tmp_path) -> Fixture:
     no_spec_sha = _git(work, "rev-parse", "HEAD")
 
     # Then the spec.
-    _write_spec(work, "v1")
+    _write_spec(work, "v1", witness, mutant)
     _git(work, "add", "-A")
     _git(work, "commit", "-q", "-m", "add spec")
 
@@ -130,7 +163,7 @@ def _build_fixture(tmp_path) -> Fixture:
 
     # Policy B, with an edited spec text. The fork point for both branches.
     _write_policy(work, "policy-B")
-    _write_spec(work, "v2 edited")
+    _write_spec(work, "v2 edited", witness, mutant)
     _git(work, "add", "-A")
     _git(work, "commit", "-q", "-m", "policy B, edited spec")
     fork_sha = _git(work, "rev-parse", "HEAD")
@@ -189,16 +222,89 @@ def _seed_task(
     pr_url: str | None,
     pushed_sha: str | None = None,
     repo_id: int | None = None,
+    mutants_commit: str | None = None,
 ) -> int:
     if repo_id is None:
         repo_id = ledger.upsert_repo("work", origin_url, str(mirror_path), None)
     run_id = ledger.create_run(repo_id, base_sha)
-    task_id = ledger.create_task(run_id, SPEC_ID, spec_sha, branch=branch)
+    task_id = ledger.create_task(
+        run_id, SPEC_ID, spec_sha, branch=branch, mutants_commit=mutants_commit
+    )
     if pr_url is not None:
         ledger.set_task_package(
             task_id, "READY_FOR_REVIEW", branch, pushed_sha or ("0" * 40), pr_url
         )
     return task_id
+
+
+def _hash_object(work: Path, text: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(work), "hash-object", "-w", "--stdin"],
+        input=text,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def _ls_tree(work: Path, commit: str) -> dict[str, str]:
+    out = subprocess.run(
+        ["git", "-C", str(work), "ls-tree", commit],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    entries: dict[str, str] = {}
+    for line in out.splitlines():
+        if not line:
+            continue
+        meta, name = line.split("\t", 1)
+        entries[name] = meta.split()[2]
+    return entries
+
+
+def _mktree(work: Path, entries: dict[str, str]) -> str:
+    stdin = "".join(
+        f"100644 blob {sha}\t{name}\n" for name, sha in sorted(entries.items())
+    )
+    return subprocess.run(
+        ["git", "-C", str(work), "mktree"],
+        input=stdin,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def _mutants_commit(
+    work: Path, *, parent: str | None, spec_id: str, yaml_text: str
+) -> str:
+    """One commit on top of `parent` (or a root commit with none), replacing
+    `<spec_id>.yaml` with `yaml_text`. Never through `write_mutants`: that
+    writer touches a real remote this fixture has no reason to grow."""
+    entries = _ls_tree(work, parent) if parent else {}
+    entries[f"{spec_id}.yaml"] = _hash_object(work, yaml_text)
+    tree = _mktree(work, entries)
+    args = ["git", "-C", str(work), "commit-tree", tree, "-m", f"mutant {spec_id}"]
+    if parent:
+        args += ["-p", parent]
+    return subprocess.run(
+        args, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def _mutants_yaml(
+    witness: str, *, file: str, find: str, replace: str = "replaced"
+) -> str:
+    return f"{witness}:\n  file: {file}\n  find: {find}\n  replace: {replace}\n"
+
+
+def _set_mutants_ref(work: Path, commit: str) -> None:
+    """Moves `refs/saffron/mutants` to `commit` and pushes it. A fresh
+    mirror then clones every ancestor on `commit`'s own chain, never a
+    dangling root the ref does not reach (measured)."""
+    _git(work, "update-ref", "refs/saffron/mutants", commit)
+    _git(work, "push", "-q", "origin", "refs/saffron/mutants:refs/saffron/mutants")
 
 
 def _seeding_ledger(path: Path, origin_url: str) -> Ledger:
@@ -227,6 +333,53 @@ def _fake_reverify(calls: list, new_failures=()):
             results=[], effective_risk="standard", advisory_gates=frozenset()
         )
         return SuiteComparison(run=run, new_failures=tuple(new_failures))
+
+    return _reverify
+
+
+def _fake_reverify_through_revert_gate(calls: list):
+    """A `reverify` stand-in. It runs the real `revert_gate` over
+    `kwargs["spec"].acceptance`, against `work.txt` as the diff's only
+    source change. A criterion whose mutant names `work.txt` stays judged,
+    and one naming `src/elsewhere.py` is set aside (b-c5da95)."""
+
+    def _reverify(**kwargs):
+        calls.append(kwargs)
+        acceptance = kwargs["spec"].acceptance
+        witnesses = [c.witness for c in acceptance]
+        prior = [GateResult(gate="tests", status="pass", tool="pytest 1", collected=[])]
+        results = [
+            GateResult(
+                gate="tests", status="pass", tool="pytest 1", collected=witnesses
+            )
+        ]
+
+        def _run_tests(subset: list[str]) -> GateResult:
+            return GateResult(
+                gate="tests",
+                status="pass",
+                tool="pytest 1",
+                collected=subset,
+                failures=[],
+            )
+
+        result = revert_gate(
+            prior=prior,
+            results=results,
+            acceptance=acceptance,
+            changed_files=["work.txt"],
+            test_paths=["tests/**"],
+            dirty=lambda: [],
+            reverted=lambda _source: contextlib.nullcontext(),
+            run_tests=_run_tests,
+            exempt=(),
+            diff="",
+        )
+        new_failures = tuple(NewFailure("revert", f) for f in result.failures)
+        run = SuiteRun(
+            results=[result], effective_risk="standard", advisory_gates=frozenset()
+        )
+        return SuiteComparison(run=run, new_failures=new_failures)
 
     return _reverify
 
@@ -890,6 +1043,385 @@ def test_regate_exits_two_on_infrastructure_and_records_nothing(
     assert "parent" not in printed
 
     assert record_calls == []
+
+
+def test_regate_judges_a_witness_its_cells_revert_set_aside_and_finds_no_new_failure(
+    monkeypatch, tmp_path, capsys
+):
+    """`saffron regate` attaches the mutants the task's own row pins
+    (`b-c5da95`). A row pinning a commit whose mutant names a file outside
+    the diff regates green, through `revert` setting that witness aside.
+    This holds even once the ref moves to a commit whose mutant names the
+    diff's own file. A row pinning no commit attaches none, so the same
+    witness stays judged and `revert` reports it as theater. A spec at base
+    declaring the witness's mutant inline keeps it, and regates green,
+    though its row pins the commit naming `work.txt`."""
+    witness = "tests/test_elsewhere.py::test_guard"
+    fixture = _build_fixture(tmp_path, witness=witness)
+    home = tmp_path / "home"
+    work = fixture.work.resolve()
+    mirror_path = cli._mirror_path(work, home)
+
+    outside_sha = _mutants_commit(
+        work,
+        parent=None,
+        spec_id=SPEC_ID,
+        yaml_text=_mutants_yaml(
+            witness, file="src/elsewhere.py", find="outside-diff-marker"
+        ),
+    )
+    inside_sha = _mutants_commit(
+        work,
+        parent=outside_sha,
+        spec_id=SPEC_ID,
+        yaml_text=_mutants_yaml(witness, file="work.txt", find="work-diff-marker"),
+    )
+    _set_mutants_ref(work, inside_sha)
+
+    def _prepare(pr_url: str) -> list:
+        monkeypatch.setattr(cli, "run_gh", _gh_pr_view(pr_url, "OPEN", "main", []))
+        monkeypatch.setattr(
+            repo_image, "build_cell_image", lambda repo: "fake-image:tag"
+        )
+        _install_probe_fakes(monkeypatch, [])
+        reverify_calls: list = []
+        monkeypatch.setattr(
+            package_phase,
+            "reverify",
+            _fake_reverify_through_revert_gate(reverify_calls),
+        )
+        return reverify_calls
+
+    # Pinned to the commit whose mutant lies outside the diff: green, though
+    # the ref itself has since moved to `inside_sha`.
+    pr_url = "https://github.com/o/r/pull/9"
+    ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
+    task_outside = _seed_task(
+        ledger,
+        origin_url=fixture.origin_url,
+        mirror_path=mirror_path,
+        base_sha=fixture.base_sha,
+        spec_sha=fixture.spec_sha,
+        branch="saffron/SA-0005",
+        pr_url=pr_url,
+        pushed_sha=fixture.packaged_sha,
+        mutants_commit=outside_sha,
+    )
+    ledger.close()
+
+    monkeypatch.chdir(work)
+    reverify_calls = _prepare(pr_url)
+    result = cli.main(["--home", str(home), "regate", str(task_outside), "--repo", "."])
+    out = capsys.readouterr().out
+    assert result == 0
+    assert "new failure" not in out
+    assert len(reverify_calls) == 1
+    assert reverify_calls[0]["spec"].acceptance[0].mutant.file == "src/elsewhere.py"
+
+    ledger = Ledger(home / "ledger.db")
+    row = ledger.regate(task_outside)
+    assert row is not None
+    assert row["new_failures"] == 0
+    ledger.close()
+
+    # No commit pinned at all: nothing is attached, so the witness stays
+    # judged and `revert` reports it as theater.
+    pr_url_none = "https://github.com/o/r/pull/10"
+    ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
+    task_none = _seed_task(
+        ledger,
+        origin_url=fixture.origin_url,
+        mirror_path=mirror_path,
+        base_sha=fixture.base_sha,
+        spec_sha=fixture.spec_sha,
+        branch="saffron/SA-0005",
+        pr_url=pr_url_none,
+        pushed_sha=fixture.packaged_sha,
+    )
+    ledger.close()
+
+    reverify_calls = _prepare(pr_url_none)
+    result = cli.main(["--home", str(home), "regate", str(task_none), "--repo", "."])
+    out = capsys.readouterr().out
+    assert result == 1
+    assert f"regate: revert passed-without-source {witness}" in out
+    assert "1 new failure" in out
+    assert reverify_calls[0]["spec"].acceptance[0].mutant is None
+
+    ledger = Ledger(home / "ledger.db")
+    row = ledger.regate(task_none)
+    assert row is not None
+    assert row["new_failures"] == 1
+    ledger.close()
+
+    # An inline mutant outside the diff, kept over a row pinning
+    # `work.txt`'s commit. Its own subdirectory, so files never collide.
+    inline_root = tmp_path / "inline"
+    inline_root.mkdir()
+    inline_fixture = _build_fixture(
+        inline_root,
+        witness=witness,
+        mutant={"file": "src/elsewhere.py", "find": "inline-marker"},
+    )
+    inline_home = inline_root / "home"
+    inline_work = inline_fixture.work.resolve()
+    inline_mirror_path = cli._mirror_path(inline_work, inline_home)
+
+    pinned_sha = _mutants_commit(
+        inline_work,
+        parent=None,
+        spec_id=SPEC_ID,
+        yaml_text=_mutants_yaml(witness, file="work.txt", find="work-diff-marker"),
+    )
+    _set_mutants_ref(inline_work, pinned_sha)
+
+    pr_url_inline = "https://github.com/o/r/pull/11"
+    ledger = _seeding_ledger(inline_home / "ledger.db", inline_fixture.origin_url)
+    task_inline = _seed_task(
+        ledger,
+        origin_url=inline_fixture.origin_url,
+        mirror_path=inline_mirror_path,
+        base_sha=inline_fixture.base_sha,
+        spec_sha=inline_fixture.spec_sha,
+        branch="saffron/SA-0005",
+        pr_url=pr_url_inline,
+        pushed_sha=inline_fixture.packaged_sha,
+        mutants_commit=pinned_sha,
+    )
+    ledger.close()
+
+    monkeypatch.setattr(cli, "run_gh", _gh_pr_view(pr_url_inline, "OPEN", "main", []))
+    monkeypatch.setattr(repo_image, "build_cell_image", lambda repo: "fake-image:tag")
+    _install_probe_fakes(monkeypatch, [])
+    reverify_calls = []
+    monkeypatch.setattr(
+        package_phase, "reverify", _fake_reverify_through_revert_gate(reverify_calls)
+    )
+
+    monkeypatch.chdir(inline_work)
+    result = cli.main(
+        ["--home", str(inline_home), "regate", str(task_inline), "--repo", "."]
+    )
+    out = capsys.readouterr().out
+    assert result == 0
+    assert "new failure" not in out
+    assert reverify_calls[0]["spec"].acceptance[0].mutant.file == "src/elsewhere.py"
+
+    ledger = Ledger(inline_home / "ledger.db")
+    row = ledger.regate(task_inline)
+    assert row is not None
+    assert row["new_failures"] == 0
+    ledger.close()
+
+
+def test_regate_declines_a_mutants_commit_it_cannot_read_before_any_cell(
+    monkeypatch, tmp_path, capsys
+):
+    """`saffron regate` declines a task whose pinned mutants commit it
+    cannot read, for a spec declaring no mutant inline, before the image or
+    any cell: a commit the mirror lacks, and one whose `<spec id>.yaml`
+    does not parse. A readable pinned commit regated first in the same
+    witness builds the image and reaches `reverify` (`b-c5da95`)."""
+    witness = "tests/test_elsewhere.py::test_guard"
+    fixture = _build_fixture(tmp_path, witness=witness)
+    home = tmp_path / "home"
+    work = fixture.work.resolve()
+    mirror_path = cli._mirror_path(work, home)
+
+    readable_sha = _mutants_commit(
+        work,
+        parent=None,
+        spec_id=SPEC_ID,
+        yaml_text=_mutants_yaml(
+            witness, file="src/elsewhere.py", find="outside-diff-marker"
+        ),
+    )
+    unparseable_sha = _mutants_commit(
+        work, parent=readable_sha, spec_id=SPEC_ID, yaml_text="not a mapping at all\n"
+    )
+    _set_mutants_ref(work, unparseable_sha)
+
+    def _prepare(pr_url: str) -> tuple[list, list]:
+        monkeypatch.setattr(cli, "run_gh", _gh_pr_view(pr_url, "OPEN", "main", []))
+        build_calls: list = []
+        monkeypatch.setattr(
+            repo_image,
+            "build_cell_image",
+            lambda repo: build_calls.append(repo) or "fake-image:tag",
+        )
+        _install_probe_fakes(monkeypatch, [])
+        reverify_calls: list = []
+        monkeypatch.setattr(
+            package_phase,
+            "reverify",
+            _fake_reverify_through_revert_gate(reverify_calls),
+        )
+        return build_calls, reverify_calls
+
+    monkeypatch.chdir(work)
+
+    # The readable commit, regated first: builds the image and reaches
+    # `reverify`.
+    pr_readable = "https://github.com/o/r/pull/9"
+    ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
+    task_readable = _seed_task(
+        ledger,
+        origin_url=fixture.origin_url,
+        mirror_path=mirror_path,
+        base_sha=fixture.base_sha,
+        spec_sha=fixture.spec_sha,
+        branch="saffron/SA-0005",
+        pr_url=pr_readable,
+        pushed_sha=fixture.packaged_sha,
+        mutants_commit=readable_sha,
+    )
+    ledger.close()
+
+    build_calls, reverify_calls = _prepare(pr_readable)
+    result = cli.main(
+        ["--home", str(home), "regate", str(task_readable), "--repo", "."]
+    )
+    capsys.readouterr()
+    assert result == 0
+    assert build_calls == [work]
+    assert len(reverify_calls) == 1
+
+    # A commit the mirror lacks.
+    missing_sha = "f" * 40
+    pr_missing = "https://github.com/o/r/pull/10"
+    ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
+    task_missing = _seed_task(
+        ledger,
+        origin_url=fixture.origin_url,
+        mirror_path=mirror_path,
+        base_sha=fixture.base_sha,
+        spec_sha=fixture.spec_sha,
+        branch="saffron/SA-0005",
+        pr_url=pr_missing,
+        pushed_sha=fixture.packaged_sha,
+        mutants_commit=missing_sha,
+    )
+    ledger.close()
+
+    build_calls, reverify_calls = _prepare(pr_missing)
+    result = cli.main(["--home", str(home), "regate", str(task_missing), "--repo", "."])
+    out = capsys.readouterr().out
+    assert result == 1
+    assert out.count("regate:") == 1
+    assert f"regate: mutants commit {missing_sha[:12]} is not in the mirror" in out
+    assert build_calls == []
+    assert reverify_calls == []
+    ledger = Ledger(home / "ledger.db")
+    assert ledger.regate(task_missing) is None
+    ledger.close()
+
+    # A commit whose `<spec id>.yaml` does not parse.
+    pr_unparseable = "https://github.com/o/r/pull/11"
+    ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
+    task_unparseable = _seed_task(
+        ledger,
+        origin_url=fixture.origin_url,
+        mirror_path=mirror_path,
+        base_sha=fixture.base_sha,
+        spec_sha=fixture.spec_sha,
+        branch="saffron/SA-0005",
+        pr_url=pr_unparseable,
+        pushed_sha=fixture.packaged_sha,
+        mutants_commit=unparseable_sha,
+    )
+    ledger.close()
+
+    build_calls, reverify_calls = _prepare(pr_unparseable)
+    result = cli.main(
+        ["--home", str(home), "regate", str(task_unparseable), "--repo", "."]
+    )
+    out = capsys.readouterr().out
+    assert result == 1
+    assert out.count("regate:") == 1
+    assert out.startswith(f"regate: {SPEC_ID}.yaml")
+    assert build_calls == []
+    assert reverify_calls == []
+    ledger = Ledger(home / "ledger.db")
+    assert ledger.regate(task_unparseable) is None
+    ledger.close()
+
+
+def test_adopt_moves_a_task_whose_witness_its_cell_set_aside_to_ready_for_review(
+    monkeypatch, tmp_path, capsys
+):
+    """`saffron adopt` moves an `EXHAUSTED` task to `READY_FOR_REVIEW` when
+    its row pins a mutants commit whose mutant sets the witness aside. Its
+    own regate, through `regate.run_regate` with no fake, records no new
+    failure on the adopted head (`b-c5da95`)."""
+    witness = "tests/test_elsewhere.py::test_guard"
+    fixture = _build_fixture(tmp_path, witness=witness)
+    home = tmp_path / "home"
+    work = fixture.work.resolve()
+    mirror_path = cli._mirror_path(work, home)
+
+    mutants_sha = _mutants_commit(
+        work,
+        parent=None,
+        spec_id=SPEC_ID,
+        yaml_text=_mutants_yaml(
+            witness, file="src/elsewhere.py", find="outside-diff-marker"
+        ),
+    )
+    _set_mutants_ref(work, mutants_sha)
+
+    ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
+    task_id = _seed_task(
+        ledger,
+        origin_url=fixture.origin_url,
+        mirror_path=mirror_path,
+        base_sha=fixture.base_sha,
+        spec_sha=fixture.spec_sha,
+        branch="saffron/SA-0005",
+        pr_url=None,
+        mutants_commit=mutants_sha,
+    )
+    ledger.set_task_package(
+        task_id, "EXHAUSTED", branch="saffron/SA-0005", pushed_sha="", pr_url=""
+    )
+    repo_id = ledger.resolve_repo_id(fixture.origin_url)
+    assert repo_id is not None
+    ledger.close()
+
+    # Adopt writes its own facts before the regate clones the mirror: create
+    # it first, or the prototype's own `RecordError` recurs (item 170).
+    git_mirror.ensure_mirror(work, mirror_path)
+
+    pr_url = "https://github.com/o/r/pull/9"
+
+    def _gh(argv: list[str]):
+        if argv[2] == "view" and len(argv) > 4 and argv[4] == "--repo":
+            payload = json.dumps(
+                {
+                    "url": pr_url,
+                    "headRefOid": fixture.review_sha,
+                    "headRefName": "saffron/SA-0005",
+                }
+            )
+            return subprocess.CompletedProcess(argv, 0, payload, "")
+        payload = json.dumps({"state": "OPEN", "baseRefName": "main"})
+        return subprocess.CompletedProcess(argv, 0, payload, "")
+
+    monkeypatch.setattr(cli, "run_gh", _gh)
+    monkeypatch.setattr(package_phase, "github_slug", lambda _url: "o/r")
+    monkeypatch.setattr(repo_image, "build_cell_image", lambda repo: "fake-image:tag")
+    _install_probe_fakes(monkeypatch, [])
+    monkeypatch.setattr(
+        package_phase, "reverify", _fake_reverify_through_revert_gate([])
+    )
+
+    monkeypatch.chdir(work)
+    result = cli.main(["--home", str(home), "adopt", SPEC_ID, "9", "--repo", "."])
+    assert result == 0, capsys.readouterr().out
+
+    ledger = Ledger(home / "ledger.db")
+    row = next(r for r in ledger.tasks_by_repo(repo_id) if r["task_id"] == task_id)
+    assert row["state"] == "READY_FOR_REVIEW"
+    ledger.close()
 
 
 def test_regate_stopped_by_sigterm_exits_143(monkeypatch, tmp_path):

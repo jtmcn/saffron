@@ -5129,7 +5129,8 @@ def test_package_probes_the_host_then_runs_package_on_the_rebuilt_task(
 
     package_outcome, package_kwargs = calls[8][1], calls[8][2]
     assert package_outcome is outcome
-    assert package_kwargs["spec"] is spec
+    # Equality, not identity: it is now the attached copy (`b-c5da95`).
+    assert package_kwargs["spec"] == spec
     assert package_kwargs["repo"] == resolved_repo
     assert package_kwargs["mirror"] == mirror
     assert package_kwargs["image"] == "saffron/cell:repo"

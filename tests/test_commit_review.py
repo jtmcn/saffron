@@ -56,18 +56,44 @@ def _git(repo, *args: str) -> str:
     ).stdout.strip()
 
 
-def _spec_text(marker: str) -> str:
-    return (
-        "---\n"
-        f"id: {SPEC_ID}\n"
-        "title: commit review fixture\n"
-        "type: feature\n"
-        "risk: standard\n"
-        "touches: ['src/**']\n"
-        "---\n\n"
-        f"spec body marker {marker}\n\n"
-        "## Acceptance criteria\n- [ ] it works\n"
-    )
+def _spec_text(
+    marker: str, witness: str | None = None, mutant: dict | None = None
+) -> str:
+    """With no `witness`, the plain free-text criterion every other witness
+    reads. With one, a single `acceptance:` criterion declaring it, plus an
+    inline `mutant` where given (`b-c5da95`)."""
+    if witness is None:
+        return (
+            "---\n"
+            f"id: {SPEC_ID}\n"
+            "title: commit review fixture\n"
+            "type: feature\n"
+            "risk: standard\n"
+            "touches: ['src/**']\n"
+            "---\n\n"
+            f"spec body marker {marker}\n\n"
+            "## Acceptance criteria\n- [ ] it works\n"
+        )
+    lines = [
+        "---",
+        f"id: {SPEC_ID}",
+        "title: commit review fixture",
+        "type: feature",
+        "risk: standard",
+        "touches: ['src/**']",
+        "acceptance:",
+        "  - claim: it works",
+        f"    witness: {witness}",
+    ]
+    if mutant is not None:
+        lines += [
+            "    mutant:",
+            f"      file: {mutant['file']}",
+            f"      find: {mutant['find']}",
+            f"      replace: {mutant.get('replace', 'replaced')}",
+        ]
+    lines += ["---", "", f"spec body marker {marker}", ""]
+    return "\n".join(lines)
 
 
 def _write_policy(work: Path, marker: str) -> None:
@@ -76,10 +102,12 @@ def _write_policy(work: Path, marker: str) -> None:
     (gates_dir / "policy.yaml").write_text(f"thread_env:\n  MARKER: {marker}\n")
 
 
-def _write_spec(work: Path, marker: str) -> None:
+def _write_spec(
+    work: Path, marker: str, witness: str | None = None, mutant: dict | None = None
+) -> None:
     specs_dir = work / ".saffron" / "specs"
     specs_dir.mkdir(parents=True, exist_ok=True)
-    (specs_dir / SPEC_FILENAME).write_text(_spec_text(marker))
+    (specs_dir / SPEC_FILENAME).write_text(_spec_text(marker, witness, mutant))
 
 
 def _write_claude(work: Path, marker: str) -> None:
@@ -100,7 +128,13 @@ class Fixture:
     origin_url: str
 
 
-def _build_fixture(tmp_path: Path, *, review_lines: int = 1) -> Fixture:
+def _build_fixture(
+    tmp_path: Path,
+    *,
+    review_lines: int = 1,
+    witness: str | None = None,
+    mutant: dict | None = None,
+) -> Fixture:
     origin = tmp_path / "origin.git"
     subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
     work = tmp_path / "work"
@@ -116,7 +150,7 @@ def _build_fixture(tmp_path: Path, *, review_lines: int = 1) -> Fixture:
     no_spec_sha = _git(work, "rev-parse", "HEAD")
 
     _write_policy(work, "p1")
-    _write_spec(work, "s1")
+    _write_spec(work, "s1", witness, mutant)
     _write_claude(work, "c1")
     _git(work, "add", "-A")
     _git(work, "commit", "-q", "-m", "base")
@@ -186,11 +220,14 @@ def _seed_task(
     pr_url: str | None,
     pushed_sha: str | None = None,
     repo_id: int | None = None,
+    mutants_commit: str | None = None,
 ) -> int:
     if repo_id is None:
         repo_id = ledger.upsert_repo("work", origin_url, str(mirror_path), None)
     run_id = ledger.create_run(repo_id, base_sha)
-    task_id = ledger.create_task(run_id, SPEC_ID, spec_sha, branch=branch)
+    task_id = ledger.create_task(
+        run_id, SPEC_ID, spec_sha, branch=branch, mutants_commit=mutants_commit
+    )
     if pushed_sha is not None and pr_url is not None:
         ledger.set_task_package(task_id, "READY_FOR_REVIEW", branch, pushed_sha, pr_url)
     elif pushed_sha is not None:
@@ -198,6 +235,72 @@ def _seed_task(
     elif pr_url is not None:
         ledger.adopt_pull_request(task_id, pr_url)
     return task_id
+
+
+def _hash_object(work: Path, text: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(work), "hash-object", "-w", "--stdin"],
+        input=text,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def _mktree(work: Path, entries: dict[str, str]) -> str:
+    stdin = "".join(
+        f"100644 blob {sha}\t{name}\n" for name, sha in sorted(entries.items())
+    )
+    return subprocess.run(
+        ["git", "-C", str(work), "mktree"],
+        input=stdin,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def _ls_tree(work: Path, commit: str) -> dict[str, str]:
+    out = subprocess.run(
+        ["git", "-C", str(work), "ls-tree", commit],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    entries: dict[str, str] = {}
+    for line in out.splitlines():
+        if not line:
+            continue
+        meta, name = line.split("\t", 1)
+        entries[name] = meta.split()[2]
+    return entries
+
+
+def _mutants_commit(
+    work: Path, *, parent: str | None = None, spec_id: str, yaml_text: str
+) -> str:
+    """One commit over `<spec_id>.yaml`, on top of `parent` or a root commit
+    with none, never through `write_mutants` (`b-c5da95`)."""
+    entries = _ls_tree(work, parent) if parent else {}
+    entries[f"{spec_id}.yaml"] = _hash_object(work, yaml_text)
+    tree = _mktree(work, entries)
+    args = ["git", "-C", str(work), "commit-tree", tree, "-m", f"mutant {spec_id}"]
+    if parent:
+        args += ["-p", parent]
+    return subprocess.run(
+        args, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def _mutants_yaml(
+    witness: str, *, file: str, find: str, replace: str = "replaced"
+) -> str:
+    return f"{witness}:\n  file: {file}\n  find: {find}\n  replace: {replace}\n"
+
+
+def _set_mutants_ref(work: Path, commit: str) -> None:
+    _git(work, "update-ref", "refs/saffron/mutants", commit)
+    _git(work, "push", "-q", "origin", "refs/saffron/mutants:refs/saffron/mutants")
 
 
 def _seeding_ledger(path: Path, origin_url: str) -> Ledger:
@@ -1176,3 +1279,208 @@ def test_review_stopped_by_sigterm_tears_its_cell_down_and_exits_143(
     assert heard == []
     assert restored == _record
     assert cell_calls and cell_calls[0]["exited"] is True
+
+
+def test_review_hands_its_lenses_the_spec_with_the_mutants_the_tasks_row_pins(
+    monkeypatch, tmp_path
+):
+    """`saffron review` hands its lenses the spec with the mutants the
+    task's row pins (`b-c5da95`). A row pinning a commit reviews with that
+    commit's mutant, even once the ref moves to a newer one. A row pinning
+    none attaches no mutant, though the ref holds one. Both read the base
+    export's own spec file. A recorded text declaring its mutant inline
+    keeps that inline mutant, though its row pins a readable commit."""
+    from saffron import end_review
+
+    witness = "tests/test_elsewhere.py::test_guard"
+
+    def _run(fixture: Fixture, *, mutants_commit, record_text: str | None = None):
+        home = fixture.work.parent / "home"
+        work = fixture.work.resolve()
+        mirror_path = cli._mirror_path(work, home)
+        pr_url = _pr_view()
+
+        ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
+        task_id = _seed_task(
+            ledger,
+            origin_url=fixture.origin_url,
+            mirror_path=mirror_path,
+            base_sha=fixture.base_sha,
+            spec_sha=fixture.spec_sha,
+            branch=f"saffron/{SPEC_ID}",
+            pr_url=pr_url,
+            pushed_sha=fixture.packaged_sha,
+            mutants_commit=mutants_commit,
+        )
+        if record_text is not None:
+            ledger.record_spec_text(
+                task_id,
+                origin="revision",
+                spec_id=SPEC_ID,
+                path=f".saffron/specs/{SPEC_ID}.md",
+                text=record_text,
+            )
+        ledger.close()
+
+        monkeypatch.setattr(cli, "run_gh", _gh_state("OPEN", []))
+        layer_calls: list = []
+
+        def _spy(_ledger, _task_key, specs_by_id, **_kwargs):
+            layer_calls.append(specs_by_id)
+            return []
+
+        monkeypatch.setattr(end_review, "_review_one_layer", _spy)
+
+        monkeypatch.chdir(work)
+        result = cli.main(["--home", str(home), "review", str(task_id), "--repo", "."])
+        assert result == 0
+        assert len(layer_calls) == 1
+        return next(iter(layer_calls[0].values()))
+
+    # A row pinning a commit whose mutant names a file outside the diff:
+    # used, though the ref has since moved to a commit naming `work.txt`.
+    case_a = tmp_path / "pinned"
+    case_a.mkdir()
+    fixture_a = _build_fixture(case_a, witness=witness)
+    outside_commit = _mutants_commit(
+        fixture_a.work,
+        spec_id=SPEC_ID,
+        yaml_text=_mutants_yaml(
+            witness, file="src/elsewhere.py", find="outside-diff-marker"
+        ),
+    )
+    inside_commit = _mutants_commit(
+        fixture_a.work,
+        parent=outside_commit,
+        spec_id=SPEC_ID,
+        yaml_text=_mutants_yaml(witness, file="work.txt", find="work-diff-marker"),
+    )
+    _set_mutants_ref(fixture_a.work, inside_commit)
+    handed = _run(fixture_a, mutants_commit=outside_commit)
+    assert handed.acceptance[0].mutant.file == "src/elsewhere.py"
+
+    # A row pinning no commit: none reaches the lenses, though the ref
+    # holds one.
+    case_b = tmp_path / "unpinned"
+    case_b.mkdir()
+    fixture_b = _build_fixture(case_b, witness=witness)
+    _set_mutants_ref(
+        fixture_b.work,
+        _mutants_commit(
+            fixture_b.work,
+            spec_id=SPEC_ID,
+            yaml_text=_mutants_yaml(witness, file="work.txt", find="unpinned-marker"),
+        ),
+    )
+    handed = _run(fixture_b, mutants_commit=None)
+    assert handed.acceptance[0].mutant is None
+
+    # A recorded, inline mutant stays, over a readable pinned commit for
+    # the same witness.
+    case_c = tmp_path / "inline"
+    case_c.mkdir()
+    fixture_c = _build_fixture(case_c, witness=witness)
+    pinned_commit = _mutants_commit(
+        fixture_c.work,
+        spec_id=SPEC_ID,
+        yaml_text=_mutants_yaml(witness, file="work.txt", find="pinned-marker"),
+    )
+    _set_mutants_ref(fixture_c.work, pinned_commit)
+    inline_text = _spec_text(
+        "inline",
+        witness,
+        mutant={"file": "src/elsewhere.py", "find": "inline-marker"},
+    )
+    handed = _run(fixture_c, mutants_commit=pinned_commit, record_text=inline_text)
+    assert handed.acceptance[0].mutant.file == "src/elsewhere.py"
+    assert handed.acceptance[0].mutant.find == "inline-marker"
+
+
+def test_review_declines_a_mutants_commit_it_cannot_read_before_any_cell(
+    monkeypatch, tmp_path, capsys
+):
+    """`saffron review` declines a task whose pinned mutants commit it
+    cannot read, for a spec declaring no mutant inline, before any cell: a
+    commit the mirror lacks, and one whose `<spec id>.yaml` does not
+    parse. Each prints one `review:` line naming the commit's first 12
+    characters or the file, and exits 2. Neither reaches the layer review.
+    A readable pinned commit reviewed first in the same witness reaches it
+    (`b-c5da95`)."""
+    from saffron import end_review
+
+    witness = "tests/test_elsewhere.py::test_guard"
+
+    def _try(fixture: Fixture, *, mutants_commit):
+        home = fixture.work.parent / "home"
+        work = fixture.work.resolve()
+        mirror_path = cli._mirror_path(work, home)
+        pr_url = _pr_view()
+
+        ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
+        task_id = _seed_task(
+            ledger,
+            origin_url=fixture.origin_url,
+            mirror_path=mirror_path,
+            base_sha=fixture.base_sha,
+            spec_sha=fixture.spec_sha,
+            branch=f"saffron/{SPEC_ID}",
+            pr_url=pr_url,
+            pushed_sha=fixture.packaged_sha,
+            mutants_commit=mutants_commit,
+        )
+        ledger.close()
+
+        monkeypatch.setattr(cli, "run_gh", _gh_state("OPEN", []))
+        layer_calls: list = []
+
+        def _spy(*_a, **_k):
+            layer_calls.append(True)
+            return []
+
+        monkeypatch.setattr(end_review, "_review_one_layer", _spy)
+
+        monkeypatch.chdir(work)
+        result = cli.main(["--home", str(home), "review", str(task_id), "--repo", "."])
+        out = capsys.readouterr().out
+        return result, out, layer_calls
+
+    # A readable pinned commit, reviewed first: reaches the layer review.
+    case_readable = tmp_path / "readable"
+    case_readable.mkdir()
+    fixture_readable = _build_fixture(case_readable, witness=witness)
+    readable_commit = _mutants_commit(
+        fixture_readable.work,
+        spec_id=SPEC_ID,
+        yaml_text=_mutants_yaml(
+            witness, file="src/elsewhere.py", find="outside-diff-marker"
+        ),
+    )
+    _set_mutants_ref(fixture_readable.work, readable_commit)
+    result, _out, layer_calls = _try(fixture_readable, mutants_commit=readable_commit)
+    assert result == 0
+    assert len(layer_calls) == 1
+
+    # A commit the mirror lacks.
+    case_missing = tmp_path / "missing"
+    case_missing.mkdir()
+    fixture_missing = _build_fixture(case_missing, witness=witness)
+    missing = "f" * 40
+    result, out, layer_calls = _try(fixture_missing, mutants_commit=missing)
+    assert result == 2
+    assert out.count("review:") == 1
+    assert f"review: mutants commit {missing[:12]} is not in the mirror" in out
+    assert layer_calls == []
+
+    # A commit whose `<spec id>.yaml` does not parse.
+    case_bad = tmp_path / "unparseable"
+    case_bad.mkdir()
+    fixture_bad = _build_fixture(case_bad, witness=witness)
+    bad_commit = _mutants_commit(
+        fixture_bad.work, spec_id=SPEC_ID, yaml_text="not a mapping at all\n"
+    )
+    _set_mutants_ref(fixture_bad.work, bad_commit)
+    result, out, layer_calls = _try(fixture_bad, mutants_commit=bad_commit)
+    assert result == 2
+    assert out.count("review:") == 1
+    assert out.startswith(f"review: {SPEC_ID}.yaml")
+    assert layer_calls == []
