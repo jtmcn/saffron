@@ -3021,6 +3021,9 @@ def cmd_cite(args) -> int:
         count, defects = _cite_defects(spec_path, args.base)
     except GitError as err:
         return _fail(str(err))
+    stale = _stale_commit_ids(spec_path.read_text(), args.base)
+    count += len(stale)
+    defects += [f"commit {sha} is not an ancestor of {args.base}" for sha in stale]
     for defect in defects:
         print(defect)
     print(f"{count} citation(s) checked")

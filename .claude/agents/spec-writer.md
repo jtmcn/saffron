@@ -39,6 +39,9 @@ And optionally:
   the line.
 - A spec that adds or widens a refusal declares `retired_first`. Name each
   queued spec the new rule would refuse (b-e7898b).
+- Name a hand edit by its file and section, never by commit id. A merge
+  replaces the commits on a spec's branch, and 77 of 314 retired specs cite a
+  commit `main` lacks. `driver.py check` blocks such an id.
 
 ## Read first
 
@@ -93,9 +96,11 @@ And optionally:
    work, and no check in this step reads them.
 4. **Set the ceilings.**
    `uv run .claude/skills/run-saffron-spec-loop/driver.py history <SA-ID>`
-   ends with a `ceilings:` line. **Done when** it reads `above by` on both
-   halves. The budget left after the pre-REVIEW spend covers the highest
-   `review_usd` plus `rebut_usd` on any one of those rows.
+   ends with a `ceilings:` line. **Done when**
+   `uv run .claude/skills/run-saffron-spec-loop/driver.py check <SA-ID>` exits 0.
+   It blocks a `max_turns` under 1.2x a peak marked a floor. It also blocks a
+   budget whose remainder after the pre-REVIEW spend covers the worst row's
+   `review_usd` plus `rebut_usd` by under $2.
 5. **Do the bookkeeping** `issue-tracker.md` asks of the commit that adds a
    spec. **Done when** the origin item's `specs:` names the spec and any new
    term has its `by_hand: true` record. The queue smoke test in
