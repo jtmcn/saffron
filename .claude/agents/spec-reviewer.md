@@ -98,7 +98,8 @@ trivial.
    above by $6.86
    ```
 
-   Each half names the row it compared against, whether the declared ceiling
+   That sample is a blocker under the floor rule below, since 90 is under
+   1.2x 81. Each half names the row it compared against, whether the declared ceiling
    is above or below it and by how much, and — for turns — whether that peak
    is a floor (the row was cut off at its own ceiling, so it says what the
    cell *needed at least*, not what it used) or a use.
@@ -111,8 +112,8 @@ trivial.
      rule is at or below, and `level with it` is the equality case.
    - **Blocker** when the budget half says `below by`: that is `budget_usd`
      under what a similar cell spent before REVIEW.
-   - **Concern** when what remains after that pre-REVIEW total cannot cover
-     one row's `review` and `rebut` figures added together. Take the largest
+   - **Blocker** when what remains after that pre-REVIEW total does not cover
+     one row's `review` and `rebut` figures added together, plus $2. Take the largest
      such total among the rows. Not the largest `review` added to the largest
      `rebut`, which is a different and higher number, and not a mean. That
      worst case is the convention both halves of the line already use. A row
@@ -120,9 +121,10 @@ trivial.
      from the rows themselves, because the line does not compute it. REBUT is
      gated on budget before the rebuttal turn, so a spec that draws a blocker
      and cannot pay ends `EXHAUSTED` with no verdict.
-   - A peak marked **a floor** makes an `above by` narrower than it looks: the
-     row never found its own ceiling. Say so rather than treating the margin
-     as measured.
+   - **Blocker** when `max_turns` is under 1.2x a peak marked **a floor**.
+     That row never found its own ceiling, so a bare clear is no margin.
+     `driver.py check` blocks on this rule and on the `review` plus `rebut`
+     rule above.
    - `ceilings: no past cells of this shape to compare against` means the
      check has no evidence. That is a note, not a pass and not a blocker.
 
