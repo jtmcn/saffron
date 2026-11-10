@@ -58,7 +58,7 @@ loop has a pull request open.
 
 **Done when** `status` lists the specs you mean to run, reports nothing stale,
 and the operator has seen `snapshot`'s table in your reply: each spec's title
-and budget, the total, and every spec it refused.
+and budget, the spec budgets' sum, and every spec it refused.
 
 ## 1b. Check each spec's ceilings
 

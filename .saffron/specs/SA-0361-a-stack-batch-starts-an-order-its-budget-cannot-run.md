@@ -208,8 +208,8 @@ before `SA-0356`, and a second batch with its own reserve and finish ran it.
 - A plain `saffron batch`. It prints no block and refuses nothing.
 - `saffron finish`, which resumes a stack batch through `run_stack_batch` and
   never reaches the new check.
-- `.claude/skills/run-saffron-spec-loop/`, which a later edit points at
-  `--partial`.
+- `.claude/skills/run-saffron-spec-loop/`. This spec's pull request points its
+  `--budget` at the queue's total by hand.
 
 ## Notes for the agent
 
