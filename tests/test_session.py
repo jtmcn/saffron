@@ -7310,14 +7310,14 @@ def test_the_gate_check_after_the_rebuttal_continues_the_gate_count(
     assert rebut.attempt == 3
 
 
-def _rebuttal_log(monkeypatch, tmp_path, *, suites, turns, rebut_commits=1):
+def _rebuttal_log(monkeypatch, tmp_path, *, suites, turns, rebut_commits=1, **drive):
     """Drives one cell through REBUT with `use_default_emit=True`. Returns
     its outcome plus every event `read_log` reads back from the real
     `events.jsonl` under `tmp_path / "out" / "SY-1"`, which b-66e82d's
     three witnesses share. `_ANCHORING_DIFF` throughout, since REBUT needs
     REVIEW's own blocker to anchor to the diff. Build `turns` with
     `_through_rebut` when the loop settles in one attempt, or by hand
-    otherwise, as the gate count test above already does.
+    otherwise. `drive` passes `policy` or `gates` on to `_drive`.
     """
     from saffron.events import read_log
 
@@ -7329,6 +7329,7 @@ def _rebuttal_log(monkeypatch, tmp_path, *, suites, turns, rebut_commits=1):
         cell=cell,
         turns=turns,
         use_default_emit=True,
+        **drive,
     )
     return outcome, list(read_log(tmp_path / "out" / "SY-1"))
 
@@ -15486,19 +15487,6 @@ def test_a_kill_with_an_uncounted_failure_still_names_the_killing_tests():
 # --- b-66e82d: each gate result and attempt line names its new failures ---
 
 
-def _failures_log(monkeypatch, tmp_path, *, suites, turns, **drive):
-    """One cell under `use_default_emit=True`. Returns the outcome and every
-    event read back from its real `events.jsonl`."""
-    from saffron.events import read_log
-
-    cell = _stub_the_runtime(monkeypatch, suites=suites, patch=_ANCHORING_DIFF)
-    _rebuttable(monkeypatch, cell, rebut_commits=1)
-    outcome, _ledger = _drive(
-        monkeypatch, tmp_path, cell=cell, turns=turns, use_default_emit=True, **drive
-    )
-    return outcome, list(read_log(tmp_path / "out" / "SY-1"))
-
-
 def _gate_events(events, against, attempt=None):
     """`events.GateResult` events of one suite, keyed by gate."""
     from saffron.events import GateResult as GateResultEvent
@@ -15551,7 +15539,7 @@ def test_each_counted_gate_result_names_the_new_failures_it_counts(
             failures=[Failure(file="r.py", code="E3", message="again")],
         ),
     ]
-    outcome, events = _failures_log(
+    outcome, events = _rebuttal_log(
         monkeypatch,
         tmp_path,
         suites=(base, attempt1, base, rebuttal),
@@ -15629,7 +15617,7 @@ def test_an_aborted_or_drifted_suite_names_no_failure_on_any_gate(
         ),
     }
     for label, (suites, turns, against) in drives.items():
-        outcome, events = _failures_log(
+        outcome, events = _rebuttal_log(
             monkeypatch, tmp_path / label, suites=suites, turns=turns
         )
         assert outcome.state == "GATE_ERROR", label
@@ -15647,7 +15635,6 @@ def test_each_attempt_line_names_its_new_failures_beneath_its_count():
     rendered in order. That holds for each decision and on REBUT's line.
     `describe` prints each beneath the count, stripped and never clipped.
     An aborted or drifted suite's line carries none."""
-    from saffron.events import Attempt as AttemptEvent
 
     def _decided(*rounds, max_attempts=4):
         emitted: list = []
@@ -15659,7 +15646,7 @@ def test_each_attempt_line_names_its_new_failures_beneath_its_count():
             repair=lambda _new: None,
             emit=emitted.append,
         )
-        return [e for e in emitted if isinstance(e, AttemptEvent)]
+        return [e for e in emitted if isinstance(e, Attempt)]
 
     f_z = Failure(file="z.py", code="E1", message="zed")
     f_b = Failure(file="b.py", code="E2", message="bee")
@@ -15718,10 +15705,9 @@ def test_the_printed_log_names_each_new_failure_beneath_its_count(
     """b-66e82d, criterion 4: `_default_emit`'s printed lines name each new
     failure. So do the `Attempt` events read back from `events.jsonl`. That
     holds on the loop's red lines and on both REBUT re-runs."""
-    from saffron.events import Attempt as AttemptEvent
 
     f_lint = Failure(file="a.py", code="E501", message="too long")
-    outcome, events = _failures_log(
+    outcome, events = _rebuttal_log(
         monkeypatch,
         tmp_path / "loop",
         suites=([], _results(f_lint), _results(f_lint)),
@@ -15732,7 +15718,7 @@ def test_the_printed_log_names_each_new_failure_beneath_its_count(
     beneath = "\n  [lint] a.py:? E501: too long"
     assert "gates: attempt 1, 1 new failures -> repair" + beneath in printed
     assert "gates: attempt 2, 1 new failures -> no-progress" + beneath in printed
-    loop = [e for e in events if isinstance(e, AttemptEvent) and e.phase == "GATE"]
+    loop = [e for e in events if isinstance(e, Attempt) and e.phase == "GATE"]
     assert [e.failures for e in loop] == [("[lint] a.py:? E501: too long",)] * 2
 
     red = _red_form_suite("format", "lint")
@@ -15752,9 +15738,7 @@ def test_the_printed_log_names_each_new_failure_beneath_its_count(
     assert (
         "gates: 1 new failures after the rebuttal — format\n  [format] x.py:? E1: m"
     ) in printed
-    rebut_lines = [
-        e for e in events if isinstance(e, AttemptEvent) and e.phase == "REBUT"
-    ]
+    rebut_lines = [e for e in events if isinstance(e, Attempt) and e.phase == "REBUT"]
     assert [e.failures for e in rebut_lines] == [
         ("[format] x.py:? E1: m", "[lint] x.py:? E1: m"),
         ("[format] x.py:? E1: m",),
