@@ -1352,6 +1352,22 @@ def _result(*, rebuttal, verdicts, moved=True):
     )
 
 
+def test_a_rebuttal_turn_that_raised_with_no_message_reads_as_unreadable():
+    """b-3df181: `str(exc)` is empty for an exception with no message. Such a
+    turn is unreadable, and its why line must not read as a turn that
+    recorded nothing (§5.6)."""
+    state, why = rebut.rebut_state(
+        moved=False, rebuttal=rebut.RebuttalTurn(error=""), verdicts=[]
+    )
+    assert state == "REBUTTAL_UNJUDGED"
+    assert "unreadable" in why
+    assert "recorded nothing" not in why
+    _, plain = rebut.rebut_state(
+        moved=False, rebuttal=rebut.RebuttalTurn(), verdicts=[]
+    )
+    assert plain.endswith("recorded nothing")
+
+
 def test_sustained_blockers_is_zero_when_rebut_never_ran():
     """No `RebutResult` at all — REVIEW found no anchored blocker, or the task
     stopped before REBUT. Nothing to sustain."""

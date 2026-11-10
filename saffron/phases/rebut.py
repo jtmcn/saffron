@@ -612,11 +612,17 @@ def rebut_state(
     argued = [r for r in rebuttal.rebuttals if r.action == "argued"]
     claimed = [r for r in rebuttal.rebuttals if r.action == "fixed"]
     if not moved and not argued:
-        detail = (
-            f"claimed a fix for {len(claimed)} blocker(s) and committed nothing"
-            if claimed
-            else rebuttal.error or "recorded nothing"
-        )
+        # `is not None`: `str(exc)` is empty for an exception with no message.
+        if claimed:
+            detail = (
+                f"claimed a fix for {len(claimed)} blocker(s) and committed nothing"
+            )
+        elif rebuttal.error is not None:
+            detail = (
+                rebuttal.error or "the rebuttal turn was unreadable, with no message"
+            )
+        else:
+            detail = "recorded nothing"
         return (
             "REBUTTAL_UNJUDGED",
             f"the rebuttal moved no commit and made no argument: {detail}",
@@ -768,7 +774,7 @@ def sustained_blockers(rebut_result: RebutResult | None) -> int:
     blocker verdicted but never rebutted, which never enters `_confirmed_with`'s
     answered set. Only a host-filed survivor reaches REBUT unanchored (§5.5).
     """
-    if rebut_result is None or rebut_result.rebuttal.error:
+    if rebut_result is None or rebut_result.rebuttal.error is not None:
         return 0
     return _confirmed_with(rebut_result, "argued")
 
@@ -790,7 +796,11 @@ def unkept_fixes(rebut_result: RebutResult | None) -> int:
     queue as state `REBUTTAL_UNJUDGED`, which ranks with the states that
     need you.
     """
-    if rebut_result is None or rebut_result.rebuttal.error or rebut_result.moved:
+    if (
+        rebut_result is None
+        or rebut_result.rebuttal.error is not None
+        or rebut_result.moved
+    ):
         return 0
     return _confirmed_with(rebut_result, "fixed")
 
