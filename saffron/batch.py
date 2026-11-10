@@ -218,6 +218,9 @@ def _drive(
     in_flight: list[tuple[str, str]],
     package_raised: list[str],
     after_attach: Callable[[Candidate, CellOutcome, int], None] | None = None,
+    # Given the candidate `_drive` passed over for budget (`b-f73cd0`).
+    # `run_stack_batch` uses one to record such a spec as a missed layer.
+    on_passed_over: Callable[[Candidate], Sequence[Candidate]] | None = None,
     reserve_usd: float = 0.0,
     writer_usd: float = 0.0,
     sleep: Callable[[float], None] | None = None,
@@ -244,12 +247,22 @@ def _drive(
     # By spec id, or a re-offered `Candidate` starts twice. With `sleep` set, one that ended
     # `RATE_LIMITED`, in `_OFFERED_AGAIN` or raised an unmarked `CellRuntimeError` is taken back out.
     started: set[str] = set()
+    # By spec id, excluded from every later `pending` the same way `started`
+    # is, so a candidate over budget tonight is never offered again (b-f73cd0).
+    passed_over: set[str] = set()
     # Each rescan replaces this rather than merging, so a spec the latest
     # scan no longer offers does not run because an earlier one did.
     pending: Sequence[Candidate] = candidates
 
     while True:
-        candidate = next((c for c in pending if c.spec.id not in started), None)
+        candidate = next(
+            (
+                c
+                for c in pending
+                if c.spec.id not in started and c.spec.id not in passed_over
+            ),
+            None,
+        )
         if candidate is None:
             if consecutive_aborts >= _BREAKER_THRESHOLD:
                 # The breaker is consulted before a task, so a queue whose
@@ -258,6 +271,10 @@ def _drive(
                 # launchd would record a successful night in which every task
                 # died of one global condition.
                 return "INFRASTRUCTURE", consecutive_aborts
+            if passed_over:
+                # The queue did not drain: money, not the list, is why
+                # nothing more ran (§4.2.1, b-f73cd0).
+                return "BUDGET", consecutive_aborts
             return "DRAINED", consecutive_aborts
 
         # Before each task, in this order: the deadline, then the budget,
@@ -275,7 +292,16 @@ def _drive(
             - ledger.batch_spend(batch_id)
         )
         if candidate.spec.budget_usd > remaining:
-            return "BUDGET", consecutive_aborts
+            # Passed over, not stopped for (§4.2.1, b-f73cd0). A later,
+            # cheaper candidate still gets its own budget check below.
+            emit(
+                f"{candidate.spec.id:<10} over budget  "
+                f"needs {candidate.spec.budget_usd:.3f}, {remaining:.3f} left"
+            )
+            passed_over.add(candidate.spec.id)
+            if on_passed_over is not None:
+                pending = on_passed_over(candidate)
+            continue
 
         if consecutive_aborts >= _BREAKER_THRESHOLD:
             return "INFRASTRUCTURE", consecutive_aborts
@@ -628,6 +654,14 @@ def run_stack_batch(
             remaining.pop(0)
         return remaining
 
+    def record_budget_miss(candidate: Candidate) -> list[Candidate]:
+        """`_drive`'s `on_passed_over` hook for the order's own pass
+        (`b-f73cd0`). A spec passed over for budget is a missed layer like
+        any other, so its dependents are refused through `resolve_prefix`."""
+        missed[candidate.spec.id] = frozenset({candidate.spec.id})
+        remaining.remove(candidate)
+        return resolve_prefix()
+
     def wrapped(candidate: Candidate) -> CellOutcome | Refused:
         nonlocal predecessor, stack_base_gone
         pred = predecessor
@@ -954,6 +988,7 @@ def run_stack_batch(
                 in_flight=in_flight,
                 package_raised=package_raised,
                 after_attach=record_layer,
+                on_passed_over=record_budget_miss,
                 reserve_usd=reserve_usd,
                 writer_usd=writer_usd,
                 sleep=sleep,

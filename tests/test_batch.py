@@ -428,6 +428,87 @@ def test_the_budget_gate_is_one_comparison_before_each_task(ledger, repo_id):
     assert exact_runner.calls == exact
 
 
+def test_a_batch_passes_over_a_candidate_its_budget_cannot_cover_and_runs_the_next_that_fits(
+    ledger, repo_id
+):
+    """A candidate over budget is passed over, not stopped for, and the
+    batch keeps offering candidates it has not tried. It is named once, on
+    its own line, however many later rescans offer it again. Once nothing
+    left fits, the batch ends `BUDGET`, unless the breaker's count already
+    stands, which ends `INFRASTRUCTURE` instead."""
+    candidates = [
+        _candidate("TE-0001", budget_usd=30.0),
+        _candidate("TE-0002", budget_usd=8.0),
+        _candidate("TE-0003", budget_usd=8.0),
+        _candidate("TE-0004", budget_usd=2.0),
+    ]
+    run_one = _spend(ledger, repo_id, 15.0)
+    run_two = _spend(ledger, repo_id, 1.0)
+    runner = FakeRunner(
+        [
+            _outcome(state="READY_FOR_REVIEW", run_id=run_one),
+            _outcome(state="READY_FOR_REVIEW", run_id=run_two),
+        ]
+    )
+    lines: list[str] = []
+
+    reason = run_batch(
+        candidates,
+        ledger,
+        budget_usd=20.0,
+        until=None,
+        runner=runner,
+        rescan=lambda: candidates,
+        readiness_check=_ready,
+        emit=lines.append,
+    )
+
+    assert reason == "BUDGET"
+    assert runner.calls == [candidates[1], candidates[3]]
+    batch_id = _latest_batch_id(ledger)
+    assert _batch_row(ledger, batch_id)["status"] == "BUDGET"
+    over_budget = [line for line in lines if "over budget" in line]
+    assert over_budget == [
+        f"{'TE-0001':<10} over budget  needs 30.000, 20.000 left",
+        f"{'TE-0003':<10} over budget  needs 8.000, 5.000 left",
+    ]
+
+    # A second batch: two aborts in a row stand the breaker. The third
+    # candidate is over budget too, so the breaker, not budget, ends it.
+    second = [
+        _candidate("TE-0005", budget_usd=1.0),
+        _candidate("TE-0006", budget_usd=1.0),
+        _candidate("TE-0007", budget_usd=50.0),
+    ]
+    runner2 = FakeRunner(
+        [
+            _outcome(state="GATE_ERROR", run_id=_spend(ledger, repo_id, 0.5)),
+            _outcome(state="GATE_ERROR", run_id=_spend(ledger, repo_id, 0.5)),
+        ]
+    )
+
+    lines2: list[str] = []
+    reason2 = run_batch(
+        second,
+        ledger,
+        budget_usd=20.0,
+        until=None,
+        runner=runner2,
+        rescan=lambda: second,
+        readiness_check=_ready,
+        emit=lines2.append,
+    )
+
+    assert reason2 == "INFRASTRUCTURE"
+    assert runner2.calls == [second[0], second[1]]
+    batch_id2 = _latest_batch_id(ledger)
+    assert _batch_row(ledger, batch_id2)["status"] == "INFRASTRUCTURE"
+    # The third candidate is still checked, and passed over, before the
+    # breaker's count ends the pass, so this line gets named too.
+    over_budget2 = [line for line in lines2 if "over budget" in line]
+    assert over_budget2 == [f"{'TE-0007':<10} over budget  needs 50.000, 19.000 left"]
+
+
 def test_a_task_overshooting_its_own_budget_does_not_stop_the_batch(ledger, repo_id):
     overshooting = _candidate("TE-0001", budget_usd=5.0)
     second = _candidate("TE-0002", budget_usd=5.0)
@@ -1691,6 +1772,87 @@ def test_a_stack_batch_refuses_every_descendant_of_a_task_that_missed_review(
     assert "TE-11" in refused["TE-15"] and "TE-14" not in refused["TE-15"]
     assert "TE-16" in refused["TE-18"] and "TE-17" in refused["TE-18"]
     assert not any("TE-20" in line for line in refused.values())
+
+
+def test_a_stack_batch_refuses_the_dependents_of_a_layer_it_passed_over_and_runs_the_rest(
+    ledger, repo_id
+):
+    """A spec of the order whose `budget_usd` no longer fits is a missed
+    layer, the same as one the runner itself could not finish. Every spec
+    whose `depends_on` reaches it is refused the same way. A later spec that
+    reaches no miss still runs, on the last layer that reached
+    `READY_FOR_REVIEW`."""
+    from saffron.batch import run_stack_batch
+
+    order = [
+        _candidate("TE-1", budget_usd=5.0),
+        _candidate("TE-2", budget_usd=50.0),
+        _candidate("TE-3", budget_usd=5.0, depends_on=["TE-2"]),
+        _candidate("TE-4", budget_usd=5.0),
+        _candidate("TE-5", budget_usd=5.0, depends_on=["TE-3"]),
+    ]
+    doubles = StackDoubles(ledger, repo_id, {})
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        30.0,
+        None,
+        doubles.runner,
+        readiness_check=_ready,
+        emit=lines.append,
+    )
+
+    assert doubles.runner_calls == [("TE-1", None), ("TE-4", "TE-1")]
+    assert reason == "BUDGET"
+    assert any(
+        line == f"{'TE-2':<10} over budget  needs 50.000, 29.000 left" for line in lines
+    )
+    assert [line for line in lines if " refused " in line] == [
+        f"{'TE-3':<10} refused  reaches TE-2",
+        f"{'TE-5':<10} refused  reaches TE-2",
+    ]
+
+
+def test_a_follow_up_its_budget_cannot_cover_is_passed_over_and_the_next_one_runs(
+    ledger, repo_id
+):
+    """A follow-up over budget is passed over the same way an order spec
+    is, on the same `over budget` line. The next follow-up that fits still
+    runs, on the order's own top layer."""
+    from saffron.batch import run_stack_batch
+
+    rows = {
+        "__follow_ups__": [
+            {"id": "TE-91", "budget_usd": 40},
+            {"id": "TE-92", "budget_usd": 1},
+        ],
+    }
+    doubles = StackDoubles(ledger, repo_id, rows)
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        [_candidate("TE-90", budget_usd=5)],
+        ledger,
+        30.0,
+        None,
+        doubles.runner,
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        writer_usd=2.0,
+        review=doubles.review,
+        mint=doubles.mint,
+        end_review=doubles.end_review,
+        follow_ups=doubles.follow_ups,
+        emit=lines.append,
+    )
+
+    assert doubles.runner_calls == [("TE-90", None), ("TE-92", "TE-90")]
+    assert reason == "BUDGET"
+    over_budget = [line for line in lines if "over budget" in line]
+    assert over_budget == [f"{'TE-91':<10} over budget  needs 40.000, 29.000 left"]
+    assert "follow-ups unrun  TE-91" in lines
 
 
 def test_a_stack_batch_counts_a_raise_as_an_abort(ledger, repo_id):
@@ -6338,7 +6500,11 @@ def test_a_follow_up_meets_until_the_budget_and_the_breaker_as_any_task_does(
     assert reason2 == "BUDGET"
     assert doubles2.runner_calls == [("TE-43", None)]
     assert len(open_pr_calls2) == 1
-    assert not any("refused" in line for line in lines2)
+    assert any(line.startswith(f"{'TE-44':<10} over budget") for line in lines2)
+    assert any(
+        line.startswith(f"{'TE-40':<10} refused") and "touches" in line
+        for line in lines2
+    )
     assert "follow-ups unrun  TE-44 TE-40" in lines2
 
     # Batch 3: the order's own pass stopped `BUDGET`, so the follow-up
