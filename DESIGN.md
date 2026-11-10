@@ -1286,7 +1286,7 @@ This section argued until 2026-09-02 that lens #3 in a naive design would be "te
 
 ### 5.6 Phase 4b — REBUT
 
-The implementer session resumes and gets the confirmed blockers. **One** attempt to either fix them or argue the finding is wrong. Both outcomes recorded. Gates re-run.
+The implementer session resumes and gets the confirmed blockers, then each anchored concern numbered after them. **One** attempt to either fix each or argue the finding is wrong. Both outcomes recorded. Gates re-run. A concern's answer is recorded and shown in the pull request, and no lens verdicts it.
 
 **An unreadable rebuttal is recorded as unreadable, never as no answer** (item 42). The ledger's rebuttal fact says, per confirmed blocker, whether the implementer answered it, left it unanswered, or answered in a turn nobody could read. The morning queue counts the last two apart from a sustained blocker. Before this, all three read as no argument, and `SA-0040`'s critic confirmed a blocker whose answer a trailing comma had destroyed.
 
