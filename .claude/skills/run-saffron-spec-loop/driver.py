@@ -57,6 +57,7 @@ _REVIEW_TRIGGER_PATHS = (
     "saffron/agents/prompts/turns/rebut.md",
     "saffron/agents/prompts/turns/verdict.md",
     "saffron/agents/prompts/turns/rebut-extract.md",
+    "saffron/agents/prompts/turns/rebut-concerns.md",
 )
 _REVIEW_TRIGGER_GLOB = "saffron/agents/prompts/review-*.md"
 # What the CLI prints at column 0 while a cell runs. Terminal states are not

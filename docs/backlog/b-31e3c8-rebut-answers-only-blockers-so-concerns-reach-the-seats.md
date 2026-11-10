@@ -4,7 +4,7 @@ title: REBUT answers only blockers, so every in-cell concern reaches the review 
 status: open
 tier: 2
 filed: 2026-11-08
-specs: []
+specs: [SA-0360]
 prs: []
 commits: []
 cites: [§5.6]
