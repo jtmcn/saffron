@@ -134,8 +134,8 @@ def run_regate(
 
     No agent runs here, and `CLAUDE_CODE_OAUTH_TOKEN` is never read. A
     decline prints `regate:` and its reason, then returns 1, including a
-    `revert-exempt.json` this cannot read, or a pinned mutants commit the
-    mirror lacks (`b-c5da95`). Any other raise, a failed `gh`, a
+    `revert-exempt.json` this cannot read, or a pinned mutants commit it
+    cannot read (`b-c5da95`). Any other raise, a failed `gh`, a
     `PreflightFailed`, any other `PackageError`, an `OSError` reading that
     file, is left to the caller, which exits 2.
     """

@@ -26,6 +26,7 @@ from saffron.agents.findings import Finding
 from saffron.ledger import Ledger
 from saffron.phases import implement
 from saffron.record.routed import RoutedRecord
+from tests.test_regate import _mutants_commit, _mutants_yaml, _set_mutants_ref
 
 SPEC_ID = "SA-0900"
 SPEC_FILENAME = f"{SPEC_ID}-commit-review-test.md"
@@ -235,72 +236,6 @@ def _seed_task(
     elif pr_url is not None:
         ledger.adopt_pull_request(task_id, pr_url)
     return task_id
-
-
-def _hash_object(work: Path, text: str) -> str:
-    return subprocess.run(
-        ["git", "-C", str(work), "hash-object", "-w", "--stdin"],
-        input=text,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-
-
-def _mktree(work: Path, entries: dict[str, str]) -> str:
-    stdin = "".join(
-        f"100644 blob {sha}\t{name}\n" for name, sha in sorted(entries.items())
-    )
-    return subprocess.run(
-        ["git", "-C", str(work), "mktree"],
-        input=stdin,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-
-
-def _ls_tree(work: Path, commit: str) -> dict[str, str]:
-    out = subprocess.run(
-        ["git", "-C", str(work), "ls-tree", commit],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    entries: dict[str, str] = {}
-    for line in out.splitlines():
-        if not line:
-            continue
-        meta, name = line.split("\t", 1)
-        entries[name] = meta.split()[2]
-    return entries
-
-
-def _mutants_commit(
-    work: Path, *, parent: str | None = None, spec_id: str, yaml_text: str
-) -> str:
-    """One commit over `<spec_id>.yaml`, on top of `parent` or a root commit
-    with none, never through `write_mutants` (`b-c5da95`)."""
-    entries = _ls_tree(work, parent) if parent else {}
-    entries[f"{spec_id}.yaml"] = _hash_object(work, yaml_text)
-    tree = _mktree(work, entries)
-    args = ["git", "-C", str(work), "commit-tree", tree, "-m", f"mutant {spec_id}"]
-    if parent:
-        args += ["-p", parent]
-    return subprocess.run(
-        args, capture_output=True, text=True, check=True
-    ).stdout.strip()
-
-
-def _mutants_yaml(
-    witness: str, *, file: str, find: str, replace: str = "replaced"
-) -> str:
-    return f"{witness}:\n  file: {file}\n  find: {find}\n  replace: {replace}\n"
-
-
-def _set_mutants_ref(work: Path, commit: str) -> None:
-    _git(work, "update-ref", "refs/saffron/mutants", commit)
-    _git(work, "push", "-q", "origin", "refs/saffron/mutants:refs/saffron/mutants")
 
 
 def _seeding_ledger(path: Path, origin_url: str) -> Ledger:
@@ -1483,4 +1418,18 @@ def test_review_declines_a_mutants_commit_it_cannot_read_before_any_cell(
     assert result == 2
     assert out.count("review:") == 1
     assert out.startswith(f"review: {SPEC_ID}.yaml")
+    assert layer_calls == []
+
+    # A YAML syntax error, whose parser message spans several lines.
+    case_syntax = tmp_path / "syntax"
+    case_syntax.mkdir()
+    fixture_syntax = _build_fixture(case_syntax, witness=witness)
+    syntax_commit = _mutants_commit(
+        fixture_syntax.work, spec_id=SPEC_ID, yaml_text="key: [\n"
+    )
+    _set_mutants_ref(fixture_syntax.work, syntax_commit)
+    result, out, layer_calls = _try(fixture_syntax, mutants_commit=syntax_commit)
+    assert result == 2
+    assert out.startswith(f"review: {SPEC_ID}.yaml is not valid YAML")
+    assert out.count("\n") == 1
     assert layer_calls == []

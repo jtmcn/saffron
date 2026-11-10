@@ -4525,3 +4525,25 @@ def test_package_refuses_a_mutants_commit_it_cannot_read_before_the_image(
     assert "\n" not in result.reason
     assert build_calls == []
     assert package_calls == []
+
+    # A YAML syntax error, whose parser message spans several lines.
+    case_c = tmp_path / "syntax"
+    case_c.mkdir()
+    ledger, run_id, repo_id, mirror, _shas = _recorded_ledger(case_c)
+    syntax_commit = _mutants_commit(mirror, "key: [\n")
+    result, build_calls, package_calls = _package_case(
+        case_c,
+        monkeypatch,
+        ledger=ledger,
+        run_id=run_id,
+        repo_id=repo_id,
+        mirror=mirror,
+        mutants_commit=syntax_commit,
+        spec_text=_REV_TEXT,
+    )
+    ledger.close()
+    assert isinstance(result, Refused)
+    assert "SY-1.yaml is not valid YAML" in result.reason
+    assert "\n" not in result.reason
+    assert build_calls == []
+    assert package_calls == []

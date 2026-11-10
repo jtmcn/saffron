@@ -212,9 +212,9 @@ def run_commit_review(
     the task's own review commits with the end review's two lenses.
 
     A decline prints `review:` and its reason, then returns 2, including a
-    pinned mutants commit the mirror lacks (`b-c5da95`). Any other raise
-    reading the task, the range, the export or the spec is left to the
-    caller, which exits 2. The task's state never moves."""
+    pinned mutants commit it cannot read (`b-c5da95`). Any other raise
+    reading the task, the range, the export or the spec file is left to
+    the caller, which exits 2. The task's state never moves."""
     url = package_phase.real_remote(repo)
     try:
         row = _task_and_run(ledger, task_id, repo, url)

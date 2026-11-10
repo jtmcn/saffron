@@ -1,9 +1,9 @@
 """Reading and writing a criterion's mutant on `refs/saffron/mutants`
 (DESIGN.md §5.4.1, backlog item 80).
 
-The reader is `run_task` and `cli._stack_mint`'s shared path in. It is also
-`run_regate`, `package_ready_task` and `run_commit_review`'s own, through
-`attach_mutants_at`: none of the three runs an implementing cell
+The reader is `run_task` and `cli._stack_mint`'s shared path in, through
+`attach_mutants_at`. `run_regate`, `package_ready_task` and
+`run_commit_review` read it the same way, with no implementing cell
 (`b-c5da95`). The writer is `saffron mutant`'s own work (`SA-0339`). It
 fetches origin's copy of the ref and builds a new commit on top of it, then
 pushes. It never uses `saffron/repos/mirror.py`'s helpers. Those pass no
@@ -128,9 +128,9 @@ def attach_mutants(spec: Spec, found: dict[str, Mutant]) -> Spec:
 
 
 def attach_mutants_at(mirror: Path, commit: str | None, spec: Spec) -> Spec:
-    """`spec` with its mutants attached from `commit` in `mirror`, for every
-    caller that judges a spec with no implementing cell: `run_regate`,
-    `package_ready_task` and `run_commit_review` alike (`b-c5da95`).
+    """`spec` with its mutants attached from `commit` in `mirror`, for
+    `run_task` and for every caller that judges a spec with no implementing
+    cell: `run_regate`, `package_ready_task` and `run_commit_review`.
 
     A `spec` that already declares any mutant inline comes back untouched,
     with no read of the ref or the mirror: only `run_task` refuses an

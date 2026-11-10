@@ -277,7 +277,7 @@ def _mktree(work: Path, entries: dict[str, str]) -> str:
 
 
 def _mutants_commit(
-    work: Path, *, parent: str | None, spec_id: str, yaml_text: str
+    work: Path, *, parent: str | None = None, spec_id: str, yaml_text: str
 ) -> str:
     """One commit on top of `parent` (or a root commit with none), replacing
     `<spec_id>.yaml` with `yaml_text`. Never through `write_mutants`: that
@@ -1239,7 +1239,10 @@ def test_regate_declines_a_mutants_commit_it_cannot_read_before_any_cell(
     unparseable_sha = _mutants_commit(
         work, parent=readable_sha, spec_id=SPEC_ID, yaml_text="not a mapping at all\n"
     )
-    _set_mutants_ref(work, unparseable_sha)
+    syntax_sha = _mutants_commit(
+        work, parent=unparseable_sha, spec_id=SPEC_ID, yaml_text="key: [\n"
+    )
+    _set_mutants_ref(work, syntax_sha)
 
     def _prepare(pr_url: str) -> tuple[list, list]:
         monkeypatch.setattr(cli, "run_gh", _gh_pr_view(pr_url, "OPEN", "main", []))
@@ -1344,6 +1347,31 @@ def test_regate_declines_a_mutants_commit_it_cannot_read_before_any_cell(
     ledger = Ledger(home / "ledger.db")
     assert ledger.regate(task_unparseable) is None
     ledger.close()
+
+    # A YAML syntax error, whose parser message spans several lines.
+    pr_syntax = "https://github.com/o/r/pull/12"
+    ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
+    task_syntax = _seed_task(
+        ledger,
+        origin_url=fixture.origin_url,
+        mirror_path=mirror_path,
+        base_sha=fixture.base_sha,
+        spec_sha=fixture.spec_sha,
+        branch="saffron/SA-0005",
+        pr_url=pr_syntax,
+        pushed_sha=fixture.packaged_sha,
+        mutants_commit=syntax_sha,
+    )
+    ledger.close()
+
+    build_calls, reverify_calls = _prepare(pr_syntax)
+    result = cli.main(["--home", str(home), "regate", str(task_syntax), "--repo", "."])
+    out = capsys.readouterr().out
+    assert result == 1
+    assert out.startswith(f"regate: {SPEC_ID}.yaml is not valid YAML")
+    assert out.count("\n") == 1
+    assert build_calls == []
+    assert reverify_calls == []
 
 
 def test_adopt_moves_a_task_whose_witness_its_cell_set_aside_to_ready_for_review(
