@@ -1451,6 +1451,19 @@ def test_a_resnapshot_takes_in_a_follow_up_a_finish_ran_and_record_reads_it(
     assert driver.cmd_record(argparse.Namespace(spec_id=follow_up, all=False)) == 0
     assert capsys.readouterr().out.startswith(f"{follow_up}  READY_FOR_REVIEW  #982")
 
+    # Spec loop runs 57 to 59 took in a merged follow-up and two cut short with
+    # nothing pushed, every snapshot. Neither is open work.
+    ledger = Ledger(path)
+    ledger.set_task_state(tasks[follow_up], "MERGED")
+    ledger.close()
+    assert driver._follow_up_rows({parent}) == []
+    ledger = Ledger(path)
+    ledger.set_task_state(tasks[follow_up], "ORPHANED")
+    ledger.record_push(tasks[follow_up], "")
+    ledger.adopt_pull_request(tasks[follow_up], "")
+    ledger.close()
+    assert driver._follow_up_rows({parent}) == []
+
 
 def _stack_batch_ledger(tmp_path, monkeypatch, chain, *, outside=None):
     """A real ledger holding one stack batch whose layers run in `chain` order.

@@ -578,6 +578,15 @@ def _follow_up_rows(known: set[str]) -> list[OrderRow]:
                 task = next((t for t in tasks if t["task_id"] == f["task_id"]), None)
                 if task is None:
                     continue
+                url = urls.get(f["task_id"], "")
+                # A merged follow-up is settled, and one cut short with nothing
+                # pushed has no layer to stack: neither is open work.
+                if task["state"] == "MERGED" or (
+                    task["state"] not in DONE_STATES
+                    and not task["pushed_sha"]
+                    and not url
+                ):
+                    continue
                 texts = ledger.spec_texts(f["task_id"])
                 text = next(
                     (t for t in texts if t["spec_sha"] == task["spec_sha"]), texts[-1]
@@ -590,7 +599,6 @@ def _follow_up_rows(known: set[str]) -> list[OrderRow]:
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_bytes(text["text"].encode("utf-8"))
                 parent = _follow_up_parent(f["task_id"], layers)
-                url = urls.get(f["task_id"], "")
                 row = OrderRow(
                     spec_id=f["spec_id"],
                     path=_relative(dest),
