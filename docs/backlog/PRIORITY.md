@@ -148,7 +148,7 @@ criterion cannot name the members its claim covers, so no command sees one
 that no witness drives.
 
 **Placed 2026-11-08**, from the spec loop's run 55: ~~**b-31e3c8**~~,
-**b-cbb6e7**, ~~**b-c7858c**~~, **b-879e72**, then **b-3df181**. REBUT answers
+**b-cbb6e7**, ~~**b-c7858c**~~, **b-879e72**, then ~~**b-3df181**~~. REBUT answers
 no concern, so every in-cell concern reached both seats. A finish minted a
 follow-up id `main` already held. `cite` passes a citation whose code moved.
 Three commands take no home lock. An empty rebuttal error reads as no answer.
