@@ -430,10 +430,12 @@ def main(argv: list[str] | None = None) -> int:
             return _guarding_sigterm(lambda: _adopt(args, ledger, out_dir))
 
         if args.command == "package":
-            return _package(args, ledger, out_dir)
+            return _locked_dispatch(args, lambda: _package(args, ledger, out_dir))
 
         if args.command == "finish":
-            return _guarding_sigterm(lambda: _finish(args, ledger, out_dir))
+            return _locked_dispatch(
+                args, lambda: _guarding_sigterm(lambda: _finish(args, ledger, out_dir))
+            )
 
         if args.command == "watch":
             return _watch(args, out_dir)
@@ -625,7 +627,8 @@ def _pushed_landed(mirror: Path, base_sha: str, pushed_sha: str) -> bool:
 
 
 def _locked_dispatch(args: argparse.Namespace, run: Callable[[], int]) -> int:
-    """Run `cell`, `batch` or `draft` under the home lock (`saffron/home_lock.py`).
+    """Run a command that holds an in-flight row under the home lock
+    (`saffron/home_lock.py`): `cell`, `batch`, `draft`, `package` or `finish`.
 
     A lock already held refuses at once, with one line naming the
     holder's pid and command. It exits `2`, as a setup failure does.
