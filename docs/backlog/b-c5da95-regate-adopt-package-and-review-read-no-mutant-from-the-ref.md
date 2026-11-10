@@ -4,7 +4,7 @@ title: "`regate`, `adopt`, `package` and `review` read no mutant from the ref, s
 status: open
 tier: 2
 filed: 2026-11-07
-specs: []
+specs: [SA-0363]
 prs: []
 commits: []
 cites: [§5.4.1]
@@ -36,3 +36,5 @@ witness the cell set aside and finds no new failure.
 ## Record
 
 - 2026-11-07: filed with `SA-0338`, from its first spec review.
+- 2026-11-10: specced as `SA-0363`, with `regate`, `adopt`, `package` and
+  `review` attaching through one helper.
