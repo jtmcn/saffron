@@ -76,10 +76,12 @@ acceptance:
       `.git`, https bare, https with a trailing `/`, scp-like with an owner,
       scp-like with none, `ssh://`, a local path with `.git`, a local path
       with `.git/`, and `file://`. The https origin of a repo named `audit`
-      names `audit`, so only the whole suffix is stripped. An origin whose
-      last segment is empty once stripped keeps the directory name. The
-      witness drives that with a local path ending in `repo` then `.git`, and
-      with an https origin whose path is an owner then `.git`. An origin
+      names `audit`, and an origin ending `o.github.io.git` names `o.github.io`,
+      so only the whole suffix at the end is stripped. An origin whose last
+      segment is empty once stripped keeps the directory name. The witness
+      drives that with a local path ending in `repo` then `.git`, and with an
+      https origin whose path is an owner then `.git`, each in a repo whose
+      directory is named `checkout`. An origin
       ending `joel+v0.5.git` names `joel-v0.5`, through the replacement the
       directory name takes today. A git repo with no `origin` keeps its
       directory name. The witness reads no host git config.
@@ -93,7 +95,9 @@ acceptance:
       - A repo with no `origin` raises instead of keeping its directory name.
       - The owner is joined to the name, so `o/thermal-edge` names `o-thermal-edge`.
       - "`.git` is removed with `rstrip`, which strips characters, so `audit.git` names `aud`."
-      - An empty last segment is kept, so a local path ending `repo/.git` names its whole path rather than the directory.
+      - An empty last segment is kept, so a local path ending `repo/.git` names an empty tag rather than the directory.
+      - A `/` is stripped again after `.git`, so a local path ending `repo/.git` names `repo` rather than the directory.
+      - "`.git` is removed wherever it occurs, so `o.github.io.git` names `ohub.io`."
   - claim: >-
       A directory that is no git repo at all keeps its own name as its tag.
     witness: tests/test_image.py::test_the_cell_image_is_named_for_the_repo
@@ -114,7 +118,7 @@ acceptance:
       - podman's member names `podman image prune --force`, a spelling no measurement backs.
       - The function returns a made-up success for podman rather than `None`.
       - The function reads apple's dialect whatever is selected.
-      - The function takes `_call`'s default bound of 120 seconds.
+      - The function takes `call`'s default bound of 120 seconds.
   - claim: >-
       Each batch form, plain and `--stack`, calls `runtime.reclaim_build_cache`
       once, after the unattended refusal and before `check_readiness`. A
@@ -136,8 +140,8 @@ acceptance:
       witness drives four outcomes. A nonzero exit with stderr prints the
       stderr, and one with no output prints `exit` and the code. A reclaim
       that timed out names the timeout, though it also carries a nonzero code
-      and stderr, since `timed_out` is read first. A `CellRuntimeError` from
-      `_call` prints its text.
+      and stderr, since `timed_out` is read first. A `CellRuntimeError` the
+      reclaim raises prints its text.
     witness: tests/test_batch_build_cache.py::test_a_reclaim_that_fails_is_printed_and_the_batch_goes_on
     wrong_versions:
       - A failed reclaim returns 2 before readiness, so the night stops.
@@ -251,8 +255,11 @@ property, to `Dialect` and to both runtimes. apple spells its argv from
 `self.binary`, and its comment says it was measured, with the version.
 podman returns `None`, and its comment says no measurement names a command.
 The member is then of the kind the module docstring calls "the exception in
-kind": what was measured of one runtime and not the other. Reword that
-docstring sentence so it still counts its members truly. Add
+kind": what was measured of one runtime and not the other. Put it last in
+the Protocol. Reword the docstring's count of those last members, and
+qualify its rule that every member is a difference observed between two
+runtimes: this one is measured for apple alone. Qualify `podman.py`'s
+"Every value below is measured" the same way. Add
 `reclaim_build_cache(timeout_s=...)` to `saffron/cell/runtime.py` beside
 `inspect_image`, with a module-level bound of 600 seconds and a one-line
 reason. It returns `Completed | None`. Also extend
