@@ -75,16 +75,19 @@ acceptance:
       claimed fix toward the state `run_rebut` reaches or its line. HEAD
       stays one measurement for the whole rebuttal. The witness drives five
       shapes. The first three run twice, the second answer once a blocker's
-      and once a concern's. The fourth and fifth run with a concern alone. A claimed blocker fix with no commit
+      and once a concern's. The fourth and fifth hand REBUT a blocker too, and
+      only the concern is answered. A claimed blocker fix with no commit
       beside an argued concern ends `REBUTTAL_UNJUDGED`, claiming a fix for 1
-      blocker, with no gate re-run and no critic cell. An argued blocker that
+      blocker, with no gate re-run and no critic cell. Its line says the
+      rebuttal made no argument against a blocker. An argued blocker that
       is confirmed beside an argued concern counts 1 argued. An argued
       blocker beside a concern claimed fixed with no commit carries no
       claimed-fix clause. A concern fix that moves HEAD, with no blocker
       answered, is still re-gated, and a red re-run ends `EXHAUSTED`. A turn
       that argued only a concern and moved nothing ends `REBUTTAL_UNJUDGED`,
-      and its line says the rebuttal answered no blocker. The same turn with
-      no concern removed, an empty turn, still says it recorded nothing.
+      and its line says the rebuttal made no argument against a blocker and
+      answered no blocker. An empty turn, which loses no entry to the filter,
+      keeps today's line and still says it recorded nothing.
     witness: tests/test_rebut.py::test_a_concerns_answer_never_changes_the_state_rebut_reaches
     wrong_versions:
       - "`rebut_state` and the early return both count every rebuttal entry, a concern's included."
@@ -94,6 +97,7 @@ acceptance:
       - The early return's `rebut_state` call is handed every entry, so its line counts a concern's claimed fix.
       - A turn that answered only concerns keeps today's line, which says the rebuttal recorded nothing.
       - Every empty turn's line says it answered no blocker, though no concern entry was removed.
+      - A claimed blocker fix beside an argued concern keeps today's line, which says the rebuttal made no argument.
   - claim: >-
       The pull request body gains a `### Concern answers` table after
       `### Disagreements`, one row per anchored concern, numbered after the
@@ -208,8 +212,9 @@ saw them, because nothing hands it a concern.
    `context.turn_prompt` as `rebut.CONCERNS_PROMPT`. It carries a
    `{concerns}` slot. `rebut.md` gains a `{concerns}` slot after
    `{blockers}`, filled with the empty string when there is no concern. The
-   paragraph says a concern is answered as a blocker is, that no critic
-   judges the answer, and that the pull request shows it. `rebut-extract.md`
+   paragraph says a concern is answered as a blocker is, and that no critic
+   judges the answer. It says the pull request shows the answer when
+   REBUT's result stands. `rebut-extract.md`
    asks for one entry per blocker and one per concern. Keep its sentence
    naming the pull request's disagreements table, and say a concern's argument
    appears in its concern answers table.
@@ -222,16 +227,22 @@ saw them, because nothing hands it a concern.
    commit. A red result ends `EXHAUSTED`. Today a turn with no commit and no
    argument ends `REBUTTAL_UNJUDGED` with a line ending "recorded nothing"
    (`saffron/phases/rebut.py:589-597`). When the filter removed a concern
-   entry and left no blocker answer, that line is false. Say instead that the
-   rebuttal moved no commit and answered no blocker. A turn that recorded no
-   entry at all keeps today's line.
-4. **The record.** `as_dict` takes the concerns as a second argument and lists
+   entry, "made no argument" is false. The line then says the rebuttal
+   moved no commit and made no argument against a blocker. Its detail is the
+   claimed-fix clause, or "answered no blocker" when no blocker answer is
+   left. A turn that recorded no entry at all keeps today's line. Reword
+   `rebut_state`'s docstring (`saffron/phases/rebut.py:581-582`) to say an
+   argument against a blocker.
+4. **The record.** `as_dict` takes the concerns as a second argument,
+   defaulting to empty, and lists
    them under a new `concerns` key, each with its number. In `session.py`,
    select the concerns beside the blockers and pass them to `run_rebut`. Keep
    answers numbered up to the blocker count plus the concern count. Ask
    `blocker_answers` about that total. Record a rebuttal fact for each concern
    after the blockers' facts, through the same `record_rebuttal` call, whose
-   verdict is always `None`.
+   verdict is always `None`. The default keeps `tests/test_task.py`'s four
+   `as_dict(blockers=[])` calls working (`tests/test_task.py:2982`), and that
+   file is `forbidden`.
 5. **The body.** Add `_concern_answers(reviews, rebut_result)` to
    `pr_body.py`, rendered right after `_disagreements`. Its heading is
    `### Concern answers`, and its columns are `#`, `lens`, `where`, `claim` and
@@ -302,7 +313,10 @@ witnesses below, left these files green: `tests/test_rebut.py`,
 docstring speak of blockers alone (`saffron/phases/rebut.py:657-671`), and so
 does `first_answers`' docstring (`saffron/phases/rebut.py:641-650`). The
 comment at `saffron/cell/session.py:3728-3730` says each answer is keyed by
-the blocker's number. Each now covers concerns too, so reword each. Renaming
+the blocker's number. `Rebuttal`'s docstring calls it the answer to one
+blocker (`saffron/phases/rebut.py:45`), and `blocker_lines`' docstring says
+blockers (`saffron/phases/rebut.py:199`). Each now covers concerns too, so
+reword each. Renaming
 the function is your choice.
 
 `_rebuttal_fixed_prefix` in `tests/test_session.py:5151-5155` splits
