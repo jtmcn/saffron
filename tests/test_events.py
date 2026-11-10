@@ -2589,7 +2589,7 @@ def test_the_watch_shaped_callable_phases_still_receive_does_not_raise():
         claude_md=None,
         prompts_dir=prompts_dir,
         max_turns=5,
-        budget_usd=1.0,
+        pool=review.ReviewPool(remaining=1.0, floor=0.0),
         agent=_scripted_agent(
             _block({"findings": []}),
             _block({"findings": []}),

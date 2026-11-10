@@ -795,10 +795,10 @@ def test_naming_the_gates_tools_moved_the_blocker_count_by_zero():
 # The two figures in the second-pass record that no run JSON can produce: the
 # per-lens ceiling both passes gave (declared, `--lens-budget-usd`) and the one
 # production gave — which is *derived*, not declared: SA-0062's spec declares
-# `budget_usd: 12`, and $3.30 is the remainder `critic_budget()` left at REVIEW
-# time. Named here because the record's "no lens came near either ceiling"
-# argument compares measured spend against them, and a test that let any
-# unrecognised dollar figure through would not be checking that argument at all.
+# `budget_usd: 12`, and $3.30 is REVIEW's own pool at REVIEW time. Named here
+# because the record's "no lens came near either ceiling" argument compares
+# measured spend against them, and a test that let any unrecognised dollar
+# figure through would not be checking that argument at all.
 LENS_CEILINGS = frozenset({"$4.00", "$3.30"})
 
 

@@ -1,11 +1,11 @@
 ---
 id: b-d39d9a
 title: "A cell spends past its own `budget_usd` during REVIEW and REBUT, and nothing stops it"
-status: open
+status: partial
 tier: 1
 filed: 2026-11-06
 specs: [SA-0335, SA-0343]
-prs: []
+prs: [1106]
 commits: []
 cites: [§5.2, §7.1]
 related: [b-2f4746]
@@ -33,3 +33,5 @@ REVIEW that crosses the ceiling.
 ## Record
 
 - 2026-11-06: filed from the spec loop's run 54.
+- 2026-11-09: partial in #1106 (`SA-0343`), from the spec loop's run 57. REVIEW now draws from one pool and caps each session at what is left. REBUT's half stays open.
+- 2026-11-09: #1106 deletes `critic_budget`. `tests/test_rebut.py:1083` still names it in a test name, and item 120 still cites it. That file was `forbidden` to `SA-0343`, so both seats kept it here.

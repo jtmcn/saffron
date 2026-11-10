@@ -136,7 +136,7 @@ call explains.
 its batch. The `tests` gate takes a printed warning for every failure.
 
 **Placed 2026-10-16**, from the spec loop's run 42: ~~**b-2da959**~~, then
-**b-f73cd0**. `cite` passes a drifted range and flags a correct one, and
+~~**b-f73cd0**~~. `cite` passes a drifted range and flags a correct one, and
 `SA-0294` ports it. A batch stops at a candidate it cannot pay for, though a
 later one fits.
 

@@ -78,15 +78,8 @@ TURN_TIMEOUT_S = 900.0
 WALL_SECONDS_PER_TURN = 15.0
 WALL_CAP_S = 3600.0
 
-# REVIEW is deliberately not gated on the spend ceiling — a green diff nobody
-# reviewed is not a product — so its sessions are capped at what is left rather
-# than at the whole task budget, which is how a $12 task bills $40 — one
-# remainder per declared lens, never decremented between them, so `LENSES`
-# growing moves that number rather than dividing it. The floor is
-# what keeps "not gated" true when nothing is left: below it a lens would be
-# refused for having no room, and the task would reach the operator unreviewed.
-# REBUT keeps its own ceilings below, at any spend, not only once
-# budget_usd is spent.
+# REVIEW's pool bounds each of its own sessions, never the task ceiling
+# (DESIGN.md §4.3). This is the floor each declared lens shares when it opens.
 REVIEW_FLOOR_USD = 2.0
 
 # The measured maximum of seven salvage turns, $0.40 on SA-0204, rounded up.
@@ -178,11 +171,6 @@ def spec_drift(gates_dir: Path, spec_id: str, spec_sha: str) -> str | None:
         f"carries {at_base[:12]} ({found[0].name}) — the agent can read a "
         "contract this run is not judging it against"
     )
-
-
-def critic_budget(budget_usd: float, spent: float) -> float:
-    """The per-session cap for one critic turn: the remainder, never zero."""
-    return max(budget_usd - spent, REVIEW_FLOOR_USD)
 
 
 class _RebutCap:
@@ -3174,9 +3162,15 @@ def _drive_cell(
                     + "; ".join(gate_comparison.aborted or gate_comparison.drift),
                 )
             elif gate_comparison is not None:
-                # One ceiling for every lens and every criterion-probe
-                # session alike (backlog item b-2750d5), computed once.
-                probe_budget = critic_budget(spec.budget_usd, spent)
+                # REVIEW's own pool (§4.3), shared below. `review.LENSES`
+                # is read live here, never cached, so a patched set moves it.
+                review_pool = review.ReviewPool(
+                    remaining=max(
+                        spec.budget_usd - spent,
+                        REVIEW_FLOOR_USD * len(review.LENSES),
+                    ),
+                    floor=REVIEW_FLOOR_USD,
+                )
                 # `None` for a spec declaring no `history` (backlog item b-a8270f).
                 # `lens_spec_body` reads it after the lens cell opens below.
                 history_result: dict | None = None
@@ -3253,7 +3247,7 @@ def _drive_cell(
                             claude_md=claude_md,
                             prompts_dir=context.PROMPTS_DIR,
                             max_turns=spec.max_turns,
-                            budget_usd=probe_budget,
+                            pool=review_pool,
                             agent=agent,
                             spec_id=spec.spec_id,
                             emit=emit,
@@ -3268,7 +3262,7 @@ def _drive_cell(
                             claude_md=claude_md,
                             prompts_dir=context.PROMPTS_DIR,
                             max_turns=spec.max_turns,
-                            budget_usd=probe_budget,
+                            pool=review_pool,
                             agent=agent,
                             spec_id=spec.spec_id,
                             emit=emit,
@@ -3283,7 +3277,7 @@ def _drive_cell(
                             claude_md=claude_md,
                             prompts_dir=context.PROMPTS_DIR,
                             max_turns=spec.max_turns,
-                            budget_usd=probe_budget,
+                            pool=review_pool,
                             agent=agent,
                             spec_id=spec.spec_id,
                             emit=emit,
@@ -3395,9 +3389,8 @@ def _drive_cell(
                             review.describe_wrong_versions(wrong_versions),
                         )
 
-                    # Deliberately not gated on the host ceiling: a green diff
-                    # nobody reviewed is exactly the product Appendix K says
-                    # means nothing.
+                    # REVIEW's pool already bounded each session as it ended.
+                    # A cut session reports a `cost_usd` of 0 here.
                     spent += (
                         sum(r.cost_usd for r in reviews)
                         + sum(e["cost_usd"] for e in criterion_probes)
@@ -3418,7 +3411,7 @@ def _drive_cell(
                             strict=True,
                         )
                     )
-                    outcome, why = review.review_state(reviews)
+                    outcome, why = review.review_state(reviews, cut=review_pool.cut)
                     _phase_start("REVIEW", "REVIEW", why)
 
         # Same reasoning as `reviews` above: bound only inside the REBUTTING

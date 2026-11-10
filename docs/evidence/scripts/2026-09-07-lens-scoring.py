@@ -74,15 +74,15 @@ def main() -> int:
         "--runs",
         type=int,
         default=3,
-        help="scored runs of the three lenses over the same diff (default 3).",
+        help="scored runs of the four lenses over the same diff (default 3).",
     )
     parser.add_argument(
         "--budget-usd",
         type=float,
         default=4.0,
-        help="per lens, the way `run_review` spends it — so the pass ceiling "
-        "is this times three lenses times --runs. Bounded for real by "
-        "--max-spend-usd.",
+        help="per lens: this times the four lenses in `review.LENSES` sets "
+        "the whole review pool for one run, so the pass ceiling is that "
+        "times --runs. Bounded for real by --max-spend-usd.",
     )
     parser.add_argument(
         "--max-spend-usd",
@@ -181,7 +181,12 @@ def main() -> int:
                 # and a container start.
                 prompts_dir=ROOT / "saffron" / "agents" / "prompts",
                 max_turns=args.max_turns,
-                budget_usd=args.budget_usd,
+                # REVIEW's own pool, built the way `session.py` builds it:
+                # the per-lens figure times every declared lens.
+                pool=review.ReviewPool(
+                    remaining=args.budget_usd * len(review.LENSES),
+                    floor=session.REVIEW_FLOOR_USD,
+                ),
                 agent=agent,
                 spec_id=f"{fixture.spec_id}-lensscore-{index}",
                 # `run_review` emits one `PhaseStart` per lens carrying
