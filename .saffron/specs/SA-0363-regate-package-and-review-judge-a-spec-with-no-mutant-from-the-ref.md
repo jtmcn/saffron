@@ -66,7 +66,7 @@ acceptance:
       - A spec declaring a mutant inline is declined, as `run_task` refuses it.
   - claim: >-
       `saffron regate` declines a task whose pinned mutants commit it cannot
-      read, before the image or any cell. A commit the mirror lacks, and a
+      read, for a spec declaring no mutant inline, before the image or any cell. A commit the mirror lacks, and a
       commit whose `<spec id>.yaml` does not parse, each print one `regate:`
       line naming the commit's first 12 characters or the file. Each exits 1,
       builds no image, never reaches `reverify` and records no regate row. A
@@ -101,7 +101,7 @@ acceptance:
       - The pinned commit is looked for before the inline mutant is kept, so a spec declaring one is refused for a commit the mirror lacks.
   - claim: >-
       `package_ready_task` returns `Refused` for a pinned mutants commit it
-      cannot read. A commit the mirror lacks, and one whose `<spec id>.yaml`
+      cannot read, for a spec declaring no mutant inline. A commit the mirror lacks, and one whose `<spec id>.yaml`
       does not parse, each give a one-line reason naming the commit's first 12
       characters or the file. Neither builds the image or calls `package()`.
       The same harness builds the image and calls `package()` for a readable
@@ -125,7 +125,7 @@ acceptance:
       - A recorded text declaring a mutant inline reaches the lenses with the pinned commit's mutant instead.
   - claim: >-
       `saffron review` declines a task whose pinned mutants commit it cannot
-      read, before any cell. A commit the mirror lacks, and one whose
+      read, for a spec declaring no mutant inline, before any cell. A commit the mirror lacks, and one whose
       `<spec id>.yaml` does not parse, each print one `review:` line naming
       the commit's first 12 characters or the file, and exit 2. Neither
       reaches the layer review. A readable pinned commit reviewed first in the
@@ -231,8 +231,10 @@ is replaced.
    `run_task` and `cli._stack_mint` (`saffron/mutants.py:4`).
 2. **`run_task` calls it.** Replace `saffron/task.py:780-787` with a call
    to `refuse_inline_mutants`, then the helper, both inside the existing
-   `try`. Only `run_task` refuses an inline mutant. The printed line and
-   the `Refused` stay as they are. Drop the imports nothing else uses.
+   `try`. Only `run_task` refuses an inline mutant. A spec that declares
+   one and pins a commit the mirror lacks now prints the inline reason,
+   since that check runs first. The printed line and the `Refused` stay as
+   they are. Drop the imports nothing else uses.
 3. **`run_regate` calls it** after `_spec_at_base`, inside the `try`, with
    `ledger.task_mutants_commit(task_id)`. A `SpecError` becomes a
    `_Declined` whose reason is the error's text on one line. It declines
@@ -311,7 +313,8 @@ test body.
 - `tests/test_commit_review.py`. Record a spec text that declares one
   criterion, since the fixture's file at base declares none. Monkeypatch
   `end_review._review_one_layer` with a spy that returns `[]`. The inline
-  case records a text whose criterion declares a `mutant:`.
+  case records a text whose criterion declares a `mutant:` whose `find`
+  differs from the pinned commit's mutant for the same witness.
 - Each decline witness first runs one task with a readable pinned commit
   through the same fakes. It sees the image, `reverify` or the layer review
   reached. Only then does it run the two unreadable ones.
