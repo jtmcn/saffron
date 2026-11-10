@@ -1928,6 +1928,15 @@ def _stack_follow_ups(
                     verify=judge_verify,
                 )
 
+            # A spec merged to the default branch since the batch cut its base
+            # holds an id the stack top lacks (b-cbb6e7).
+            try:
+                _, main_head = package_phase.fetch_default_branch(
+                    pinned.mirror, pinned.url
+                )
+            except package_phase.PackageError as missed:
+                main_head = None
+                print(f"note: follow-up ids read without the default branch, {missed}")
             return follow_up.write_follow_ups(
                 ledger,
                 stack,
@@ -1944,6 +1953,7 @@ def _stack_follow_ups(
                 cap_usd=writer_left(ledger, int(batch_key), cap_usd),
                 emit=print,
                 pooled=pooled,
+                main_head=main_head,
             )
         except Exception as exc:
             message = " ".join(f"{type(exc).__name__}: {exc}".split())

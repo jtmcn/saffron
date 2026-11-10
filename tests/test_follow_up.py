@@ -1964,6 +1964,45 @@ def test_the_next_spec_id_reads_both_spec_directories_and_the_repos_tasks(tmp_pa
     assert next_spec_id("SB-01", specs, ledger, repo_id) == "SB-901"
 
 
+def test_the_next_spec_id_reads_the_default_branchs_spec_paths(tmp_path):
+    """b-cbb6e7: finish 72 minted `SA-0356`, already merged on `main` by hand
+    after the batch cut its base. A spec at the default branch's head counts,
+    live or retired, and a tree with none changes nothing."""
+    import subprocess
+
+    from saffron.follow_up import next_spec_id
+
+    mirror = tmp_path / "mirror"
+    mirror.mkdir()
+
+    def git(*args):
+        return subprocess.run(
+            ["git", *args], cwd=mirror, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "t")
+    (mirror / "README").write_text("r\n")
+    git("add", "README")
+    git("commit", "-qm", "bare")
+    bare = git("rev-parse", "HEAD")
+    done = mirror / ".saffron" / "specs" / "done"
+    done.mkdir(parents=True)
+    (done / "SA-0040-old.md").write_text("x\n")
+    (mirror / ".saffron" / "specs" / "SA-0356-hand.md").write_text("x\n")
+    git("add", ".saffron")
+    git("commit", "-qm", "a spec merged by hand")
+    head = git("rev-parse", "HEAD")
+    specs = tmp_path / "specs"
+    specs.mkdir()
+    (specs / "SA-0355-x.md").write_text("x\n")
+
+    assert next_spec_id("SA-0001", specs, None, None) == "SA-0356"
+    assert next_spec_id("SA-0001", specs, None, None, tree=(mirror, head)) == "SA-0357"
+    assert next_spec_id("SA-0001", specs, None, None, tree=(mirror, bare)) == "SA-0356"
+
+
 def test_a_stack_with_no_layers_writes_nothing_and_raises_nothing(tmp_path):
     from saffron import follow_up
 
