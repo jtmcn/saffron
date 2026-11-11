@@ -240,6 +240,12 @@ call the helper. Write the five tests the criteria name, in
 report `skip` for each. The wrong versions under each criterion say what its
 witness must still catch.
 
+**Seed the task already a layer as `EXHAUSTED`.** A batch writes a layer
+only for a task in `READY_FOR_REVIEW`. Adopt sends that state down its
+early return. So production never brings a layer to the green path.
+Criterion 4's arm is defensive. Seed that task as the batch's top layer in
+`EXHAUSTED`, so the green path reaches the check.
+
 **At base each witness fails in its body.** Adopt there records no layer.
 So each witness fails on its first placed case.
 Import nothing the change adds at module scope.
