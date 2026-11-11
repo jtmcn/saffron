@@ -2971,3 +2971,19 @@ critic's own, so they have no line.
 - `SA-0369` (#1150): a docstring cited a measured fact to "see the spec",
   which points nowhere once the spec retires. **Bucket 3**, conventions.
   **Landed:** a review commit on #1150.
+
+## 2026-11-11, spec loop run 63 (#1158)
+
+- `SA-0371` (#1158): the witness checked the fresh cell's `created` set by
+  equality, so a fresh empty set passed. REVIEW filed that wrong version
+  `killed`, since its edit also changed the first cell. **Bucket 1**.
+  **Open:** b-f06097. **Landed:** a review commit on #1158.
+- `SA-0371` (#1158): comments and docstrings called the fresh cell "one
+  retry", a word on the Attempt and Repair `_Avoid_` lines. **Bucket 1**.
+  **Open:** b-8220e6. **Landed:** a review commit on #1158.
+- `SA-0371` (#1158): a loop variable and test texts used "attempt" for one
+  cell entry, though an attempt is one execution of a phase. **Bucket 3**,
+  conventions. **Landed:** a review commit on #1158.
+- `SA-0371` (#1158): a comment framed `_PROBE_CELL_UNENTERABLE` as the new
+  fresh cell's summary alone. **Bucket 3**, conventions. **Landed:** a review
+  commit on #1158.

@@ -1,11 +1,11 @@
 ---
 id: b-7c88f8
 title: A criterion-probe session or probe cell that errors files its claim unproven, and REVIEW reaches READY_FOR_REVIEW as if no probe failed
-status: open
+status: partial
 tier: 3
 filed: 2026-09-22
 specs: [SA-0371]
-prs: []
+prs: [1158]
 commits: []
 cites: [§5.4.1, §5.5]
 related: [b-e40d09]
@@ -49,3 +49,7 @@ behaviour.
 - 2026-11-11: `SA-0371` specs the probe cell's half. A stopped cell is
   entered once more, and an edit still unasked reads `error`. The REVIEW
   lines count it. A criterion-probe session that errors is left open.
+- 2026-11-11: partial by `SA-0371` in #1158, from the spec loop's run 63. A
+  probe cell that stops is entered once more, and every edit it still leaves
+  unasked reads `error`. Both REVIEW lines count those edits. A
+  criterion-probe session that errors still files its claim `unproven`.
