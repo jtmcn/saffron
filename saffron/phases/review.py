@@ -276,7 +276,9 @@ def _parse_or_reprompt[T](
                 options=retry_options,
                 resume=attempt.session_id,
                 emit=emit,
-                last_cost_usd=attempt.cost_usd_est,
+                # No carry: a killed re-prompt charges its own floor, never the
+                # turn it extracts from a second time (b-f41001).
+                last_cost_usd=0.0,
             )
         except implement.AgentFailed as failed:
             cost = attempt.cost_usd_est + (

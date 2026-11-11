@@ -1464,7 +1464,7 @@ def test_a_criterion_probe_session_names_one_edit_per_sentence_of_the_claim_it_i
 def test_a_criterion_probe_answer_that_is_not_the_schema_is_reprompted_once_in_its_own_session():
     """Criterion 2: a criterion-probe answer that is not the schema gets
     one re-prompt. It resumes the turn's own session on the budget it
-    left, and passes its cost as `last_cost_usd`. That holds for no
+    left, and carries no cost as `last_cost_usd` (b-f41001). That holds for no
     `<output>` block, JSON that does not parse, no `probes` key, a probe
     with no `sentence`, zero probes, and 17 probes. Exactly one probe and
     exactly the ceiling's sixteen are both the schema, so neither is
@@ -1544,7 +1544,7 @@ def test_a_criterion_probe_answer_that_is_not_the_schema_is_reprompted_once_in_i
         )
         assert second_call["options"]["tools"] == review.REVIEW_TOOLS
         assert second_call["options"]["max_budget_usd"] == pytest.approx(expected_cap)
-        assert second_call["kwargs"]["last_cost_usd"] == pytest.approx(0.3)
+        assert second_call["kwargs"]["last_cost_usd"] == 0.0
 
     for fragment, call in zip(
         [
@@ -2122,7 +2122,7 @@ def _wv_turn(session_id, text, cost):
 def test_a_wrong_version_answer_that_is_not_the_schema_is_reprompted_once_in_its_own_session():
     """Criterion 1: a wrong-version answer that is not the schema gets one
     re-prompt. It resumes the turn's own session, on the budget it left,
-    and passes its cost as `last_cost_usd`. That holds for a missing
+    and carries no cost as `last_cost_usd` (b-f41001). That holds for a missing
     `<output>` block, JSON that does not parse, a schema the model
     refused, and a wrong answer count."""
     criteria = [
@@ -2196,7 +2196,7 @@ def test_a_wrong_version_answer_that_is_not_the_schema_is_reprompted_once_in_its
         )
         assert second_call["options"]["tools"] == review.REVIEW_TOOLS
         assert second_call["options"]["max_budget_usd"] == pytest.approx(expected_cap)
-        assert second_call["kwargs"]["last_cost_usd"] == pytest.approx(0.3)
+        assert second_call["kwargs"]["last_cost_usd"] == 0.0
 
     for fragment, call in zip(
         [
@@ -2484,7 +2484,7 @@ def test_both_callers_build_one_reprompt_turn(monkeypatch):
         }
         assert second_call["prompt"] == f"{retry_error}\n\n{EXTRACTION_PROMPT}"
         assert second_call["kwargs"]["resume"] == "s-1"
-        assert second_call["kwargs"]["last_cost_usd"] == pytest.approx(0.3)
+        assert second_call["kwargs"]["last_cost_usd"] == 0.0
         assert second_call["kwargs"]["emit"] is emit_fn
 
     # the lens: its own re-prompt plus the `PhaseStart` only it announces.

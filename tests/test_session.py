@@ -362,6 +362,7 @@ class _agent:
         self._turns = iter(texts)
         self.prompts: list[str] = []
         self.resumes: list[str | None] = []
+        self.last_costs: list[float | None] = []
         self.session_id: str | None = "sess-1"
 
     def __call__(
@@ -376,6 +377,7 @@ class _agent:
     ):
         self.prompts.append(prompt)
         self.resumes.append(resume)
+        self.last_costs.append(kwargs.get("last_cost_usd"))
         return implement.AttemptResult(
             session_id=self.session_id,
             subtype="success",
@@ -885,6 +887,26 @@ def test_a_refused_proposal_is_reprompted_and_a_plan_can_follow():
     assert len(agent.prompts) == 2
     assert "already inside touches" in agent.prompts[1]
     assert spent == 0.2
+
+
+def test_neither_plan_re_prompt_carries_the_turn_before_it():
+    """A killed re-prompt charges its own floor (b-f41001). Carrying the plan
+    turn's cost would charge that whole turn a second time."""
+    inside = _PROPOSAL | {"proposed_touches": ["src/x.py"]}
+    for first in (_block(inside), "not a plan"):
+        agent = _agent(first, _block(_PLAN))
+        session.plan_checkpoint(
+            "cell",
+            options={},
+            spec=_spec(),
+            protected=[],
+            elevate_on=[],
+            test_paths=[],
+            agent=agent,
+            emit=lambda _event: None,
+        )
+        assert len(agent.prompts) == 2, first
+        assert agent.last_costs[1] == 0.0, first
 
 
 def test_a_proposal_refused_twice_ends_as_plan_rejected():
