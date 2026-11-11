@@ -4,7 +4,7 @@ title: A criterion-probe session or probe cell that errors files its claim unpro
 status: open
 tier: 3
 filed: 2026-09-22
-specs: []
+specs: [SA-0371]
 prs: []
 commits: []
 cites: [§5.4.1, §5.5]
@@ -46,3 +46,6 @@ behaviour.
   wrong versions, were filed `unproven`. No file names the error that
   stopped it. The task reached `READY_FOR_REVIEW`. The Spec seat then found 4
   witness blockers among those same wrong versions.
+- 2026-11-11: `SA-0371` specs the probe cell's half. A stopped cell is
+  entered once more, and an edit still unasked reads `error`. The REVIEW
+  lines count it. A criterion-probe session that errors is left open.
