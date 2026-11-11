@@ -3,7 +3,7 @@ id: SA-0372
 title: A spec that removes a name starts its cell though a file outside its touches reads that name, so the cell ends EXHAUSTED
 type: feature
 priority: 2
-estimated_lines: 97
+estimated_lines: 108
 estimate_measured: true
 touches:
   - saffron/repos/mirror.py
@@ -86,13 +86,15 @@ acceptance:
       witness drives a reader that each of these leaves out. Those are an
       exact `touches` path, a `src/**` glob, Markdown at the top level and
       nested, a file under `.saffron/specs/` and a `protected` glob. It
-      drives a reader one directory below a `tests/*.txt` pattern, and the
-      reason names that reader. It drives both entry forms. The same spec with every reader in `touches`
+      drives a reader one directory below a `tests/*.txt` pattern in
+      `touches`, and one below a `gen/*.txt` pattern in `protected`. The
+      reason names both. It drives both entry forms. The same spec with every reader in `touches`
       starts its cell.
     witness: tests/test_removed_name_readers.py::test_run_task_refuses_a_removed_name_read_outside_touches_before_the_cell
     wrong_versions:
       - A `touches` entry compared as an exact string, so a reader under `src/**` is named.
-      - "`fnmatch` in place of `scope.matches`, so `tests/*.txt` reaches a file one directory down."
+      - "`fnmatch` in place of `scope.matches` for `touches`, so `tests/*.txt` reaches a file one directory down."
+      - "`fnmatch` in place of `scope.matches` for `protected`, so `gen/*.txt` reaches a file one directory down."
       - Markdown kept, so `README.md` is named.
       - The `.saffron/specs/` exclusion left out, so a text file there is named.
       - The policy left unread, so a reader under the `protected` glob is named.
@@ -104,13 +106,18 @@ acceptance:
       copy add no reader. Stacked, it is the parent's head. A reader the
       parent deleted is not named, a reader it added is named, and the
       parent's `protected` list applies. A tree base whose `policy.yaml` is
-      absent, or does not parse, protects nothing. A tree base the mirror
-      lacks raises `GitError` and prints no `refused` line.
+      absent, does not parse, or cannot be read protects nothing. The
+      witness drives a symlink leaving the tree for the last. Where the
+      locale cannot decode the bytes `\xff\xfe`, it drives a policy holding
+      them too. A tree base the mirror lacks raises `GitError` and prints no
+      `refused` line.
     witness: tests/test_removed_name_readers.py::test_readers_are_read_at_the_tasks_tree_base_with_its_own_policy
     wrong_versions:
       - Readers read at `base_sha` when the task is stacked, so the parent's deleted reader is named and its new one is not.
       - The policy read at another commit or from the working copy, so the parent's `protected` glob does not apply.
       - A policy that does not parse raises, so the task aborts and is not refused.
+      - Only a `PolicyError` caught, so a policy symlink leaving the tree aborts the task.
+      - A policy that does not decode left uncaught, so the task aborts.
       - A tree base the mirror lacks turned into a refusal.
   - claim: >-
       A spec with no `removes`, or with an empty `touches`, never calls
@@ -180,7 +187,9 @@ the `consumes` check.
 to `saffron/repos/mirror.py`, next to `unresolved_consumes`. Split each
 entry at the first colon. The subject is the name of a `path:name`, or the
 whole of a bare `path`. List the candidate files with one `git grep` per
-entry over the tree-ish, fixed-string, NUL-separated. Exit 1 means no
+entry over the tree-ish, fixed-string. List names only, with `-l` and `-z`.
+A match line can hold bytes that do not decode, and `_run` decodes all of
+its output as text (`saffron/repos/mirror.py:54-59`). Exit 1 means no
 candidate, and any other non-zero exit raises `GitError`. Skip the file at
 the entry's own path. Keep a candidate whose `file_at` text holds the
 subject by `_word_pattern`. A candidate that raises `UnreadablePath` or
@@ -190,8 +199,9 @@ order, then in the path order git lists.
 **The refusal.** In `run_task`, after the `consumes` block, check a spec
 whose `removes` and `touches` are both non-empty. Use `cell_spec.tree_base`
 and the same `has_commit` guard. Read `.saffron/policy.yaml` at the tree
-base with `file_at` and `parse_policy`. An absent file, or a
-`PolicyError`, leaves no path protected. Drop each reader whose path ends in
+base with `file_at`, and pass its text to `parse_policy` encoded as bytes.
+An absent file, an `UnreadablePath` or `UnicodeDecodeError` from `file_at`,
+or a `PolicyError` leaves no path protected. Drop each reader whose path ends in
 `.md`, starts with `.saffron/specs/`, or matches a `touches` or `protected`
 pattern by `scope.matches`. If any reader is left, print the `refused`
 line and return `Refused`. The reason reads as below, with one
@@ -201,8 +211,12 @@ line and return `Refused`. The reason reads as below, with one
 <tree base[:12]> holds readers outside touches: tests/test_sigterm.py reads CRITIC_NETWORK
 ```
 
-Add the new refusal to `run_task`'s docstring list of what `Refused`
-comes from, within its ten lines. Write the four tests the criteria name,
+Name the new refusal in three docstrings of `saffron/task.py`. The module
+docstring lists the refusals `run_task` makes, and calls the `consumes` one
+the exception (`saffron/task.py:16-26`). Add a bullet beside it. `Refused`'s
+docstring lists its causes (`saffron/task.py:604-614`). Add a sentence there.
+`run_task`'s docstring lists them too, and it is already ten lines
+(`saffron/task.py:754-763`). Reflow it to name the new refusal within ten. Write the four tests the criteria name,
 in `tests/test_removed_name_readers.py`.
 
 ## Out of scope
@@ -212,6 +226,11 @@ in `tests/test_removed_name_readers.py`.
 - **A model call.** Nothing here asks an agent whether a file reads a name.
 - **A reader inside `touches` that `forbidden` also matches.** `scope`
   refuses that edit too, but the decision was `touches` alone.
+- **A frozen record that names a live name.** At `c1fe691c`, 33 files under
+  `docs/evidence/` name `run_one_cell`, and ten of them are not Markdown.
+  Such a file refuses a spec that removes the name, until its path joins
+  `touches` or `protected`. The operator accepts that, and the exclusions
+  stay as they are.
 - **A bare path read another way**, such as `saffron.replay` for
   `saffron/replay.py`. The subject is the path string as written.
 - **Declaring `removes` on any queued spec.** No queued spec declares it at
@@ -249,7 +268,8 @@ holds only `policy.yaml`, and this check needs only `protected`.
 
 **A symlink is never a candidate.** Measured on the host's git 2.54.0, a
 `git grep` over a tree lists no symlink, whatever its target string holds. A
-regular file it points at is read on its own. No witness drives a symlink.
+regular file it points at is read on its own. The cell image's git 2.39.5 is
+unmeasured. No witness drives a symlink as a reader.
 
 **The fixtures.** `_plain_repo` and `git` live in `tests/test_mirror.py`.
 `tests/test_consumes.py` shows a `run_task` fixture with a faked
@@ -262,8 +282,8 @@ The undecodable case follows `tests/test_consumes.py`'s locale check, since
 an em dash, a semicolon, a contraction, the perfect tense or a sentence over
 25 words.
 
-**Size.** A prototype measured 388 changed tokens with `size_gate`, against
-the `feature` ceiling of 3000, with 865 more under the test paths. It held
-the function, the refusal, the docstring edit and the four witnesses. Every
+**Size.** A prototype measured 433 changed tokens with `size_gate`, against
+the `feature` ceiling of 3000, with 951 more under the test paths. It held
+the function, the refusal, the three docstring edits and the four witnesses. Every
 test in `tests/test_consumes.py`, `tests/test_mirror.py` and
 `tests/test_task.py` passed on it.
