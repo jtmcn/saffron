@@ -188,29 +188,14 @@ def test_the_cell_tag_reads_the_repo_name_from_every_origin_form(
 
 
 def test_an_origin_read_that_hangs_keeps_the_directory_name(monkeypatch, tmp_path):
-    """A git that never answers is killed at its bound, and the tag falls
+    """A git that never answers times out at its bound, and the tag falls
     back to the directory name rather than stalling the cell's start."""
-    killed: list[bool] = []
+    bounds: list[float | None] = []
 
-    class _Hung:
-        returncode = None
+    def _hung(argv, **kw):
+        bounds.append(kw.get("timeout"))
+        raise subprocess.TimeoutExpired(argv, kw.get("timeout") or 0)
 
-        def __init__(self, *_a, **_k) -> None:
-            pass
-
-        def __enter__(self) -> _Hung:
-            return self
-
-        def __exit__(self, *_a) -> None:
-            return None
-
-        def communicate(self, timeout: float | None = None):
-            assert timeout == image.ORIGIN_TIMEOUT_S
-            raise subprocess.TimeoutExpired("git", image.ORIGIN_TIMEOUT_S)
-
-        def kill(self) -> None:
-            killed.append(True)
-
-    monkeypatch.setattr(image.subprocess, "Popen", _Hung)
+    monkeypatch.setattr(image.subprocess, "run", _hung)
     assert image.cell_tag(tmp_path / "stalled") == "saffron/cell:stalled"
-    assert killed == [True]
+    assert bounds == [image.ORIGIN_TIMEOUT_S]
