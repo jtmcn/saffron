@@ -129,7 +129,7 @@ def _repo(path: Path, origin: str | None) -> Path:
 def test_two_git_worktrees_of_one_repo_build_one_cell_image(
     monkeypatch, tmp_path, isolated_git
 ):
-    """Two worktrees and their checkout build one cell image, and a second
+    """Two git worktrees and their repo build one cell image, and a second
     repo builds its own (b-2bc0d5)."""
     store: set[str] = set()
 
@@ -159,7 +159,7 @@ def test_the_cell_tag_reads_the_repo_name_from_every_origin_form(
     tmp_path, isolated_git
 ):
     """Each URL shape git writes names the same image. A name a tag cannot
-    carry is made legal, and a checkout with no origin keeps its own name."""
+    carry is made legal, and a repo with no origin keeps its own name."""
     forms = [
         "https://github.com/o/thermal-edge.git",
         "https://github.com/o/thermal-edge",
@@ -185,3 +185,32 @@ def test_the_cell_tag_reads_the_repo_name_from_every_origin_form(
     assert image.cell_tag(odd) == "saffron/cell:joel-v0.5"
     lone = _repo(tmp_path / "lone", None)
     assert image.cell_tag(lone) == "saffron/cell:lone"
+
+
+def test_an_origin_read_that_hangs_keeps_the_directory_name(monkeypatch, tmp_path):
+    """A git that never answers is killed at its bound, and the tag falls
+    back to the directory name rather than stalling the cell's start."""
+    killed: list[bool] = []
+
+    class _Hung:
+        returncode = None
+
+        def __init__(self, *_a, **_k) -> None:
+            pass
+
+        def __enter__(self) -> _Hung:
+            return self
+
+        def __exit__(self, *_a) -> None:
+            return None
+
+        def communicate(self, timeout: float | None = None):
+            assert timeout == image.ORIGIN_TIMEOUT_S
+            raise subprocess.TimeoutExpired("git", image.ORIGIN_TIMEOUT_S)
+
+        def kill(self) -> None:
+            killed.append(True)
+
+    monkeypatch.setattr(image.subprocess, "Popen", _Hung)
+    assert image.cell_tag(tmp_path / "stalled") == "saffron/cell:stalled"
+    assert killed == [True]

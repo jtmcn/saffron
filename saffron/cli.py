@@ -2369,13 +2369,15 @@ def _reclaim_build_cache() -> None:
     except runtime.CellRuntimeError as exc:
         print(f"batch: build cache not reclaimed — {exc}")
         return
-    if done is None or done.returncode == 0:
+    if done is None:
         return
     if done.timed_out:
         print(
             "batch: build cache not reclaimed — timed out after "
             f"{runtime.RECLAIM_BUILD_CACHE_TIMEOUT_S:g}s"
         )
+        return
+    if done.returncode == 0:
         return
     reason = done.stderr.strip() or f"exit {done.returncode}"
     print(f"batch: build cache not reclaimed — {reason}")

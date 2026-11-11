@@ -100,7 +100,7 @@ def no_host_tool_exec(request, monkeypatch):
 @pytest.fixture(autouse=True)
 def no_build_cache_reclaim(request, monkeypatch):
     """An unmarked test never drops the host's build cache, which every batch
-    it drives would reach. Yields the real function for the witness that
+    it drives would reach. Returns the real function for the witness that
     drives it, or None where it is absent."""
     real = getattr(runtime, "reclaim_build_cache", None)
     if not request.node.get_closest_marker("cell"):

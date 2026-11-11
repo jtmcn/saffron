@@ -22,6 +22,10 @@ BASE_DOCKERFILE = _SAFFRON_ROOT / "images" / "cell-base.python.Dockerfile"
 BASE_IMAGE_ENV = "SAFFRON_BASE_IMAGE"
 
 
+# A local git read, bounded so a wedged git never stalls a cell's start.
+ORIGIN_TIMEOUT_S = 30.0
+
+
 def _origin_name(repo: Path) -> str | None:
     """The last segment of `repo`'s git `origin`, or None with no usable one."""
     # Popen, not `run`: a session test answers `subprocess.run` with lsof
@@ -33,7 +37,11 @@ def _origin_name(repo: Path) -> str | None:
             stderr=subprocess.DEVNULL,
             text=True,
         ) as done:
-            out, _ = done.communicate()
+            try:
+                out, _ = done.communicate(timeout=ORIGIN_TIMEOUT_S)
+            except subprocess.TimeoutExpired:
+                done.kill()
+                return None
     except OSError:
         return None
     if done.returncode != 0:
@@ -58,7 +66,7 @@ def cell_tag(repo: Path) -> str:
     repo with no origin, or no git at all, keeps its directory name.
 
     A tag is `[A-Za-z0-9_.-]`. A directory name is not, and neither is an
-    origin's last segment. A worktree named `joel+branch`, or an origin ending
+    origin's last segment. A git worktree named `joel+branch`, or an origin ending
     `joel+v0.5.git`, would otherwise build a tag no runtime can reference.
     """
     name = _origin_name(repo) or repo.name
