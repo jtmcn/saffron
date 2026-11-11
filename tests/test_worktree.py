@@ -1112,6 +1112,73 @@ def test_a_stacked_worktree_holds_the_parents_real_commits_and_only_the_childs_n
     assert worktree.commits_ahead(container, root) == 3
 
 
+def test_a_volume_target_routes_through_run_ephemeral_read_only_at_work(
+    monkeypatch,
+):
+    """`worktree._run`'s dispatch (b-f582ee).
+
+    A container name still execs in place, as every caller here always has.
+    A `VolumeTarget` has no cell to exec in. It runs instead in a fresh
+    container of its own `image`, joined to its own `network` alone. The
+    volume mounts read-only at `/work`, with no other mount, no `env`, no
+    `cpus`, no `memory`. The command changes to `/work` itself before
+    running, since `run_ephemeral` takes no working directory.
+    """
+    calls: list[dict] = []
+
+    def _exec(*_a, **_k):
+        raise AssertionError("a VolumeTarget must never reach exec_")
+
+    def _run_ephemeral(
+        image,
+        command,
+        *,
+        network=None,
+        env=None,
+        cpus=None,
+        memory=None,
+        mounts=(),
+        timeout_s=120,
+    ):
+        calls.append(
+            {
+                "image": image,
+                "command": list(command),
+                "network": network,
+                "env": env,
+                "cpus": cpus,
+                "memory": memory,
+                "mounts": list(mounts),
+                "timeout_s": timeout_s,
+            }
+        )
+        return runtime.Completed(0, "deadbeef\n", "")
+
+    monkeypatch.setattr(runtime, "exec_", _exec)
+    monkeypatch.setattr(runtime, "run_ephemeral", _run_ephemeral)
+
+    target = worktree.VolumeTarget(image="img", volume="vol", network="net")
+    assert worktree.head_sha(target) == "deadbeef"
+
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["image"] == "img"
+    assert call["network"] == "net"
+    assert call["env"] is None
+    assert call["cpus"] is None
+    assert call["memory"] is None
+    assert call["mounts"] == [
+        runtime.Mount("volume", "vol", worktree.WORKTREE_MOUNT, readonly=True)
+    ]
+    assert call["command"][:4] == ["sh", "-c", 'cd /work && exec "$@"', "sh"]
+
+    # A container name is unaffected: still routed to `exec_`, never here.
+    monkeypatch.setattr(
+        runtime, "exec_", lambda *a, **k: runtime.Completed(0, "cafebabe\n", "")
+    )
+    assert worktree.head_sha("some-container") == "cafebabe"
+
+
 # --- source_reverted, against a real git repo on the host ------------------
 #
 # `_git` is a one-function seam over `runtime.exec_`, so these run the real

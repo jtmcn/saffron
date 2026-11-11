@@ -924,20 +924,120 @@ def cell_env(proxy_ip: str, thread_env: Mapping[str, str]) -> dict[str, str]:
     return env
 
 
+def _export_from_volume(
+    cell_exc: Exception,
+    subjects: list[str],
+    *,
+    container: str,
+    volume: str,
+    image: str,
+    created: set[str],
+    spec: CellSpec,
+    task_dir: Path,
+    teardown: Callable[[str, bool, str], None],
+) -> tuple[str | None, list[str]]:
+    """The fallback `export_patch` reaches once the cell's own patch read
+    fails: the same four reads, against `volume` instead of `container`
+    (b-f582ee). Removing the container first is what lets a second
+    container attach to the volume at all (measured, see the spec). Never
+    raises, for the same reason its caller does not.
+    """
+    from saffron.cell import runtime, worktree
+
+    removed = runtime.remove_container(container)
+    if removed.returncode != 0:
+        teardown(
+            "export_failed",
+            False,
+            f"patch export FAILED — {cell_exc} — removing the cell's "
+            f"container failed: {removed.stderr.strip()}",
+        )
+        return None, subjects
+    created.discard(container)
+
+    network = f"saffron-export-{spec.spec_id.lower()}"
+    runtime.remove_network(network)
+    head_sha: str | None = None
+    try:
+        runtime.allocate_network(network)
+        target = worktree.VolumeTarget(image=image, volume=volume, network=network)
+
+        try:
+            subjects = worktree.commit_subjects(target, spec.tree_base)
+        except Exception as exc:
+            teardown(
+                "commit_subjects",
+                False,
+                f"the agent's commit subjects are unreadable — {volume}: {exc}",
+            )
+
+        try:
+            patch = worktree.export_patch(target, spec.tree_base)
+        except Exception as vol_exc:
+            teardown(
+                "export_failed",
+                False,
+                f"patch export FAILED — {cell_exc} — {volume}: {vol_exc}",
+            )
+            return None, subjects
+
+        if not patch:
+            teardown("no_commits", True, "no commits, nothing to export")
+            return None, subjects
+
+        head_sha = worktree.head_sha(target)
+        task_dir.mkdir(parents=True, exist_ok=True)
+        (task_dir / "patch.diff").write_text(patch)
+        (task_dir / "patch.json").write_text(
+            json.dumps(
+                {
+                    "base_sha": spec.base_sha,
+                    "tree_base": spec.tree_base,
+                    "head_sha": head_sha,
+                    "files": worktree.changed_files(target, spec.tree_base),
+                },
+                indent=2,
+            )
+        )
+        teardown(
+            "exported",
+            True,
+            f"exported {len(patch)} bytes to {task_dir / 'patch.diff'}"
+            f" — from {volume}, after the cell's patch read failed: {cell_exc}",
+        )
+        return head_sha, subjects
+    except Exception as exc:
+        teardown(
+            "export_failed",
+            False,
+            f"patch export FAILED — {cell_exc} — {volume}: {exc}",
+        )
+        # A failed `changed_files` read, after `patch.diff` is on disk,
+        # keeps the `head_sha` that write already earned.
+        return head_sha, subjects
+    finally:
+        runtime.remove_network(network)
+
+
 def export_patch(
     container: str,
     spec: CellSpec,
     task_dir: Path,
     emit: Callable[[Event], None],
+    *,
+    volume: str,
+    image: str,
+    created: set[str],
 ) -> tuple[str | None, list[str]]:
     """The run's durable product (§0), plus the two facts PACKAGE needs about a
     cell that no longer exists. The commits live only on the worktree volume,
     so a patch not exported ceases to exist at teardown.
 
-    Never raises: this runs from a `finally`. A cell that died, or never
-    started, makes the exec fail — reported, not swallowed. The subjects are
-    read in their own `try` because a missing subject list is not worth losing
-    a package over, and vice versa.
+    Never raises: this runs from a `finally`. A cell the runtime can no
+    longer exec in reads the same four things from `volume` instead, in a
+    fresh network-isolated container of `image` (b-f582ee). The subjects are
+    read in their own `try` because a missing subject list is not worth
+    losing a package over, and vice versa.
     """
     from saffron.cell import worktree
 
@@ -953,20 +1053,40 @@ def export_patch(
         )
 
     head_sha, subjects = None, []
+    held_subjects_error: Exception | None = None
     try:
         subjects = worktree.commit_subjects(container, spec.tree_base)
     except Exception as exc:
+        held_subjects_error = exc
+
+    try:
+        patch = worktree.export_patch(container, spec.tree_base)
+    except Exception as cell_exc:
+        return _export_from_volume(
+            cell_exc,
+            subjects,
+            container=container,
+            volume=volume,
+            image=image,
+            created=created,
+            spec=spec,
+            task_dir=task_dir,
+            teardown=lambda step, ok, detail: _teardown(step, ok=ok, detail=detail),
+        )
+
+    # The cell's patch read succeeded: go on as at base, reporting the held
+    # subjects failure now, with no fallback left to drop it to.
+    if held_subjects_error is not None:
         _teardown(
             "commit_subjects",
             ok=False,
-            detail=f"the agent's commit subjects are unreadable — {exc}",
+            detail=f"the agent's commit subjects are unreadable — {held_subjects_error}",
         )
+    if not patch:
+        # Absence and emptiness must not look alike: no commits, no file.
+        _teardown("no_commits", ok=True, detail="no commits, nothing to export")
+        return head_sha, subjects
     try:
-        patch = worktree.export_patch(container, spec.tree_base)
-        if not patch:
-            # Absence and emptiness must not look alike: no commits, no file.
-            _teardown("no_commits", ok=True, detail="no commits, nothing to export")
-            return head_sha, subjects
         # The only surviving name for the commit once the volume is gone — the
         # diff itself does not carry it.
         head_sha = worktree.head_sha(container)
@@ -3904,13 +4024,19 @@ def _drive_cell(
 
             for ok, detail in egress_report.read_egress(proxy_name, container):
                 _teardown("egress_read", ok=ok, detail=detail)
-        # Before `cell_down`, on every path the exception one included: the
-        # export execs inside the cell, so it must precede the container's
-        # removal as well as the volume's. An EXHAUSTED run with commits is
-        # worth reading too.
+        # Before `cell_down`: the export reads the cell, or its volume,
+        # before either is removed. An EXHAUSTED run with commits counts too.
         if container in created:
+            from saffron.repos import image
+
             exported["head_sha"], exported["subjects"] = export_patch(
-                container, spec, task_dir, emit
+                container,
+                spec,
+                task_dir,
+                emit,
+                volume=volume,
+                image=image.cell_tag(repo),
+                created=created,
             )
         cell_down(
             network=network,
