@@ -53,53 +53,63 @@ risk: standard
 acceptance:
   - claim: >-
       When `_apply_criterion_probes` cannot enter its gate-only cell, or the
-      cell stops part-way with a `runtime.CellRuntimeError`, it enters one
-      fresh gate-only cell. It enters it only after the first is torn down,
-      through `critic_cell` with the same keywords and the same `created`
-      set. That cell asks every pair not yet answered, in order. Four stops
-      are driven. The mutator raising as it applies a pair's edit asks that
-      pair again in the second cell. So does the `tests` gate raising at a
-      pair's witness ask, and so does a survivor's line read raising. A
-      raise at a survivor's second ask files that survivor's finding once,
-      with its witness-ask claim, and the second cell starts at the next
-      pair. A first cell that cannot be entered has every pair asked in the
-      second. A pair the second cell answers carries no `unasked` key.
+      cell stops part-way with a `runtime.CellRuntimeError`, it enters a
+      fresh gate-only cell once more, unless no pair is left to ask. It
+      enters it only after the cell before it is torn down, through
+      `critic_cell` with the same keywords and the same `created` set. The
+      fresh cell asks every pair not yet answered, in order. Four stops are
+      driven. The mutator raising as it applies a pair's edit asks that pair
+      again in the fresh cell. So does the `tests` gate raising at a pair's
+      witness ask, and so does a survivor's line read raising. A raise at a
+      survivor's second ask files that survivor's finding once, with its
+      witness-ask claim, and the fresh cell starts at the next pair. When
+      that survivor is the last pair, no fresh cell is entered. A cell that
+      cannot be entered at all has every pair asked in the fresh one. A
+      pair the fresh cell answers carries no `unasked` key.
     witness: tests/test_session.py::test_a_probe_cell_that_stops_is_entered_once_more_for_every_pair_left
     wrong_versions:
-      - The second cell starts after the pair that was running, so a pair whose witness ask stopped the cell is never asked.
-      - The second cell starts from the first pair, so pairs the first cell answered are asked twice.
-      - The second cell is entered while the first is still open.
-      - A survivor whose line read stopped the cell keeps `error`, and the second cell starts at the next pair.
+      - The fresh cell starts after the pair that was running, so a pair whose witness ask stopped the cell is never asked.
+      - The fresh cell starts from the first pair, so pairs already answered are asked twice.
+      - The fresh cell is entered while the cell before it is still open.
+      - A survivor whose line read stopped the cell keeps `error`, and the fresh cell starts at the next pair.
       - A survivor whose second ask stopped the cell is asked again, so its finding is filed twice.
-      - A first cell that cannot be entered gets no second cell.
-      - The second cell is handed a fresh `created` set.
-      - Only a stop from the mutator enters a second cell, and a stop from the `tests` gate does not.
+      - A cell that cannot be entered gets no fresh cell.
+      - The fresh cell is handed a fresh `created` set.
+      - Only a stop from the mutator enters a fresh cell, and a stop from the `tests` gate does not.
+      - A stop at the last pair's second ask enters a fresh cell.
   - claim: >-
-      A second stop, or a second cell that cannot be entered, enters no
-      third cell. Every pair still unasked then reads outcome `error`, never
-      `unproven`. Its `unasked` key holds the text of the runtime error that
-      ended the second cell. Its summary is `the probe cell stopped before
-      this edit was asked: ` followed by that text after a stop. After a
-      failed entry it is `the probe cell could not be entered: ` followed by
-      that text. A survivor whose second ask stopped the second cell keeps
-      `survived` and its one finding, with no `unasked` key. The witness
-      drives a second stop at a witness ask, at a survivor's line read and
-      at a survivor's second ask. It also drives a first stop followed by a
-      second cell that cannot be entered, and two cells that cannot be
-      entered. In the same calls a pair with no edit and a refused pair
-      still read `unproven` with no `unasked` key. Every pair in a repo
-      whose head declares no `tests` gate reads `unproven` with no `unasked`
-      key, and no cell is entered.
+      When the fresh cell also stops, or cannot be entered, no further cell
+      is entered. A pair the fresh cell answered before its own stop keeps
+      its outcome and carries no `unasked` key. Every pair still unasked
+      then reads outcome `error`, never `unproven`. The pairs still unasked
+      include the pair whose witness ask or line read was running when the
+      fresh cell stopped. Its summary replaces the one the witness gate or
+      the line read wrote. Each such pair's `unasked` key holds the text of
+      the runtime error that ended the fresh cell. Its summary is `the probe
+      cell stopped before this edit's answer was recorded: ` followed by
+      that text after a stop. After a failed entry it is `the probe cell
+      could not be entered: ` followed by that text. A survivor whose second
+      ask stopped the fresh cell keeps `survived` and its one finding, with
+      no `unasked` key. The witness drives a stop of the fresh cell at a
+      witness ask, after it answered one pair, at a survivor's line read and
+      at a survivor's second ask. It also drives a stop followed by a fresh
+      cell that cannot be entered, and two cells that cannot be entered. In
+      the same calls a pair with no edit and a refused pair still read
+      `unproven` with no `unasked` key. Every pair in a repo whose head
+      declares no `tests` gate reads `unproven` with no `unasked` key, and
+      no cell is entered.
     witness: tests/test_session.py::test_a_second_stop_files_every_pair_left_as_an_error_naming_the_runtime_error
     wrong_versions:
-      - A second stop enters a third cell.
+      - A stop of the fresh cell enters a further cell.
       - The pairs left read `unproven` with the new summary.
       - The pairs left read `error` with the old summary, which names no runtime error.
-      - The `unasked` key holds the first cell's error instead of the one that ended the second.
-      - A second cell that cannot be entered gets the stopped summary instead of the unenterable one.
+      - The `unasked` key holds the first cell's error instead of the one that ended the fresh cell.
+      - A fresh cell that cannot be entered gets the stopped summary instead of the unenterable one.
       - A pair with no edit, or a refused pair, is marked `unasked` too.
       - A repo with no `tests` gate reads `error`.
-      - A survivor whose second ask stopped the second cell is marked `unasked`.
+      - A survivor whose second ask stopped the fresh cell is marked `unasked`.
+      - Every pair handed to the fresh cell is marked `unasked`, including those it answered before its own stop.
+      - The pair running at the fresh cell's stop keeps the witness gate's own `error` summary and no `unasked` key.
   - claim: >-
       `review.describe_criterion_probes` and `review.describe_wrong_versions`
       each count the edits, across every entry, that carry an `unasked` key.
@@ -161,11 +171,12 @@ text names no error (`:2090-2093`):
 - A raise at a survivor's second ask, which appends the finding with its
   witness-ask claim first (`saffron/cell/session.py:2227-2232`).
 
-**Entering a second cell is safe.** `critic_cell` pre-cleans its container,
-volumes and network by name before it creates them
+**Entering a fresh gate-only cell reuses the names.** `critic_cell`
+pre-cleans its container, volumes and network by name before it creates them
 (`saffron/cell/session.py:1576-1580`). With `network=None` the names are
-`saffron-gate-*` (`:1559-1566`). A second entry after the first is torn down
-reuses them.
+`saffron-gate-*` (`:1559-1566`). An entry after the cell before it is torn
+down reuses them. That is reasoned from the pre-clean, not measured: no cell
+has yet been entered twice this way.
 
 **The REVIEW lines count named edits, not asked ones.**
 `describe_criterion_probes` counts a probe with an edit and no `refusal` as
@@ -211,9 +222,14 @@ stay as they are.
 **`review_state`, the task's state, and the pull request's Not covered
 section** (`saffron/report/pr_body.py:690-698`).
 
-**A line for a retry that succeeded.** A second cell that answers every
+**A line for a retry that succeeded.** A fresh cell that answers every
 pair emits nothing new. Only the record and the REVIEW lines change when
 pairs stay unasked.
+
+**The pull request.** `DESIGN.md` §5.4.1 says a criterion with no usable
+answer is named on "the REVIEW line and the pull request". This spec names
+unasked edits on the REVIEW lines only. The pull request's Not covered
+section is left for a later item.
 
 **A restore that raises.** `_mutate` sets `stopped` for a raise on the
 mutator's exit too. Criterion 1 drives the raise on entry alone, through the
@@ -222,8 +238,8 @@ same handler.
 ## Notes for the agent
 
 **This change is new behaviour.** No criterion has a mutant on the ref. Each
-witness reads a second cell, an `unasked` key or a tail the base never
-produces. Expect `witness` to report `skip` for all three.
+witness reads a fresh cell's entry, an `unasked` key or a tail the base
+never produces. Expect `witness` to report `skip` for all three.
 
 **One shape that fits.** Move the loop over pairs into a nested function
 that takes a container and the pairs to ask. On a stop it returns the index
@@ -231,21 +247,28 @@ of the first pair left to ask and the runtime error's text. It returns
 `None` when every pair was answered. The witness-ask stop and the line-read
 stop return the running pair's index. The second-ask stop appends the
 finding, as at base, and returns the next index. Call it inside a loop of
-two cell entries. Close the first entry's `ExitStack` before entering the
-second. If the pairs left are empty, return without entering. Then write
-`outcome`, `summary` and `unasked` onto each pair still left. Remove
+two cell entries. Close each entry's `ExitStack` before the next entry. If
+the pairs left are empty, return without entering. Then write `outcome`,
+`summary` and `unasked` onto each pair still left, over whatever the cell
+wrote for it. Remove
 `unknown_tree`. Name the new summary prefix as a module constant beside
 `_PROBE_CELL_UNENTERABLE`.
 
 **The second-ask stop is not asked again.** The decision is that the pair
 running when the cell stopped is asked again. A survivor at its second ask
 has its witness answer and its finding already filed. Asking it again would
-file the finding twice. A second cell that cannot reach it would also drop
-the blocker. So it keeps today's finding, and the second cell starts at the
+file the finding twice. A fresh cell that cannot reach it would also drop
+the blocker. So it keeps today's finding, and the fresh cell starts at the
 next pair.
 
+**Why the stopped summary says the answer was recorded.** Take a survivor
+whose line read stopped the cell. Its witness answered `survived`, but no
+finding was filed for it. "Asked" would be false for it, and "recorded" holds for every
+pair left. The key stays `unasked`, so criterion 3 counts that survivor with
+the rest.
+
 **Docstrings.** `_apply_criterion_probes`'s docstring stays within ten lines
-and names the second cell and the `unasked` key. Add one line to the
+and says the cell is entered once more, and names the `unasked` key. Add one line to the
 REVIEW lines' docstrings, or give the shared tail its own helper with one.
 
 **Existing tests that change.**
@@ -253,7 +276,7 @@ REVIEW lines' docstrings, or give the shared tail its own helper with one.
 - `test_a_survivor_whose_whole_suite_cannot_answer_keeps_todays_blocker`
   (`tests/test_session.py:14634`) asserts the fifth criterion is filed
   `unproven` with `unknown_tree` (`:14745-14755`). Under this change a
-  second gate-only cell asks it. Append one `tests` result to its scripted
+  fresh gate-only cell asks it. Append one `tests` result to its scripted
   answers for that ask. Add `["t.py::e"]` to its subsets and `e` to its
   mutated list, and assert the outcome that result gives. Correct its
   docstring's sentence about the fifth criterion. Rename no test, since
@@ -266,7 +289,7 @@ REVIEW lines' docstrings, or give the shared tail its own helper with one.
 - Criteria 1 and 2 call `session._apply_criterion_probes` directly. Stub
   `session.critic_cell` with a context manager that records its keywords
   and an ordered log. It yields `gate-1` for the first entry and `gate-2`
-  for the second, or raises a scripted `runtime.CellRuntimeError` on entry.
+  for the next, or raises a scripted `runtime.CellRuntimeError` on entry.
   Stub `saffron.gates.runner.run_gate` to log the container and subset and
   answer from a scripted list, raising an exception item. Stub
   `saffron.cell.worktree.source_mutated` and `read_at_head` by container,
@@ -275,6 +298,9 @@ REVIEW lines' docstrings, or give the shared tail its own helper with one.
   collected every witness. Pass `_ANCHORING_DIFF` as the diff.
 - A killed witness ask answers `fail`. A survivor answers `pass`, then its
   second ask's subset is empty.
+- Criterion 1 also drives a stop at the last pair's second ask, and asserts
+  one cell entry. Criterion 2's stop at a witness ask comes after the fresh
+  cell answered one pair, and asserts that pair has no `unasked` key.
 - Compare the log's entries and exits as one ordered list. Compare the two
   keyword sets for equality and `created` by identity.
 - Criterion 3 builds entries by hand. Give a later unasked edit a different
@@ -284,8 +310,8 @@ Import every name the change adds inside a test body. A module-scope import
 of one makes the reverted test a collection error, which `revert` reads as
 `skip`.
 
-**Measured on a prototype.** A diff built to this spec at base measured 452
-changed tokens on `size_gate` outside `tests/**`, and 1667 under it. The
+**Measured on a prototype.** A diff built to this spec at base measured 453
+changed tokens on `size_gate` outside `tests/**`, and 1726 under it. The
 `bug` ceiling is 1300. All three witnesses failed with the source reverted.
 Each wrong version listed under the three criteria ran against its witness,
 and each failed it. `tests/test_session.py` and `tests/test_review.py` pass
