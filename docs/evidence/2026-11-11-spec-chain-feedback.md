@@ -217,3 +217,34 @@ the `draft` task as `draft` then `revision`.
     retired term fails before the delegate's commit.
 35. A seed in a witness copies a shape production writes. Round 2 found a
     fix that drove every member with a shape no writer produces.
+
+## SA-0375 (b-1b05be), after spec loop run 63
+
+The first of two specs that close b-1b05be's reopened half. An earlier
+writer stopped at step 1 because nothing records the tree REVIEW's lenses
+read. This spec records it as `reviewed-diff.json` in the task directory,
+with its sha256 on a REVIEW phase line. A new fact kind needs ontology and
+`CONTEXT.md` edits, so the writer ruled it out with evidence.
+
+The writer drafted in 22.5 minutes. It killed 10 wrong versions on a
+prototype that measured 50 changed tokens against the `bug` ceiling of 1300.
+
+**Review 1: 0 blockers, 1 concern, 4 notes.** The delegate applied the
+concern and two notes by hand.
+
+- `tree_base` was witnessed only on a stacked spec, so writing
+  `stacked_on` passed every witness. Pre-flight 1 missed it: the set was
+  stacked and unstacked specs, and the witness drove one. The delegate
+  probed the fix on the prototype, and it killed the version.
+- Out of scope said a later task overwrites the file. A later task that
+  stops before REVIEW leaves the earlier file in place. Pre-flight 5
+  missed it.
+
+**Review 2: 0 blockers, 0 concerns, 2 notes.** One wrong version said
+"verdict lenses", a misnamed and ambiguous phrase. The delegate reworded it.
+
+## Checks to build (SA-0375)
+
+36. A claim about a value that differs between stacked and unstacked specs
+    names both, and a witness drives each. Round 1 found `tree_base`
+    driven stacked only.
