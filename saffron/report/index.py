@@ -200,7 +200,7 @@ def counted_header(lines: Sequence[QueueLine]) -> dict[str, str]:
     }
 
 
-# The header key every page writer spells through `accept_rate_header`.
+# The header key. Only `accept_rate_header` and replay's placeholder spell it.
 ACCEPT_RATE_KEY = "trailing accept rate"
 
 
