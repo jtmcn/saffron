@@ -282,6 +282,11 @@ finding reads `follow_up`, or `pooled` when no follow-up took it. It also holds
 the follow-up specs' own critic findings, which go to the backlog and never to a second
 generation.
 
+**`verify.json`**: The file at `finish/<batch id>/verify.json` in the batch tree. It
+holds the finishing suite's last comparison: the commit judged, its base, the mirror
+that holds the commit, each new failure, and each head gate result that carries one.
+A red finish pushes nothing, so this file is the only place its gate results are kept.
+
 **Finishing layer**: A stack batch's last commit, cut from the top layer's head. It
 writes the latest spec text of each order layer and each unrun follow-up spec. A
 follow-up spec that ran is left out of it. It moves no spec into `done/`. Its suite is
@@ -291,7 +296,7 @@ request on the top layer's branch.
 
 **Escalation line**: A line `publish_finish` prints that starts with `escalate:`. It
 prints one for a finishing suite that did not finish, and one for a red finishing
-suite. It prints one for a layer whose remote head is not its graded head. It prints
+suite, followed by one line per new failure. It prints one for a layer whose remote head is not its graded head. It prints
 one for a pull request whose base is not its predecessor's branch. A finishing branch that already exists prints one too. Each
 pushes nothing and links nothing. It is not an Escalation, which withholds a spec.
 

@@ -1,11 +1,12 @@
 ---
 id: b-fe82d9
 title: A stack finish escalated on three new failures and recorded none of them where the operator can read them
-status: open
+status: done
 tier: 2
 filed: 2026-10-08
+closed: 2026-11-11
 specs: [SA-0225, SA-0228, SA-0368]
-prs: [746, 747]
+prs: [746, 747, 1145]
 commits: []
 cites: [§4.2.1]
 related: [b-3c7ce9]
@@ -42,3 +43,7 @@ judged into its batch folder, and the log line names the failures.
   `SA-0364` went green, then PACKAGE's re-verify printed "2 new failures"
   and set `MERGE_FAILED`. Neither the log nor `events.jsonl` named a test. A
   local suite named the clock flake #1112 fixes.
+- 2026-11-11: done by #1145, `SA-0368`, in the spec loop's run 61. PACKAGE
+  emits one line per new failure after its count, a red finish prints one
+  line per failure after its `escalate:` line, and the finish writes
+  `finish/<batch id>/verify.json`.

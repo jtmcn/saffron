@@ -50,3 +50,8 @@ as `regate` then `adopt`. A test drives each route and starts a child on it.
   ran a recorded spec text, not a file at base_sha" (`saffron/regate.py`). A
   stack batch records a revised text for each layer its review revised. So
   no route moves such a `MERGE_FAILED` task to `READY_FOR_REVIEW`.
+- 2026-11-11: the route held where no spec text was recorded. In the spec
+  loop's run 61, `saffron adopt SA-0368 1145` re-gated the head green and set
+  `READY_FOR_REVIEW`. Batch 79 recorded no revised text for that layer. But
+  `saffron finish 79` then refused: "batch 79 holds no layer". An adopted
+  task is not a stack layer, so its end review never runs.

@@ -60,3 +60,8 @@ command can package it, and says which command does.
   agent died with exit -6, and the cell runtime failed with "no PID data from
   sync pipe". No patch was exported, and the task reads `ORPHANED` at $49.80
   of $60. #1137 is a hand rebuild.
+- 2026-11-11: a third cell, in the spec loop's run 61. `SA-0368` went green
+  on attempt 2. REBUT's agent then died with exit -6 before any result event,
+  so no blocker was answered and the task reads `EXHAUSTED` at $39.92 of $52.
+  The patch was exported, and PACKAGE opened #1145. A runtime death read as
+  `EXHAUSTED` is an `error` charged to the task.

@@ -2939,3 +2939,13 @@ critic's own, so they have no line.
   bound. **Landed:** a review commit on #1137.
 - `SA-0365` (#1137): `_origin_name` reads git through `Popen` only to dodge a
   session test's fake. **Bucket 3**. **Open:** b-16c819.
+
+## 2026-11-11, spec loop run 61 (#1145)
+
+- `SA-0368` (#1145): a docstring gave a reason a finish never shows, that the
+  operator already saw a dropped gate result. **Bucket 3**, conventions.
+  **Landed:** a review commit on #1145.
+- `SA-0368` (#1145): a docstring and a comment called a batch-tree file and an
+  `events.jsonl` line "the one record", which `CONTEXT.md` keeps for
+  `refs/saffron/*`. **Bucket 3**, conventions. **Landed:** a review commit on
+  #1145.

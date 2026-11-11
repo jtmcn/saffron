@@ -28,3 +28,6 @@ A killed turn with no result event adds nothing to REBUT's cost.
 ## Record
 
 - 2026-09-25: filed from the spec reviews of `b-792ab2`'s last build specs.
+- 2026-11-11: seen in the spec loop's run 61. `SA-0368`'s REBUT agent died
+  with exit -6, and the log said its extraction "ran out of its $4.00
+  reserve". No turn spent that reserve. The line names a cap for a crash.
