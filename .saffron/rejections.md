@@ -2949,3 +2949,25 @@ critic's own, so they have no line.
   `events.jsonl` line "the one record", which `CONTEXT.md` keeps for
   `refs/saffron/*`. **Bucket 3**, conventions. **Landed:** a review commit on
   #1145.
+
+## 2026-11-11, spec loop run 62 (#1150)
+
+- `SA-0369` (#1150): criterion 1's witness never drove a live cell whose
+  subject read alone fails, so sending that cell to the volume passed it.
+  **Bucket 1**, a witness that cannot fail. **Landed:** a review commit
+  on #1150.
+- `SA-0369` (#1150): criterion 2's witness asserted no failure line's cell
+  error or volume error, so dropping either passed it. **Bucket 1**,
+  a witness that cannot fail. **Landed:** a review commit on #1150.
+- `SA-0369` (#1150): criterion 2's failed removal used a cell with no
+  subjects, so dropping the cell's subjects passed it. **Bucket 1**,
+  a witness that cannot fail. **Landed:** a review commit on #1150.
+- `SA-0369` (#1150): criterion 2's empty volume lived in a separately named
+  test, so writing an empty `patch.diff` passed the witness. **Bucket 1**,
+  a witness that cannot fail. **Landed:** a review commit on #1150.
+- `SA-0369` (#1150): both export paths wrote their own copy of `patch.json`,
+  and the copies had already drifted. **Bucket 3**, conventions.
+  **Landed:** a review commit on #1150.
+- `SA-0369` (#1150): a docstring cited a measured fact to "see the spec",
+  which points nowhere once the spec retires. **Bucket 3**, conventions.
+  **Landed:** a review commit on #1150.

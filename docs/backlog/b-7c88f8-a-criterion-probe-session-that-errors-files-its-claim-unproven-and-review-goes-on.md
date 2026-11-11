@@ -41,3 +41,8 @@ behaviour.
 
 - 2026-09-22: filed from ADR 4's review. ADR 4's principles 34 and 36 record
   it.
+- 2026-11-11: hit in the spec loop's run 62. `SA-0369`'s gate-only cell
+  stopped after its 26th criterion probe. The 9 probes after it, and all 37
+  wrong versions, were filed `unproven`. No file names the error that
+  stopped it. The task reached `READY_FOR_REVIEW`. The Spec seat then found 4
+  witness blockers among those same wrong versions.
