@@ -30,6 +30,7 @@ from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from saffron import mutants
 from saffron.agents import context
 from saffron.cell.worktree import DIFF_FLAGS
 from saffron.events import Event, describe
@@ -432,6 +433,7 @@ def _review_one_layer(
     task_key: str,
     specs: Mapping[str, Spec],
     *,
+    mutants_commit: str | None,
     mirror: Path,
     open_cell: Callable[[LayerFields], AbstractContextManager[str]],
     context_md: str,
@@ -445,15 +447,16 @@ def _review_one_layer(
 ) -> list[review.LensReview]:
     """One layer's own two lens reviews, or a synthetic error for each.
 
-    A raise reading the layer's fields, its spec or its diff is caught
-    here, and so is one opening the cell or running its lenses. Either
-    gives every lens in `END_LENSES` a `LensReview` naming the
-    exception's type and message, at cost 0. The layer below it is
-    still tried.
+    The layer's spec carries the mutants `mutants_commit` pins, attached
+    through `mutants.attach_mutants_at` before any cell opens. A raise
+    reading the layer's fields, spec, mutants or diff is caught here, and
+    so is one opening the cell or running its lenses. Either gives every
+    lens in `END_LENSES` a `LensReview` naming the exception's type and
+    message, at cost 0. The layer below it is still tried.
     """
     try:
         fields = resolve(ledger, task_key)
-        spec = specs[fields.spec_id]
+        spec = mutants.attach_mutants_at(mirror, mutants_commit, specs[fields.spec_id])
         diff = _diff(mirror, fields.diff_base, fields.head)
         with open_cell(fields) as container:
             return review_layer(
@@ -516,6 +519,7 @@ def review_stack(
                 ledger,
                 task_key,
                 specs,
+                mutants_commit=ledger.task_mutants_commit(task_id),
                 mirror=mirror,
                 open_cell=open_cell,
                 context_md=context_md,

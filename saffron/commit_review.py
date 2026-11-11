@@ -283,6 +283,7 @@ def run_commit_review(
         ledger,
         str(task_id),
         {framed.id: framed},
+        mutants_commit=ledger.task_mutants_commit(task_id),
         mirror=mirror,
         open_cell=open_cell,
         context_md=context_md,
