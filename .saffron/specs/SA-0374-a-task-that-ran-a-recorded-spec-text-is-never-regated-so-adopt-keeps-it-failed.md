@@ -53,8 +53,11 @@ acceptance:
       attaches the mutants the task's own row pins, exits 0 on a green
       head, and records the re-gate. The witness drives one task for each
       of `SPEC_TEXT_ORIGINS`, `revision`, `follow_up` and `draft`. Each
-      task holds two rows whose titles differ, and both carry that task's
-      own origin, so a reader of `revision` rows alone misses two tasks. It checks the title and the
+      task holds two rows whose titles differ. The `follow_up` task's rows
+      are both `follow_up`, and the `draft` task's are `draft` then
+      `revision`, the shape `saffron draft` writes. So a reader of
+      `revision` rows alone misses the `follow_up` task, and a reader of the
+      first row's origin alone misses the `draft` task. It checks the title and the
       attached mutant `reverify` receives, and the recorded head and count.
       A task with no row is still judged against its file at `base_sha`,
       and the same witness checks that file's title reaches `reverify`.
