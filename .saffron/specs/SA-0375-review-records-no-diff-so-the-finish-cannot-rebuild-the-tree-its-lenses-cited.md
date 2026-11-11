@@ -61,7 +61,7 @@ acceptance:
     witness: tests/test_session.py::test_review_records_the_diff_its_lenses_read_with_its_hash_and_tree_base
     wrong_versions:
       - The implementer's export, `patch_to_review`, recorded instead of the critic cell's.
-      - The record rewritten after REBUT with the export the verdict lenses read.
+      - The record rewritten after REBUT with the post-rebuttal export.
       - "`tree_base` written as the spec's `base_sha`."
       - The sha256 taken over something other than `raw`, such as `tree_base` joined to it.
       - The sha256 taken over `raw` encoded as Latin-1.
