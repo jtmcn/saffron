@@ -54,11 +54,12 @@ acceptance:
       `path:name` entry's subject is its name. A bare `path` entry's subject
       is the whole path. A reader holds the subject as a whole word, by
       `_word_pattern`. The file at the entry's own path is never its reader,
-      in both forms. Pairs come in entry order, then path order. The witness
+      in both forms, and the witness drives a bare-path file that holds its
+      own path. Pairs come in entry order, then path order. The witness
       drives both forms in both orders. It drives an import, an attribute
       read, a subject that starts a file with no trailing newline, and a
-      Markdown reader. It drives `OLD_NAME_V2`, `NOOLD_NAME` and `old_name`
-      as files that read nothing. It drives two near misses on a bare path
+      Markdown reader. It drives `OLD_NAME_V2`, `NOOLD_NAME` and `old_name`,
+      in one file beside an uppercase hit, as text that reads nothing. It drives two near misses on a bare path
       the same way, one with its last dot made an underscore and one with a
       letter after its extension. An entry no file reads adds no pair. Where the locale cannot decode the bytes
       `\xff\xfe`, a file holding them beside the subject counts as a
@@ -70,6 +71,7 @@ acceptance:
       - The subject used as a regular expression unescaped, in the grep and the match, so the near miss with an underscore for the dot reads as a reader.
       - The whole entry taken as a `path:name` entry's subject, so no file reads `lib.py:OLD_NAME`.
       - The file at the entry's own path kept, so `lib.py` reads its own `OLD_NAME`.
+      - The own-path skip made only for a `path:name` entry, so `pkg/old.py` reads its own path.
       - A file that does not decode skipped, so it reads nothing.
       - Every git grep exit past 0 read as no match, so a `sha` the mirror lacks returns no pair.
       - Pairs sorted by path across all entries, so a later entry's reader with an earlier path comes first.
@@ -107,7 +109,8 @@ acceptance:
       parent deleted is not named, a reader it added is named, and the
       parent's `protected` list applies. A tree base whose `policy.yaml` is
       absent, does not parse, or cannot be read protects nothing. The
-      witness drives a symlink leaving the tree for the last. Where the
+      witness drives a tree base with no `policy.yaml` for the first, and a
+      symlink leaving the tree for the last. Where the
       locale cannot decode the bytes `\xff\xfe`, it drives a policy holding
       them too. A tree base the mirror lacks raises `GitError` and prints no
       `refused` line.
@@ -115,6 +118,7 @@ acceptance:
     wrong_versions:
       - Readers read at `base_sha` when the task is stacked, so the parent's deleted reader is named and its new one is not.
       - The policy read at another commit or from the working copy, so the parent's `protected` glob does not apply.
+      - An absent `policy.yaml` passed on to `parse_policy`, so the task aborts.
       - A policy that does not parse raises, so the task aborts and is not refused.
       - Only a `PolicyError` caught, so a policy symlink leaving the tree aborts the task.
       - A policy that does not decode left uncaught, so the task aborts.
