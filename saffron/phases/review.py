@@ -637,14 +637,26 @@ def run_criterion_probes(
     return entries
 
 
+def _unasked_tail(edits: Sequence[Mapping[str, object]]) -> str:
+    """The tail both REVIEW lines append for every edit a probe cell's fresh
+    cell left unasked (backlog b-7c88f8): a count and the first such edit's
+    own `unasked` text, between the line's counts and any `; no session
+    answered: ` tail. Empty when no edit carries an `unasked` key."""
+    unasked = [e["unasked"] for e in edits if e.get("unasked") is not None]
+    if not unasked:
+        return ""
+    return f"; {len(unasked)} never answered: {unasked[0]}"
+
+
 def describe_criterion_probes(entries: Sequence[Mapping[str, object]]) -> str:
     """The one REVIEW line criterion-probing adds, counted over every probe
     across every entry (backlog item b-78a590), the way
     `describe_wrong_versions` counts versions across every entry. A probe
     with an edit and no `refusal` is named, a null-edit probe is unnamed,
-    and a `probe.probe_refusal` refusal is refused. The tail names, in
-    entry order, the witness of each entry whose session never answered
-    the schema."""
+    and a `probe.probe_refusal` refusal is refused. `_unasked_tail` adds a
+    further tail for a named probe its fresh cell left unasked. The last
+    tail names, in entry order, the witness of each entry whose session
+    never answered the schema."""
     probes = [
         p for e in entries for p in cast("list[Mapping[str, object]]", e["probes"])
     ]
@@ -655,6 +667,7 @@ def describe_criterion_probes(entries: Sequence[Mapping[str, object]]) -> str:
         f"criterion probes: {named} named over {len(entries)} criteria, "
         f"{unnamed} unnamed, {refused} refused"
     )
+    line += _unasked_tail(probes)
     unanswered = [e["witness"] for e in entries if e.get("error") is not None]
     if unanswered:
         line += "; no session answered: " + ", ".join(str(w) for w in unanswered)
@@ -834,9 +847,11 @@ def describe_wrong_versions(entries: Sequence[Mapping[str, object]]) -> str:
     """The one REVIEW line the wrong-version sessions add. The first
     clause counts every version across every entry. It then counts how
     many named an edit and were not refused, and how many
-    `probe.probe_refusal` refused to run. The last names, in entry order,
-    the witness of each entry whose session never answered the schema.
-    With none, the line matches the first clause alone."""
+    `probe.probe_refusal` refused to run. `_unasked_tail` adds a further
+    tail for an expressed version its fresh cell left unasked. The last
+    tail names, in entry order, the witness of each entry whose session
+    never answered the schema. With none of either, the line matches the
+    first clause alone."""
     versions = [
         v for e in entries for v in cast("list[Mapping[str, object]]", e["versions"])
     ]
@@ -846,6 +861,7 @@ def describe_wrong_versions(entries: Sequence[Mapping[str, object]]) -> str:
         f"wrong versions: {len(versions)} declared, {expressed} expressed, "
         f"{refused} refused"
     )
+    line += _unasked_tail(versions)
     unanswered = [e["witness"] for e in entries if e.get("error") is not None]
     if unanswered:
         line += "; no session answered: " + ", ".join(str(w) for w in unanswered)

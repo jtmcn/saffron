@@ -114,6 +114,10 @@ HISTORY_EXEC_TIMEOUT_S = 600.0
 _PROBE_CELL_UNENTERABLE = "the probe cell could not be entered: "
 _PROBE_BASELINE_UNREADABLE = "the baseline tests gate could not run: "
 
+# What `_apply_criterion_probes` writes on a pair its fresh cell left unasked,
+# unlike `_PROBE_CELL_UNENTERABLE`, which names a cell that could not be entered.
+_PROBE_CELL_STOPPED = "the probe cell stopped before this edit's answer was recorded: "
+
 
 def _default_emit(event: Event, *, log: EventLog) -> None:
     """What `run_one_cell` fans an event out to when the caller (every direct
@@ -2075,25 +2079,20 @@ def _apply_criterion_probes(
     created: set[str],
     note: Callable[[str, bool, str], None],
 ) -> None:
-    """Applies every criterion probe's and wrong version's own edit, and
-    asks its criterion's witness (items b-2750d5, b-7e69d0, b-78a590). Runs
-    in a Gate-only cell entered after `_probe_adequacy`'s own is torn down.
-    `pairs` holds one pair per probe of each criterion-probe entry, then
-    each wrong version paired with the criterion that declared it. Writes
-    each pair's outcome and summary in place, and a refused pair's own
-    `probe.probe_refusal` reason under `refusal` beside them. Appends a
-    survivor's `Finding` to the `adequacy` review in `reviews`, and asks it
-    a second time of the whole `tests` gate too (backlog b-b9365d).
-    """
+    """Applies every criterion probe's and wrong version's own edit, and asks
+    its criterion's witness (items b-2750d5, b-7e69d0, b-78a590, b-7c88f8).
+    `pairs` holds one pair per probe of each criterion-probe entry, then each
+    wrong version paired with its criterion. Writes each pair's outcome and
+    summary in place, and a refused pair's own `probe.probe_refusal` reason
+    under `refusal`. A stopped or unenterable cell is entered once more for
+    whatever pairs are left. One still left after that reads `error`, with
+    its runtime error under `unasked`. Appends a survivor's `Finding` to
+    `reviews`'s `adequacy` lens, and asks it a second time of the whole
+    `tests` gate too (backlog b-b9365d)."""
     from saffron import probe as probe_check
     from saffron.cell import worktree
     from saffron.gates import runner
     from saffron.gates.core.witness import witness_gate
-
-    unknown_tree = (
-        "an earlier edit left this cell's tree in an unknown state, so nothing "
-        "after it was asked"
-    )
 
     def _unproven(pending: list[tuple[Criterion, dict]], reason: str) -> None:
         for _criterion, entry in pending:
@@ -2129,26 +2128,15 @@ def _apply_criterion_probes(
     collected = None if head_tests is None else head_tests.collected
     adequacy = next(r for r in reviews if r.lens == "adequacy")
 
-    stack = contextlib.ExitStack()
-    try:
-        container = stack.enter_context(
-            critic_cell(
-                spec=spec,
-                repo=repo,
-                mirror=mirror,
-                network=None,
-                env=dict(thread_env),  # the repo's declared gate env, nothing more
-                gates_dir=gates_dir,
-                patch=patch,
-                created=created,
-                note=note,
-            )
-        )
-    except runtime.CellRuntimeError as exc:
-        _unproven(with_edit, f"{_PROBE_CELL_UNENTERABLE}{exc}")
-        return
-
-    with stack:
+    def _ask_pairs(
+        container: str, pairs_to_ask: list[tuple[Criterion, dict]]
+    ) -> tuple[int, str] | None:
+        """Asks each of `pairs_to_ask`, in order, inside `container`. Returns
+        `None` once every one is answered. Otherwise returns `(index, text)`:
+        the first pair left to ask, and the runtime error that stopped this
+        cell. A witness-ask or line-read stop names the pair that was
+        running, so it is asked again. A second-ask stop names the next
+        pair, since its own survivor's finding is already filed."""
         # `witness_gate` reports a raise here and a gate `error` alike as
         # `error`. Only this note tells them apart.
         stopped: str | None = None
@@ -2177,7 +2165,7 @@ def _apply_criterion_probes(
                 stopped = str(exc)
                 raise
 
-        for index, (criterion, entry) in enumerate(with_edit):
+        for index, (criterion, entry) in enumerate(pairs_to_ask):
             edit = Mutant.model_validate(entry["edit"])
             result = witness_gate(
                 acceptance=[criterion.model_copy(update={"mutant": edit})],
@@ -2191,10 +2179,7 @@ def _apply_criterion_probes(
             entry["outcome"] = review.criterion_probe_outcome(result.status)
             entry["summary"] = result.summary
             if stopped is not None:
-                # `witness_gate` already reports this entry as `error`, with
-                # the summary kept above. `stopped` only ends the loop.
-                _unproven(with_edit[index + 1 :], unknown_tree)
-                return
+                return index, stopped
             if entry["outcome"] != "survived":
                 continue
             try:
@@ -2212,8 +2197,7 @@ def _apply_criterion_probes(
             except runtime.CellRuntimeError as exc:
                 entry["outcome"] = "error"
                 entry["summary"] = f"the survivor's line could not be read: {exc}"
-                _unproven(with_edit[index + 1 :], unknown_tree)
-                return
+                return index, str(exc)
 
             # The second ask (backlog b-b9365d) only runs for a survivor,
             # and only `anchored.claim` can change from it.
@@ -2229,10 +2213,10 @@ def _apply_criterion_probes(
                     )
                 except runtime.CellRuntimeError:
                     # The finding already holds today's claim, so append it
-                    # unchanged and end the loop as a witness-ask stop does.
+                    # unchanged, as at base, and ask the next pair.
                     adequacy.findings.append(anchored)
-                    _unproven(with_edit[index + 1 :], unknown_tree)
-                    return
+                    assert stopped is not None  # set by `_mutate`/`_run_tests` above
+                    return index + 1, stopped
                 anchored = anchored.model_copy(
                     update={
                         "claim": review.survivor_claim_with_suite_verdict(
@@ -2241,6 +2225,50 @@ def _apply_criterion_probes(
                     }
                 )
             adequacy.findings.append(anchored)
+        return None
+
+    # Entered once more (backlog b-7c88f8) for whatever stop or failed entry
+    # leaves unasked, never a third time, so one fault costs one more cell.
+    to_ask = with_edit
+    cannot_enter = False
+    error_text = ""
+    for _entry in range(2):
+        if not to_ask:
+            break
+        stack = contextlib.ExitStack()
+        try:
+            container = stack.enter_context(
+                critic_cell(
+                    spec=spec,
+                    repo=repo,
+                    mirror=mirror,
+                    network=None,
+                    env=dict(thread_env),  # the repo's declared gate env, nothing more
+                    gates_dir=gates_dir,
+                    patch=patch,
+                    created=created,
+                    note=note,
+                )
+            )
+        except runtime.CellRuntimeError as exc:
+            cannot_enter = True
+            error_text = str(exc)
+            continue
+        with stack:
+            outcome = _ask_pairs(container, to_ask)
+        if outcome is None:
+            to_ask = []
+            break
+        index, error_text = outcome
+        to_ask = to_ask[index:]
+        cannot_enter = False
+
+    if to_ask:
+        prefix = _PROBE_CELL_UNENTERABLE if cannot_enter else _PROBE_CELL_STOPPED
+        for _criterion, entry in to_ask:
+            entry["outcome"] = "error"
+            entry["summary"] = f"{prefix}{error_text}"
+            entry["unasked"] = error_text
 
 
 def _drive_cell(
