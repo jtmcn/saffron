@@ -182,3 +182,38 @@ seeded as a layer, a wrong early-return call records nothing.
     that short-circuits before the branch.
 33. A spec that adds a writer of a recorded fact greps `docs/adr/` for the
     rule naming that fact's writers.
+
+## SA-0374 (b-619b7d), after spec loop run 62
+
+`regate` declined any task that held a recorded spec text, so `saffron
+adopt` could move no such task to `READY_FOR_REVIEW`. That held `SA-0353`
+in run 56 and `SA-0364` in run 60. This spec judges such a task against its
+newest row, the text its cell ran.
+
+The writer drafted in 16.3 minutes and killed 15 wrong versions, each with
+the seed that reaches its branch. The pre-commit `retired-vocabulary` hook
+refused the first commit: "re-gate runs" matched the retired "gate run".
+The writer's tree checks do not run that hook.
+
+**Review 1: 0 blockers, 3 concerns, 3 notes.** The delegate applied two by
+hand and left one.
+
+- Criterion 1's rows did not fix the origin of each task's later row.
+  Pre-flight 1 missed it: the set was origins, and the second row's origin
+  was a hidden member.
+- No criterion carries a mutant, though part of the change deletes code.
+  A mutant needs a push to `refs/saffron/mutants`, which is outside the
+  delegate's grant. The pull request names it.
+- A Note said a later batch re-runs the task. A later batch mints a fresh
+  one. Pre-flight 5 missed it.
+
+**Review 2: 0 blockers, 1 concern, 3 notes.** Round 1's fix seeded every
+task with one origin, a shape production never writes. The delegate seeded
+the `draft` task as `draft` then `revision`.
+
+## Checks to build (SA-0374)
+
+34. The writer's tree checks run the pre-commit hooks over the spec, so a
+    retired term fails before the delegate's commit.
+35. A seed in a witness copies a shape production writes. Round 2 found a
+    fix that drove every member with a shape no writer produces.
