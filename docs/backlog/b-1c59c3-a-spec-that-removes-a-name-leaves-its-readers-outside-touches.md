@@ -4,7 +4,7 @@ title: A spec that removes a name can leave a reader of it outside its touches, 
 status: open
 tier: 1
 filed: 2026-10-12
-specs: [SA-0269]
+specs: [SA-0269, SA-0372]
 prs: [853]
 commits: []
 cites: [§4.3, §5.4]
@@ -38,3 +38,5 @@ model call decides it.
 ## Record
 
 - 2026-10-12: filed from the spec loop's run 36. #853 fixed `SA-0269` by hand.
+- 2026-11-11: specced as `SA-0372`, a refusal in `run_task` before the cell. The
+  queue scan stays as it is, since it never reads the mirror.

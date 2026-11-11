@@ -48,8 +48,15 @@ GitHub issues remain in use only for research/evidence records under
   other's body, claims or `consumes` name, and no `depends_on` path joins
   them. A removed bare path also matches a `consumes` entry under that path. The other is a candidate, or a spec whose task waits in
   `DEPENDENCY_WAITING_STATES`. A waiting partner holds the candidate. Of two
-  candidates the later id is held. `SA-0290` adds the field. Until it
-  lands, load refuses the key.
+  candidates the later id is held. `SA-0290` added the field.
+  So name each identifier the spec deletes or renames. Before the cell,
+  `run_task` refuses the task when a file at its tree base reads one and
+  lies outside `touches`. A reader holds the name, or a bare entry's whole
+  path, as a whole word. The entry's own file is no reader. Neither is
+  Markdown, a file under `.saffron/specs/` or a protected path. A spec with
+  no `touches` is not checked. The refusal names each reader and the name
+  it reads. `SA-0372` adds the refusal. Until it lands, nothing checks the
+  tree.
 - **`retired_first`** is optional and empty by default. Each entry is a spec
   id that must sit in `done/` at the spec's base before its cell runs. Declare
   it for a spec that adds or widens a refusal, and name each queued spec the

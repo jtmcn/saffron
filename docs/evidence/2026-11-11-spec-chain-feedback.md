@@ -102,3 +102,46 @@ concerns and one note by hand.
     1 fixed one sentence and left the same word in a verbatim line.
 29. Pre-flight 3 reads each new noun phrase against `CONTEXT.md`'s _Avoid_
     lists. The `terms` gate checks only seven phrases.
+
+## SA-0372 (b-1c59c3), after spec loop run 62
+
+`SA-0290` added `removes` to catch two specs that clash on a name. This
+spec checks one spec against its tree base. Before the cell, `run_task`
+refuses the task when a file outside `touches` still reads a removed name.
+The delegate settled the reader set before the writer ran. Markdown,
+`.saffron/specs/` and protected paths are not readers.
+
+The writer drafted in 18.1 minutes and revised in 3.6. It killed 20 wrong
+versions at the draft and 31 after the revision. `make check` passed on
+the draft with 5129 tests. The writer landed no protected edit. The
+delegate landed its two edits, to `DESIGN.md` §4.2 and
+`docs/agents/issue-tracker.md`, in the draft commit.
+
+**Review 1: 1 blocker, 2 concerns, 7 notes.** The writer revised them.
+
+- Criterion 2 said `touches` and `protected` both match by
+  `scope.matches`. Only `touches` was driven one directory below a `*`.
+  Pre-flight 1 missed it: the claim named two sets and the prototype drove
+  one.
+- `task.py`'s module and `Refused` docstrings list every pre-cell refusal,
+  and the spec named neither. Pre-flight 6 missed it, since a docstring
+  that turns false breaks no test.
+- Frozen `docs/evidence` records read live names, so a spec removing one is
+  refused. The operator accepted it, and the spec names it.
+
+**Review 2: 1 blocker, 1 concern, 4 notes.** The delegate applied the
+blocker, the concern and one note by hand.
+
+- Criterion 3's policy failures were absent, unparseable or unreadable.
+  Round 1's fix drove two of the three. Pre-flight 1 missed it again, on a
+  set round 1's fix created.
+- The own-path skip was claimed for both entry forms, and only one had a
+  wrong version.
+
+## Checks to build (SA-0372)
+
+30. Pre-flight 1 lists each set a claim names in a table, member by
+    member, against the witness sentence that drives it. Both rounds here
+    found one undriven member, and the second came from round 1's fix.
+31. A spec that adds a refusal greps the touched modules' docstrings for a
+    list of refusals. `task.py` keeps three such lists.
