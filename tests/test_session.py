@@ -14659,10 +14659,10 @@ def test_a_survivor_whose_whole_suite_cannot_answer_keeps_todays_blocker(
     """Criterion 3: a second ask that cannot answer leaves today's claim
     untouched. The stop can be an `error`, a `skip`, a mutator that declines
     the edit's second application, or a cell that stops outright. Every
-    survivor still reaches REBUT with its witness-ask claim intact. The
-    stop empties the loop, so the fifth criterion is never even asked. A
-    head whose own lens table carries no `tests` result at all buys no
-    second ask for anyone."""
+    survivor still reaches REBUT with its witness-ask claim intact. The stop
+    enters a fresh cell for the fifth criterion, which is asked and killed
+    there. A head whose own lens table carries no `tests` result at all buys
+    no second ask for anyone."""
     import saffron.gates.runner as runner_mod
     from saffron.intake import Criterion, Mutant
 
@@ -14708,6 +14708,9 @@ def test_a_survivor_whose_whole_suite_cannot_answer_keeps_todays_blocker(
             _tests_result("pass", collected=["t.py::c"]),
             _tests_result("pass", collected=["t.py::d"]),
             runtime.CellRuntimeError("the cell died mid-ask"),
+            # The fresh cell's own ask of the fifth criterion, left unasked
+            # by the stop above.
+            _tests_result("fail"),
         ]
     )
     subsets: list[list[str]] = []
@@ -14758,8 +14761,9 @@ def test_a_survivor_whose_whole_suite_cannot_answer_keeps_todays_blocker(
         ["t.py::c"],
         ["t.py::d"],
         [],
+        ["t.py::e"],
     ]
-    assert cell.mutated == [Mutant.model_validate(edit(n)) for n in "aabbccdd"]
+    assert cell.mutated == [Mutant.model_validate(edit(n)) for n in "aabbccdde"]
 
     entries = json.loads(
         (tmp_path / "out" / "SY-1" / "criterion-probes.json").read_text()
@@ -14769,11 +14773,10 @@ def test_a_survivor_whose_whole_suite_cannot_answer_keeps_todays_blocker(
         "survived",
         "survived",
         "survived",
-        "unproven",
+        "killed",
     ]
     assert entries[4]["probes"][0]["summary"] == (
-        "an earlier edit left this cell's tree in an unknown state, so "
-        "nothing after it was asked"
+        "1 of 1 witness(es) died under their own criterion probe"
     )
 
     record = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
@@ -14828,6 +14831,513 @@ def test_a_survivor_whose_whole_suite_cannot_answer_keeps_todays_blocker(
         "edit applied to src/x.py. The claim was 'claim x', and only that "
         "witness ran under the edit."
     )
+
+
+_PROBE_CELL_CONTENTS = {"src/x.py": "def y():\n    return 1\nassert x == 1\n"}
+
+
+def _probe_cell_edit(letter):
+    return {"file": "src/x.py", "find": "assert x == 1", "replace": letter}
+
+
+def _run_apply_criterion_probes(
+    monkeypatch,
+    pairs,
+    *,
+    enters,
+    run_gate,
+    mutate=None,
+    read_at_head=None,
+    gates=("tests",),
+):
+    """Calls `session._apply_criterion_probes` once, over `pairs`, with
+    `session.critic_cell`, `runner.run_gate`, `worktree.source_mutated` and
+    `worktree.read_at_head` all stubbed. `enters` and `run_gate` are each a
+    flat list, consumed in call order, of either an answer or an exception
+    to raise. Returns the ordered entry/exit log, the keyword dicts
+    `critic_cell` was called with, the `adequacy` review and the `created`
+    set `_apply_criterion_probes` was given."""
+    import saffron.gates.runner as runner_mod
+    from saffron.cell import worktree as worktree_mod
+
+    log: list[str] = []
+    kwargs_log: list[dict] = []
+    enters_iter = iter(enters)
+
+    @contextlib.contextmanager
+    def _fake_critic_cell(**kwargs):
+        kwargs_log.append(kwargs)
+        item = next(enters_iter)
+        if isinstance(item, BaseException):
+            log.append(f"enter-failed:{item}")
+            raise item
+        log.append(f"enter:{item}")
+        try:
+            yield item
+        finally:
+            log.append(f"exit:{item}")
+
+    monkeypatch.setattr(session, "critic_cell", _fake_critic_cell)
+
+    run_gate_iter = iter(run_gate)
+
+    def _run_gate(name, executable, cwd, *, subset=None, executor=None, **kw):
+        result = next(run_gate_iter)
+        if isinstance(result, BaseException):
+            raise result
+        return result
+
+    monkeypatch.setattr(runner_mod, "run_gate", _run_gate)
+    monkeypatch.setattr(
+        worktree_mod,
+        "source_mutated",
+        mutate or contextlib.contextmanager(lambda _c, _e: iter([None])),
+    )
+    monkeypatch.setattr(
+        worktree_mod,
+        "read_at_head",
+        read_at_head or (lambda _c, path: _PROBE_CELL_CONTENTS.get(path)),
+    )
+
+    gate_comparison = SuiteComparison(
+        SuiteRun(
+            [
+                GateResult(
+                    gate="tests",
+                    status="pass",
+                    tool="pytest 8.0",
+                    collected=[criterion.witness for criterion, _entry in pairs],
+                )
+            ],
+            "standard",
+            frozenset(),
+        )
+    )
+    reviews = [review.LensReview(lens="adequacy")]
+    created: set[str] = set()
+    session._apply_criterion_probes(
+        spec=_spec(),
+        repo=Path("repo"),
+        mirror=Path("mirror"),
+        gates_dir=Path("gates"),
+        thread_env={"T": "1"},
+        test_paths=["tests/**"],
+        gates={g: Path(f"{g}-gate") for g in gates},
+        patch=_ANCHORING_DIFF,
+        pairs=pairs,
+        diff=_ANCHORING_DIFF,
+        gate_comparison=gate_comparison,
+        reviews=reviews,
+        created=created,
+        note=lambda *a: None,
+    )
+    return log, kwargs_log, reviews[0], created
+
+
+def test_a_probe_cell_that_stops_is_entered_once_more_for_every_pair_left(
+    monkeypatch,
+):
+    """A cell that cannot be entered, or that stops mid-ask, is entered once
+    more. The stop can be the mutator, the `tests` gate, a survivor's line
+    read, or a survivor's second ask. The retry happens after the first
+    cell is torn down, with the same `critic_cell` keywords and the same
+    `created` set. The fresh cell asks every pair not yet answered, in
+    order, and a pair it answers carries no `unasked` key. A witness-ask or
+    line-read stop re-asks the pair that was running. A second-ask stop
+    starts the fresh cell at the next pair, since that survivor's finding
+    is already filed. Nothing is entered again once every pair is
+    answered, including by the last pair's own second ask."""
+    from saffron.intake import Criterion
+
+    criteria = {n: Criterion(claim=f"claim {n}", witness=f"t.py::{n}") for n in "abc"}
+
+    def _pairs(letters):
+        return [(criteria[n], {"edit": _probe_cell_edit(n)}) for n in letters]
+
+    @contextlib.contextmanager
+    def _mutate_ok(_container, _edit):
+        yield None
+
+    # The mutator raises applying pair `a`'s edit, in the first cell only.
+    @contextlib.contextmanager
+    def _mutate_raises_on_a(container, edit):
+        if container == "gate-1" and edit.replace == "a":
+            raise runtime.CellRuntimeError("the mutator raised")
+        yield None
+
+    def _outcome_of(pairs, letter):
+        for criterion, entry in pairs:
+            if criterion.witness.endswith(letter):
+                return entry
+        raise AssertionError(letter)
+
+    # Scenario A: the mutator raises applying the first pair's edit. Both
+    # pairs are re-asked whole, in a fresh cell.
+    scenario_a_pairs = _pairs("ab")
+    # `a` kills and `b` survives, deliberately asymmetric: asked in the
+    # wrong order, `a` would read `survived` and `b` would read `killed`.
+    log_a, kwargs_log_a, review_a, created_a = _run_apply_criterion_probes(
+        monkeypatch,
+        scenario_a_pairs,
+        enters=["gate-1", "gate-2"],
+        run_gate=[
+            GateResult(gate="tests", status="fail", tool="pytest 8.0"),
+            GateResult(gate="tests", status="pass", tool="pytest 8.0"),
+            GateResult(gate="tests", status="pass", tool="pytest 8.0"),
+        ],
+        mutate=_mutate_raises_on_a,
+    )
+    assert log_a == ["enter:gate-1", "exit:gate-1", "enter:gate-2", "exit:gate-2"]
+    assert kwargs_log_a[0] == kwargs_log_a[1]
+    assert kwargs_log_a[0]["created"] is created_a
+    a_entry = _outcome_of(scenario_a_pairs, "a")
+    b_entry = _outcome_of(scenario_a_pairs, "b")
+    assert a_entry["outcome"] == "killed"
+    assert "unasked" not in a_entry
+    assert b_entry["outcome"] == "survived"
+    assert "unasked" not in b_entry
+    assert len(review_a.findings) == 1
+
+    # Scenario A2: `a` and `b` both answer in the first cell. The second
+    # cannot be entered, so only `c` is marked, and `a`/`b` stay untouched.
+    scenario_a2_pairs = _pairs("abc")
+    log_a2, _kw_a2, _rev_a2, _created_a2 = _run_apply_criterion_probes(
+        monkeypatch,
+        scenario_a2_pairs,
+        enters=[
+            "gate-1",
+            runtime.CellRuntimeError("the second attempt could not enter"),
+        ],
+        run_gate=[
+            GateResult(gate="tests", status="fail", tool="pytest 8.0"),
+            GateResult(gate="tests", status="fail", tool="pytest 8.0"),
+            runtime.CellRuntimeError("c stopped"),
+        ],
+        mutate=_mutate_ok,
+    )
+    assert log_a2 == [
+        "enter:gate-1",
+        "exit:gate-1",
+        "enter-failed:the second attempt could not enter",
+    ]
+    a2_a = _outcome_of(scenario_a2_pairs, "a")
+    a2_b = _outcome_of(scenario_a2_pairs, "b")
+    a2_c = _outcome_of(scenario_a2_pairs, "c")
+    assert a2_a["outcome"] == "killed"
+    assert "unasked" not in a2_a
+    assert a2_b["outcome"] == "killed"
+    assert "unasked" not in a2_b
+    assert a2_c["outcome"] == "error"
+    assert a2_c["summary"] == (
+        "the probe cell could not be entered: the second attempt could not enter"
+    )
+    assert a2_c["unasked"] == "the second attempt could not enter"
+
+    # Scenario B: the `tests` gate itself raises at a pair's witness ask.
+    # Re-asked whole, surviving on retry.
+    scenario_b_pairs = _pairs("a")
+    log_b, kwargs_log_b, review_b, created_b = _run_apply_criterion_probes(
+        monkeypatch,
+        scenario_b_pairs,
+        enters=["gate-1", "gate-2"],
+        run_gate=[
+            runtime.CellRuntimeError("the tests gate raised"),
+            GateResult(gate="tests", status="pass", tool="pytest 8.0"),
+            GateResult(gate="tests", status="pass", tool="pytest 8.0"),
+        ],
+        mutate=_mutate_ok,
+    )
+    assert log_b == ["enter:gate-1", "exit:gate-1", "enter:gate-2", "exit:gate-2"]
+    assert kwargs_log_b[0] == kwargs_log_b[1]
+    assert kwargs_log_b[0]["created"] is created_b
+    b_only = _outcome_of(scenario_b_pairs, "a")
+    assert b_only["outcome"] == "survived"
+    assert "unasked" not in b_only
+    assert len(review_b.findings) == 1
+
+    # Scenario C: a survivor's line read raises. Re-asked whole, surviving
+    # on retry, this time able to read its own line.
+    def _read_at_head_raises_in_gate_1(container, path):
+        if container == "gate-1":
+            raise runtime.CellRuntimeError("the line read raised")
+        return _PROBE_CELL_CONTENTS.get(path)
+
+    scenario_c_pairs = _pairs("a")
+    log_c, _kw_c, review_c, _created_c = _run_apply_criterion_probes(
+        monkeypatch,
+        scenario_c_pairs,
+        enters=["gate-1", "gate-2"],
+        run_gate=[
+            GateResult(gate="tests", status="pass", tool="pytest 8.0"),
+            GateResult(gate="tests", status="pass", tool="pytest 8.0"),
+            GateResult(gate="tests", status="pass", tool="pytest 8.0"),
+        ],
+        mutate=_mutate_ok,
+        read_at_head=_read_at_head_raises_in_gate_1,
+    )
+    assert log_c == ["enter:gate-1", "exit:gate-1", "enter:gate-2", "exit:gate-2"]
+    c_only = _outcome_of(scenario_c_pairs, "a")
+    assert c_only["outcome"] == "survived"
+    assert "unasked" not in c_only
+    assert len(review_c.findings) == 1
+
+    # Scenario D: a survivor's second ask raises. Its finding is filed once
+    # already, so the fresh cell starts at the next pair instead.
+    scenario_d_pairs = _pairs("ab")
+    log_d, _kw_d, review_d, _created_d = _run_apply_criterion_probes(
+        monkeypatch,
+        scenario_d_pairs,
+        enters=["gate-1", "gate-2"],
+        run_gate=[
+            GateResult(gate="tests", status="pass", tool="pytest 8.0"),
+            runtime.CellRuntimeError("the second ask raised"),
+            GateResult(gate="tests", status="fail", tool="pytest 8.0"),
+        ],
+        mutate=_mutate_ok,
+    )
+    assert log_d == ["enter:gate-1", "exit:gate-1", "enter:gate-2", "exit:gate-2"]
+    d_a = _outcome_of(scenario_d_pairs, "a")
+    d_b = _outcome_of(scenario_d_pairs, "b")
+    assert d_a["outcome"] == "survived"
+    assert "unasked" not in d_a
+    assert d_b["outcome"] == "killed"
+    assert "unasked" not in d_b
+    assert len(review_d.findings) == 1
+
+    # Scenario E: a stop at the last pair's own second ask leaves nothing to
+    # ask. No fresh cell is entered, so there is exactly one cell entry.
+    scenario_e_pairs = _pairs("a")
+    log_e, kwargs_log_e, review_e, _created_e = _run_apply_criterion_probes(
+        monkeypatch,
+        scenario_e_pairs,
+        enters=["gate-1"],
+        run_gate=[
+            GateResult(gate="tests", status="pass", tool="pytest 8.0"),
+            runtime.CellRuntimeError("the second ask raised at the end"),
+        ],
+        mutate=_mutate_ok,
+    )
+    assert log_e == ["enter:gate-1", "exit:gate-1"]
+    assert len(kwargs_log_e) == 1
+    e_only = _outcome_of(scenario_e_pairs, "a")
+    assert e_only["outcome"] == "survived"
+    assert "unasked" not in e_only
+    assert len(review_e.findings) == 1
+
+    # Scenario F: the cell cannot be entered at all. Every pair is asked in
+    # the fresh one, which answers both.
+    scenario_f_pairs = _pairs("ab")
+    log_f, kwargs_log_f, _review_f, created_f = _run_apply_criterion_probes(
+        monkeypatch,
+        scenario_f_pairs,
+        enters=[runtime.CellRuntimeError("could not reach the runtime"), "gate-2"],
+        run_gate=[
+            GateResult(gate="tests", status="fail", tool="pytest 8.0"),
+            GateResult(gate="tests", status="fail", tool="pytest 8.0"),
+        ],
+        mutate=_mutate_ok,
+    )
+    assert log_f == [
+        "enter-failed:could not reach the runtime",
+        "enter:gate-2",
+        "exit:gate-2",
+    ]
+    assert kwargs_log_f[0] == kwargs_log_f[1]
+    assert kwargs_log_f[0]["created"] is created_f
+    f_a = _outcome_of(scenario_f_pairs, "a")
+    f_b = _outcome_of(scenario_f_pairs, "b")
+    assert f_a["outcome"] == "killed"
+    assert "unasked" not in f_a
+    assert f_b["outcome"] == "killed"
+    assert "unasked" not in f_b
+
+
+def test_a_second_stop_files_every_pair_left_as_an_error_naming_the_runtime_error(
+    monkeypatch,
+):
+    """When the fresh cell also stops, or cannot be entered, no further
+    cell is entered. A pair it answered before its own stop keeps its
+    outcome, with no `unasked` key. Every pair still unasked reads
+    `error`, including whichever pair was running when the fresh cell
+    stopped. Its summary replaces whatever the witness gate or the line
+    read wrote, and its `unasked` key holds the fresh cell's own runtime
+    error. A survivor whose second ask stopped the fresh cell keeps
+    `survived` and its one finding, with no `unasked` key. A pair with no
+    edit, or a refused pair, stays `unproven` throughout. So does every
+    pair when the repo declares no `tests` gate, which enters none."""
+    from saffron.intake import Criterion
+
+    criteria = {n: Criterion(claim=f"claim {n}", witness=f"t.py::{n}") for n in "abc"}
+
+    def _edit_pair(letter):
+        return (criteria[letter], {"edit": _probe_cell_edit(letter)})
+
+    @contextlib.contextmanager
+    def _mutate_ok(_container, _edit):
+        yield None
+
+    def _outcome_of(pairs, letter):
+        for criterion, entry in pairs:
+            if criterion.witness.endswith(letter):
+                return entry
+        raise AssertionError(letter)
+
+    # Scenario G: the first cell stops asking `b`. The fresh cell answers
+    # `b`, then stops again applying `c`. The no-edit and refused pairs stay untouched.
+    pairs_g = [
+        _edit_pair("a"),
+        _edit_pair("b"),
+        _edit_pair("c"),
+        (criteria["a"], {"edit": None}),
+        (criteria["b"], {"edit": {"file": "tests/x.py", "find": "x", "replace": "y"}}),
+    ]
+
+    @contextlib.contextmanager
+    def _mutate_g(container, edit):
+        if container == "gate-2" and edit.replace == "c":
+            raise runtime.CellRuntimeError("gate-2 stopped")
+        yield None
+
+    log_g, kwargs_log_g, _review_g, created_g = _run_apply_criterion_probes(
+        monkeypatch,
+        pairs_g,
+        enters=["gate-1", "gate-2"],
+        run_gate=[
+            GateResult(gate="tests", status="fail", tool="pytest 8.0"),
+            runtime.CellRuntimeError("gate-1 stopped"),
+            GateResult(gate="tests", status="fail", tool="pytest 8.0"),
+        ],
+        mutate=_mutate_g,
+    )
+    assert log_g == ["enter:gate-1", "exit:gate-1", "enter:gate-2", "exit:gate-2"]
+    assert kwargs_log_g[0] == kwargs_log_g[1]
+    assert kwargs_log_g[0]["created"] is created_g
+
+    g_a = _outcome_of(pairs_g, "a")
+    assert g_a["outcome"] == "killed"
+    assert "unasked" not in g_a
+
+    g_b = pairs_g[1][1]
+    assert g_b["outcome"] == "killed"
+    assert "unasked" not in g_b
+
+    g_c = pairs_g[2][1]
+    assert g_c["outcome"] == "error"
+    assert g_c["summary"] == (
+        "the probe cell stopped before this edit's answer was recorded: gate-2 stopped"
+    )
+    assert g_c["unasked"] == "gate-2 stopped"
+
+    g_no_edit = pairs_g[3][1]
+    assert g_no_edit["outcome"] == "unproven"
+    assert "unasked" not in g_no_edit
+
+    g_refused = pairs_g[4][1]
+    assert g_refused["outcome"] == "unproven"
+    assert g_refused["refusal"] is not None
+    assert "unasked" not in g_refused
+
+    # Scenario H: neither the first cell nor the fresh one can be entered.
+    # Every pair left reads the fresh cell's own error, not the first's.
+    pairs_h = [_edit_pair("a"), _edit_pair("b")]
+    log_h, _kw_h, _review_h, _created_h = _run_apply_criterion_probes(
+        monkeypatch,
+        pairs_h,
+        enters=[
+            runtime.CellRuntimeError("the first attempt could not enter"),
+            runtime.CellRuntimeError("the fresh attempt could not enter"),
+        ],
+        run_gate=[],
+        mutate=_mutate_ok,
+    )
+    assert log_h == [
+        "enter-failed:the first attempt could not enter",
+        "enter-failed:the fresh attempt could not enter",
+    ]
+    h_a = _outcome_of(pairs_h, "a")
+    h_b = _outcome_of(pairs_h, "b")
+    for entry in (h_a, h_b):
+        assert entry["outcome"] == "error"
+        assert entry["summary"] == (
+            "the probe cell could not be entered: the fresh attempt could not enter"
+        )
+        assert entry["unasked"] == "the fresh attempt could not enter"
+
+    # Scenario I: the first cell cannot be entered. The fresh one answers
+    # the lone survivor, then its own second ask stops it, leaving nothing to ask.
+    pairs_i = [_edit_pair("a")]
+    log_i, kwargs_log_i, review_i, _created_i = _run_apply_criterion_probes(
+        monkeypatch,
+        pairs_i,
+        enters=[
+            runtime.CellRuntimeError("the first attempt could not enter"),
+            "gate-2",
+        ],
+        run_gate=[
+            GateResult(gate="tests", status="pass", tool="pytest 8.0"),
+            runtime.CellRuntimeError("the fresh cell's second ask raised"),
+        ],
+        mutate=_mutate_ok,
+    )
+    assert log_i == [
+        "enter-failed:the first attempt could not enter",
+        "enter:gate-2",
+        "exit:gate-2",
+    ]
+    assert len(kwargs_log_i) == 2
+    i_a = _outcome_of(pairs_i, "a")
+    assert i_a["outcome"] == "survived"
+    assert "unasked" not in i_a
+    assert len(review_i.findings) == 1
+
+    # Scenario K: `a` kills. `b` survives, but its own line read raises in
+    # both cells, so `c` is never even reached, in either one.
+    def _read_at_head_always_raises(_container, _path):
+        raise runtime.CellRuntimeError("the line read raised again")
+
+    pairs_k = [_edit_pair("a"), _edit_pair("b"), _edit_pair("c")]
+    log_k, _kw_k, _review_k, _created_k = _run_apply_criterion_probes(
+        monkeypatch,
+        pairs_k,
+        enters=["gate-1", "gate-2"],
+        run_gate=[
+            GateResult(gate="tests", status="fail", tool="pytest 8.0"),
+            GateResult(gate="tests", status="pass", tool="pytest 8.0"),
+            GateResult(gate="tests", status="pass", tool="pytest 8.0"),
+        ],
+        mutate=_mutate_ok,
+        read_at_head=_read_at_head_always_raises,
+    )
+    assert log_k == ["enter:gate-1", "exit:gate-1", "enter:gate-2", "exit:gate-2"]
+    k_a = _outcome_of(pairs_k, "a")
+    k_b = _outcome_of(pairs_k, "b")
+    k_c = _outcome_of(pairs_k, "c")
+    assert k_a["outcome"] == "killed"
+    assert "unasked" not in k_a
+    for entry in (k_b, k_c):
+        assert entry["outcome"] == "error"
+        assert entry["summary"] == (
+            "the probe cell stopped before this edit's answer was recorded: "
+            "the line read raised again"
+        )
+        assert entry["unasked"] == "the line read raised again"
+
+    # Scenario J: the repo declares no `tests` gate. Every pair stays
+    # `unproven`, and `critic_cell` is never entered.
+    pairs_j = [_edit_pair("a")]
+    log_j, kwargs_log_j, _review_j, _created_j = _run_apply_criterion_probes(
+        monkeypatch,
+        pairs_j,
+        enters=[],
+        run_gate=[],
+        mutate=_mutate_ok,
+        gates=(),
+    )
+    assert log_j == []
+    assert kwargs_log_j == []
+    j_a = _outcome_of(pairs_j, "a")
+    assert j_a["outcome"] == "unproven"
+    assert "unasked" not in j_a
 
 
 def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_probes(

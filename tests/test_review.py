@@ -2849,6 +2849,155 @@ def test_the_wrong_version_line_counts_refused_versions_apart_from_expressed_one
     )
 
 
+def test_the_review_lines_count_the_edits_no_probe_cell_asked():
+    """`_unasked_tail` adds one tail to each REVIEW line for every edit a
+    probe cell's one retry left unasked. It names the first such edit's
+    own text, before any `; no session answered: ` tail. An edit whose
+    outcome is `error` with no `unasked` key is not counted, and the
+    named and expressed counts stay as they were. With none, each line
+    matches its own base line alone."""
+    from saffron.cell.session import _PROBE_CELL_STOPPED
+
+    probe_entries = [
+        {
+            "witness": "t.py::a",
+            "probes": [
+                {
+                    "sentence": "s1",
+                    "edit": {"file": "x.py", "find": "a", "replace": "b"},
+                    "outcome": "error",
+                    "summary": f"{_PROBE_CELL_STOPPED}first boom",
+                    "unasked": "first boom",
+                },
+                {
+                    "sentence": "s2",
+                    "edit": {"file": "x.py", "find": "c", "replace": "d"},
+                    "outcome": "killed",
+                    "summary": "ok",
+                },
+                {
+                    "sentence": "s3",
+                    "edit": {"file": "x.py", "find": "e", "replace": "f"},
+                    "outcome": "error",
+                    "summary": "the survivor's line could not be read",
+                },
+            ],
+        },
+        {
+            "witness": "t.py::b",
+            "probes": [
+                {
+                    "sentence": "s4",
+                    "edit": {"file": "x.py", "find": "g", "replace": "h"},
+                    "outcome": "error",
+                    "summary": f"{_PROBE_CELL_STOPPED}second boom",
+                    "unasked": "second boom",
+                },
+            ],
+        },
+    ]
+    assert review.describe_criterion_probes(probe_entries) == (
+        "criterion probes: 4 named over 2 criteria, 0 unnamed, 0 refused; "
+        "2 never answered: first boom"
+    )
+
+    unanswered = {"witness": "t.py::z", "probes": [], "error": "boom"}
+    assert review.describe_criterion_probes(probe_entries + [unanswered]) == (
+        "criterion probes: 4 named over 3 criteria, 0 unnamed, 0 refused; "
+        "2 never answered: first boom; no session answered: t.py::z"
+    )
+
+    only_answered = [
+        {
+            "witness": "t.py::c",
+            "probes": [
+                {
+                    "sentence": "s5",
+                    "edit": {"file": "x.py", "find": "i", "replace": "j"},
+                    "outcome": "killed",
+                    "summary": "ok",
+                }
+            ],
+        }
+    ]
+    assert review.describe_criterion_probes(only_answered) == (
+        "criterion probes: 1 named over 1 criteria, 0 unnamed, 0 refused"
+    )
+
+    version_entries = [
+        {
+            "witness": "t.py::a",
+            "claim": "c",
+            "cost_usd": 0.1,
+            "error": None,
+            "versions": [
+                {
+                    "version": "v1",
+                    "edit": {"file": "x.py", "find": "a", "replace": "b"},
+                    "reason": "r",
+                    "outcome": "error",
+                    "summary": f"{_PROBE_CELL_STOPPED}first boom",
+                    "unasked": "first boom",
+                },
+                {
+                    "version": "v2",
+                    "edit": {"file": "x.py", "find": "c", "replace": "d"},
+                    "reason": "r",
+                    "outcome": "killed",
+                    "summary": "ok",
+                },
+            ],
+        },
+        {
+            "witness": "t.py::b",
+            "claim": "c",
+            "cost_usd": 0.1,
+            "error": None,
+            "versions": [
+                {
+                    "version": "v3",
+                    "edit": {"file": "x.py", "find": "e", "replace": "f"},
+                    "reason": "r",
+                    "outcome": "error",
+                    "summary": f"{_PROBE_CELL_STOPPED}second boom",
+                    "unasked": "second boom",
+                },
+            ],
+        },
+    ]
+    assert review.describe_wrong_versions(version_entries) == (
+        "wrong versions: 3 declared, 3 expressed, 0 refused; "
+        "2 never answered: first boom"
+    )
+
+    unanswered_v = {"witness": "t.py::z", "versions": [], "error": "boom"}
+    assert review.describe_wrong_versions(version_entries + [unanswered_v]) == (
+        "wrong versions: 3 declared, 3 expressed, 0 refused; "
+        "2 never answered: first boom; no session answered: t.py::z"
+    )
+
+    only_answered_v = [
+        {
+            "witness": "t.py::c",
+            "claim": "c",
+            "cost_usd": 0.1,
+            "error": None,
+            "versions": [
+                {
+                    "version": "v4",
+                    "edit": {"file": "x.py", "find": "i", "replace": "j"},
+                    "reason": "r",
+                    "outcome": "killed",
+                    "summary": "ok",
+                }
+            ],
+        }
+    ]
+    assert review.describe_wrong_versions(only_answered_v) == (
+        "wrong versions: 1 declared, 1 expressed, 0 refused"
+    )
+
+
 def test_a_probe_verdict_keeps_the_severity_the_lens_filed():
     """Criterion 1 (backlog item b-7c41e0): `apply_probe_verdict` writes the
     severity the lens filed onto `filed_severity` before it decides a new
