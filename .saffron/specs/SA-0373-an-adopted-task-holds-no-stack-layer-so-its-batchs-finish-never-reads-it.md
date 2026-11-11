@@ -246,6 +246,11 @@ early return. So production never brings a layer to the green path.
 Criterion 4's arm is defensive. Seed that task as the batch's top layer in
 `EXHAUSTED`, so the green path reaches the check.
 
+**Seed criterion 5's `READY_FOR_REVIEW` task with no layer.** Put it in a
+stack batch where no layer ran after it. A task seeded as a layer would
+send a wrong early-return call into the already-a-layer check, which
+records nothing.
+
 **At base each witness fails in its body.** Adopt there records no layer.
 So each witness fails on its first placed case.
 Import nothing the change adds at module scope.
