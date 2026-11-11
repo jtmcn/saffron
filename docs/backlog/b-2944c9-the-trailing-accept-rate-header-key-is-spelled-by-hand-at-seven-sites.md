@@ -1,11 +1,12 @@
 ---
 id: b-2944c9
 title: The header key `trailing accept rate` is spelled by hand at seven sites, where one helper would serve all of them
-status: open
+status: done
 tier: 3
 filed: 2026-10-03
+closed: 2026-11-11
 specs: [SA-0198, SA-0199]
-prs: [662, 670]
+prs: [662, 670, 1149]
 commits: []
 cites: [§6]
 related: [b-49a2f7, b-0703c8]
@@ -31,3 +32,4 @@ imports it, and replay keeps its own placeholder or calls it too.
 ## Record
 
 - 2026-10-03: filed from the spec loop's run 27.
+- 2026-11-11: done by hand in #1149, with `index.accept_rate_header` and a guard test.
