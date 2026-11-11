@@ -16,7 +16,7 @@ from saffron.gates.core.scope import scope_gate
 from saffron.gates.runner import run_suite
 from saffron.intake import load_spec
 from saffron.ledger import Ledger
-from saffron.report.index import QueueLine, append_queue_line
+from saffron.report.index import ACCEPT_RATE_KEY, QueueLine, append_queue_line
 from saffron.report.pr_body import render_pr_body
 from saffron.repos import mirror as git_mirror
 from saffron.repos.policy import load_policy
@@ -140,7 +140,7 @@ def replay(
     )
     # The same store PACKAGE appends to: two writers of one `index.html` meant
     # whichever ran second silently dropped the other's rows.
-    append_queue_line(out_dir, line, header={"trailing accept rate": "—"})
+    append_queue_line(out_dir, line, header={ACCEPT_RATE_KEY: "—"})
     return line
 
 
