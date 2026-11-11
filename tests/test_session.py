@@ -1936,8 +1936,11 @@ def test_the_n1_refusal_names_the_processes_behind_each_answering_port(
         "TCP *:9200 (LISTEN)\n"
     )
     calls = iter([listing, later])
+    real_run = subprocess.run
 
     def _run_lsof(*a, **k):
+        if list(a[0][:1]) != ["lsof"]:
+            return real_run(*a, **k)
         return subprocess.CompletedProcess(a, 0, next(calls), "")
 
     monkeypatch.setattr(subprocess, "run", _run_lsof)

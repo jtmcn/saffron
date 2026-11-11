@@ -28,25 +28,18 @@ ORIGIN_TIMEOUT_S = 30.0
 
 def _origin_name(repo: Path) -> str | None:
     """The last segment of `repo`'s git `origin`, or None with no usable one."""
-    # Popen, not `run`: a session test answers `subprocess.run` with lsof
-    # listings in order, and an extra call here took the first (measured).
     try:
-        with subprocess.Popen(
+        done = subprocess.run(
             ["git", "-C", str(repo), "remote", "get-url", "origin"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            capture_output=True,
             text=True,
-        ) as done:
-            try:
-                out, _ = done.communicate(timeout=ORIGIN_TIMEOUT_S)
-            except subprocess.TimeoutExpired:
-                done.kill()
-                return None
-    except OSError:
+            timeout=ORIGIN_TIMEOUT_S,
+        )
+    except (OSError, subprocess.TimeoutExpired):
         return None
     if done.returncode != 0:
         return None
-    url = out.strip()
+    url = done.stdout.strip()
     if not url:
         return None
     if url.endswith("/"):
