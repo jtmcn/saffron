@@ -204,7 +204,8 @@ _Avoid_: "base" alone (that is `base_sha`), "root".
 
 **Layer**: A task in a stack batch that reached `READY_FOR_REVIEW`. It is one
 `stack_layers` row, with its position, its predecessor and its generation. A task that
-misses adds no layer.
+misses adds no layer. A missed task that `saffron adopt` moves to `READY_FOR_REVIEW`
+becomes the top layer, if it ran after every layer (`SA-0373`).
 
 **Generation**: A layer's `generation` column: `0` for a task of the stack order, `1`
 for a follow-up spec. Nothing reviews the follow-ups' layers again, so a stack holds one
@@ -937,7 +938,9 @@ request to a spec's newest `NOT_IMPLEMENTED`, `READY_FOR_REVIEW`, `EXHAUSTED` or
 that same pull request. Adopt records the pull request's head as the task's
 pushed sha, unless a `READY_FOR_REVIEW` task already holds one. It re-gates a task in any of those states but
 `READY_FOR_REVIEW`, and a green re-gate of that head moves the task to
-`READY_FOR_REVIEW` (`SA-0313`). Otherwise the state stays, and adopt can run
+`READY_FOR_REVIEW` (`SA-0313`). In a stack batch that move also makes the task the
+batch's top layer, if it ran after every layer. Otherwise adopt prints that no end
+review reads it (`SA-0373`). Without the move the state stays, and adopt can run
 again on the same pull request. `reconcile` then asks GitHub about it, unless the
 task stayed `MERGE_FAILED`. A merge makes the task `MERGED` and admits its
 dependents (`SA-0264`).
