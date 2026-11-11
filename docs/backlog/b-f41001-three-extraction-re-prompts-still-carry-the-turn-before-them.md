@@ -42,5 +42,8 @@ decided either way, with the reason written down.
 ## Record
 
 - 2026-11-11: filed from the review of #1147.
-- 2026-11-11: done by hand in #1152. Five re-prompts pass no carry. REBUT's
-  fix turn keeps its carry, since it is a full turn of the implement session.
+- 2026-11-11: done by hand in #1152. Three re-prompt sites, with five
+  callers, and the notes turn pass no carry. REBUT's fix turn keeps its
+  carry, since it is a full turn of the implement session. The spec chain's
+  extraction carries in `saffron/spec_review.py` are kept. Each is capped at
+  its extraction budget, and tests pin the cap.

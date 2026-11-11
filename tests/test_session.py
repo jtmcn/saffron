@@ -15289,6 +15289,21 @@ def test_the_notes_artifact_is_hashed_when_it_is_produced(monkeypatch, tmp_path)
     assert record["sha256"] == artifacts.hash_artifact(record["raw"])
 
 
+def test_the_notes_turn_does_not_carry_the_implement_turns_cost(monkeypatch, tmp_path):
+    """A killed notes turn charges its own floor (b-f41001). Carrying the
+    implement turn's cost would charge that whole turn a second time."""
+    cell = _stub_the_runtime(monkeypatch)
+    _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn(cost=5.0), _turn("no notes", cost=0.2)],
+        spec=_spec(forbidden=["config/legacy.py"]),
+    )
+    assert len(cell.turn_last_costs) >= 3
+    assert cell.turn_last_costs[2] == 0.0
+
+
 def test_a_protected_path_alone_asks_for_notes(monkeypatch, tmp_path):
     """`notes_worth_asking` is `bool(spec.forbidden) or bool(policy.protected)`
     — an OR of a per-spec list and a repo-wide one. Only the both-true

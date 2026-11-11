@@ -3157,7 +3157,8 @@ def _drive_cell(
                     options=options,
                     resume=session_id,
                     emit=emit,
-                    last_cost_usd=last_cost,
+                    # No carry: a short turn, as the extractions (b-f41001).
+                    last_cost_usd=0.0,
                 )
             except implement.AgentFailed as failed:
                 _phase_start(
