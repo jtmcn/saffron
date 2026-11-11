@@ -1,14 +1,14 @@
 """Reading and writing a criterion's mutant on `refs/saffron/mutants`
 (DESIGN.md §5.4.1, backlog item 80).
 
-The reader is `run_task` and `cli._stack_mint`'s shared path in, through
-`attach_mutants_at`. `run_regate`, `package_ready_task` and
-`run_commit_review` read it the same way, with no implementing cell
-(`b-c5da95`). The writer is `saffron mutant`'s own work (`SA-0339`). It
-fetches origin's copy of the ref and builds a new commit on top of it, then
-pushes. It never uses `saffron/repos/mirror.py`'s helpers. Those pass no
-environment, and the writer carries `GIT_TERMINAL_PROMPT=0` on every process
-it starts.
+The reader is `attach_mutants_at`, which `run_task` calls. `cli._stack_mint`
+only pins `ref_commit`'s answer on the task row, for `run_task` to read
+later. `run_regate`, `package_ready_task` and `run_commit_review` read it
+the same way, with no implementing cell (`b-c5da95`). The writer is
+`saffron mutant`'s own work (`SA-0339`). It fetches origin's copy of the ref
+and builds a new commit on top of it, then pushes. It never uses
+`saffron/repos/mirror.py`'s helpers. Those pass no environment, and the
+writer carries `GIT_TERMINAL_PROMPT=0` on every process it starts.
 """
 
 from __future__ import annotations

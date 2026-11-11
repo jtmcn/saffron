@@ -45,3 +45,8 @@ as `regate` then `adopt`. A test drives each route and starts a child on it.
   the adopted head as a `task_push` fact and moves the task to `READY_FOR_REVIEW` on a
   green re-gate.
 - 2026-11-09: partial from the spec loop's run 56. `saffron adopt SA-0353 1099` printed `regate: task 396 ran a recorded spec text, not a file at base_sha` and kept the task `EXHAUSTED`. The batch had rewritten the spec's moved citations, so the text it ran is in no file. `driver.py record` still prints the task `EXHAUSTED`.
+- 2026-11-10: a new block in the spec loop's run 60. `saffron adopt
+  SA-0364 1136` named the pull request, but its re-gate declined: "task 407
+  ran a recorded spec text, not a file at base_sha" (`saffron/regate.py`). A
+  stack batch records a revised text for each layer its review revised. So
+  no route moves such a `MERGE_FAILED` task to `READY_FOR_REVIEW`.

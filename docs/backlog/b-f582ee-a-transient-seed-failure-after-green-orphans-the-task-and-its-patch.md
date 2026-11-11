@@ -55,3 +55,8 @@ command can package it, and says which command does.
   container, so no `patch.diff` was written and the task ended `ORPHANED` at
   $31.46 of $32. `saffron adopt` refuses an `ORPHANED` task, so the hand
   rebuild (#1127) is no task's pull request.
+- 2026-11-10: a second loss in the spec loop's run 60. `SA-0365`'s second
+  repair chased the clock flake #1112 fixes and looped the suite. Then its
+  agent died with exit -6, and the cell runtime failed with "no PID data from
+  sync pipe". No patch was exported, and the task reads `ORPHANED` at $49.80
+  of $60. #1137 is a hand rebuild.
