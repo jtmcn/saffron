@@ -1,10 +1,10 @@
 ---
 id: b-1b05be
 title: "The deferred finish grades each layer's critic findings at PACKAGE's head, so it re-raises what review commits fixed"
-status: done
+status: partial
 tier: 2
 filed: 2026-10-25
-closed: 2026-10-27
+closed:
 specs: [SA-0320]
 prs: [976]
 commits: []
@@ -36,3 +36,12 @@ that a later commit on the layer changed before the writer sees it.
 
 - 2026-10-25: filed from the spec loop's run 48.
 - 2026-10-27: done by `SA-0320` in #976, from the spec loop's run 49.
+- 2026-11-11: partial again from the spec loop's run 62. Finish 80 graded
+  `SA-0369`'s two in-cell concerns as live. REBUT had changed the cited
+  `worktree.py:308` before PACKAGE pushed. The drop reads only changes after
+  PACKAGE's head, so it missed that line. REBUT also shifted every line below
+  959 by one, so the rule compares the critic's numbers on the wrong side.
+  The other concern cites `session.py:1008`. REBUT fixed its defect six lines
+  below it, and no change touched the cited line itself. Nothing records the
+  tree the critic read. So a fix first records REVIEW's diff, then diffs from
+  that tree on the critic's side.
