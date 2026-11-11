@@ -55,3 +55,6 @@ gate that failed.
 - 2026-11-11: a correction to the line above, from the spec loop's run 63.
   REBUT changed the code behind both concerns before PACKAGE. Review commit
   `12e8c6a6` fixed neither. b-1b05be's Record line has the two cited lines.
+- 2026-11-11: recurred in finish 81. It drafted `SA-0375` from `SA-0371`'s
+  contract concern, which the spec had named out of scope. The draft failed
+  `prose` and the records check, so the finding was pooled.

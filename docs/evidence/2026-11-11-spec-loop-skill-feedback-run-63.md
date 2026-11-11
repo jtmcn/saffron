@@ -27,7 +27,11 @@ spec review spent $3.10. IMPLEMENT took 137 of its 160 turns.
    Record line.
 5. **The b-6dd608 flake hit four times today.** It failed one test per full
    suite, in `test_qualify` and `test_batch`. Each passed alone.
-6. **#1157 merged before any CI check reported.** The watch returned at
+6. **Finish 81 drafted a follow-up its own suite refused.** It turned the
+   settled Not covered concern into `SA-0375`. The draft failed `prose` on 27
+   lines and the records check, so the finding was pooled and nothing was
+   committed. b-4a9207 has the Record line.
+7. **#1157 merged before any CI check reported.** The watch returned at
    once, since no check had started yet.
 
 ## What the reviews found
