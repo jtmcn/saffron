@@ -1,6 +1,6 @@
 """Where the vocabulary and the shipped code both close a set, they close it the same.
 
-Six sets are closed in both places. `Severity` is a `Literal` in
+Seven sets are closed in both places. `Severity` is a `Literal` in
 `saffron/agents/findings.py`, so a severity declared in the vocabulary that the
 code cannot represent is a run record that cannot be written — pydantic rejects
 it. `BatchStopReason` is closed *twice* on the code side — a `Literal` in
@@ -31,6 +31,7 @@ from ontology_paths import NS, ONTOLOGY, VOCABULARY
 from saffron.agents.findings import Severity
 from saffron.batch import StopReason
 from saffron.events import Event
+from saffron.intake import SpecType
 from saffron.ledger import RUN_PREFLIGHT_OUTCOMES, SCHEMA, TaskState
 from saffron.reconcile import IN_FLIGHT_STATES
 from saffron.record.contract import KINDS
@@ -63,6 +64,12 @@ def test_the_severities_the_code_accepts_are_the_ones_the_vocabulary_declares():
         "run record at all; the generator cannot reach Python, so this is a "
         "hand edit in findings.py."
     )
+
+
+def test_the_spec_types_intake_accepts_are_the_ones_the_vocabulary_declares():
+    """Intake accepted six types and the shapes three, so the projection left a
+    merged `test` or `docs` task out as `spec_unusable` (b-60d804)."""
+    assert _declared("SpecType") == set(get_args(SpecType))
 
 
 def test_the_stop_reasons_the_loop_can_return_are_the_ones_the_vocabulary_declares():

@@ -86,20 +86,18 @@ _GATE_RESULT_SET_ASIDE = frozenset(
     {"schema_version", "collected", "uncollected", "locations"}
 )
 
-# Item 42: a `rebuttal` fact's own `answer` and `error` keys, set aside
-# like `_GATE_RESULT_SET_ASIDE`. `_finding_facts` derives neither yet.
-_REBUTTAL_SET_ASIDE = frozenset({"answer", "error"})
-
 
 def _normalized(fact: Fact) -> Fact:
-    """`fact` with every difference the top-up sets aside already gone: its
-    `at`, the four `gate_result` keys above on a `gate_result`, and the two
-    `rebuttal` keys above on a `rebuttal`."""
+    """`fact` with every difference the top-up sets aside already gone:
+    its `at`, and the four `gate_result` keys above on a `gate_result`.
+    A `rebuttal` fact's own `answer` and `error` default to null where
+    either is missing. So a fact recorded before item 42 agrees with one
+    derived with both explicitly null."""
     payload = fact.payload
     if fact.kind == "gate_result":
         payload = {k: v for k, v in payload.items() if k not in _GATE_RESULT_SET_ASIDE}
     elif fact.kind == "rebuttal":
-        payload = {k: v for k, v in payload.items() if k not in _REBUTTAL_SET_ASIDE}
+        payload = {"answer": None, "error": None, **payload}
     return replace(fact, at="", payload=payload)
 
 
@@ -204,6 +202,7 @@ def migrate(source: Path, record: Record, *, repo_id: int | None = None) -> Migr
     try:
         has_head_count = "failures_at_head" in _columns(conn, "gate_results")
         has_earned_risk = "earned_risk" in _columns(conn, "attempts")
+        has_answer = "answer" in _columns(conn, "findings")
         result = Migration()
         for task in conn.execute(_TASKS).fetchall():
             if repo_id is not None and task["run_repo_id"] != repo_id:
@@ -213,7 +212,9 @@ def migrate(source: Path, record: Record, *, repo_id: int | None = None) -> Migr
             if refusal is not None:
                 result.refused.append((key, refusal))
                 continue
-            facts = _facts_for_task(conn, task, has_head_count, has_earned_risk)
+            facts = _facts_for_task(
+                conn, task, has_head_count, has_earned_risk, has_answer
+            )
             held = record.read(key)
             if held == facts[: len(held)]:
                 for fact in facts[len(held) :]:
@@ -418,6 +419,7 @@ def _facts_for_task(
     task: sqlite3.Row,
     has_head_count: bool,
     has_earned_risk: bool,
+    has_answer: bool,
 ) -> list[Fact]:
     key = task["record_key"]
     repo = task["repo_name"]
@@ -452,7 +454,7 @@ def _facts_for_task(
         )
     ]
     facts.extend(_attempt_facts(conn, task, one, has_head_count, has_earned_risk))
-    facts.extend(_finding_facts(conn, task, one))
+    facts.extend(_finding_facts(conn, task, one, has_answer))
     facts.extend(_outcome_facts(task, one))
     facts.extend(_key_filed_facts(conn, task, one))
     return facts
@@ -517,14 +519,22 @@ def _attempt_facts(
 
 
 def _finding_facts(
-    conn: sqlite3.Connection, task: sqlite3.Row, one: _Maker
+    conn: sqlite3.Connection, task: sqlite3.Row, one: _Maker, has_answer: bool
 ) -> list[Fact]:
+    """Every `finding` fact, in position order, then every `rebuttal` fact
+    REBUT itself wrote: every blocker's, in position order, then every
+    other one, in position order, as REBUT records them in session.py.
+    `has_answer` is `False` for a source predating `answer` and
+    `rebuttal_error`, so both read null there rather than touching columns
+    the row does not have."""
     facts = []
     at = task["updated_at"]
     rows = conn.execute(
         "SELECT * FROM findings WHERE task_id = ? ORDER BY finding_id",
         (task["task_id"],),
     ).fetchall()
+    blocker_rebuttals: list[dict[str, Any]] = []
+    other_rebuttals: list[dict[str, Any]] = []
     for position, finding in enumerate(rows, start=1):
         facts.append(
             one(
@@ -541,18 +551,26 @@ def _finding_facts(
                 },
             )
         )
-        if finding["verdict"] is not None or finding["rebuttal"] is not None:
-            facts.append(
-                one(
-                    "rebuttal",
-                    at,
-                    {
-                        "position": position,
-                        "verdict": finding["verdict"],
-                        "rebuttal": finding["rebuttal"],
-                    },
-                )
-            )
+        answer = finding["answer"] if has_answer else None
+        error = finding["rebuttal_error"] if has_answer else None
+        if (
+            finding["verdict"] is not None
+            or finding["rebuttal"] is not None
+            or answer is not None
+        ):
+            payload = {
+                "position": position,
+                "verdict": finding["verdict"],
+                "rebuttal": finding["rebuttal"],
+                "answer": answer,
+                "error": error,
+            }
+            if finding["severity"] == "blocker":
+                blocker_rebuttals.append(payload)
+            else:
+                other_rebuttals.append(payload)
+    for payload in (*blocker_rebuttals, *other_rebuttals):
+        facts.append(one("rebuttal", at, payload))
     return facts
 
 

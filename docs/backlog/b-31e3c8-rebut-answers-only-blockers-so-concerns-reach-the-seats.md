@@ -1,11 +1,12 @@
 ---
 id: b-31e3c8
 title: REBUT answers only blockers, so every in-cell concern reaches the review seats unanswered
-status: open
+status: done
 tier: 2
 filed: 2026-11-08
-specs: []
-prs: []
+closed: 2026-11-10
+specs: [SA-0360]
+prs: [1113, 1117]
 commits: []
 cites: [§5.6]
 related: [b-1e9a7a]
@@ -32,3 +33,6 @@ concern through REBUT and asserts its answer is recorded.
 
 - 2026-11-08: filed from the spec loop's run 55.
 - 2026-11-09: recurred in the spec loop's run 56. REBUT left a concern or note unanswered on `SA-0341`, `SA-0342` and `SA-0351`, and both PR seats raised each again. `SA-0341`'s was ADR 0004's two-turn sentence, which its `forbidden` held out of reach. Review commits fixed the rest as one-line comments.
+- 2026-11-10: done by `SA-0360` (#1117), from the spec loop's run 58. The
+  cell ended `EXHAUSTED`: its REBUT left `types` red. The delegate fixed the
+  test by hand, opened #1117 and ran `saffron adopt`, whose re-gate passed.

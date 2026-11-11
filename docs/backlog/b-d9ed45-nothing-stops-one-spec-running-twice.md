@@ -1,11 +1,11 @@
 ---
 id: b-d9ed45
 title: Nothing stops one spec running in two cells at once, and the second removes the first one's container and volumes
-status: open
+status: partial
 tier: 2
 filed: 2026-10-11
 specs: []
-prs: []
+prs: [1090]
 commits: []
 cites: [§5.1]
 related: [b-ca3bc6, b-a714d2]
@@ -39,3 +39,7 @@ second start refuses.
 ## Record
 
 - 2026-10-11: filed from the parallel-cells survey, beside b-ca3bc6.
+- 2026-11-10: partial. `SA-0352` (#1090) takes one lock per `--home` before
+  `cell` or `batch`. So a second run of a spec on the same home refuses before
+  any container is touched, naming the holder. Two homes on one host still
+  share the runtime's container names, and nothing refuses that case.

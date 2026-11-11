@@ -8,13 +8,14 @@ is the contract a second runtime satisfies.
 
 **Minimal on purpose, and it grows by measurement.** Appendix G's mistake was a
 proper noun standing in for a contract; the opposite mistake is a contract
-standing in for a product nobody has run. Every member below is a difference
-actually observed between two runtimes
+standing in for a product nobody has run. Every member below but the last is a
+difference actually observed between two runtimes
 (`docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md`). A difference
 that has not been measured does not get an entry here in advance — it gets one
-when a spike arm finds it. The last two members are the exception in kind, not
-in rule: what has been *proven* of a runtime differs too, and a runtime not yet
-proven must say so rather than inherit the first one's standing.
+when a spike arm finds it. The last three members are the exception in kind, not
+in rule. Two hold what is *proven* of a runtime, and a runtime not yet
+proven must say so rather than inherit the first one's standing. The last holds
+what was measured of apple and not of podman.
 """
 
 from __future__ import annotations
@@ -88,4 +89,13 @@ class Dialect(Protocol):
 
         Asked by running the runtime, never by reading the host around it — the
         answer is whatever the binary says about itself (principle 39).
+        """
+
+    @property
+    def build_cache_reclaim_argv(self) -> list[str] | None:
+        """The command that drops every layer this runtime's builder holds.
+
+        A batch runs it at its start. The cache then holds one night's builds,
+        never every build since the runtime was installed. None where no
+        measurement names one, and then nothing is reclaimed.
         """

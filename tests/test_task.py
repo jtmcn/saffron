@@ -4248,4 +4248,302 @@ def test_run_task_refuses_an_inline_mutant_or_an_unreadable_mutants_file_before_
     assert "\n" not in result.reason
     assert missing[:12] in printed
 
+    # 6. A declared inline mutant, plus a task pinning an unreadable
+    # commit: the inline reason wins, not the missing commit's (b-c5da95).
+    missing2 = "e" * 40
+    task_e = ledger.create_task(
+        run_id,
+        spec_id="SY-1",
+        spec_sha="f" * 64,
+        branch="saffron/SY-1",
+        mutants_commit=missing2,
+    )
+    result = _run(
+        parse_spec(inline_text),
+        hashlib.sha256(inline_text.encode()).hexdigest(),
+        task_id=task_e,
+    )
+    assert isinstance(result, Refused)
+    assert "tests/test_a.py::test_two" in result.reason
+    assert missing2[:12] not in result.reason
+    printed = capsys.readouterr().out
+    assert printed == f"{'SY-1':<10} refused  {result.reason}\n"
+    assert "\n" not in result.reason
+
     ledger.close()
+
+
+def _package_case(
+    case_root: Path,
+    monkeypatch,
+    *,
+    ledger: Ledger,
+    run_id: int,
+    repo_id: int,
+    mirror: Path,
+    mutants_commit: str | None,
+    spec_text: str,
+) -> tuple[object, list, list]:
+    """`task.package_ready_task`, over a task whose own row pins
+    `mutants_commit` (`b-c5da95`). `ready_task`, the mirror, the image,
+    the network and the host probe are each faked the way
+    `test_package_probes_the_host_then_runs_package_on_the_rebuilt_task`
+    fakes them in `tests/test_cli.py`. `ledger`, `run_id`, `repo_id` and
+    `mirror` are the caller's own `_recorded_ledger`, so a mutants commit
+    it built beforehand lands in the same object store this reads."""
+    from saffron import preflight
+    from saffron.cell import runtime
+    from saffron.repos import image as repo_image
+
+    out_dir = case_root / "out"
+    task_id = ledger.create_task(
+        run_id,
+        spec_id="SY-1",
+        spec_sha="f" * 64,
+        branch="saffron/SY-1",
+        mutants_commit=mutants_commit,
+    )
+    outcome = CellOutcome(
+        state="READY_FOR_REVIEW",
+        task_id=task_id,
+        run_id=run_id,
+        task_dir=out_dir / "SY-1",
+    )
+    ready = task_module.ReadyTask(
+        outcome=outcome, spec=parse_spec(spec_text), parent_branch=None
+    )
+    monkeypatch.setattr(task_module, "ready_task", lambda *a, **k: ready)
+    monkeypatch.setattr(
+        preflight,
+        "prepare_mirror",
+        lambda repo_arg, mirror_path: (
+            mirror,
+            "https://example.invalid/o/r.git",
+            "b" * 40,
+        ),
+    )
+    build_calls: list = []
+    monkeypatch.setattr(
+        repo_image,
+        "build_cell_image",
+        lambda repo_arg: build_calls.append(repo_arg) or "image:tag",
+    )
+    monkeypatch.setattr(
+        runtime,
+        "remove_network",
+        lambda name: subprocess.CompletedProcess([name], 0, "", ""),
+    )
+    monkeypatch.setattr(runtime, "create_network", lambda name, *a, **k: None)
+    monkeypatch.setattr(preflight, "host_probe_ports", lambda: ([], [], []))
+    monkeypatch.setattr(preflight, "probe_addresses", lambda gateway: [gateway])
+    monkeypatch.setattr(preflight, "assert_host_is_unreachable", lambda *a, **k: None)
+
+    package_calls: list = []
+
+    def _fake_package(outcome_arg, **kwargs):
+        package_calls.append(kwargs)
+        return package_phase.PackageResult(
+            state="READY_FOR_REVIEW",
+            pr_url="https://example.invalid/pull/1",
+            branch="saffron/SY-1",
+        )
+
+    monkeypatch.setattr(package_phase, "package", _fake_package)
+
+    result = task_module.package_ready_task(
+        "SY-1",
+        repo=case_root / "target-repo",
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir,
+        mirror_path=mirror,
+        token=None,
+    )
+    return result, build_calls, package_calls
+
+
+def test_package_hands_package_the_mutants_the_tasks_row_pins(tmp_path, monkeypatch):
+    """`saffron package` hands `package()` the spec with the mutants the
+    task's row pins (`b-c5da95`). A row pinning a commit packages that
+    commit's mutant and builds the image, even once the ref moves on. A
+    row pinning none packages no mutant, though the ref holds one. A spec
+    declaring its mutant inline packages that inline mutant, though its row
+    pins a commit the mirror lacks."""
+    from saffron.intake import Mutant
+
+    witness = "tests/test_a.py::test_two"
+
+    # A row pinning a commit: that commit's mutant reaches `package()`,
+    # though a later commit exists too.
+    case_a = tmp_path / "pinned"
+    case_a.mkdir()
+    ledger, run_id, repo_id, mirror, _shas = _recorded_ledger(case_a)
+    commit_1 = _mutants_commit(
+        mirror, f"{witness}:\n  file: src/a.py\n  find: alpha_edit\n"
+    )
+    commit_2 = _mutants_commit(
+        mirror, f"{witness}:\n  file: src/a.py\n  find: beta_edit\n"
+    )
+    _set_mutants_ref(mirror, commit_2)
+    result, build_calls, package_calls = _package_case(
+        case_a,
+        monkeypatch,
+        ledger=ledger,
+        run_id=run_id,
+        repo_id=repo_id,
+        mirror=mirror,
+        mutants_commit=commit_1,
+        spec_text=_REV_TEXT,
+    )
+    ledger.close()
+    assert isinstance(result, package_phase.PackageResult)
+    assert build_calls == [case_a / "target-repo"]
+    assert len(package_calls) == 1
+    attached = package_calls[0]["spec"].acceptance[0].mutant
+    assert attached == Mutant(file="src/a.py", find="alpha_edit")
+
+    # A row pinning no commit: none reaches `package()`, though the ref
+    # holds one.
+    case_b = tmp_path / "unpinned"
+    case_b.mkdir()
+    ledger, run_id, repo_id, mirror_b, _shas = _recorded_ledger(case_b)
+    _set_mutants_ref(
+        mirror_b,
+        _mutants_commit(mirror_b, f"{witness}:\n  file: src/a.py\n  find: gamma\n"),
+    )
+    result, _build_calls, package_calls = _package_case(
+        case_b,
+        monkeypatch,
+        ledger=ledger,
+        run_id=run_id,
+        repo_id=repo_id,
+        mirror=mirror_b,
+        mutants_commit=None,
+        spec_text=_REV_TEXT,
+    )
+    ledger.close()
+    assert isinstance(result, package_phase.PackageResult)
+    assert package_calls[0]["spec"].acceptance[0].mutant is None
+
+    # An inline mutant: kept, though the row pins a commit the mirror lacks.
+    case_c = tmp_path / "inline"
+    case_c.mkdir()
+    ledger, run_id, repo_id, mirror_c, _shas = _recorded_ledger(case_c)
+    inline_text = _rev_text(mutant_find="an edit this text spells nowhere else")
+    result, build_calls, package_calls = _package_case(
+        case_c,
+        monkeypatch,
+        ledger=ledger,
+        run_id=run_id,
+        repo_id=repo_id,
+        mirror=mirror_c,
+        mutants_commit="f" * 40,
+        spec_text=inline_text,
+    )
+    ledger.close()
+    assert isinstance(result, package_phase.PackageResult)
+    assert package_calls[0]["spec"].acceptance[0].mutant == Mutant(
+        file="src/a.py", find="an edit this text spells nowhere else"
+    )
+
+
+def test_package_refuses_a_mutants_commit_it_cannot_read_before_the_image(
+    tmp_path, monkeypatch
+):
+    """`package_ready_task` returns `Refused` for a pinned mutants commit it
+    cannot read, for a spec declaring no mutant inline: a commit the mirror
+    lacks, and one whose `<spec id>.yaml` does not parse. Neither builds
+    the image or calls `package()`. A readable pinned commit regated first
+    in the same witness builds the image and reaches `package()`
+    (`b-c5da95`)."""
+    witness = "tests/test_a.py::test_two"
+
+    # A readable pinned commit, run first: builds the image and reaches
+    # `package()`.
+    case_readable = tmp_path / "readable"
+    case_readable.mkdir()
+    ledger, run_id, repo_id, mirror, _shas = _recorded_ledger(case_readable)
+    readable_commit = _mutants_commit(
+        mirror, f"{witness}:\n  file: src/a.py\n  find: alpha_edit\n"
+    )
+    result, build_calls, package_calls = _package_case(
+        case_readable,
+        monkeypatch,
+        ledger=ledger,
+        run_id=run_id,
+        repo_id=repo_id,
+        mirror=mirror,
+        mutants_commit=readable_commit,
+        spec_text=_REV_TEXT,
+    )
+    ledger.close()
+    assert isinstance(result, package_phase.PackageResult)
+    assert build_calls == [case_readable / "target-repo"]
+    assert len(package_calls) == 1
+
+    # A commit the mirror lacks.
+    case_a = tmp_path / "missing"
+    case_a.mkdir()
+    missing = "f" * 40
+    ledger, run_id, repo_id, mirror, _shas = _recorded_ledger(case_a)
+    result, build_calls, package_calls = _package_case(
+        case_a,
+        monkeypatch,
+        ledger=ledger,
+        run_id=run_id,
+        repo_id=repo_id,
+        mirror=mirror,
+        mutants_commit=missing,
+        spec_text=_REV_TEXT,
+    )
+    ledger.close()
+    assert isinstance(result, Refused)
+    assert missing[:12] in result.reason
+    assert "\n" not in result.reason
+    assert build_calls == []
+    assert package_calls == []
+
+    # A `<spec id>.yaml` that parses as YAML but is not a mapping of
+    # witness to mutant.
+    case_b = tmp_path / "unparseable"
+    case_b.mkdir()
+    ledger, run_id, repo_id, mirror, _shas = _recorded_ledger(case_b)
+    bad_commit = _mutants_commit(mirror, "not a mapping at all\n")
+    result, build_calls, package_calls = _package_case(
+        case_b,
+        monkeypatch,
+        ledger=ledger,
+        run_id=run_id,
+        repo_id=repo_id,
+        mirror=mirror,
+        mutants_commit=bad_commit,
+        spec_text=_REV_TEXT,
+    )
+    ledger.close()
+    assert isinstance(result, Refused)
+    assert "SY-1.yaml" in result.reason
+    assert "\n" not in result.reason
+    assert build_calls == []
+    assert package_calls == []
+
+    # A YAML syntax error, whose parser message spans several lines.
+    case_c = tmp_path / "syntax"
+    case_c.mkdir()
+    ledger, run_id, repo_id, mirror, _shas = _recorded_ledger(case_c)
+    syntax_commit = _mutants_commit(mirror, "key: [\n")
+    result, build_calls, package_calls = _package_case(
+        case_c,
+        monkeypatch,
+        ledger=ledger,
+        run_id=run_id,
+        repo_id=repo_id,
+        mirror=mirror,
+        mutants_commit=syntax_commit,
+        spec_text=_REV_TEXT,
+    )
+    ledger.close()
+    assert isinstance(result, Refused)
+    assert "SY-1.yaml is not valid YAML" in result.reason
+    assert "\n" not in result.reason
+    assert build_calls == []
+    assert package_calls == []

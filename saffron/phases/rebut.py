@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
@@ -36,13 +36,17 @@ VERDICT_PROMPT_FILE = "rebut-verdict.md"
 
 REBUT_PROMPT = context.turn_prompt("rebut")
 
+CONCERNS_PROMPT = context.turn_prompt("rebut-concerns")
+
 VERDICT_TURN_PROMPT = context.turn_prompt("verdict")
 
 EXTRACT_PROMPT = context.turn_prompt("rebut-extract")
 
 
 class Rebuttal(BaseModel):
-    """The implementer's answer to one blocker — §4.1's `findings.rebuttal`."""
+    """The implementer's answer to one blocker, or one anchored concern,
+    under §4.1's `findings.rebuttal`. A concern's entry is shaped the same
+    way, and no verdict ever judges it (§5.6)."""
 
     finding: int
     action: Literal["fixed", "argued"]
@@ -137,9 +141,12 @@ class RebutResult:
     moved: bool
     cost_usd: float
 
-    def as_dict(self, blockers: Sequence[Finding]) -> dict:
+    def as_dict(
+        self, blockers: Sequence[Finding], concerns: Sequence[Finding] = ()
+    ) -> dict:
         """The phase's record. The ledger has no `findings` table, so `verdict`
-        and `rebuttal` have nowhere to go but this artifact (§4.1)."""
+        and `rebuttal` have nowhere to go but this artifact (§4.1). A caller with
+        no concerns passes none."""
         return {
             "state": self.state,
             "why": self.why,
@@ -147,6 +154,10 @@ class RebutResult:
             "cost_usd": self.cost_usd,
             "blockers": [
                 {"finding": n, **f.model_dump()} for n, f in enumerate(blockers, 1)
+            ],
+            "concerns": [
+                {"finding": n, **f.model_dump()}
+                for n, f in enumerate(concerns, len(blockers) + 1)
             ],
             "rebuttal": {
                 "error": self.rebuttal.error,
@@ -196,9 +207,11 @@ def _blocker_line(n: int, f: Finding) -> str:
 
 
 def blocker_lines(numbered: Sequence[tuple[int, Finding]]) -> str:
-    """Blockers as prompt text, numbered so a rebuttal and a verdict can name
-    one. The numbers are global across the phase: a lens is shown only its own
-    blockers, but under the numbers the implementer answered."""
+    """Blockers, or concerns, as prompt text, numbered so a rebuttal and a
+    verdict can name one. The numbers are global across the phase: a lens is
+    shown only its own blockers, but under the numbers the implementer
+    answered. A concern renders the same way, with the same numbered-finding
+    shape, and no lens ever verdicts it (§5.6)."""
     return "\n".join(_blocker_line(n, f) for n, f in numbered)
 
 
@@ -226,6 +239,9 @@ def run_rebuttal(
     container: str,
     *,
     blockers: Sequence[tuple[int, Finding]],
+    # Numbered on from the last blocker. Empty by default, so a caller with
+    # no concerns need not pass one.
+    concerns: Sequence[tuple[int, Finding]] = (),
     options: dict,
     session_id: str,
     agent: Callable[..., implement.AttemptResult],
@@ -245,10 +261,18 @@ def run_rebuttal(
     extraction answer earns one more call, on the extraction's own session.
     The fix turn never runs again (`DESIGN.md` §5.6).
     """
+    # The leading newline opens a paragraph after the template's last line.
+    concerns_text = (
+        "\n" + CONCERNS_PROMPT.format(concerns=blocker_lines(concerns))
+        if concerns
+        else ""
+    )
     try:
         attempt = agent(
             container,
-            prompt=REBUT_PROMPT.format(blockers=blocker_lines(blockers)),
+            prompt=REBUT_PROMPT.format(
+                blockers=blocker_lines(blockers), concerns=concerns_text
+            ),
             options=options,
             resume=session_id,
             emit=emit,
@@ -579,19 +603,26 @@ def rebut_state(
     """The task's state after REBUT, and the line that says why.
 
     Doneness is measured, never reported (§4.3): HEAD moved, or an explicit
-    recorded argument. A turn that claims a fix it did not commit produced
-    neither. `NOT_IMPLEMENTED` is IMPLEMENT's own measurement and names the
-    wrong phase, so the task halts at `REBUTTAL_UNJUDGED` instead (§3.3),
-    the state where it stopped.
+    recorded argument against a blocker. A turn that claims a fix it did not
+    commit produced neither. `NOT_IMPLEMENTED` names the wrong phase, so the
+    task halts at `REBUTTAL_UNJUDGED` instead (§3.3), the state it stopped
+    in. `rebuttal` carries blocker-numbered entries only, by the caller's
+    own filtering, so a concern's own fix or argument moves `moved` alone.
     """
     argued = [r for r in rebuttal.rebuttals if r.action == "argued"]
     claimed = [r for r in rebuttal.rebuttals if r.action == "fixed"]
     if not moved and not argued:
-        detail = (
-            f"claimed a fix for {len(claimed)} blocker(s) and committed nothing"
-            if claimed
-            else rebuttal.error or "recorded nothing"
-        )
+        # `is not None`: `str(exc)` is empty for an exception with no message.
+        if claimed:
+            detail = (
+                f"claimed a fix for {len(claimed)} blocker(s) and committed nothing"
+            )
+        elif rebuttal.error is not None:
+            detail = (
+                rebuttal.error or "the rebuttal turn was unreadable, with no message"
+            )
+        else:
+            detail = "recorded nothing"
         return (
             "REBUTTAL_UNJUDGED",
             f"the rebuttal moved no commit and made no argument: {detail}",
@@ -639,7 +670,8 @@ def rebut_state(
 
 
 def first_answers(rebuttal: RebuttalTurn) -> dict[int, Rebuttal]:
-    """The rebuttal keyed by blocker number, first answer winning.
+    """The rebuttal keyed by finding number, a blocker's or an anchored
+    concern's alike, first answer winning.
 
     Nothing in `_Rebuttals` constrains the model to one entry per `finding`,
     and three places read this field: the ledger, the queue's counts, and the
@@ -659,9 +691,11 @@ BlockerAnswer = Literal["answered", "unanswered", "unread"]
 
 def blocker_answers(turn: RebuttalTurn, blockers: int) -> dict[int, BlockerAnswer]:
     """Each of `blockers` numbers, 1 through `blockers`, mapped to item 42's
-    own answer (§5.6). Every number reads `unread` when `turn.error` is not
-    `None`, the empty string included. Otherwise a number reads `answered` when `first_answers` holds
-    it, and `unanswered` when it does not.
+    own answer (§5.6). `blockers` is the caller's own count: a blocker count
+    alone, or that count plus every anchored concern. Every number reads
+    `unread` when `turn.error` is not `None`, the empty string included.
+    Otherwise a number reads `answered` when `first_answers` holds it, and
+    `unanswered` when it does not.
     """
     if turn.error is not None:
         return {n: "unread" for n in range(1, blockers + 1)}
@@ -740,7 +774,7 @@ def sustained_blockers(rebut_result: RebutResult | None) -> int:
     blocker verdicted but never rebutted, which never enters `_confirmed_with`'s
     answered set. Only a host-filed survivor reaches REBUT unanchored (§5.5).
     """
-    if rebut_result is None or rebut_result.rebuttal.error:
+    if rebut_result is None or rebut_result.rebuttal.error is not None:
         return 0
     return _confirmed_with(rebut_result, "argued")
 
@@ -762,7 +796,11 @@ def unkept_fixes(rebut_result: RebutResult | None) -> int:
     queue as state `REBUTTAL_UNJUDGED`, which ranks with the states that
     need you.
     """
-    if rebut_result is None or rebut_result.rebuttal.error or rebut_result.moved:
+    if (
+        rebut_result is None
+        or rebut_result.rebuttal.error is not None
+        or rebut_result.moved
+    ):
         return 0
     return _confirmed_with(rebut_result, "fixed")
 
@@ -771,6 +809,9 @@ def run_rebut(
     container: str,
     *,
     blockers: Sequence[Finding],
+    # Required, not defaulted: a bare default would let a caller silently
+    # drop every anchored concern it was handed (§5.6).
+    concerns: Sequence[Finding],
     # Required, not defaulted: a default would hide that `preserves` never
     # reached the guard below (backlog b-cd5fd2).
     acceptance: Sequence[Criterion],
@@ -821,9 +862,13 @@ def run_rebut(
     # conventional reading, and `run_verdict` requires the verdict set to match
     # exactly — a renumbering model would cost the whole phase's spend.
     numbered = list(enumerate(blockers, 1))
+    # Numbered on from the last blocker, under the one global numbering
+    # both share (§5.6).
+    numbered_concerns = list(enumerate(concerns, len(blockers) + 1))
     turn = run_rebuttal(
         container,
         blockers=numbered,
+        concerns=numbered_concerns,
         # The implementer's own options, but never its budget: its turns resume
         # IMPLEMENT's session, whose cap is the whole task budget (§5.6).
         options=options | {"max_budget_usd": budget_usd},
@@ -851,16 +896,38 @@ def run_rebut(
     result = RebutResult(
         state="",
         why="",
+        # Every entry, concerns included, kept for the record (§5.6).
         rebuttal=turn,
         verdicts=[],
         moved=moved,
         cost_usd=turn.cost_usd,
     )
 
-    if not moved and not any(r.action == "argued" for r in turn.rebuttals):
+    # Only a blocker's answer counts toward the state below (§5.6). Both the
+    # early return and its `rebut_state` call drop every concern's entry.
+    concern_numbers = range(len(blockers) + 1, len(blockers) + len(concerns) + 1)
+    blocker_only = replace(
+        turn, rebuttals=[r for r in turn.rebuttals if r.finding not in concern_numbers]
+    )
+    if not moved and not any(r.action == "argued" for r in blocker_only.rebuttals):
         # Nothing was fixed and nothing argued, so HEAD is where the gates last
         # measured it: re-running the suite would buy the same answer.
-        result.state, result.why = rebut_state(moved=moved, rebuttal=turn, verdicts=[])
+        result.state, result.why = rebut_state(
+            moved=moved, rebuttal=blocker_only, verdicts=[]
+        )
+        if len(blocker_only.rebuttals) != len(turn.rebuttals):
+            # The filter dropped a concern's own entry, so `rebut_state`'s
+            # "recorded nothing" would be false: it recorded a concern.
+            claimed = [r for r in blocker_only.rebuttals if r.action == "fixed"]
+            detail = (
+                f"claimed a fix for {len(claimed)} blocker(s) and committed nothing"
+                if claimed
+                else "answered no blocker"
+            )
+            result.why = (
+                "the rebuttal moved no commit and made no argument against a "
+                f"blocker: {detail}"
+            )
         return result
 
     if stopped := rerun_gates(turn.session_id or session_id):
@@ -928,6 +995,6 @@ def run_rebut(
         )
     result.cost_usd += sum(v.cost_usd for v in result.verdicts)
     result.state, result.why = rebut_state(
-        moved=moved, rebuttal=turn, verdicts=result.verdicts
+        moved=moved, rebuttal=blocker_only, verdicts=result.verdicts
     )
     return result

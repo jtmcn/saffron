@@ -1022,6 +1022,55 @@ def test_record_all_records_every_pending_spec_a_batch_ran(loop, monkeypatch, ca
     assert f"{rows[2].spec_id}  not run" in capsys.readouterr().out
 
 
+def test_record_fetches_a_pushed_head_the_checkout_lacks(
+    loop, monkeypatch, capsys, tmp_path
+):
+    """PACKAGE pushes from the mirror, so the checkout can lack the pushed
+    head. `record` fetches it from origin before it reads the spec copy,
+    and names the stale copy, not an unreadable one (spec loop runs 57, 58)."""
+    from saffron.ledger import Ledger
+
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    root = loop.root
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "t")
+    spec_id = loop.ids[0]
+    path = loop.row(0).path
+    ran_text = (root / path).read_text()
+    _git(root, "add", path)
+    _git(root, "commit", "-qm", "the spec main ran")
+    origin = tmp_path / "origin"
+    _git(tmp_path, "clone", "-q", str(root), str(origin))
+    _git(origin, "config", "user.email", "t@example.com")
+    _git(origin, "config", "user.name", "t")
+    _git(origin, "checkout", "-q", "-b", "stacked")
+    stale = _commit(origin, path, ran_text + "A line main later dropped.\n")
+    _git(root, "remote", "add", "origin", str(origin))
+
+    driver._save([loop.row(0)])
+    sha = driver._load()[0].spec_sha
+    ledger = Ledger(root / "ledger.db")
+    repo_id = ledger.upsert_repo("r", "git@github.com:o/r.git", "/mirror", "policy")
+    task_id = ledger.create_task(
+        ledger.create_run(repo_id, "b" * 40), spec_id, sha, "saffron/X", budget_usd=6.0
+    )
+    ledger.set_task_state(task_id, "PACKAGE")
+    ledger.set_task_package(
+        task_id, "READY_FOR_REVIEW", "saffron/X", stale, "https://x/pull/247"
+    )
+    ledger.close()
+    monkeypatch.setattr(
+        driver, "_ledger_and_repo", lambda: (Ledger(root / "ledger.db"), repo_id, "url")
+    )
+
+    assert driver.cmd_record(argparse.Namespace(spec_id=spec_id, all=False)) == 0
+    captured = capsys.readouterr()
+    assert "unreadable" not in captured.err
+    assert f"copy at {stale[:12]} differs from the text the cell ran" in captured.out
+
+
 def test_record_names_the_spec_the_cell_ran_when_a_stacked_branch_holds_another(
     loop, monkeypatch, capsys
 ):
@@ -1401,6 +1450,19 @@ def test_a_resnapshot_takes_in_a_follow_up_a_finish_ran_and_record_reads_it(
 
     assert driver.cmd_record(argparse.Namespace(spec_id=follow_up, all=False)) == 0
     assert capsys.readouterr().out.startswith(f"{follow_up}  READY_FOR_REVIEW  #982")
+
+    # Spec loop runs 57 to 59 took in a merged follow-up and two cut short with
+    # nothing pushed, every snapshot. Neither is open work.
+    ledger = Ledger(path)
+    ledger.set_task_state(tasks[follow_up], "MERGED")
+    ledger.close()
+    assert driver._follow_up_rows({parent}) == []
+    ledger = Ledger(path)
+    ledger.set_task_state(tasks[follow_up], "ORPHANED")
+    ledger.record_push(tasks[follow_up], "")
+    ledger.adopt_pull_request(tasks[follow_up], "")
+    ledger.close()
+    assert driver._follow_up_rows({parent}) == []
 
 
 def _stack_batch_ledger(tmp_path, monkeypatch, chain, *, outside=None):
@@ -2277,6 +2339,40 @@ def test_cite_blocks_a_spec_naming_a_commit_off_the_base(
         f"commit {off_main[:8]} is not an ancestor of main",
         "2 citation(s) checked",
     ]
+
+
+def test_cite_names_a_citation_a_parent_branch_moved_or_rewrote(
+    empty_repo, monkeypatch, capsys
+):
+    """b-c7858c: a parent that shifts a cited line leaves the line in place,
+    so a plain resolve passes it. `cite` at the parent's branch maps each
+    citation through the parent's diff and names the moved and the rewritten."""
+    monkeypatch.setattr(driver, "REPO", empty_repo)
+    monkeypatch.setattr(driver, "_TRUNK", "main")
+    body = "".join(f"line {n}\n" for n in range(1, 9))
+    _commit(empty_repo, "f.py", body)
+    _git(empty_repo, "checkout", "-q", "-b", "parent")
+    lines = body.splitlines(keepends=True)
+    lines.insert(1, "added\n")  # shifts line 2 onward by one
+    lines[7] = "line 7 rewritten\n"  # the trunk's line 7, now at 8
+    _commit(empty_repo, "f.py", "".join(lines))
+    _git(empty_repo, "checkout", "-q", "main")
+    spec = empty_repo / "spec.md"
+    spec.write_text(
+        "Kept `f.py:1`. Moved `f.py:3-4`. Rewritten `f.py:7`. Past it `f.py:8`.\n\n"
+        "Ending on the rewrite `f.py:5-7`.\n"
+    )
+
+    assert driver.cmd_cite(SimpleNamespace(spec_path=str(spec), base="parent")) == 1
+    out = capsys.readouterr().out
+    assert "f.py:3-4: parent moved it to f.py:4-5" in out
+    assert "f.py:7: parent rewrote the cited text" in out
+    assert "f.py:5-7: parent rewrote the cited text" in out
+    assert "f.py:8: parent moved it to f.py:9" in out
+    assert "f.py:1:" not in out
+
+    # At the trunk itself nothing is mapped.
+    assert driver.cmd_cite(SimpleNamespace(spec_path=str(spec), base="main")) == 0
 
 
 def test_check_judges_the_rows_history_prints_and_no_others(monkeypatch, capsys):

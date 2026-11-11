@@ -58,7 +58,7 @@ loop has a pull request open.
 
 **Done when** `status` lists the specs you mean to run, reports nothing stale,
 and the operator has seen `snapshot`'s table in your reply: each spec's title
-and budget, the total, and every spec it refused.
+and budget, the spec budgets' sum, and every spec it refused.
 
 ## 1b. Check each spec's ceilings
 
@@ -104,7 +104,9 @@ answered by the operator.
 
 **A batch is the default.** The operator set this on 2026-10-07, in spec loop run 30.
 Start `saffron batch --repo . --budget <total>` over the order, with the token
-and listeners as in (a). Use `--stack --defer-end-review` unless a parent is an open pull
+and listeners as in (a). `<total>` is the last figure `saffron queue --repo .
+--stack` prints, which holds back the reserve and the writer's share. A
+`--stack` batch below it is refused unless it is given `--partial`. Use `--stack --defer-end-review` unless a parent is an open pull
 request outside the order (b-e0e1cf). Then call `mcp__cell-watch__watch` once with
 `{}`. It follows each task in turn and never expires. Run `driver.py record`
 for a task when its hand-over wake-up names the next spec, since PACKAGE is

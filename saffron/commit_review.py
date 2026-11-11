@@ -19,7 +19,7 @@ import os
 from functools import partial, wraps
 from pathlib import Path
 
-from saffron import end_review
+from saffron import end_review, mutants
 from saffron.agents import context
 from saffron.cell.session import (
     _SAFFRON_ROOT,
@@ -211,8 +211,9 @@ def run_commit_review(
     """Everything `saffron review` does: decline before any cell, or read
     the task's own review commits with the end review's two lenses.
 
-    A decline prints `review:` and its reason, then returns 2. Any other
-    raise reading the task, the range, the export or the spec is left to
+    A decline prints `review:` and its reason, then returns 2, including a
+    pinned mutants commit it cannot read (`b-c5da95`). Any other raise
+    reading the task, the range, the export or the spec file is left to
     the caller, which exits 2. The task's state never moves."""
     url = package_phase.real_remote(repo)
     try:
@@ -230,6 +231,12 @@ def run_commit_review(
         spec = _spec_for_task(
             ledger, task_id, exported, row["spec_id"], row["spec_sha"]
         )
+        try:
+            spec = mutants.attach_mutants_at(
+                mirror, ledger.task_mutants_commit(task_id), spec
+            )
+        except SpecError as exc:
+            raise _Declined(" ".join(str(exc).split())) from exc
 
         _token()
     except _Declined as declined:
@@ -276,6 +283,7 @@ def run_commit_review(
         ledger,
         str(task_id),
         {framed.id: framed},
+        mutants_commit=ledger.task_mutants_commit(task_id),
         mirror=mirror,
         open_cell=open_cell,
         context_md=context_md,

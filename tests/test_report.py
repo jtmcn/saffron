@@ -27,7 +27,7 @@ from saffron.report.index import (
     render_index,
     sort_key,
 )
-from saffron.report.pr_body import _NOTES_LIMIT, render_pr_body
+from saffron.report.pr_body import _NONE_MARK, _NOTES_LIMIT, render_pr_body
 
 SPEC = parse_spec(
     """---
@@ -1421,6 +1421,180 @@ def test_the_disagreements_table_shows_the_first_answer_to_a_duplicated_finding(
     row = next(line for line in body.splitlines() if line.startswith("| 1 "))
     assert "committed the fix" in row
     assert "on reflection, no" not in row
+
+
+def test_the_pull_request_body_shows_each_concerns_answer_under_its_number():
+    """Problem item 5 (§5.6): `### Concern answers` follows `###
+    Disagreements`, one row per anchored concern, numbered on from the
+    blockers, with no critic column. A duplicate answer keeps the first.
+    An unanchored concern and an anchored note get no row. A turn nobody
+    could read gives every row the fixed sentence, never its error. With
+    no `RebutResult`, or no anchored concern, the table is absent."""
+    blocker = _finding(claim="blocker one claim", file="z.py", line=9)
+    concern_fixed = _finding(
+        severity="concern", claim="concern fixed claim", file="a.py", line=5
+    )
+    concern_dup = _finding(
+        lens="contract",
+        severity="concern",
+        claim="concern dup claim",
+        file="b.py",
+        line=6,
+    )
+    concern_unanswered = _finding(
+        lens="conventions",
+        severity="concern",
+        claim="concern none claim",
+        file="c.py",
+        line=7,
+    )
+    concern_unanchored = _finding(
+        lens="adequacy",
+        severity="concern",
+        claim="concern unanchored claim",
+        file="d.py",
+        line=8,
+        anchored=False,
+    )
+    note = _finding(severity="note", claim="a note claim", file="e.py", line=10)
+    reviews = [
+        LensReview(
+            lens="correctness",
+            findings=[blocker, concern_fixed, concern_unanchored, note],
+        ),
+        LensReview(lens="contract", findings=[concern_dup]),
+        LensReview(lens="conventions", findings=[concern_unanswered]),
+    ]
+    rebut_result = RebutResult(
+        state="READY_FOR_REVIEW",
+        why="test",
+        rebuttal=RebuttalTurn(
+            rebuttals=[
+                Rebuttal(finding=1, action="fixed", argument="blocker fix"),
+                Rebuttal(finding=2, action="fixed", argument="fixed the concern"),
+                Rebuttal(finding=3, action="argued", argument="first answer stands"),
+                Rebuttal(finding=3, action="fixed", argument="a later duplicate"),
+            ]
+        ),
+        verdicts=[
+            LensVerdicts(
+                lens="correctness",
+                verdicts=[Verdict(finding=1, verdict="confirmed", reason="r")],
+            )
+        ],
+        moved=True,
+        cost_usd=0.0,
+    )
+    rendered = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        reviews=reviews,
+        rebut_result=rebut_result,
+    )
+    assert "### Concern answers" in rendered
+    assert rendered.index("### Concern answers") > rendered.index("### Disagreements")
+
+    # Disagreements keeps the blocker alone: no concern joins its rows, its
+    # count, or its critic column.
+    disagreements_section = rendered.split("### Disagreements", 1)[1].split(
+        "### Concern answers", 1
+    )[0]
+    disagreement_rows = [
+        line for line in disagreements_section.splitlines() if line.startswith("|")
+    ]
+    assert len(disagreement_rows) == 3  # header, separator, the one blocker
+    assert "concern" not in disagreements_section
+
+    section = rendered.split("### Concern answers", 1)[1].split("###", 1)[0]
+    rows = [line for line in section.splitlines() if line.startswith("|")]
+    header, _separator, *data_rows = rows
+    assert header == "| # | lens | where | claim | implementer |"
+    assert len(data_rows) == 3
+    row2 = next(r for r in data_rows if r.startswith("| 2 "))
+    row3 = next(r for r in data_rows if r.startswith("| 3 "))
+    row4 = next(r for r in data_rows if r.startswith("| 4 "))
+    assert row2 == (
+        "| 2 | `correctness` | a.py:5 | concern fixed claim "
+        "| fixed: fixed the concern |"
+    )
+    assert row3 == (
+        "| 3 | `contract` | b.py:6 | concern dup claim | argued: first answer stands |"
+    )
+    assert "a later duplicate" not in row3
+    assert row4.split("|")[5].strip() == _NONE_MARK
+    assert "concern unanchored claim" not in section
+    assert "a note claim" not in section
+
+    # A turn nobody could read gives every row the fixed sentence, and
+    # never its own error, with no HEAD clause unlike `_disagreements`.
+    unreadable = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        reviews=reviews,
+        rebut_result=RebutResult(
+            state="REBUTTING",
+            why="test",
+            rebuttal=RebuttalTurn(error="not the schema: @SA-0040"),
+            verdicts=[],
+            moved=True,
+            cost_usd=0.0,
+        ),
+    )
+    unreadable_section = unreadable.split("### Concern answers", 1)[1].split("###", 1)[
+        0
+    ]
+    rows = [
+        r
+        for r in unreadable_section.splitlines()
+        if r.startswith("| ") and r[2:3].isdigit()
+    ]
+    assert len(rows) == 3
+    for row in rows:
+        assert row.split("|")[5].strip() == (
+            "no rebuttal was recorded for this turn (see `rebuttal.json`)"
+        )
+        assert "@SA-0040" not in row
+
+    # With no `RebutResult`, the table is absent, though the concerns stand.
+    no_result = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        reviews=reviews,
+    )
+    assert "### Concern answers" not in no_result
+
+    # With no anchored concern, the table is absent too.
+    no_concern = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        reviews=[LensReview(lens="correctness", findings=[blocker])],
+        rebut_result=rebut_result,
+    )
+    assert "### Concern answers" not in no_concern
 
 
 def _two_blocker_reviews():

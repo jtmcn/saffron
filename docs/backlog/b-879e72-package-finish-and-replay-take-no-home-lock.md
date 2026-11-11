@@ -1,11 +1,13 @@
 ---
 id: b-879e72
 title: '`package`, `finish` and `replay` take no home lock, so a batch beside one stamps its live row `ORPHANED`'
-status: open
+status: done
+closed: 2026-11-10
+by_hand: true
 tier: 2
 filed: 2026-11-08
 specs: []
-prs: []
+prs: [1130]
 commits: []
 cites: [§4.2.1]
 related: [b-a714d2, b-615466]
@@ -33,3 +35,6 @@ its state.
 ## Record
 
 - 2026-11-08: filed from the spec loop's run 55.
+- 2026-11-10: done by hand. `package` and `finish` take the home lock as
+  `cell`, `batch` and `draft` do. `replay` takes none, since v1 deletes it, and
+  `saffron/reconcile.py` says so. `tests/test_home_lock.py` drives both (#1130).

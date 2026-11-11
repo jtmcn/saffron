@@ -2273,6 +2273,20 @@ def test_the_join_covers_every_captured_line_a_kind_renders():
             detail="conventions: 0 blocker, 0 concern, 0 note, drop rate 0% of 0, $0.00",
         )
     )
+    # The failing `lint` gate's one new failure, beneath each counted line.
+    beneath = describe(
+        Attempt(
+            timestamp=1.0,
+            spec_id="x",
+            phase="GATE",
+            attempt=1,
+            commits=None,
+            spent_usd_est=None,
+            new_failures=1,
+            decision="repair",
+            failures=("[lint] a.py:? E501: too long",),
+        )
+    ).splitlines()[1]
     unchecked = [
         line
         for line in captured
@@ -2280,6 +2294,7 @@ def test_the_join_covers_every_captured_line_a_kind_renders():
         and line not in per_gate
         and line != no_claude_md
         and line != conventions_line
+        and line != beneath
         and "<" not in line
     ]
     assert unchecked == [], f"captured but joined to no kind: {unchecked}"
@@ -2619,6 +2634,7 @@ def test_the_watch_shaped_callable_phases_still_receive_does_not_raise():
     rebut.run_rebut(
         "cell",
         blockers=[blocker],
+        concerns=[],
         acceptance=[],
         options=options,
         session_id="sess-1",

@@ -38,3 +38,7 @@ judged into its batch folder, and the log line names the failures.
   f69031be, then escalated with 7 new failures at re-verify and named none.
 - 2026-10-19: recurred twice in the spec loop's run 44. Batch 37's finish escalated on 2 new failures and batch 38's on 10. Each `gates` folder was empty, and neither log line named a failure. Both commits wrote back spec text (b-703e64).
 - 2026-10-23: recurred in the spec loop's run 46. Batch 47's finish escalated on "13 new failures" and wrote no gate record under `finish/47/`. A local run of the same commit found one (b-cc87b1).
+- 2026-11-10: the same shape in PACKAGE, in the spec loop's run 60.
+  `SA-0364` went green, then PACKAGE's re-verify printed "2 new failures"
+  and set `MERGE_FAILED`. Neither the log nor `events.jsonl` named a test. A
+  local suite named the clock flake #1112 fixes.

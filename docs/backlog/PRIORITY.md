@@ -107,7 +107,7 @@ stopped it. The overrun stopped its batch after two of four specs.
 ### Tier 2 — the morning after
 
 **Placed 2026-11-07**, in grooming, from three open items no tier named:
-~~**b-a714d2**~~, **b-d9ed45**, then **b-2bc0d5**. A second batch stamps a live
+~~**b-a714d2**~~, **b-d9ed45**, then ~~**b-2bc0d5**~~. A second batch stamps a live
 task `ORPHANED`, because nothing holds one batch at a time. A second run of one
 spec removes the first run's container. Cell images and the build cache are
 never reclaimed, and one host's free disk fell to 16 GB. The first two stand
@@ -117,15 +117,20 @@ between ADR 10's sequence and two cells on one host.
 refuses a finish's follow-up as not in the order. It took the rank of
 ~~**b-25f2b2**~~, the tier 2 item grooming folded into it.
 
-**Placed 2026-11-07**, from reviewing `SA-0340`: **b-3cf039**. `migrate`
+**Placed 2026-11-10**, from the spec loop's run 60: ~~**b-96508a**~~, then
+~~**b-16c819**~~. The stack's end review hands its lenses a spec with no mutant
+from the ref. A session test fakes `subprocess.run` for every argv, so new
+code under `cell_up` must avoid `run`.
+
+**Placed 2026-11-07**, from reviewing `SA-0340`: ~~**b-3cf039**~~. `migrate`
 derives no `rebuttal` fact for a blocker that met REBUT's early exit, so it
 refuses the ref.
 
-**Placed 2026-11-07**, from reviewing `SA-0338`: **b-c5da95**. Four commands
+**Placed 2026-11-07**, from reviewing `SA-0338`: ~~**b-c5da95**~~. Four commands
 load a spec without the ref's mutants, so a regate can judge a witness the cell
 set aside.
 
-**Placed 2026-11-06**, from the spec loop's run 54: **b-fe3488**, ~~**b-ffb930**~~,
+**Placed 2026-11-06**, from the spec loop's run 54: ~~**b-fe3488**~~, ~~**b-ffb930**~~,
 ~~**b-0add4c**~~, then **b-71f95f**. A stack batch starts an order its budget
 cannot run. The follow-up writer's first draft never parses. The record's
 git calls can prompt and drop git's reason. A cell makes CONNECTs no git
@@ -147,8 +152,8 @@ stack thresholds assume every earlier candidate ran.
 criterion cannot name the members its claim covers, so no command sees one
 that no witness drives.
 
-**Placed 2026-11-08**, from the spec loop's run 55: **b-31e3c8**,
-**b-cbb6e7**, **b-c7858c**, **b-879e72**, then **b-3df181**. REBUT answers
+**Placed 2026-11-08**, from the spec loop's run 55: ~~**b-31e3c8**~~,
+~~**b-cbb6e7**~~, ~~**b-c7858c**~~, ~~**b-879e72**~~, then ~~**b-3df181**~~. REBUT answers
 no concern, so every in-cell concern reached both seats. A finish minted a
 follow-up id `main` already held. `cite` passes a citation whose code moved.
 Three commands take no home lock. An empty rebuttal error reads as no answer.
@@ -186,7 +191,7 @@ unwind closes a pipe a reader thread holds.
 
 **From the operator visibility plan and the spec loop's runs 5 to 10**, in
 this order: **43**, **66**, ~~**67**~~, **98**, ~~**157**~~, ~~**172**~~, **b-eac388**,
-**b-bc54d1**, **b-63ac52**, **b-952c34**, **b-60d804**,
+**b-bc54d1**, **b-63ac52**, **b-952c34**, ~~**b-60d804**~~,
 **b-281f0a** and **b-7d3810**. Then **160**, which is what
 item 141's close left. The Gate-only cell's suite is in a file because the
 ledger has no owner column that fits it.
@@ -206,7 +211,7 @@ review spent a pass on it. Then **b-490c9c**, ~~**b-61993a**~~, **b-f45f73**
 and **b-0de0b3**. The last is the operator's decision to generate
 the loop's report in core, and it needs design before a spec.
 
-**From the spec loop's run 13** (2026-09-22): **b-66e82d**, **b-055fa3** and
+**From the spec loop's run 13** (2026-09-22): ~~**b-66e82d**~~, **b-055fa3** and
 ~~**b-a9ee32**~~. The first is why finding the gate behind #433's `EXHAUSTED` took
 reproducing every gate by hand. The second is a witness that fails once three
 local branches are pruned. The third opens when item b-b5f379 bumps the cell's
@@ -318,7 +323,7 @@ then passed it. No gate re-runs a parent's wrong versions.
 **b-a12047**. Fakes kept a reordered function's old signature, so a revert
 passed. PACKAGE leaves a spec's deferred check out of `## Not covered`.
 
-**Placed 2026-10-23**, from the spec loop's run 46: ~~**b-0bd346**~~, then
+**Placed 2026-10-23**, from the spec loop's run 46: **b-0bd346**, then
 ~~**b-066901**~~, ~~**b-1572e7**~~, **b-cc87b1** and ~~**b-7c1c99**~~. REBUT ends a task
 `EXHAUSTED` on a gate failure its own fix made. A layer cut from a review
 commit cannot be packaged again. A child stacks on its lowest open parent.
@@ -416,7 +421,7 @@ seat or the run found and the stack left alone.
 
 **Placed 2026-10-24**, from the spec loop's run 47: **b-0c5afc**,
 **b-fa014a**, **b-22ed54**, **b-c3688d**, **b-7fa522**, **b-54c8b4**,
-**b-7655f9** and **b-2d2014**. Each is a gap a seat or the run found and the
+**b-7655f9** and ~~**b-2d2014**~~. Each is a gap a seat or the run found and the
 stack left alone.
 
 **Placed 2026-10-24**, from ADR 11 and the controlled vocabulary review:

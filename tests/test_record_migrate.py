@@ -2700,12 +2700,13 @@ def test_the_top_up_sets_aside_only_its_named_differences(tmp_path: Path) -> Non
 def test_the_top_up_sets_aside_a_live_rebuttals_answer_and_error(
     tmp_path: Path,
 ) -> None:
-    """Item 42: the top-up sets aside a `rebuttal` fact's `answer` and
-    `error` keys, as it sets aside a `gate_result`'s own keys. `migrate`
-    derives neither yet. So a held `rebuttal` fact carrying them, the empty
-    error included, agrees with the one derived for the same row. The same
-    keys on a `finding` fact still disagree, and so does a held `rebuttal`
-    whose `verdict` differs."""
+    """Item 42: `migrate` derives a `rebuttal` fact's own `answer` and
+    `error` from the row, null included. The top-up compares them like any
+    other key, instead of erasing them. A held fact lacking both, as one
+    recorded before item 42 would, defaults them to null and so agrees
+    with `_rich_task`'s row, which holds neither. The same two keys on a
+    `finding` fact still disagree, and so does a held `rebuttal` whose
+    `verdict` differs."""
     from saffron.record.migrate import migrate
 
     ledger = Ledger(tmp_path / "source.db")
@@ -2722,10 +2723,16 @@ def test_the_top_up_sets_aside_a_live_rebuttals_answer_and_error(
     rebuttal_index = next(i for i, f in enumerate(full) if f.kind == "rebuttal")
     finding_index = next(i for i, f in enumerate(full) if f.kind == "finding")
 
-    # No backfill: on a record with no prior facts, `_finding_facts`
-    # derives neither key, which the set-aside below could otherwise mask.
-    assert "answer" not in full[rebuttal_index].payload
-    assert "error" not in full[rebuttal_index].payload
+    # `_rich_task`'s rows carry no answer and no error, so the derived fact
+    # already holds both null, the same shape as every other derived key.
+    assert full[rebuttal_index].payload["answer"] is None
+    assert full[rebuttal_index].payload["error"] is None
+
+    def _without(index: int, *keys: str) -> list[Fact]:
+        copy = list(full)
+        payload = {k: v for k, v in copy[index].payload.items() if k not in keys}
+        copy[index] = replace(copy[index], payload=payload)
+        return copy
 
     def _tweaked_payload(index: int, **payload_changes: Any) -> list[Fact]:
         copy = list(full)
@@ -2734,18 +2741,13 @@ def test_the_top_up_sets_aside_a_live_rebuttals_answer_and_error(
         )
         return copy
 
+    # Lacking both keys, as a fact recorded before item 42 would, defaults
+    # them to null and agrees with a row that holds neither.
     _assert_agrees_and_gains_nothing(
-        source_path,
-        key,
-        _tweaked_payload(rebuttal_index, answer="answered", error=""),
-    )
-    _assert_agrees_and_gains_nothing(
-        source_path,
-        key,
-        _tweaked_payload(rebuttal_index, answer="unread", error="boom"),
+        source_path, key, _without(rebuttal_index, "answer", "error")
     )
 
-    # The set-aside is `rebuttal`'s own, not every kind's: the same two keys
+    # The default is `rebuttal`'s own, not every kind's: the same two keys
     # on a `finding` fact still disagree.
     _assert_disagrees(
         source_path,
@@ -2753,7 +2755,7 @@ def test_the_top_up_sets_aside_a_live_rebuttals_answer_and_error(
         _tweaked_payload(finding_index, answer="answered", error=""),
     )
 
-    # A real disagreement on the same fact is never erased by the set-aside.
+    # A real disagreement on the same fact is never erased by the default.
     _assert_disagrees(
         source_path, key, _tweaked_payload(rebuttal_index, verdict="withdrawn")
     )
@@ -2865,3 +2867,554 @@ def test_a_topped_up_ref_ends_on_the_ledgers_state_only_where_its_own_differs(
 
     task_package_e = next(f for f in full["e"] if f.kind == "task_package")
     assert seeded.read(keys["e"]) == [*held["e"], task_package_e]
+
+
+def test_a_live_ref_whose_rebut_reached_no_verdict_and_no_rebuttal_tops_up(
+    tmp_path: Path,
+) -> None:
+    """SA-0364: `migrate` derives a `rebuttal` fact for every finding whose
+    row's `answer` is set, a null `verdict` and a null `rebuttal` included.
+    The fact carries that `answer` and the row's `rebuttal_error` as
+    `error`. It derives a task's `rebuttal` facts in REBUT's own order:
+    every blocker's, in position order, then every other one, in position
+    order. The blocker group is chosen by the row's own `severity` alone,
+    never by `anchored`."""
+    from saffron.record.migrate import migrate
+
+    live = MemoryRecord()
+    ledger = Ledger(tmp_path / "source.db", record=live)
+    repo_id = ledger.upsert_repo("saffron", "/o", "/m.git", None)
+
+    # Task 1: a blocker, a note and a concern. A failed turn left the
+    # blocker and the concern `unread`, and REBUT never asked about the note.
+    _, task1 = _task(ledger, repo_id, "SA-9601")
+    findings1 = ledger.record_findings(
+        task1,
+        [
+            Finding(
+                lens="l1",
+                severity="blocker",
+                file="a.py",
+                line=1,
+                claim="c1",
+                anchored=True,
+            ),
+            Finding(
+                lens="l1",
+                severity="note",
+                file="n.py",
+                line=3,
+                claim="cn",
+                anchored=True,
+            ),
+            Finding(
+                lens="l1",
+                severity="concern",
+                file="b.py",
+                line=2,
+                claim="c2",
+                anchored=True,
+            ),
+        ],
+    )
+    ledger.record_rebuttal(
+        findings1[0], verdict=None, rebuttal=None, answer="unread", error="boom"
+    )
+    ledger.record_rebuttal(
+        findings1[2], verdict=None, rebuttal=None, answer="unread", error="boom"
+    )
+
+    # Task 2: the same shape, but a readable turn that answered nothing.
+    _, task2 = _task(ledger, repo_id, "SA-9602")
+    findings2 = ledger.record_findings(
+        task2,
+        [
+            Finding(
+                lens="l1",
+                severity="blocker",
+                file="a.py",
+                line=1,
+                claim="c1",
+                anchored=True,
+            ),
+            Finding(
+                lens="l1",
+                severity="note",
+                file="n.py",
+                line=3,
+                claim="cn",
+                anchored=True,
+            ),
+            Finding(
+                lens="l1",
+                severity="concern",
+                file="b.py",
+                line=2,
+                claim="c2",
+                anchored=True,
+            ),
+        ],
+    )
+    ledger.record_rebuttal(
+        findings2[0], verdict=None, rebuttal=None, answer="unanswered", error=None
+    )
+    ledger.record_rebuttal(
+        findings2[2], verdict=None, rebuttal=None, answer="unanswered", error=None
+    )
+
+    # Task 3: lens A's concern, its blocker, lens B's concern, then its
+    # blocker. REBUT recorded both blockers first, then both concerns.
+    _, task3 = _task(ledger, repo_id, "SA-9603")
+    findings3 = ledger.record_findings(
+        task3,
+        [
+            Finding(
+                lens="lA",
+                severity="concern",
+                file="a.py",
+                line=1,
+                claim="c1",
+                anchored=True,
+            ),
+            Finding(
+                lens="lA",
+                severity="blocker",
+                file="a.py",
+                line=2,
+                claim="c2",
+                anchored=True,
+            ),
+            Finding(
+                lens="lB",
+                severity="concern",
+                file="b.py",
+                line=3,
+                claim="c3",
+                anchored=True,
+            ),
+            Finding(
+                lens="lB",
+                severity="blocker",
+                file="b.py",
+                line=4,
+                claim="c4",
+                anchored=True,
+            ),
+        ],
+    )
+    for i in (1, 3, 0, 2):
+        ledger.record_rebuttal(
+            findings3[i], verdict=None, rebuttal=None, answer="unread", error="boom"
+        )
+
+    # Task 4: a concern, then an unanchored blocker claiming
+    # `review.HOST_FILED`. REBUT recorded that blocker first.
+    _, task4 = _task(ledger, repo_id, "SA-9604")
+    findings4 = ledger.record_findings(
+        task4,
+        [
+            Finding(
+                lens="l1",
+                severity="concern",
+                file="a.py",
+                line=1,
+                claim="c1",
+                anchored=True,
+            ),
+            Finding(
+                lens="l1",
+                severity="blocker",
+                file="a.py",
+                line=2,
+                claim="review.HOST_FILED: c2",
+                anchored=False,
+            ),
+        ],
+    )
+    ledger.record_rebuttal(
+        findings4[1], verdict=None, rebuttal=None, answer="unread", error="boom"
+    )
+    ledger.record_rebuttal(
+        findings4[0], verdict=None, rebuttal=None, answer="unread", error="boom"
+    )
+
+    keys = {
+        n: _key(ledger, tid)
+        for n, tid in [(1, task1), (2, task2), (3, task3), (4, task4)]
+    }
+    source_path = tmp_path / "source.db"
+    ledger.close()
+
+    held = {n: list(live.read(keys[n])) for n in keys}
+    on_live = migrate(source_path, live)
+    assert sorted(on_live.migrated) == sorted(keys.values())
+    assert on_live.refused == []
+    assert {n: live.read(keys[n]) for n in keys} == held
+
+    truth = MemoryRecord()
+    result = migrate(source_path, truth)
+    assert sorted(result.migrated) == sorted(keys.values())
+    assert result.refused == []
+
+    for n in keys:
+        truth_rebuttals = [f for f in truth.read(keys[n]) if f.kind == "rebuttal"]
+        live_rebuttals = [f for f in live.read(keys[n]) if f.kind == "rebuttal"]
+        assert [f.payload for f in truth_rebuttals] == [
+            f.payload for f in live_rebuttals
+        ], n
+
+    # Task 3's own order: both blockers (positions 2, 4), then both
+    # concerns (positions 1, 3).
+    assert [
+        f.payload["position"] for f in truth.read(keys[3]) if f.kind == "rebuttal"
+    ] == [
+        2,
+        4,
+        1,
+        3,
+    ]
+    # Task 4's own order: the blocker at position 2 first, chosen by its
+    # severity alone though it is unanchored and host-filed.
+    assert [
+        f.payload["position"] for f in truth.read(keys[4]) if f.kind == "rebuttal"
+    ] == [
+        2,
+        1,
+    ]
+
+    rebuilt = Ledger(tmp_path / "rebuilt.db")
+    for n in keys:
+        rebuilt.fold_task(keys[n], truth.read(keys[n]))
+    rows1 = rebuilt._db.execute(
+        "SELECT verdict, rebuttal, answer, rebuttal_error FROM findings "
+        "WHERE task_id = (SELECT task_id FROM tasks WHERE record_key = ?) "
+        "ORDER BY finding_id",
+        (keys[1],),
+    ).fetchall()
+    assert [row["answer"] for row in rows1] == ["unread", None, "unread"]
+    assert [row["rebuttal_error"] for row in rows1] == ["boom", None, "boom"]
+    for row in rows1:
+        assert row["verdict"] is None
+        assert row["rebuttal"] is None
+    rows2 = rebuilt._db.execute(
+        "SELECT verdict, rebuttal, answer, rebuttal_error FROM findings "
+        "WHERE task_id = (SELECT task_id FROM tasks WHERE record_key = ?) "
+        "ORDER BY finding_id",
+        (keys[2],),
+    ).fetchall()
+    assert [row["answer"] for row in rows2] == ["unanswered", None, "unanswered"]
+    assert [row["rebuttal_error"] for row in rows2] == [None, None, None]
+    for row in rows2:
+        assert row["verdict"] is None
+        assert row["rebuttal"] is None
+    rebuilt.close()
+
+
+def test_migrate_derives_no_rebuttal_fact_where_no_rebut_recorded_one(
+    tmp_path: Path,
+) -> None:
+    """SA-0364: a finding whose row holds no `verdict`, no `rebuttal` and
+    no `answer` derives no `rebuttal` fact at all. That holds whether
+    REBUT never started or ended before recording one."""
+    from saffron.record.migrate import migrate
+
+    live = MemoryRecord()
+    ledger = Ledger(tmp_path / "source.db", record=live)
+    repo_id = ledger.upsert_repo("saffron", "/o", "/m.git", None)
+
+    # Task 1: a concern and a note, no blocker, and no rebuttal recorded.
+    _, task1 = _task(ledger, repo_id, "SA-9701")
+    ledger.record_findings(
+        task1,
+        [
+            Finding(
+                lens="l1",
+                severity="concern",
+                file="a.py",
+                line=1,
+                claim="c1",
+                anchored=True,
+            ),
+            Finding(
+                lens="l1",
+                severity="note",
+                file="b.py",
+                line=2,
+                claim="c2",
+                anchored=True,
+            ),
+        ],
+    )
+
+    # Task 2: a blocker, but the task never reached REBUT.
+    _, task2 = _task(ledger, repo_id, "SA-9702")
+    ledger.record_findings(
+        task2,
+        [
+            Finding(
+                lens="l1",
+                severity="blocker",
+                file="a.py",
+                line=1,
+                claim="c1",
+                anchored=True,
+            ),
+        ],
+    )
+
+    # Task 3: a blocker, a `REBUTTING` attempt that opened and never
+    # closed, and no rebuttal recorded: the cell died mid-turn.
+    _, task3 = _task(ledger, repo_id, "SA-9703")
+    ledger.record_findings(
+        task3,
+        [
+            Finding(
+                lens="l1",
+                severity="blocker",
+                file="a.py",
+                line=1,
+                claim="c1",
+                anchored=True,
+            ),
+        ],
+    )
+    ledger.open_attempt(task3, phase="REBUTTING")
+    ledger.set_task_state(task3, "ORPHANED")
+
+    # Task 4: a blocker, a note, then a concern. REBUT recorded the
+    # blocker and the concern `unread`, leaving the note untouched.
+    _, task4 = _task(ledger, repo_id, "SA-9704")
+    findings4 = ledger.record_findings(
+        task4,
+        [
+            Finding(
+                lens="l1",
+                severity="blocker",
+                file="a.py",
+                line=1,
+                claim="c1",
+                anchored=True,
+            ),
+            Finding(
+                lens="l1",
+                severity="note",
+                file="b.py",
+                line=2,
+                claim="c2",
+                anchored=True,
+            ),
+            Finding(
+                lens="l1",
+                severity="concern",
+                file="c.py",
+                line=3,
+                claim="c3",
+                anchored=True,
+            ),
+        ],
+    )
+    ledger.record_rebuttal(
+        findings4[0], verdict=None, rebuttal=None, answer="unread", error="boom"
+    )
+    ledger.record_rebuttal(
+        findings4[2], verdict=None, rebuttal=None, answer="unread", error="boom"
+    )
+
+    keys = {
+        n: _key(ledger, tid)
+        for n, tid in [(1, task1), (2, task2), (3, task3), (4, task4)]
+    }
+    source_path = tmp_path / "source.db"
+    ledger.close()
+
+    held = {n: list(live.read(keys[n])) for n in keys}
+    on_live = migrate(source_path, live)
+    assert sorted(on_live.migrated) == sorted(keys.values())
+    assert on_live.refused == []
+    assert {n: live.read(keys[n]) for n in keys} == held
+
+    truth = MemoryRecord()
+    result = migrate(source_path, truth)
+    assert sorted(result.migrated) == sorted(keys.values())
+    assert result.refused == []
+
+    for n in (1, 2, 3):
+        assert [f for f in truth.read(keys[n]) if f.kind == "rebuttal"] == []
+
+    rebuttals4 = [f for f in truth.read(keys[4]) if f.kind == "rebuttal"]
+    assert [f.payload["position"] for f in rebuttals4] == [1, 3]
+
+
+def test_the_top_up_compares_a_rebuttals_answer_and_error(tmp_path: Path) -> None:
+    """SA-0364: the top-up compares a `rebuttal` fact's `answer` and
+    `error` instead of setting them aside. A key a held fact lacks reads
+    as null, as the fold reads it too. Each row below is its own source, so
+    `_assert_agrees_and_gains_nothing`'s own `migrated == [key]` is never
+    diluted by the other row's task."""
+    # Source 1: one task holding a concern then a blocker. REBUT recorded
+    # the blocker's rebuttal first, both `unread` with an error.
+    live1 = MemoryRecord()
+    ledger1 = Ledger(tmp_path / "source1.db", record=live1)
+    repo_id1 = ledger1.upsert_repo("saffron", "/o", "/m.git", None)
+    _, task1 = _task(ledger1, repo_id1, "SA-9801")
+    findings1 = ledger1.record_findings(
+        task1,
+        [
+            Finding(
+                lens="l1",
+                severity="concern",
+                file="b.py",
+                line=2,
+                claim="c2",
+                anchored=True,
+            ),
+            Finding(
+                lens="l1",
+                severity="blocker",
+                file="a.py",
+                line=1,
+                claim="c1",
+                anchored=True,
+            ),
+        ],
+    )
+    # REBUT's own order: the blocker's rebuttal, then the concern's.
+    ledger1.record_rebuttal(
+        findings1[1], verdict=None, rebuttal=None, answer="unread", error="boom"
+    )
+    ledger1.record_rebuttal(
+        findings1[0], verdict=None, rebuttal=None, answer="unread", error="boom"
+    )
+    key1 = _key(ledger1, task1)
+    source_path1 = tmp_path / "source1.db"
+    ledger1.close()
+
+    # Source 2: one task holding a blocker recorded with a verdict and a
+    # rebuttal, no answer.
+    ledger2 = Ledger(tmp_path / "source2.db")
+    repo_id2 = ledger2.upsert_repo("saffron", "/o", "/m.git", None)
+    _, task2 = _task(ledger2, repo_id2, "SA-9802")
+    findings2 = ledger2.record_findings(
+        task2,
+        [
+            Finding(
+                lens="l1",
+                severity="blocker",
+                file="a.py",
+                line=1,
+                claim="c1",
+                anchored=True,
+            ),
+        ],
+    )
+    ledger2.record_rebuttal(findings2[0], verdict="confirmed", rebuttal="fixed")
+    key2 = _key(ledger2, task2)
+    source_path2 = tmp_path / "source2.db"
+    ledger2.close()
+
+    _, record1 = _migrated(source_path1)
+    _, record2 = _migrated(source_path2)
+    full1 = record1.read(key1)
+    full2 = record2.read(key2)
+
+    # Pinned against the literal positions, not against `full1` itself:
+    # the blocker (2) is REBUT's own first rebuttal fact, ahead of the concern (1).
+    assert [f.payload["position"] for f in full1 if f.kind == "rebuttal"] == [2, 1]
+
+    rebuttal_index1 = next(i for i, f in enumerate(full1) if f.kind == "rebuttal")
+    rebuttal_index2 = next(i for i, f in enumerate(full2) if f.kind == "rebuttal")
+
+    def _tweaked(index: int, full: list[Fact], **changes: Any) -> list[Fact]:
+        copy = list(full)
+        copy[index] = replace(copy[index], payload={**copy[index].payload, **changes})
+        return copy
+
+    def _dropped(index: int, full: list[Fact], *keys_: str) -> list[Fact]:
+        copy = list(full)
+        payload = {k: v for k, v in copy[index].payload.items() if k not in keys_}
+        copy[index] = replace(copy[index], payload=payload)
+        return copy
+
+    # Against task 1's row (`unread`, error `boom`), a differing
+    # `answer`, `error`, a null `error`, or missing both are each refused.
+    _assert_disagrees(
+        source_path1, key1, _tweaked(rebuttal_index1, full1, answer="unanswered")
+    )
+    _assert_disagrees(
+        source_path1, key1, _tweaked(rebuttal_index1, full1, error="other")
+    )
+    _assert_disagrees(source_path1, key1, _tweaked(rebuttal_index1, full1, error=None))
+    _assert_disagrees(
+        source_path1, key1, _dropped(rebuttal_index1, full1, "answer", "error")
+    )
+    _assert_agrees_and_gains_nothing(source_path1, key1, full1)
+    _assert_agrees_and_gains_nothing(source_path1, key1, live1.read(key1))
+
+    # Against task 2's row (a verdict and a rebuttal, no answer), a fact
+    # lacking both keys agrees. One carrying either set is refused.
+    _assert_agrees_and_gains_nothing(
+        source_path2, key2, _dropped(rebuttal_index2, full2, "answer", "error")
+    )
+    _assert_disagrees(
+        source_path2, key2, _tweaked(rebuttal_index2, full2, answer="answered")
+    )
+    _assert_disagrees(source_path2, key2, _tweaked(rebuttal_index2, full2, error="x"))
+
+
+def test_a_ledger_that_predates_the_rebuttal_answer_migrates_its_rebuttals(
+    tmp_path: Path,
+) -> None:
+    """SA-0364: a source whose `findings` table predates both `answer` and
+    `rebuttal_error` still migrates. Its row with a verdict and a rebuttal
+    derives one `rebuttal` fact, whose `answer` and `error` are null, and
+    its other rows derive none."""
+    from saffron.record.migrate import migrate
+
+    source = Ledger(tmp_path / "source.db")
+    repo_id = source.upsert_repo("saffron", "/o", "/m.git", None)
+
+    _, task1 = _task(source, repo_id, "SA-9901")
+    findings1 = source.record_findings(
+        task1,
+        [
+            Finding(
+                lens="l1",
+                severity="blocker",
+                file="a.py",
+                line=1,
+                claim="c1",
+                anchored=True,
+            ),
+            Finding(
+                lens="l1",
+                severity="concern",
+                file="b.py",
+                line=2,
+                claim="c2",
+                anchored=True,
+            ),
+        ],
+    )
+    source.record_rebuttal(findings1[0], verdict="confirmed", rebuttal="fixed")
+    key1 = _key(source, task1)
+
+    source._db.execute("ALTER TABLE findings DROP COLUMN answer")
+    source._db.execute("ALTER TABLE findings DROP COLUMN rebuttal_error")
+    source._db.commit()
+    source.close()
+
+    source_path = tmp_path / "source.db"
+    record = MemoryRecord()
+    result = migrate(source_path, record)
+    assert result.migrated == [key1]
+    assert result.refused == []
+
+    rebuttals = [f for f in record.read(key1) if f.kind == "rebuttal"]
+    assert len(rebuttals) == 1
+    assert rebuttals[0].payload == {
+        "position": 1,
+        "verdict": "confirmed",
+        "rebuttal": "fixed",
+        "answer": None,
+        "error": None,
+    }

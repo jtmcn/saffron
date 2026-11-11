@@ -50,6 +50,12 @@ class Apple:
         return ["--cpus", str(cpus)]
 
     @property
+    def build_cache_reclaim_argv(self) -> list[str] | None:
+        # 1.6.1 has no builder prune: deleting the builder drops its cache, and the
+        # next `build` starts a fresh one (measured 2026-11-10, b-2bc0d5).
+        return [self.binary, "builder", "delete", "--force"]
+
+    @property
     def shares_kernel(self) -> bool:
         # Measured: each cell is its own VM (docs/appendices/G-the-cell-runtime.md:34),
         # with the vCPU offset in cpu_offset above.

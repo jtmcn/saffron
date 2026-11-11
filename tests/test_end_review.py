@@ -2705,3 +2705,187 @@ def test_the_standards_lens_says_a_repo_declares_no_standing_instructions(claude
 
     assert _flatten(review.NO_STANDING_INSTRUCTIONS) in _flatten(_prompt("standards"))
     assert "declares no standing instructions" not in _prompt("spec")
+
+
+def _mutants_commit_in(
+    mirror: Path, files: dict[str, str], *, parent: str | None = None
+) -> str:
+    """One commit on top of `parent` whose tree holds `files`, written with
+    `hash-object`, `mktree` and `commit-tree` and never checked out."""
+    entries = []
+    for name, text in files.items():
+        blob = subprocess.run(
+            ["git", "-C", str(mirror), "hash-object", "-w", "--stdin"],
+            input=text,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        entries.append(f"100644 blob {blob}\t{name}\n")
+    tree = subprocess.run(
+        ["git", "-C", str(mirror), "mktree"],
+        input="".join(entries),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    args = ["commit-tree", tree, "-m", "mutants"]
+    if parent is not None:
+        args += ["-p", parent]
+    return _git(mirror, *args).strip()
+
+
+def _mutant_yaml(spec_id: str, find: str) -> str:
+    return f"tests/test_{spec_id}.py::t:\n  file: src/elsewhere.py\n  find: {find}\n"
+
+
+def _pinned_stack_ledger(
+    tmp_path: Path, sha_a: str, shas: dict[str, str], pins: dict[str, str | None]
+):
+    """One batch whose layers are `pins`' spec ids, bottom first, each
+    packaged at its own commit and pinning its own mutants commit."""
+    ledger = Ledger(tmp_path / "ledger.db", record=MemoryRecord())
+    repo_id = ledger.upsert_repo("thermal-edge", "/o", "/m.git", policy_sha="p" * 64)
+    batch = ledger.create_batch(100.0)
+    task_ids: dict[str, int] = {}
+    predecessor: int | None = None
+    for position, (spec_id, commit) in enumerate(pins.items(), start=1):
+        run_id = ledger.create_run(repo_id, base_sha=sha_a, batch_id=batch)
+        task_id = ledger.create_task(
+            run_id,
+            spec_id=spec_id,
+            spec_sha="s" * 64,
+            branch=f"saffron/{spec_id}",
+            mutants_commit=commit,
+        )
+        ledger.set_task_package(
+            task_id,
+            "READY_FOR_REVIEW",
+            f"saffron/{spec_id}",
+            shas[spec_id],
+            f"https://h/pull/{spec_id}",
+        )
+        ledger.record_stack_layer(
+            task_id, position=position, predecessor_task_id=predecessor, generation=0
+        )
+        predecessor = task_id
+        task_ids[spec_id] = task_id
+    return ledger, batch, task_ids
+
+
+def _review_layer_spy(calls: list):
+    def spy(container, fields, **kwargs):
+        calls.append((fields.spec_id, list(kwargs["acceptance"])))
+        return [review.LensReview(lens, cost_usd=0.0) for lens in ("spec", "standards")]
+
+    return spy
+
+
+def test_each_layers_lenses_read_its_spec_with_the_mutants_its_task_row_pins(
+    tmp_path, monkeypatch
+):
+    """`review_stack` hands each layer's lenses its spec with the mutants
+    its own task row pins. It never reads the ref's current head (b-96508a)."""
+    import saffron.end_review as end_review
+
+    mirror, sha_a, shas = _stack_mirror(tmp_path, monkeypatch)
+    first = _mutants_commit_in(
+        mirror,
+        {
+            "TE-4.yaml": _mutant_yaml("TE-4", "pinned-four"),
+            "TE-7.yaml": _mutant_yaml("TE-7", "unpinned-seven"),
+        },
+    )
+    moved = _mutants_commit_in(
+        mirror,
+        {
+            "TE-4.yaml": _mutant_yaml("TE-4", "moved-four"),
+            "TE-7.yaml": _mutant_yaml("TE-7", "unpinned-seven"),
+            "TE-3.yaml": _mutant_yaml("TE-3", "ref-three"),
+        },
+        parent=first,
+    )
+    _git(mirror, "update-ref", "refs/saffron/mutants", moved)
+    ledger, batch, _task_ids = _pinned_stack_ledger(
+        tmp_path, sha_a, shas, {"TE-4": first, "TE-7": None, "TE-3": moved}
+    )
+    specs = _stack_specs()
+    inline = Mutant(file="src/elsewhere.py", find="inline-three", replace="x")
+    specs["TE-3"] = specs["TE-3"].model_copy(
+        update={
+            "acceptance": [
+                specs["TE-3"].acceptance[0].model_copy(update={"mutant": inline})
+            ]
+        }
+    )
+    calls: list = []
+    monkeypatch.setattr(end_review, "review_layer", _review_layer_spy(calls))
+    kwargs = _end_review_kwargs(mirror, _open_cell_double([]), _scripted([], []))
+
+    end_review.review_stack(ledger, str(batch), 100.0, specs, **kwargs)
+
+    seen = {spec_id: acceptance for spec_id, acceptance in calls}
+    assert list(seen) == ["TE-3", "TE-7", "TE-4"]
+    assert seen["TE-4"][0].mutant == Mutant(
+        file="src/elsewhere.py", find="pinned-four", replace=""
+    )
+    assert seen["TE-7"][0].mutant is None
+    assert seen["TE-3"][0].mutant == inline
+    ledger.close()
+
+
+def test_a_layer_whose_pinned_mutants_commit_cannot_be_read_errors_before_its_cell(
+    tmp_path, monkeypatch
+):
+    """A pinned commit the mirror lacks errors that layer's two lenses at
+    cost 0, and so does one whose `<spec id>.yaml` does not parse. Neither
+    opens a cell. The layer below still opens its own (b-96508a)."""
+    import saffron.end_review as end_review
+
+    mirror, sha_a, shas = _stack_mirror(tmp_path, monkeypatch)
+    readable = _mutants_commit_in(
+        mirror, {"TE-4.yaml": _mutant_yaml("TE-4", "pinned-four")}
+    )
+    unparsed = _mutants_commit_in(
+        mirror, {"TE-7.yaml": "- not a mapping\n"}, parent=readable
+    )
+    _git(mirror, "update-ref", "refs/saffron/mutants", unparsed)
+    missing = "deadbeef" * 5
+    ledger, batch, task_ids = _pinned_stack_ledger(
+        tmp_path, sha_a, shas, {"TE-4": readable, "TE-7": unparsed, "TE-3": missing}
+    )
+    calls: list = []
+    monkeypatch.setattr(end_review, "review_layer", _review_layer_spy(calls))
+    cell_calls: list[str] = []
+    kwargs = _end_review_kwargs(
+        mirror, _open_cell_double(cell_calls), _scripted([], [])
+    )
+
+    layers = end_review.review_stack(
+        ledger, str(batch), 100.0, _stack_specs(), **kwargs
+    )
+
+    assert cell_calls == ["TE-4"]
+    assert [spec_id for spec_id, _ in calls] == ["TE-4"]
+    assert calls[0][1][0].mutant == Mutant(
+        file="src/elsewhere.py", find="pinned-four", replace=""
+    )
+    top, middle, bottom = layers
+    for layer_review, needle in ((top, "deadbeefdead"), (middle, "TE-7.yaml")):
+        assert [r.lens for r in layer_review.reviews] == ["spec", "standards"]
+        for r in layer_review.reviews:
+            assert r.cost_usd == 0.0
+            assert "MutantsError" in (r.error or "")
+            assert needle in (r.error or "")
+    assert all(r.error is None for r in bottom.reviews)
+    statuses = {
+        (row["task_id"], row["lens"]): row["status"]
+        for row in ledger._db.execute(
+            "SELECT t.task_id, e.lens, e.status FROM end_reviews e "
+            "JOIN tasks t ON t.record_key = e.task_key"
+        ).fetchall()
+    }
+    for spec_id, status in (("TE-3", "error"), ("TE-7", "error"), ("TE-4", "reviewed")):
+        for lens in ("spec", "standards"):
+            assert statuses[(task_ids[spec_id], lens)] == status
+    ledger.close()

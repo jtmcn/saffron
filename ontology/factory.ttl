@@ -221,6 +221,7 @@ factory:task_engine a factory:FactKind .
 
 factory:SpecType a owl:Class .
 factory:feature a factory:SpecType . factory:bug a factory:SpecType . factory:refactor a factory:SpecType .
+factory:test a factory:SpecType . factory:docs a factory:SpecType . factory:chore a factory:SpecType .
 
 factory:Severity a owl:Class ; rdfs:label "severity" .
 factory:blocker a factory:Severity . factory:concern a factory:Severity . factory:note a factory:Severity .

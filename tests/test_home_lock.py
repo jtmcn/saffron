@@ -26,7 +26,7 @@ from tests.test_cli import (
     _task_state,
 )
 
-_COMMANDS = ("cell", "batch", "draft")
+_COMMANDS = ("cell", "batch", "draft", "package", "finish")
 
 # Kept before any test patches `cli._batch`. A stub standing in for it can
 # still hand a nested call to the real function this way.
@@ -41,6 +41,16 @@ def _argv(command: str, home: Path, tmp_path: Path, tag: str) -> list[str]:
             "--home",
             str(home),
             "batch",
+            "--repo",
+            str(tmp_path / f"{tag}-repo"),
+        ]
+    if command in ("package", "finish"):
+        target = "SY-1" if command == "package" else "1"
+        return [
+            "--home",
+            str(home),
+            command,
+            target,
             "--repo",
             str(tmp_path / f"{tag}-repo"),
         ]
@@ -86,7 +96,7 @@ def _wire_a_draining_batch(monkeypatch, tmp_path, repo_id: int) -> None:
     monkeypatch.setattr(cli, "run_batch", lambda *a, **k: "DRAINED")
 
 
-def test_a_batch_cell_or_draft_beside_another_on_one_home_is_refused(
+def test_a_command_holding_a_live_row_beside_another_on_one_home_is_refused(
     monkeypatch, tmp_path
 ):
     for holder_cmd in _COMMANDS:
@@ -119,6 +129,8 @@ def test_a_batch_cell_or_draft_beside_another_on_one_home_is_refused(
             monkeypatch.setattr(cli, "_batch", _make_stub("batch"))
             monkeypatch.setattr(cli, "_run_cell", _make_stub("cell"))
             monkeypatch.setattr(cli, "_draft", _make_stub("draft"))
+            monkeypatch.setattr(cli, "_package", _make_stub("package"))
+            monkeypatch.setattr(cli, "_finish", _make_stub("finish"))
 
             holder_result = cli.main(_argv(holder_cmd, home, tmp_path, f"{tag}-holder"))
 
@@ -156,6 +168,8 @@ def test_a_batch_cell_or_draft_beside_another_on_one_home_is_refused(
         monkeypatch.setattr(cli, "_batch", _make_solo_stub("batch"))
         monkeypatch.setattr(cli, "_run_cell", _make_solo_stub("cell"))
         monkeypatch.setattr(cli, "_draft", _make_solo_stub("draft"))
+        monkeypatch.setattr(cli, "_package", _make_solo_stub("package"))
+        monkeypatch.setattr(cli, "_finish", _make_solo_stub("finish"))
 
         result = cli.main(_argv(holder_cmd, home_a, tmp_path, f"solo-{holder_cmd}"))
 
@@ -168,6 +182,8 @@ def test_a_batch_beside_a_live_task_leaves_it_in_its_state(monkeypatch, tmp_path
         ("batch", "REVIEWING"),
         ("cell", "IMPLEMENTING"),
         ("draft", "QUEUED"),
+        ("package", "REBUTTING"),
+        ("finish", "IMPLEMENTING"),
     ]
     for holder_cmd, live_state in cases:
         home = tmp_path / f"home2-{holder_cmd}"
@@ -205,6 +221,8 @@ def test_a_batch_beside_a_live_task_leaves_it_in_its_state(monkeypatch, tmp_path
         monkeypatch.setattr(cli, "_batch", _make_stub("batch"))
         monkeypatch.setattr(cli, "_run_cell", _make_stub("cell"))
         monkeypatch.setattr(cli, "_draft", _make_stub("draft"))
+        monkeypatch.setattr(cli, "_package", _make_stub("package"))
+        monkeypatch.setattr(cli, "_finish", _make_stub("finish"))
 
         holder_result = cli.main(
             _argv(holder_cmd, home, tmp_path, f"{holder_cmd}-holder2")
@@ -373,6 +391,8 @@ def test_the_home_is_freed_when_its_holder_returns_or_raises(monkeypatch, tmp_pa
             monkeypatch.setattr(cli, "_batch", _make_stub("batch"))
             monkeypatch.setattr(cli, "_run_cell", _make_stub("cell"))
             monkeypatch.setattr(cli, "_draft", _make_stub("draft"))
+            monkeypatch.setattr(cli, "_package", _make_stub("package"))
+            monkeypatch.setattr(cli, "_finish", _make_stub("finish"))
 
             cli.main(_argv(holder_cmd, home, tmp_path, f"{tag}-holder"))
 

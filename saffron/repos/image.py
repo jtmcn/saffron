@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 from pathlib import Path
 
 from saffron.cell import runtime
@@ -21,13 +22,48 @@ BASE_DOCKERFILE = _SAFFRON_ROOT / "images" / "cell-base.python.Dockerfile"
 BASE_IMAGE_ENV = "SAFFRON_BASE_IMAGE"
 
 
+# A local git read, bounded so a wedged git never stalls a cell's start.
+ORIGIN_TIMEOUT_S = 30.0
+
+
+def _origin_name(repo: Path) -> str | None:
+    """The last segment of `repo`'s git `origin`, or None with no usable one."""
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(repo), "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            timeout=ORIGIN_TIMEOUT_S,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if done.returncode != 0:
+        return None
+    url = done.stdout.strip()
+    if not url:
+        return None
+    if url.endswith("/"):
+        url = url[:-1]
+    if url.endswith(".git"):
+        url = url[: -len(".git")]
+    cut = max(url.rfind("/"), url.rfind(":"))
+    name = url[cut + 1 :]
+    return name or None
+
+
 def cell_tag(repo: Path) -> str:
     """The image a cell of this repo runs (§5.1's `saffron/cell:<repo>`).
 
-    A tag is `[A-Za-z0-9_.-]`; a directory name is not (a git worktree named
-    `joel+branch` would otherwise build an image that cannot be referenced).
+    Named for `repo`'s git `origin` when it has one. Every git worktree of one
+    repo then builds one cell image instead of one each (backlog b-2bc0d5). A
+    repo with no origin, or no git at all, keeps its directory name.
+
+    A tag is `[A-Za-z0-9_.-]`. A directory name is not, and neither is an
+    origin's last segment. A git worktree named `joel+branch`, or an origin ending
+    `joel+v0.5.git`, would otherwise build a tag no runtime can reference.
     """
-    return "saffron/cell:" + re.sub(r"[^A-Za-z0-9_.-]", "-", repo.name)
+    name = _origin_name(repo) or repo.name
+    return "saffron/cell:" + re.sub(r"[^A-Za-z0-9_.-]", "-", name)
 
 
 def _build_argv(

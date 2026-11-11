@@ -724,6 +724,22 @@ def inspect_image(tag: str, timeout_s: float = 30) -> Completed:
     return _call([dialect().binary, "image", "inspect", tag], timeout_s=timeout_s)
 
 
+# Reasoned: deleting a builder that holds tens of GB is disk work, bounded so a
+# hung delete cannot hold the night.
+RECLAIM_BUILD_CACHE_TIMEOUT_S = 600.0
+
+
+def reclaim_build_cache(
+    timeout_s: float = RECLAIM_BUILD_CACHE_TIMEOUT_S,
+) -> Completed | None:
+    """Drop the selected runtime's build cache, without raising on a refusal.
+    None, having executed nothing, where the runtime names no command."""
+    argv = dialect().build_cache_reclaim_argv
+    if argv is None:
+        return None
+    return _call(argv, timeout_s)
+
+
 def container_logs(name: str, timeout_s: float = 30) -> Completed:
     """A container's whole log, both streams, without raising."""
     return _call([dialect().binary, "logs", name], timeout_s=timeout_s)

@@ -798,9 +798,9 @@ the critic's verdict, and the basis of the critic-ROI question.
 > **adjudicates**, the implementer **rebuts**. Never call any of them "the verdict"
 > without saying whose.
 
-**Rebuttal**: The implementer's single response to confirmed blockers: either a fix
-or an argument that the finding is wrong. Both outcomes are recorded. A documented
-disagreement is more informative than agreement. Each confirmed blocker's answer is
+**Rebuttal**: The implementer's single response to confirmed blockers, and to each anchored
+concern beside them: either a fix or an argument that the finding is wrong. Both outcomes are recorded. A documented
+disagreement is more informative than agreement. Each confirmed blocker's and anchored concern's answer is
 `answered`, `unanswered` or `unread`. An `unread` blocker met a turn nobody could read, so
 its argument is lost, not absent. Neither of the last two is an argument.
 _Avoid_: "response", "appeal", "pushback".

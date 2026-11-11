@@ -47,7 +47,7 @@ from saffron.events import (
 
 # Aliased: `GateResult` below is the gate contract's; this is `events.GateResult`.
 from saffron.events import GateResult as GateResultEvent
-from saffron.gates.baseline import NewFailure, is_no_progress
+from saffron.gates.baseline import NewFailure, is_no_progress, render
 from saffron.gates.contract import GateResult
 from saffron.intake import Criterion, History, Mutant
 from saffron.phases import implement, rebut, review
@@ -788,7 +788,8 @@ def attempt_event(
 
     `gates` is non-empty only on the call `decision=None` makes, REBUT's
     own, never a GATE suite's. Derived from `comparison.new_failures`,
-    never from a gate's status (b-66e82d)."""
+    never from a gate's status (b-66e82d). `failures` renders every one of
+    them, on both phases' lines."""
     if comparison.aborted:
         return Attempt(
             timestamp=time.time(),
@@ -824,6 +825,7 @@ def attempt_event(
         new_failures=len(comparison.new_failures),
         decision=decision,
         gates=names,
+        failures=tuple(render(nf) for nf in comparison.new_failures),
     )
 
 
@@ -2924,12 +2926,18 @@ def _drive_cell(
             )
             for result in latest.results:
                 count = None
+                failures = None
                 if (
                     counted is not None
                     and result.status not in ("skip", "error")
                     and result.gate not in latest.advisory_gates
                 ):
                     count = counted.get(result.gate, 0)
+                    failures = tuple(
+                        render(nf)
+                        for nf in comparison.new_failures
+                        if nf.gate == result.gate
+                    )
                 emit(
                     GateResultEvent(
                         timestamp=time.time(),
@@ -2939,6 +2947,7 @@ def _drive_cell(
                         against=against,
                         attempt=attempt,
                         new_failures=count,
+                        failures=failures,
                     )
                 )
             return comparison
@@ -3434,6 +3443,9 @@ def _drive_cell(
             if on_state is not None:
                 on_state("REBUTTING")
             blockers = review.anchored_blockers(reviews)
+            # §5.6: every anchored concern, the selection rule the concern
+            # answers table shares (`pr_body.py`).
+            concerns = review.rebut_concerns(reviews)
             # Read directly, not through `_over_budget`: that call emits the
             # stopping line, and REBUT no longer stops outright past budget.
             overrun = spent >= spec.budget_usd
@@ -3669,6 +3681,7 @@ def _drive_cell(
                 result = rebut.run_rebut(
                     container,
                     blockers=blockers,
+                    concerns=concerns,
                     acceptance=spec.acceptance,
                     options=options,
                     session_id=session_id,
@@ -3723,32 +3736,44 @@ def _drive_cell(
             spent += result.cost_usd
             session_id = repair_session_id or result.rebuttal.session_id or session_id
             (task_dir / "rebuttal.json").write_text(
-                json.dumps(result.as_dict(blockers), indent=2)
+                json.dumps(result.as_dict(blockers, concerns), indent=2)
             )
             # The critic's verdict and the implementer's argument, onto the
-            # rows REVIEW wrote. Both are keyed by the blocker's number,
-            # which is its position in `blockers` counted from 1 (§5.6).
-            # Nothing validates the rebuttal turn's numbering the way
-            # `run_verdict` validates a verdict set, so it is validated
-            # here: a number nobody asked about is dropped, and
+            # rows REVIEW wrote. Both are keyed by the finding's number,
+            # which is its position in `blockers` then `concerns`, counted
+            # from 1 (§5.6). Nothing validates the rebuttal turn's numbering
+            # the way `run_verdict` validates a verdict set, so it is
+            # validated here: a number nobody asked about is dropped, and
             # `first_answers` keeps the one that stands. Silently letting
-            # a duplicate win leaves another blocker reading as unanswered.
+            # a duplicate win leaves another finding reading as unanswered.
             # `action` rides along because "fixed" and "argued" are the
             # difference the critic-ROI query is asking about (§4.6).
+            total = len(blockers) + len(concerns)
             argued = {
                 n: f"{r.action}: {r.argument}"
                 for n, r in rebut.first_answers(result.rebuttal).items()
-                if 1 <= n <= len(blockers)
+                if 1 <= n <= total
             }
             judged = {
                 v.finding: v.verdict for lens in result.verdicts for v in lens.verdicts
             }
-            # Item 42: one answer per blocker, read by the ledger below.
-            answers = rebut.blocker_answers(result.rebuttal, len(blockers))
+            # Item 42: one answer per blocker and per concern, read by the
+            # ledger below.
+            answers = rebut.blocker_answers(result.rebuttal, total)
             for n, finding in enumerate(blockers, 1):
                 ledger.record_rebuttal(
                     recorded[id(finding)],
                     verdict=judged.get(n),
+                    rebuttal=argued.get(n),
+                    answer=answers.get(n),
+                    error=result.rebuttal.error,
+                )
+            # A concern's answer, after the blockers' own facts. No lens
+            # verdicts a concern (§5.6), so its fact always carries `None`.
+            for n, finding in enumerate(concerns, len(blockers) + 1):
+                ledger.record_rebuttal(
+                    recorded[id(finding)],
+                    verdict=None,
                     rebuttal=argued.get(n),
                     answer=answers.get(n),
                     error=result.rebuttal.error,

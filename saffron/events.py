@@ -246,6 +246,8 @@ class Attempt:
     aborted: tuple[str, ...] = ()
     drift: tuple[str, ...] = ()
     gates: tuple[str, ...] = ()
+    # Each new failure `new_failures` counts, rendered, on GATE and REBUT lines alike.
+    failures: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,6 +269,8 @@ class GateResult:
     attempt: int | None = None
     # `None`, never `0`: a skipped or errored gate had no count computed.
     new_failures: int | None = None
+    # The failures `new_failures` counts, rendered. `None` exactly when it is.
+    failures: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -618,6 +622,22 @@ def _shape_ok(value: object, hint: object) -> bool:
     return True
 
 
+def _is_tuple_hint(hint: object) -> bool:
+    """A `tuple[...]` hint, bare or inside `X | None`."""
+    if typing.get_origin(hint) is tuple:
+        return True
+    if typing.get_origin(hint) in (typing.Union, types.UnionType):
+        return any(_is_tuple_hint(arg) for arg in typing.get_args(hint))
+    return False
+
+
+def _with_failures(head: str, failures: tuple[str, ...]) -> str:
+    """`head`, then each failure on its own line beneath it, cleaned and never clipped."""
+    lines = [head]
+    lines.extend(f"  {_clean(failure, len(failure))}" for failure in failures)
+    return "\n".join(lines)
+
+
 def _parse_line(line: str) -> Event | None:
     """One already-decoded line, parsed into whichever `Event` it names, or
     `None` if it is blank, fails to parse as JSON, is not an object, names no
@@ -650,7 +670,7 @@ def _parse_line(line: str) -> Event | None:
     # comes back a list; coerced here so a round-trip equality check sees none.
     hints = typing.get_type_hints(cls)
     for name, value in list(obj.items()):
-        if isinstance(value, list) and typing.get_origin(hints.get(name)) is tuple:
+        if isinstance(value, list) and _is_tuple_hint(hints.get(name)):
             obj[name] = tuple(value)
     # A field of the wrong shape drops its event, like a missing one (item 61).
     if any(not _shape_ok(value, hints[name]) for name, value in obj.items()):
@@ -901,18 +921,21 @@ def describe(event: Event) -> str:
         if event.drift:
             return f"gates: {list(event.drift)} — distrusting the subtraction"
         if event.new_failures is not None and event.decision is not None:
-            return (
+            head = (
                 f"gates: attempt {event.attempt}, {event.new_failures} new "
                 f"failures -> {event.decision}"
             )
+            return _with_failures(head, event.failures)
         if event.new_failures is not None:
             if event.gates:
                 names = ", ".join(event.gates)
-                return (
+                head = (
                     f"gates: {event.new_failures} new failures after the "
                     f"rebuttal — {names}"
                 )
-            return f"gates: {event.new_failures} new failures after the rebuttal"
+            else:
+                head = f"gates: {event.new_failures} new failures after the rebuttal"
+            return _with_failures(head, event.failures)
         if event.commits is None or event.spent_usd_est is None:
             return f"{event.phase}: attempt {event.attempt}"
         return f"IMPLEMENT: {event.commits} commit(s), ${event.spent_usd_est:.2f} spent"

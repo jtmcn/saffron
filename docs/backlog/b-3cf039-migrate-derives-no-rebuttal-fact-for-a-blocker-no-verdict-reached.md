@@ -1,11 +1,12 @@
 ---
 id: b-3cf039
 title: "`migrate` derives no `rebuttal` fact for a blocker no verdict reached, so it refuses the ref a live cell wrote"
-status: open
+status: done
+closed: 2026-11-10
 tier: 2
 filed: 2026-11-07
-specs: []
-prs: []
+specs: [SA-0364]
+prs: [1136]
 commits: []
 cites: [§5.6]
 related: [42, b-9c7001]
@@ -33,3 +34,6 @@ unread early exit tops up, and a test drives one.
 ## Record
 
 - 2026-11-07: filed from `SA-0340`'s second spec review.
+- 2026-11-10: closed by `SA-0364` (#1136) in the spec loop's run 60. The
+  cell went green, then PACKAGE hit the clock flake #1112 fixes and the task
+  reads `MERGE_FAILED`. The delegate opened the cell's own patch as #1136.

@@ -56,7 +56,7 @@ factory:SpecShape a sh:NodeShape ;
     sh:targetClass factory:Spec ;
     sh:property [ sh:path factory:specType ; sh:minCount 1 ; sh:maxCount 1 ;
         sh:class factory:SpecType ;
-        sh:in ( factory:feature factory:bug factory:refactor ) ] ;
+        sh:in ( factory:feature factory:bug factory:refactor factory:test factory:docs factory:chore ) ] ;
     sh:property [ sh:path factory:hasCriterion ; sh:minCount 1 ;
         sh:class factory:AcceptanceCriterion ] .
 

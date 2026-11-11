@@ -37,3 +37,13 @@ gate that failed.
 - 2026-11-02: filed from the spec loop's run 52.
 - 2026-11-06: recurred in the spec loop's run 54. Finish 67's one real finding was a one-line docstring in `saffron/record/routed.py`. Its follow-up `SA-0338` failed to parse, then failed `prose`, and was pooled. The delegate fixed the line by hand on #1024. b-ffb930 holds the parse failure.
 - 2026-11-09: recurred in the spec loop's run 56. Finish 73 ran `main`'s engine, which lacks this stack's #1099 fix for the writer's own validation. Its follow-up drafts failed to parse three times. `SA-0357` and `SA-0358` were refused for overlapping #1099. The finishing layer went red with one unnamed failure and pushed nothing.
+- 2026-11-10: the spec loop's runs 57 and 58 ran finish 74, 75 and 76 after
+  their stacks merged. The skill runs a finish before the merge. Each finish
+  pooled concerns the review commits had fixed, and could not read its
+  deleted heads. This is the delegate's error, not a recurrence of this item.
+- 2026-11-10: recurred in the spec loop's run 60. Finish 78's two concerns
+  were one-line docstrings. `SA-0366`'s draft failed `prose` on a
+  contraction. `SA-0367`'s witness passed at its base, since review commit
+  `80f41af0` had fixed its line. The finish pushed #1138 with both drafts and
+  ended `INFRASTRUCTURE`. The delegate fixed `SA-0366`'s line in run 60's
+  step 5 pull request and closed #1138.

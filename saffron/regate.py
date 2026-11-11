@@ -12,9 +12,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from saffron import preflight
+from saffron import mutants, preflight
 from saffron.cell import runtime
-from saffron.intake import load_spec
+from saffron.intake import SpecError, load_spec
 from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
 from saffron.repos import image as repo_image
@@ -134,9 +134,10 @@ def run_regate(
 
     No agent runs here, and `CLAUDE_CODE_OAUTH_TOKEN` is never read. A
     decline prints `regate:` and its reason, then returns 1, including a
-    `revert-exempt.json` this cannot read. Any other raise, a failed `gh`,
-    a `PreflightFailed`, any other `PackageError`, an `OSError` reading
-    that file, is left to the caller, which exits 2.
+    `revert-exempt.json` this cannot read, or a pinned mutants commit it
+    cannot read (`b-c5da95`). Any other raise, a failed `gh`, a
+    `PreflightFailed`, any other `PackageError`, an `OSError` reading that
+    file, is left to the caller, which exits 2.
     """
     url = package_phase.real_remote(repo)
     try:
@@ -152,6 +153,12 @@ def run_regate(
             mirror, row["base_sha"], out_dir / "regate" / str(task_id) / "gates"
         )
         spec = _spec_at_base(exported, row["spec_id"], row["spec_sha"])
+        try:
+            spec = mutants.attach_mutants_at(
+                mirror, ledger.task_mutants_commit(task_id), spec
+            )
+        except SpecError as exc:
+            raise _Declined(" ".join(str(exc).split())) from exc
         policy, _policy_sha = load_policy(exported)
         exempt = package_phase.read_revert_exempt(out_dir / row["spec_id"])
     except _Declined as declined:

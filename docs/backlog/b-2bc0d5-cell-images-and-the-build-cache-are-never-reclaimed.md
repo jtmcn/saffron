@@ -1,12 +1,14 @@
 ---
 id: b-2bc0d5
 title: Cell images and the build cache are never reclaimed, so every worktree a cell ran from leaves its image behind
-status: open
+status: done
+closed: 2026-11-10
 tier: 2
 filed: 2026-10-11
-specs: []
-prs: []
+specs: [SA-0365]
+prs: [1137]
 commits: []
+by_hand: true
 cites: [§4.5, §5.1]
 related: []
 ---
@@ -49,3 +51,6 @@ the failure it exists to prevent.
 
 - 2026-10-11: filed after a hand cleanup (`container builder delete --force`,
   `container image prune -a`) reclaimed about 128 GB of runtime storage.
+- 2026-11-10: closed by `SA-0365` (#1137) in the spec loop's run 60. The
+  cell died in the cell runtime and lost its patch, so #1137 was rebuilt by
+  hand from the spec writer's prototype.

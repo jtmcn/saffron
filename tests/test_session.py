@@ -1936,8 +1936,11 @@ def test_the_n1_refusal_names_the_processes_behind_each_answering_port(
         "TCP *:9200 (LISTEN)\n"
     )
     calls = iter([listing, later])
+    real_run = subprocess.run
 
     def _run_lsof(*a, **k):
+        if list(a[0][:1]) != ["lsof"]:
+            return real_run(*a, **k)
         return subprocess.CompletedProcess(a, 0, next(calls), "")
 
     monkeypatch.setattr(subprocess, "run", _run_lsof)
@@ -7310,14 +7313,14 @@ def test_the_gate_check_after_the_rebuttal_continues_the_gate_count(
     assert rebut.attempt == 3
 
 
-def _rebuttal_log(monkeypatch, tmp_path, *, suites, turns, rebut_commits=1):
+def _rebuttal_log(monkeypatch, tmp_path, *, suites, turns, rebut_commits=1, **drive):
     """Drives one cell through REBUT with `use_default_emit=True`. Returns
     its outcome plus every event `read_log` reads back from the real
     `events.jsonl` under `tmp_path / "out" / "SY-1"`, which b-66e82d's
     three witnesses share. `_ANCHORING_DIFF` throughout, since REBUT needs
     REVIEW's own blocker to anchor to the diff. Build `turns` with
     `_through_rebut` when the loop settles in one attempt, or by hand
-    otherwise, as the gate count test above already does.
+    otherwise. `drive` passes `policy` or `gates` on to `_drive`.
     """
     from saffron.events import read_log
 
@@ -7329,6 +7332,7 @@ def _rebuttal_log(monkeypatch, tmp_path, *, suites, turns, rebut_commits=1):
         cell=cell,
         turns=turns,
         use_default_emit=True,
+        **drive,
     )
     return outcome, list(read_log(tmp_path / "out" / "SY-1"))
 
@@ -7464,7 +7468,10 @@ def test_a_red_rebuttal_line_names_each_gate_that_failed_anew(monkeypatch, tmp_p
     assert rebut_attempt.new_failures == 3
     assert list(rebut_attempt.gates) == ["lint", "dead"]
     assert describe(rebut_attempt) == (
-        "gates: 3 new failures after the rebuttal — lint, dead"
+        "gates: 3 new failures after the rebuttal — lint, dead\n"
+        "  [lint] b.py:? E501: too long\n"
+        "  [lint] c.py:? E502: also too long\n"
+        "  [dead] d.py:? V1: unused"
     )
 
     rebuttal_results = {
@@ -7500,7 +7507,10 @@ def test_a_red_rebuttal_line_names_each_gate_that_failed_anew(monkeypatch, tmp_p
         e for e in one_events if isinstance(e, Attempt) and e.phase == "REBUT"
     ]
     assert one_rebut.gates == ("lint",)
-    assert describe(one_rebut) == "gates: 1 new failures after the rebuttal — lint"
+    assert describe(one_rebut) == (
+        "gates: 1 new failures after the rebuttal — lint\n"
+        "  [lint] b.py:? E501: too long"
+    )
     one_results = {
         e.gate: (e.status, e.new_failures)
         for e in one_events
@@ -11186,6 +11196,164 @@ def test_rebut_records_each_blockers_answer_and_an_unread_turns_error(
     )
     assert (first["answer"], first["rebuttal_error"]) == ("unread", "")
     assert (second["answer"], second["rebuttal_error"]) == ("unread", "")
+
+
+# One lens filing a blocker, a concern and a note on `src/x.py` line 1,
+# which `_ANCHORING_DIFF` changes. Plus a concern on a line it does not.
+_BLOCKER_CONCERN_NOTE = {
+    "findings": [
+        {
+            "file": "src/x.py",
+            "line": 1,
+            "severity": "blocker",
+            "claim": "x returns nothing",
+        },
+        {
+            "file": "src/x.py",
+            "line": 1,
+            "severity": "concern",
+            "claim": "a concern on the changed line",
+        },
+        {
+            "file": "src/x.py",
+            "line": 1,
+            "severity": "note",
+            "claim": "a note on the changed line",
+        },
+        {
+            "file": "src/never-touched.py",
+            "line": 4,
+            "severity": "concern",
+            "claim": "a concern the diff does not change",
+        },
+    ]
+}
+
+
+def test_rebut_hands_each_anchored_concern_to_the_rebuttal_and_records_its_answer(
+    monkeypatch, tmp_path
+):
+    """b-31e3c8 (§5.6): REBUT hands each anchored concern to the rebuttal
+    turn, numbered after the blockers. Neither a note nor an unanchored
+    concern reaches it. Item 42's three answers apply to a concern's own
+    row exactly as they do to a blocker's."""
+
+    def _run(path, rebut_turns, *, rebut_commits):
+        cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+        _rebuttable(monkeypatch, cell, rebut_commits=rebut_commits)
+        _outcome, ledger = _drive(
+            monkeypatch,
+            tmp_path / path,
+            cell=cell,
+            turns=[
+                _turn(_block(_PLAN)),
+                _turn(),
+                _turn(_block(_BLOCKER_CONCERN_NOTE)),
+                _turn(_block({"findings": []})),
+                _turn(_block({"findings": []})),
+                _turn(_block({"findings": []})),
+                *rebut_turns,
+            ],
+        )
+        (task_id,) = [row["task_id"] for row in ledger.queue_lines()]
+        rows = {r["claim"]: r for r in ledger.findings(task_id)}
+        return rows, cell, tmp_path / path / "out" / "SY-1" / "rebuttal.json"
+
+    # A readable turn that answers the concern `fixed`, with its argument.
+    rows, answered_cell, rebuttal_json = _run(
+        "answered",
+        (
+            _turn("Fixed both."),
+            _turn(
+                structured_output={
+                    "rebuttals": [
+                        {"finding": 1, "action": "fixed", "argument": "fixed the bug"},
+                        {
+                            "finding": 2,
+                            "action": "fixed",
+                            "argument": "fixed the concern",
+                        },
+                    ]
+                }
+            ),
+            _turn(
+                structured_output={
+                    "verdicts": [{"finding": 1, "verdict": "withdrawn", "reason": "r"}]
+                }
+            ),
+        ),
+        rebut_commits=1,
+    )
+    concern = rows["a concern on the changed line"]
+    assert (concern["answer"], concern["rebuttal"], concern["rebuttal_error"]) == (
+        "answered",
+        "fixed: fixed the concern",
+        None,
+    )
+    # No lens verdicts a concern.
+    assert concern["verdict"] is None
+    note = rows["a note on the changed line"]
+    assert (note["answer"], note["rebuttal"], note["verdict"]) == (None, None, None)
+    unanchored = rows["a concern the diff does not change"]
+    assert (unanchored["answer"], unanchored["rebuttal"], unanchored["verdict"]) == (
+        None,
+        None,
+        None,
+    )
+
+    # The concern reached `run_rebut`'s own prompt, numbered after the one
+    # blocker, and is not a ledger row a side channel alone populated.
+    fixed_prefix = rebut.REBUT_PROMPT.split("{blockers}")[0]
+    rebuttal_prompt = next(
+        prompt for prompt in answered_cell.turns if prompt.startswith(fixed_prefix)
+    )
+    assert "1. [correctness] src/x.py:1 — x returns nothing" in rebuttal_prompt
+    assert (
+        "2. [correctness] src/x.py:1 — a concern on the changed line" in rebuttal_prompt
+    )
+    assert "never-touched" not in rebuttal_prompt
+    assert "a note on the changed line" not in rebuttal_prompt
+
+    # `rebuttal.json` lists the concern under `concerns`, by its own number.
+    recorded = json.loads(rebuttal_json.read_text())
+    assert [c["claim"] for c in recorded["concerns"]] == [
+        "a concern on the changed line"
+    ]
+    assert recorded["concerns"][0]["finding"] == 2
+
+    # A readable turn that leaves the concern out, answering the blocker alone.
+    rows, _cell, _rebuttal_json = _run(
+        "unanswered",
+        (
+            _turn("Argued the blocker only."),
+            _turn(
+                structured_output={
+                    "rebuttals": [
+                        {"finding": 1, "action": "argued", "argument": "by design"}
+                    ]
+                }
+            ),
+            _turn(
+                structured_output={
+                    "verdicts": [{"finding": 1, "verdict": "withdrawn", "reason": "r"}]
+                }
+            ),
+        ),
+        rebut_commits=0,
+    )
+    concern = rows["a concern on the changed line"]
+    assert (concern["answer"], concern["rebuttal"], concern["rebuttal_error"]) == (
+        "unanswered",
+        None,
+        None,
+    )
+
+    # The rebuttal turn's own session raises outright: unread, with its error.
+    rows, _cell, _rebuttal_json = _run(
+        "unread", (implement.AgentFailed("", _cut_off_turn(cost=0.4)),), rebut_commits=0
+    )
+    concern = rows["a concern on the changed line"]
+    assert (concern["answer"], concern["rebuttal_error"]) == ("unread", "")
 
 
 def test_a_rebut_carries_its_unread_and_unanswered_counts_past_a_pool_cut(
@@ -15317,3 +15485,264 @@ def test_a_kill_with_an_uncounted_failure_still_names_the_killing_tests():
         f"{head}. {review.SUITE_KILL_SENTENCE}t.py::b, t.py::c, "
         "and the criterion's witness did not fail."
     )
+
+
+# --- b-66e82d: each gate result and attempt line names its new failures ---
+
+
+def _gate_events(events, against, attempt=None):
+    """`events.GateResult` events of one suite, keyed by gate."""
+    from saffron.events import GateResult as GateResultEvent
+
+    return {
+        e.gate: e
+        for e in events
+        if isinstance(e, GateResultEvent)
+        and e.against == against
+        and (attempt is None or e.attempt == attempt)
+    }
+
+
+def test_each_counted_gate_result_names_the_new_failures_it_counts(
+    monkeypatch, tmp_path
+):
+    """b-66e82d, criterion 1: a counted gate's event carries each new failure
+    it counts, rendered, in the comparison's order, on a loop suite and on
+    the re-run after REBUT. `types` keeps one of two failures at base, so
+    only its second is new. `dead` is advisory and `size` too, so neither
+    carries a list. Every baseline event carries none."""
+    f_t1 = Failure(file="a.py", code="T1", message="first")
+    f_t2 = Failure(file="a.py", line=3, code="T2", message="second")
+    f_dead = Failure(file="d.py", code="V1", message="unused")
+    base = [
+        GateResult(gate="types", status="fail", tool="t 1", failures=[f_t1]),
+        GateResult(gate="dead", status="pass", tool="d 1"),
+    ]
+    dead_red = GateResult(gate="dead", status="fail", tool="d 1", failures=[f_dead])
+    attempt1 = [
+        GateResult(gate="types", status="fail", tool="t 1", failures=[f_t1, f_t2]),
+        dead_red,
+        GateResult(
+            gate="lint",
+            status="fail",
+            tool="l 1",
+            failures=[
+                Failure(file="z.py", code="E1", message="zed"),
+                Failure(file="b.py", code="E2", message="bee"),
+            ],
+        ),
+    ]
+    rebuttal = [
+        base[0],
+        dead_red,
+        GateResult(
+            gate="lint",
+            status="fail",
+            tool="l 1",
+            failures=[Failure(file="r.py", code="E3", message="again")],
+        ),
+    ]
+    outcome, events = _rebuttal_log(
+        monkeypatch,
+        tmp_path,
+        suites=(base, attempt1, base, rebuttal),
+        turns=[
+            _turn(_block(_PLAN)),
+            _turn(),
+            _turn(),  # the repair turn after attempt 1
+            _turn(_block(_BLOCKER)),
+            _turn(_block({"findings": []})),
+            _turn(_block({"findings": []})),
+            _turn(_block({"findings": []})),
+            _turn("Fixed it."),
+            _turn(structured_output=_CLAIMED_FIX),
+        ],
+        policy="gates:\n  dead: { blocking: false }\n",
+        gates=("dead",),
+    )
+    assert outcome.state == "EXHAUSTED"
+
+    baseline = _gate_events(events, "baseline")
+    assert {"types", "dead", "committed"} <= set(baseline)
+    assert all(e.failures is None for e in baseline.values())
+
+    first = _gate_events(events, "attempt", 1)
+    assert first["lint"].failures == ("[lint] z.py:? E1: zed", "[lint] b.py:? E2: bee")
+    assert first["types"].failures == ("[types] a.py:3 T2: second",)
+    assert first["committed"].failures == ()
+    second = _gate_events(events, "attempt", 2)
+    assert "lint" not in second
+    assert second["types"].failures == ()
+    after = _gate_events(events, "rebuttal", 3)
+    assert after["lint"].failures == ("[lint] r.py:? E3: again",)
+    assert after["types"].failures == ()
+    assert after["committed"].failures == ()
+    for suite in (first, second, after):
+        assert suite["dead"].status in ("pass", "fail")
+        for gate in ("dead", "size", "integrity", "census", "criteria"):
+            assert suite[gate].failures is None, gate
+        for event in suite.values():
+            assert (event.failures is None) == (event.new_failures is None)
+            if event.failures is not None:
+                assert type(event.failures) is tuple
+                assert len(event.failures) == event.new_failures
+    assert first["dead"].status == "fail" and after["dead"].status == "fail"
+
+
+def test_an_aborted_or_drifted_suite_names_no_failure_on_any_gate(
+    monkeypatch, tmp_path
+):
+    """b-66e82d, criterion 2: a suite that aborted or drifted counts nothing,
+    so no gate's event carries a list, in the loop or after REBUT. Each drive
+    first logs a counted suite, whose events carry one, through the same
+    read-back."""
+    f_lint = Failure(file="a.py", code="E501", message="too long")
+    lint_red = GateResult(gate="lint", status="fail", tool="l 1", failures=[f_lint])
+    errored = GateResult(gate="tests", status="error", summary="toolchain missing")
+    tests_pass = GateResult(gate="tests", status="pass", tool="pytest 1")
+    tests_skip = GateResult(gate="tests", status="skip")
+    loop_turns = [_turn(_block(_PLAN)), _turn(), _turn()]
+    rebut_turns = _through_rebut(
+        _turn("Fixed it."), _turn(structured_output=_CLAIMED_FIX)
+    )
+    drives = {
+        "loop-aborted": (([], [lint_red], [errored, lint_red]), loop_turns, "attempt"),
+        "loop-drifted": (
+            ([tests_pass], [tests_pass, lint_red], [tests_skip, lint_red]),
+            loop_turns,
+            "attempt",
+        ),
+        "rebut-aborted": (([], [], [errored, lint_red]), rebut_turns, "rebuttal"),
+        "rebut-drifted": (
+            ([tests_pass], [tests_pass], [tests_skip, lint_red]),
+            rebut_turns,
+            "rebuttal",
+        ),
+    }
+    for label, (suites, turns, against) in drives.items():
+        outcome, events = _rebuttal_log(
+            monkeypatch, tmp_path / label, suites=suites, turns=turns
+        )
+        assert outcome.state == "GATE_ERROR", label
+        counted = _gate_events(events, "attempt", 1)
+        if against == "attempt":
+            assert counted["lint"].failures == ("[lint] a.py:? E501: too long",)
+        assert counted["committed"].failures == (), label
+        judged = _gate_events(events, against, 2)
+        assert judged["lint"].status == "fail", label
+        assert all(e.failures is None for e in judged.values()), label
+
+
+def test_each_attempt_line_names_its_new_failures_beneath_its_count():
+    """b-66e82d, criterion 3: an `Attempt` carries its suite's new failures,
+    rendered in order. That holds for each decision and on REBUT's line.
+    `describe` prints each beneath the count, stripped and never clipped.
+    An aborted or drifted suite's line carries none."""
+
+    def _decided(*rounds, max_attempts=4):
+        emitted: list = []
+        comparisons = iter(rounds)
+        session.repair_loop(
+            spec_id="SA-TEST",
+            judge=lambda _attempt: next(comparisons),
+            max_attempts=max_attempts,
+            repair=lambda _new: None,
+            emit=emitted.append,
+        )
+        return [e for e in emitted if isinstance(e, Attempt)]
+
+    f_z = Failure(file="z.py", code="E1", message="zed")
+    f_b = Failure(file="b.py", code="E2", message="bee")
+    f_c = Failure(file="c.py", code="E3", message="sea")
+    repair, no_progress = _decided(_judged(f_z, f_b), _judged(f_z, f_b))
+    assert (repair.decision, no_progress.decision) == ("repair", "no-progress")
+    two = ("[lint] z.py:? E1: zed", "[lint] b.py:? E2: bee")
+    assert repair.failures == two and no_progress.failures == two
+    assert describe(repair) == (
+        "gates: attempt 1, 2 new failures -> repair\n"
+        "  [lint] z.py:? E1: zed\n"
+        "  [lint] b.py:? E2: bee"
+    )
+    _first, exhausted = _decided(_judged(f_z), _judged(f_c), max_attempts=2)
+    assert exhausted.decision == "exhausted"
+    assert exhausted.failures == ("[lint] c.py:? E3: sea",)
+    assert describe(exhausted) == (
+        "gates: attempt 2, 1 new failures -> exhausted\n  [lint] c.py:? E3: sea"
+    )
+    (green,) = _decided(_judged())
+    assert green.failures == ()
+    assert describe(green) == "gates: attempt 1, 0 new failures -> green"
+
+    noisy = Failure(file="n.py", code="E9", message="bad\x1b[2Jline\nnext" + "q" * 600)
+    rebut_comparison = SuiteComparison(
+        SuiteRun(_results(f_z), "standard", frozenset()),
+        new_failures=(NewFailure("lint", noisy), NewFailure("dead", f_b)),
+    )
+    rebut_line = session.attempt_event(
+        rebut_comparison, spec_id="SA-TEST", phase="REBUT", attempt=3
+    )
+    assert rebut_line.failures == (
+        "[lint] n.py:? E9: bad\x1b[2Jline\nnext" + "q" * 600,
+        "[dead] b.py:? E2: bee",
+    )
+    assert describe(rebut_line).split("\n") == [
+        "gates: 2 new failures after the rebuttal — lint, dead",
+        "  [lint] n.py:? E9: bad [2Jline next" + "q" * 600,
+        "  [dead] b.py:? E2: bee",
+    ]
+
+    for distrusted in (
+        SuiteComparison(SuiteRun([], "standard", frozenset()), aborted=("tests",)),
+        SuiteComparison(SuiteRun([], "standard", frozenset()), drift=("tests: …",)),
+    ):
+        line = session.attempt_event(
+            distrusted, spec_id="SA-TEST", phase="GATE", attempt=2
+        )
+        assert line.failures == ()
+        assert "\n" not in describe(line)
+
+
+def test_the_printed_log_names_each_new_failure_beneath_its_count(
+    monkeypatch, tmp_path, capsys
+):
+    """b-66e82d, criterion 4: `_default_emit`'s printed lines name each new
+    failure. So do the `Attempt` events read back from `events.jsonl`. That
+    holds on the loop's red lines and on both REBUT re-runs."""
+
+    f_lint = Failure(file="a.py", code="E501", message="too long")
+    outcome, events = _rebuttal_log(
+        monkeypatch,
+        tmp_path / "loop",
+        suites=([], _results(f_lint), _results(f_lint)),
+        turns=[_turn(_block(_PLAN)), _turn(), _turn()],
+    )
+    assert outcome.state == "EXHAUSTED"
+    printed = capsys.readouterr().out
+    beneath = "\n  [lint] a.py:? E501: too long"
+    assert "gates: attempt 1, 1 new failures -> repair" + beneath in printed
+    assert "gates: attempt 2, 1 new failures -> no-progress" + beneath in printed
+    loop = [e for e in events if isinstance(e, Attempt) and e.phase == "GATE"]
+    assert [e.failures for e in loop] == [("[lint] a.py:? E501: too long",)] * 2
+
+    red = _red_form_suite("format", "lint")
+    outcome, events, _rebuttal, _cell = _rebut_repair_drive(
+        monkeypatch,
+        tmp_path / "rebut",
+        suites=(_GREEN_FORM_SUITE, _GREEN_FORM_SUITE, red, _red_form_suite("format")),
+        turns=_through_rebut_repair(0.1, _turn("Repaired.", cost=0.1)),
+    )
+    assert outcome.state == "EXHAUSTED"
+    printed = capsys.readouterr().out
+    assert (
+        "gates: 2 new failures after the rebuttal — format, lint\n"
+        "  [format] x.py:? E1: m\n"
+        "  [lint] x.py:? E1: m"
+    ) in printed
+    assert (
+        "gates: 1 new failures after the rebuttal — format\n  [format] x.py:? E1: m"
+    ) in printed
+    rebut_lines = [e for e in events if isinstance(e, Attempt) and e.phase == "REBUT"]
+    assert [e.failures for e in rebut_lines] == [
+        ("[format] x.py:? E1: m", "[lint] x.py:? E1: m"),
+        ("[format] x.py:? E1: m",),
+    ]

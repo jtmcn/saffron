@@ -60,6 +60,7 @@ gates: committed=pass
 gates: census=skip
 gates: criteria=skip
 gates: attempt 1, 1 new failures -> repair
+  [lint] a.py:? E501: too long
 gates: scope=pass
 gates: integrity=skip
 gates: size=pass
@@ -68,6 +69,7 @@ gates: committed=pass
 gates: census=skip
 gates: criteria=skip
 gates: attempt 2, 1 new failures -> no-progress
+  [lint] a.py:? E501: too long
 EXHAUSTED: $0.30 spent, session sess-1
 teardown
 teardown: exported 62 bytes to <TASK_DIR>/patch.diff

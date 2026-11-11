@@ -2888,3 +2888,54 @@ critic's own, so they have no line.
 - `SA-0343` (#1106): the cell dropped the sentence "An `AgentFailed` turn
   is never re-prompted." from a docstring it kept. **Bucket 3**,
   conventions. **Landed:** a review commit on #1106.
+
+## 2026-11-10, spec loop run 58 (#1117, #1118)
+
+- `SA-0360` (#1117): REBUT's new witness called `run_rebut` without a
+  required argument inside `pytest.raises`. `types` failed and the task
+  ended `EXHAUSTED`. **Bucket 1**, `types`. **Open:** b-0bd346, since no
+  repair turn follows a red non-form gate after REBUT.
+- `SA-0360` (#1117): three witnesses let a probe survive. None checked that
+  a verdict session sees its own blocker. None drove an argued blocker
+  beside a concern claimed fixed. One read a single row of the table.
+  **Bucket 3**, adequacy. **Landed:** a review commit on #1117.
+- `SA-0360` (#1117): the blocker filter dropped every number past the
+  blockers, not only the concerns' numbers. **Bucket 3**, correctness.
+  **Landed:** a review commit on #1117.
+- `SA-0360` (#1117): a sentence written twice, a docstring naming its test
+  callers, and a prompt paragraph with no blank line before it.
+  **Bucket 3**, conventions. **Landed:** a review commit on #1117.
+- `SA-0361` (#1118): `_format_budget` printed `:g`, which rounds past six
+  significant digits. The witness's only sub-cent case had six.
+  **Bucket 3**, correctness. **Landed:** a review commit on #1118.
+- `SA-0361` (#1118): the default-budget case passed `--budget 50.0`, so a
+  changed parser default survived it. **Bucket 3**, adequacy.
+  **Landed:** a review commit on #1118.
+- `SA-0361` (#1118): a docstring that never said it returns the total, the
+  stop reasons spelled out, and a third copy of one test order.
+  **Bucket 3**, conventions. **Landed:** a review commit on #1118.
+
+## 2026-11-10, spec loop run 59 (#1127)
+
+- `SA-0362` (#1127): a new test helper restated `_rebuttal_log` line for
+  line, and two tests re-imported `Attempt` under an alias. **Bucket 3**,
+  conventions. **Landed:** a review commit on #1127.
+
+## 2026-11-10, spec loop run 60 (#1135, #1136, #1137)
+
+- `SA-0363` (#1135): the three decline witnesses fed only a one-line parser
+  error, so a reason that kept its newlines passed. **Bucket 1**, a witness
+  that cannot fail. **Landed:** a review commit on #1135.
+- `SA-0363` (#1135): two test files restated six git fixture helpers line for
+  line. **Bucket 3**, conventions. **Landed:** a review commit on #1135.
+- `SA-0364` (#1136): no witness migrated against the live record, though a
+  refused live ref is the defect. **Bucket 1**, a witness that cannot fail.
+  **Landed:** a review commit on #1136.
+- `SA-0364` (#1136): no note sat between a blocker and a concern, so a
+  position counted over asked findings passed. **Bucket 1**, a witness that
+  cannot fail. **Landed:** a review commit on #1136.
+- `SA-0365` (#1137): the origin read had no bound, so a wedged git could stall
+  a cell's start. **Bucket 2**, a line that every host subprocess takes a
+  bound. **Landed:** a review commit on #1137.
+- `SA-0365` (#1137): `_origin_name` reads git through `Popen` only to dodge a
+  session test's fake. **Bucket 3**. **Open:** b-16c819.

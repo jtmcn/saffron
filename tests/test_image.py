@@ -101,3 +101,101 @@ def test_a_declared_base_image_reaches_the_base_build(monkeypatch, tmp_path):
     image.build_cell_image(tmp_path)
     assert "--build-arg=BASE_IMAGE=local/debootstrap:24.04" in calls[0]
     assert not any(a.startswith("--build-arg") for a in calls[1])
+
+
+def _git(cwd: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True)
+
+
+@pytest.fixture
+def isolated_git(monkeypatch):
+    """No host git config reaches these repos, as SA-0255's witnesses do."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+
+def _repo(path: Path, origin: str | None) -> Path:
+    """A committed repo at `path` with a `.saffron/Dockerfile`, and `origin`."""
+    (path / ".saffron").mkdir(parents=True)
+    (path / ".saffron" / "Dockerfile").write_text("FROM saffron/cell-base:python\n")
+    _git(path, "init", "-q")
+    _git(path, "add", "-A")
+    _git(path, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "seed")
+    if origin is not None:
+        _git(path, "remote", "add", "origin", origin)
+    return path
+
+
+def test_two_git_worktrees_of_one_repo_build_one_cell_image(
+    monkeypatch, tmp_path, isolated_git
+):
+    """Two git worktrees and their repo build one cell image, and a second
+    repo builds its own (b-2bc0d5)."""
+    store: set[str] = set()
+
+    def _call(argv, timeout_s):
+        store.add(argv[argv.index("-t") + 1])
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(runtime, "call", _call)
+    main = _repo(tmp_path / "saffron", "https://github.com/o/thermal-edge.git")
+    for name in ("joel+one", "wt-two"):
+        _git(main, "worktree", "add", "-q", str(tmp_path / name))
+        image.build_cell_image(tmp_path / name)
+    image.build_cell_image(main)
+    assert {t for t in store if t.startswith("saffron/cell:")} == {
+        "saffron/cell:thermal-edge"
+    }
+
+    other = _repo(tmp_path / "other", "https://github.com/o/lattice.git")
+    image.build_cell_image(other)
+    assert {t for t in store if t.startswith("saffron/cell:")} == {
+        "saffron/cell:thermal-edge",
+        "saffron/cell:lattice",
+    }
+
+
+def test_the_cell_tag_reads_the_repo_name_from_every_origin_form(
+    tmp_path, isolated_git
+):
+    """Each URL shape git writes names the same image. A name a tag cannot
+    carry is made legal, and a repo with no origin keeps its own name."""
+    forms = [
+        "https://github.com/o/thermal-edge.git",
+        "https://github.com/o/thermal-edge",
+        "https://github.com/o/thermal-edge/",
+        "git@github.com:o/thermal-edge.git",
+        "git@host:thermal-edge.git",
+        "ssh://git@github.com/o/thermal-edge.git",
+        "/srv/git/thermal-edge.git",
+        "/srv/git/thermal-edge.git/",
+        "file:///srv/git/thermal-edge",
+    ]
+    for n, origin in enumerate(forms):
+        repo = _repo(tmp_path / f"checkout-{n}", origin)
+        assert image.cell_tag(repo) == "saffron/cell:thermal-edge", origin
+    audit = _repo(tmp_path / "plain-audit", "https://github.com/o/audit.git")
+    assert image.cell_tag(audit) == "saffron/cell:audit"
+    pages = _repo(tmp_path / "plain-pages", "https://github.com/o/o.github.io.git")
+    assert image.cell_tag(pages) == "saffron/cell:o.github.io"
+    for n, origin in enumerate(["/srv/git/repo/.git", "https://host/o/.git"]):
+        empty = _repo(tmp_path / f"empty-{n}" / "checkout", origin)
+        assert image.cell_tag(empty) == "saffron/cell:checkout", origin
+    odd = _repo(tmp_path / "plain", "/srv/git/joel+v0.5.git")
+    assert image.cell_tag(odd) == "saffron/cell:joel-v0.5"
+    lone = _repo(tmp_path / "lone", None)
+    assert image.cell_tag(lone) == "saffron/cell:lone"
+
+
+def test_an_origin_read_that_hangs_keeps_the_directory_name(monkeypatch, tmp_path):
+    """A git that never answers times out at its bound, and the tag falls
+    back to the directory name rather than stalling the cell's start."""
+    bounds: list[float | None] = []
+
+    def _hung(argv, **kw):
+        bounds.append(kw.get("timeout"))
+        raise subprocess.TimeoutExpired(argv, kw.get("timeout") or 0)
+
+    monkeypatch.setattr(image.subprocess, "run", _hung)
+    assert image.cell_tag(tmp_path / "stalled") == "saffron/cell:stalled"
+    assert bounds == [image.ORIGIN_TIMEOUT_S]

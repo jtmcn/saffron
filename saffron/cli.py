@@ -179,6 +179,9 @@ def main(argv: list[str] | None = None) -> int:
     batch_parser.add_argument("--stack", action="store_true")
     # Needs `--stack`, refused below before the ledger opens (b-8a0c9a).
     batch_parser.add_argument("--defer-end-review", action="store_true")
+    # Starts the order below its printed total (b-fe3488). Needs `--stack`,
+    # refused below before the ledger opens, the same way as above.
+    batch_parser.add_argument("--partial", action="store_true")
 
     draft_parser = subcommands.add_parser(
         "draft",
@@ -342,6 +345,8 @@ def main(argv: list[str] | None = None) -> int:
             watch_parser.error("--no-follow needs a spec id")
     if args.command == "batch" and args.defer_end_review and not args.stack:
         batch_parser.error("--defer-end-review needs --stack")
+    if args.command == "batch" and args.partial and not args.stack:
+        batch_parser.error("--partial needs --stack")
     out_dir_arg = getattr(args, "out", None)
     out_dir = out_dir_arg or (args.home / "batches" / "v0")
 
@@ -425,10 +430,12 @@ def main(argv: list[str] | None = None) -> int:
             return _guarding_sigterm(lambda: _adopt(args, ledger, out_dir))
 
         if args.command == "package":
-            return _package(args, ledger, out_dir)
+            return _locked_dispatch(args, lambda: _package(args, ledger, out_dir))
 
         if args.command == "finish":
-            return _guarding_sigterm(lambda: _finish(args, ledger, out_dir))
+            return _locked_dispatch(
+                args, lambda: _guarding_sigterm(lambda: _finish(args, ledger, out_dir))
+            )
 
         if args.command == "watch":
             return _watch(args, out_dir)
@@ -620,7 +627,8 @@ def _pushed_landed(mirror: Path, base_sha: str, pushed_sha: str) -> bool:
 
 
 def _locked_dispatch(args: argparse.Namespace, run: Callable[[], int]) -> int:
-    """Run `cell`, `batch` or `draft` under the home lock (`saffron/home_lock.py`).
+    """Run a command that holds an in-flight row under the home lock
+    (`saffron/home_lock.py`): `cell`, `batch`, `draft`, `package` or `finish`.
 
     A lock already held refuses at once, with one line naming the
     holder's pid and command. It exits `2`, as a setup failure does.
@@ -1923,6 +1931,15 @@ def _stack_follow_ups(
                     verify=judge_verify,
                 )
 
+            # A spec merged to the default branch since the batch cut its base
+            # holds an id the stack top lacks (b-cbb6e7).
+            try:
+                _, main_head = package_phase.fetch_default_branch(
+                    pinned.mirror, pinned.url
+                )
+            except package_phase.PackageError as missed:
+                main_head = None
+                print(f"note: follow-up ids read without the default branch, {missed}")
             return follow_up.write_follow_ups(
                 ledger,
                 stack,
@@ -1939,6 +1956,7 @@ def _stack_follow_ups(
                 cap_usd=writer_left(ledger, int(batch_key), cap_usd),
                 emit=print,
                 pooled=pooled,
+                main_head=main_head,
             )
         except Exception as exc:
             message = " ".join(f"{type(exc).__name__}: {exc}".split())
@@ -2254,19 +2272,28 @@ def _ceil_cents(amount: float) -> float:
     return math.ceil(amount * 100 - 1e-9) / 100
 
 
-def _print_stack_admission(candidates: list[Candidate]) -> None:
-    """What `--budget` a stack queue's own order would need, one line per
-    candidate, printed after `_print_queue`'s own output (b-0a08bf, §7.1).
-    Candidate `k`'s threshold is the least `--budget` from which every larger
-    one starts it: each earlier candidate's `budget_usd` plus one spec review,
-    plus `k`'s own, over `1 - reserve share - writer share` (`_drive`). A
-    smaller budget can start `k` by passing over an earlier one (b-f73cd0).
-    A larger budget below the line can then lose `k`, so no lower figure
-    holds for every budget above it (b-d1c277). The total adds
-    the last spec review, so draining the order leaves both shares whole.
-    """
+def _format_budget(amount: float) -> str:
+    """`amount` to the cent, unless rounding would hide a digit past the
+    cent, when it is printed as given, since `f"{107.999:.2f}"` reads
+    `108.00` (b-fe3488, §7.1)."""
+    rounded = round(amount, 2)
+    if abs(amount - rounded) < 1e-9:
+        return f"{amount:.2f}"
+    return repr(amount)
+
+
+def _print_stack_admission(candidates: list[Candidate]) -> float:
+    """What `--budget` a stack queue's order needs, one line per candidate,
+    printed for `_queue` and `_batch`. Returns the total, which `_batch`
+    compares with `--budget` (b-0a08bf, §7.1). Candidate `k`'s threshold is
+    the least `--budget` from which every larger one starts it: each earlier
+    `budget_usd` plus one spec review, plus `k`'s own, over `1 - reserve share
+    - writer share` (`_drive`). A smaller budget can start `k` by passing over
+    an earlier one (b-f73cd0), and a larger one below the line can lose it
+    (b-d1c277). The total adds the last spec review, so draining the order
+    leaves both shares whole."""
     if not candidates:
-        return
+        return 0.0
     reserve_share, writer_share = _stack_admission_shares(1.0)
     denominator = 1.0 - reserve_share - writer_share
     review_usd = spec_review.SPEC_REVIEW_SESSION_USD
@@ -2287,6 +2314,7 @@ def _print_stack_admission(candidates: list[Candidate]) -> None:
         spent_by_earlier += candidate.spec.budget_usd + review_usd
     total = _ceil_cents(spent_by_earlier / denominator)
     print(f"  --budget ${total:.2f} runs every candidate and keeps both shares whole")
+    return total
 
 
 def _print_batch_plan(
@@ -2333,6 +2361,28 @@ def _print_batch_plan(
     _print_scan_gaps(resolved.repo_slug, resolved.gh_failures, resolved.policy_unread)
 
 
+def _reclaim_build_cache() -> None:
+    """Bound the build cache before readiness reads the disk (b-2bc0d5).
+    A refusal is printed, and the night goes on with the cache it has."""
+    try:
+        done = runtime.reclaim_build_cache()
+    except runtime.CellRuntimeError as exc:
+        print(f"batch: build cache not reclaimed — {exc}")
+        return
+    if done is None:
+        return
+    if done.timed_out:
+        print(
+            "batch: build cache not reclaimed — timed out after "
+            f"{runtime.RECLAIM_BUILD_CACHE_TIMEOUT_S:g}s"
+        )
+        return
+    if done.returncode == 0:
+        return
+    reason = done.stderr.strip() or f"exit {done.returncode}"
+    print(f"batch: build cache not reclaimed — {reason}")
+
+
 def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     """`saffron batch --repo . --budget 50 --until 06:30` — §4.2.1's night,
     driven. Resolves the queue, asserting the batch-only premise `saffron
@@ -2366,6 +2416,10 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     if refusal is not None:
         print(f"batch: refused — {refusal}")
         return 2
+
+    # Dead weight a night does not need to keep (backlog b-2bc0d5), freed
+    # before readiness asks about disk headroom.
+    _reclaim_build_cache()
 
     repo = args.repo.resolve()
     until = (
@@ -2496,6 +2550,17 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                     print(f"batch: the queue page could not be rewritten: {exc}")
 
             if args.stack:
+                # Printed for every `--stack` night, admitted or not
+                # (b-fe3488, §7.1): this refusal reads the same total.
+                total = _print_stack_admission(resolved.candidates)
+                if args.budget < total and not args.partial:
+                    print(
+                        f"batch: refused — ${_format_budget(args.budget)} is "
+                        f"below ${total:.2f}, the printed total; --partial "
+                        "starts the order anyway"
+                    )
+                    return 2
+
                 # A stack batch never rescans: the order is fixed right here.
                 # `repo_id` is still looked up fresh per task, not pinned now.
                 stack_base = (

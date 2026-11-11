@@ -1,11 +1,12 @@
 ---
 id: b-fe3488
 title: "`saffron batch --stack` starts an order its budget cannot run, and prints no admission line"
-status: open
+status: done
 tier: 2
 filed: 2026-11-06
-specs: []
-prs: []
+closed: 2026-11-10
+specs: [SA-0361]
+prs: [1115, 1118]
 commits: []
 cites: [§7.1]
 related: [b-2f4746]
@@ -30,3 +31,8 @@ order holds, unless told to run a prefix.
 ## Record
 
 - 2026-11-06: filed from the spec loop's run 54.
+- 2026-11-09: recurred in the spec loop's run 57. Batch 74 ran `--budget 120` for `SA-0343` ($52) and `SA-0356` ($30), so tasks got $60. `SA-0343` spent $52.44, and the batch ended `BUDGET` before `SA-0356`. A second batch, with its own reserve and finish, ran `SA-0356`. Specced as `SA-0361`.
+- 2026-11-09: `SA-0361` refuses below the queue's printed total, not below the last layer's threshold. Between the two every layer starts, and the last spec review spends into the reserve and the writer's share. Whether those shares are a floor is b-2f4746's open question. So the delegate took the arm that keeps them whole, and `--partial` overrides it.
+- 2026-11-10: run 57's feedback, finding 2, said batch 74's budget stop had
+  no item. This item was it.
+- 2026-11-10: done by `SA-0361` (#1118), from the spec loop's run 58.
