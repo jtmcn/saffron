@@ -145,3 +145,40 @@ blocker, the concern and one note by hand.
     found one undriven member, and the second came from round 1's fix.
 31. A spec that adds a refusal greps the touched modules' docstrings for a
     list of refusals. `task.py` keeps three such lists.
+
+## SA-0373 (b-323c97), after spec loop run 62
+
+Runs 50, 53, 56 and 61 each adopted an `EXHAUSTED` task from a stack
+batch. Each finish then refused for want of a layer, or graded a later
+layer against the wrong parent. This spec makes such a task the batch's top
+layer on `saffron adopt`'s green re-gate. That happens only if the task ran
+after every layer. Otherwise adopt says no end review reads it.
+
+The writer drafted in 18.4 minutes and killed 15 wrong versions. It found
+the stack-batch mark in recorded facts: a run that names a batch, plus a
+`spec_reviews` row. It checked placement against the home ledger. Batches
+59, 66 and 79 would place their adopted task, and batch 73 would print the
+line. It landed protected edits to `CONTEXT.md` and `DESIGN.md` §5.7
+itself.
+
+**Review 1: 0 blockers, 2 concerns, 4 notes.** The delegate applied both by
+hand.
+
+- Criterion 4's "already a layer" arm could not be reached if that task was
+  seeded in `READY_FOR_REVIEW`, the state a layer holds. Pre-flight 1
+  missed it: the member was named, but its seed could not reach the branch.
+- ADR 7 records what writes a layer, and the spec added a writer.
+  Pre-flight 8 missed it, since the writer amended `CONTEXT.md` and
+  `DESIGN.md` but not the ADR.
+
+**Review 2: 0 blockers, 1 concern, 4 notes.** The delegate applied the
+concern by hand. Criterion 5's `READY_FOR_REVIEW` task had the same hole:
+seeded as a layer, a wrong early-return call records nothing.
+
+## Checks to build (SA-0373)
+
+32. For each wrong version, pre-flight 1 names the seeded state that
+    reaches the branch it breaks. Both rounds here found a natural seed
+    that short-circuits before the branch.
+33. A spec that adds a writer of a recorded fact greps `docs/adr/` for the
+    rule naming that fact's writers.
