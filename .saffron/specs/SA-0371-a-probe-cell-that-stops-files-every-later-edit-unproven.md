@@ -145,52 +145,52 @@ The record is `criterion-probes.json` and `wrong-versions.json` under that
 task's directory.
 
 **One gate-only cell asks every pair.** `_apply_criterion_probes`
-(`saffron/cell/session.py:2058`) files a pair with no edit as unproven,
-with the summary "this session named no edit" (`saffron/cell/session.py:2103-2105`).
+(`saffron/cell/session.py:2061`) files a pair with no edit as unproven,
+with the summary "this session named no edit" (`saffron/cell/session.py:2106-2108`).
 It files a refused pair as unproven with its refusal under `refusal`
-(`saffron/cell/session.py:2106-2110`). A repo whose head declares no `tests`
+(`saffron/cell/session.py:2109-2113`). A repo whose head declares no `tests`
 gate files every pair unproven and enters no cell
-(`saffron/cell/session.py:2115-2121`). The rest are asked in one cell entered through
-`critic_cell` with `network=None` and the repo's gate env (`:2129-2143`).
+(`saffron/cell/session.py:2118-2124`). The rest are asked in one cell entered through
+`critic_cell` with `network=None` and the repo's gate env (`:2132-2146`).
 
 **A cell that cannot be entered files every pair `unproven`.** The
 `except` files them with `_PROBE_CELL_UNENTERABLE` and the error
-(`saffron/cell/session.py:2144-2146`). That constant reads `the probe cell
+(`saffron/cell/session.py:2147-2149`). That constant reads `the probe cell
 could not be entered: ` (`:114`).
 
 **A stop part-way files every later pair `unproven`.** `_mutate` and
 `_run_tests` set `stopped` when the cell raises `runtime.CellRuntimeError`
-(`saffron/cell/session.py:2153-2175`). The loop over pairs starts at
-`:2177`. Three exits then file every later pair with `unknown_tree`, whose
-text names no error (`:2090-2093`):
+(`saffron/cell/session.py:2156-2178`). The loop over pairs starts at
+`:2180`. Three exits then file every later pair with `unknown_tree`, whose
+text names no error (`:2093-2096`):
 
 - A stop at the witness ask. The witness gate files the pair itself as an
-  error first (`saffron/cell/session.py:2190-2194`).
+  error first (`saffron/cell/session.py:2193-2197`).
 - A raise reading a survivor's line, which files the pair as an error
-  (`saffron/cell/session.py:2209-2213`).
+  (`saffron/cell/session.py:2212-2216`).
 - A raise at a survivor's second ask, which appends the finding with its
-  witness-ask claim first (`saffron/cell/session.py:2227-2232`).
+  witness-ask claim first (`saffron/cell/session.py:2230-2235`).
 
 **Entering a fresh gate-only cell reuses the names.** `critic_cell`
 pre-cleans its container, volumes and network by name before it creates them
-(`saffron/cell/session.py:1576-1580`). With `network=None` the names are
-`saffron-gate-*` (`:1559-1566`). An entry after the cell before it is torn
+(`saffron/cell/session.py:1579-1583`). With `network=None` the names are
+`saffron-gate-*` (`:1562-1569`). An entry after the cell before it is torn
 down reuses them. That is reasoned from the pre-clean, not measured: no cell
 has yet been entered twice this way.
 
 **The REVIEW lines count named edits, not asked ones.**
 `describe_criterion_probes` counts a probe with an edit and no `refusal` as
-named (`saffron/phases/review.py:638-659`, `:650`).
+named (`saffron/phases/review.py:640-661`, `:652`).
 `describe_wrong_versions` counts a version with an edit and no `refusal` as
-expressed (`:831-850`, `:842`). Each appends `; no session answered: ` and
+expressed (`:833-852`, `:844`). Each appends `; no session answered: ` and
 the witnesses whose session errored. REVIEW calls `_apply_criterion_probes`
-(`saffron/cell/session.py:3478`). It then writes each record and emits each
-line (`saffron/cell/session.py:3498-3517`). Both lines read the entries the
+(`saffron/cell/session.py:3482`). It then writes each record and emits each
+line (`saffron/cell/session.py:3502-3521`). Both lines read the entries the
 call wrote in place.
 
 **The task is not stopped, by decision.** `review_state` stops at
 `REVIEW_INCOMPLETE` only on a cut pool or an errored lens
-(`saffron/phases/review.py:1066-1075`). `run_task` packages only
+(`saffron/phases/review.py:1068-1077`). `run_task` packages only
 `READY_FOR_REVIEW` or an `EXHAUSTED` task with a standing blocker
 (`saffron/task.py:947-952`). Stopping here would discard a green cell's pull
 request over an infrastructure fault. Principle 36 prefers one re-run
@@ -208,15 +208,15 @@ charged to nobody over a consumer reading a truncated set (Appendix H).
 
 ## Out of scope
 
-**`probe_findings`** (`saffron/cell/session.py:1863`). It serves REVIEW's
-vacuity probes through `_probe_adequacy` (`:2023`). REBUT's probes call it too
-(`saffron/cell/session.py:3657`). Its `unproven(remaining, ...)` paths (`:1976`, `:1983`, `:2001-2018`)
+**`probe_findings`** (`saffron/cell/session.py:1866`). It serves REVIEW's
+vacuity probes through `_probe_adequacy` (`:2026`). REBUT's probes call it too
+(`saffron/cell/session.py:3661`). Its `unproven(remaining, ...)` paths (`:1979`, `:1986`, `:2004-2021`)
 are unchanged. REBUT's check that reads `_PROBE_CELL_UNENTERABLE` reads
-only that function's entries (`:3698-3704`). The new summaries do not
+only that function's entries (`:3702-3708`). The new summaries do not
 reach it.
 
 **The criterion-probe session's own error.** A session that errored is an
-entry with an `error` field (`saffron/phases/review.py:656-658`). Its probes
+entry with an `error` field (`saffron/phases/review.py:658-660`). Its probes
 stay as they are.
 
 **`review_state`, the task's state, and the pull request's Not covered
@@ -274,8 +274,8 @@ REVIEW lines' docstrings, or give the shared tail its own helper with one.
 **Existing tests that change.**
 
 - `test_a_survivor_whose_whole_suite_cannot_answer_keeps_todays_blocker`
-  (`tests/test_session.py:14634`) asserts the fifth criterion is filed
-  `unproven` with `unknown_tree` (`:14745-14755`). Under this change a
+  (`tests/test_session.py:14656`) asserts the fifth criterion is filed
+  `unproven` with `unknown_tree` (`:14767-14777`). Under this change a
   fresh gate-only cell asks it. Append one `fail` `tests` result to its
   scripted answers for that ask. Add `["t.py::e"]` to its subsets and `e` to its
   mutated list, and assert the outcome that result gives. Correct its
