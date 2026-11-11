@@ -83,12 +83,14 @@ acceptance:
       ends `PROVIDER_UNREACHABLE` before REVIEW, and one whose Gate-only
       cell suite aborts and ends `GATE_ERROR`. The third is one whose
       Gate-only cell applies the patch while its critic cell refuses it,
-      ending `EXHAUSTED`.
+      ending `EXHAUSTED`. The clean REVIEW's spec is not stacked, and its
+      file's `tree_base` is that spec's `base_sha`.
     witness: tests/test_session.py::test_a_task_whose_lenses_are_handed_no_diff_records_none
     wrong_versions:
       - The record written as `patch_to_review` is exported, before the Gate-only cell.
       - The record written once REVIEW's branch ends, from `reviewed_diff` whatever it holds.
       - An empty record written when the critic cell refuses the patch.
+      - "`tree_base` written as the spec's `stacked_on`, which is null for a spec that is not stacked."
 ---
 
 ## Context
@@ -193,9 +195,11 @@ Write the three tests the criteria name in `tests/test_session.py`.
 - **REBUT's post-rebuttal diff.** The verdict sessions' second diff is
   exported in REBUT (`saffron/cell/session.py:3854`). No finding is filed
   against it, so it is not recorded.
-- **A second task of the same spec.** A task directory is named by spec id.
-  So a later task of the spec overwrites the file, as it overwrites
-  `findings.json`. The second spec decides how it tells them apart.
+- **A second task of the same spec.** A task directory is named by spec id
+  and is never cleared. A later task of the spec that reaches REVIEW
+  overwrites the file. One that stops before REVIEW leaves the earlier
+  task's file in place. The second spec binds the file to its task, by
+  the hash's phase line inside that task's span of `events.jsonl`.
 - **Tasks that already ran.** Nothing backfills a record for them.
 
 ## Notes for the agent
@@ -237,11 +241,14 @@ here because the second spec reads them.
   container, so the Gate-only cell would refuse first and the critic cell
   never open. Assert the Gate-only container saw an exec, so the case
   reaches the critic cell. Read the clean case's file at the same
-  `tmp_path / ... / "out" / "SY-1"` path the negative cases check.
+  `tmp_path / ... / "out" / "SY-1"` path the negative cases check, and
+  assert its `tree_base` is `"b" * 40`, the default spec's `base_sha`.
 - Criterion 3 names what its witness drives. Other tasks also end with no
   lens handed a diff: a drifted Gate-only suite, a patch the Gate-only
   cell refuses or cannot carry, a refused history cell, and a binary patch
-  at the critic cell. Each leaves REVIEW before the critic cell's export,
+  at the critic cell. So do a repair loop that ends `EXHAUSTED`, a plan
+  rejected, a budget stop, `RATE_LIMITED`, and a critic export that
+  raises. Each leaves REVIEW before the critic cell's export,
   as the three driven cases do. No witness drives them.
 
 **At base each witness fails in its body.** No file is written there.
