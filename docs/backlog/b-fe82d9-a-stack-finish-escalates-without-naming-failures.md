@@ -4,7 +4,7 @@ title: A stack finish escalated on three new failures and recorded none of them 
 status: open
 tier: 2
 filed: 2026-10-08
-specs: [SA-0225, SA-0228]
+specs: [SA-0225, SA-0228, SA-0368]
 prs: [746, 747]
 commits: []
 cites: [§4.2.1]
