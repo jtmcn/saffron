@@ -924,6 +924,21 @@ def cell_env(proxy_ip: str, thread_env: Mapping[str, str]) -> dict[str, str]:
     return env
 
 
+def _patch_json(spec: CellSpec, head_sha: str, files: list[str]) -> str:
+    """`patch.json`, the one shape both export paths write for PACKAGE."""
+    return json.dumps(
+        {
+            # The run's pin, unchanged. `tree_base` is what the
+            # diff below is relative to; equal unless stacked.
+            "base_sha": spec.base_sha,
+            "tree_base": spec.tree_base,
+            "head_sha": head_sha,
+            "files": files,
+        },
+        indent=2,
+    )
+
+
 def _export_from_volume(
     cell_exc: Exception,
     subjects: list[str],
@@ -939,7 +954,7 @@ def _export_from_volume(
     """The fallback `export_patch` reaches once the cell's own patch read
     fails: the same four reads, against `volume` instead of `container`
     (b-f582ee). Removing the container first is what lets a second
-    container attach to the volume at all (measured, see the spec). Never
+    container attach to the volume at all (measured, b-f582ee). Never
     raises, for the same reason its caller does not.
     """
     from saffron.cell import runtime, worktree
@@ -985,20 +1000,13 @@ def _export_from_volume(
             teardown("no_commits", True, "no commits, nothing to export")
             return None, subjects
 
-        head_sha = worktree.head_sha(target)
+        # Every read before either write, so a failed read writes neither file.
+        read_sha = worktree.head_sha(target)
+        files = worktree.changed_files(target, spec.tree_base)
         task_dir.mkdir(parents=True, exist_ok=True)
         (task_dir / "patch.diff").write_text(patch)
-        (task_dir / "patch.json").write_text(
-            json.dumps(
-                {
-                    "base_sha": spec.base_sha,
-                    "tree_base": spec.tree_base,
-                    "head_sha": head_sha,
-                    "files": worktree.changed_files(target, spec.tree_base),
-                },
-                indent=2,
-            )
-        )
+        (task_dir / "patch.json").write_text(_patch_json(spec, read_sha, files))
+        head_sha = read_sha
         teardown(
             "exported",
             True,
@@ -1012,8 +1020,6 @@ def _export_from_volume(
             False,
             f"patch export FAILED — {cell_exc} — {volume}: {exc}",
         )
-        # A failed `changed_files` read, after `patch.diff` is on disk,
-        # keeps the `head_sha` that write already earned.
         return head_sha, subjects
     finally:
         runtime.remove_network(network)
@@ -1093,16 +1099,8 @@ def export_patch(
         task_dir.mkdir(parents=True, exist_ok=True)
         (task_dir / "patch.diff").write_text(patch)
         (task_dir / "patch.json").write_text(
-            json.dumps(
-                {
-                    # The run's pin, unchanged. `tree_base` is what the
-                    # diff below is relative to; equal unless stacked.
-                    "base_sha": spec.base_sha,
-                    "tree_base": spec.tree_base,
-                    "head_sha": head_sha,
-                    "files": worktree.changed_files(container, spec.tree_base),
-                },
-                indent=2,
+            _patch_json(
+                spec, head_sha, worktree.changed_files(container, spec.tree_base)
             )
         )
         _teardown(

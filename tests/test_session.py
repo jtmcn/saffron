@@ -4134,53 +4134,38 @@ def test_a_cell_the_runtime_cannot_exec_in_exports_its_patch_from_the_volume(
     assert subjects_b == [], "a read nobody answered must default empty"
     assert head_b is not None
 
-
-def test_a_cell_whose_subject_read_alone_fails_keeps_the_cell_and_reports_it(
-    monkeypatch, tmp_path
-):
-    """Criterion 1's third case: a live cell whose patch read succeeds but
-    whose subject read fails emits the base `commit_subjects` line, returns
-    no subjects, and never touches the volume."""
-    _pin_diff_noprefix(monkeypatch, tmp_path)
-    repo = tmp_path / "volume"
-    base = _volume_repo(repo)
-    spec = _spec(base_sha=base, stacked_on=None)
-
-    def _exec(_container, command, *, workdir=None, timeout_s=900):
+    # A live cell whose patch read succeeds but whose subject read fails
+    # keeps its container, reports the base line and never reads the volume.
+    def _exec_no_log(_container, command, *, workdir=None, timeout_s=900):
         if "log" in command:
             return runtime.Completed(1, "", "log failed")
-        done = subprocess.run(list(command), cwd=repo, capture_output=True, check=False)
-        return runtime.Completed(
-            done.returncode, runtime._decode(done.stdout), runtime._decode(done.stderr)
-        )
+        return _exec_against(repo)(_container, command, workdir=workdir)
 
-    monkeypatch.setattr("saffron.cell.runtime.exec_", _exec)
+    def _no_volume_read(*_a, **_k):
+        raise AssertionError("a live cell's patch read must never reach the volume")
 
-    def _fail_ephemeral(*_a, **_k):
-        pytest.fail("a live cell's patch read must never reach run_ephemeral")
-
-    monkeypatch.setattr("saffron.cell.runtime.run_ephemeral", _fail_ephemeral)
-
-    watched: list[str] = []
-    created = {"cell-1"}
-    head, subjects = session.export_patch(
-        "cell-1",
+    order_c: list[str] = []
+    _stub_export_network(monkeypatch, order_c)
+    monkeypatch.setattr("saffron.cell.runtime.exec_", _exec_no_log)
+    monkeypatch.setattr("saffron.cell.runtime.run_ephemeral", _no_volume_read)
+    watched_c: list[str] = []
+    created_c = {"cell-c"}
+    head_c, subjects_c = session.export_patch(
+        "cell-c",
         spec,
-        tmp_path / "out",
-        lambda e: watched.append(describe(e)),
+        tmp_path / "out-c",
+        lambda e: watched_c.append(describe(e)),
         volume="vol-1",
         image="img-1",
-        created=created,
+        created=created_c,
     )
-    assert subjects == []
-    assert head is not None
-    assert any("commit subjects are unreadable" in line for line in watched), (
-        "the base's own line for a failed subject read is missing"
-    )
-    exported = next(line for line in watched if "exported" in line)
-    assert exported.startswith("teardown: exported ")
-    assert "vol-1" not in exported, "a live cell's exported line must stay base text"
-    assert "cell-1" in created
+    assert order_c == [], "a live cell claims no export network"
+    assert subjects_c == []
+    assert head_c == head_live
+    assert "cell-c" in created_c
+    assert any("commit subjects are unreadable" in line for line in watched_c)
+    exported_c = next(line for line in watched_c if "exported" in line)
+    assert "vol-1" not in exported_c, "a live cell's exported line must stay base text"
 
 
 def test_a_volume_that_cannot_be_read_either_ends_the_export_once(
@@ -4221,6 +4206,8 @@ def test_a_volume_that_cannot_be_read_either_ends_the_export_once(
     export_failed_line = next(line for line in watched if "export FAILED" in line)
     assert sum(1 for line in watched if "export FAILED" in line) == 1
     assert "vol-1" in export_failed_line
+    assert _DEAD_CELL_ERROR in export_failed_line
+    assert "could not read the volume" in export_failed_line
     assert any("unreadable" in step and "vol-1" in step for step in watched)
     assert "cell-1" not in created
     # The network is removed before the create and again once the last
@@ -4269,6 +4256,8 @@ def test_a_volume_that_cannot_be_read_either_ends_the_export_once(
 
     monkeypatch.setattr("saffron.cell.runtime.create_network", _never_create)
     monkeypatch.setattr("saffron.cell.runtime.run_ephemeral", _never_ephemeral)
+    # The cell's own subject read still answers, so its subjects must survive.
+    monkeypatch.setattr("saffron.cell.runtime.exec_", _exec_cell_subjects_only(repo))
     watched4: list[str] = []
     created4 = {"cell-4"}
     head4, subjects4 = session.export_patch(
@@ -4281,7 +4270,7 @@ def test_a_volume_that_cannot_be_read_either_ends_the_export_once(
         created=created4,
     )
     assert head4 is None
-    assert subjects4 == []
+    assert subjects4 == ["the agent's work"]
     assert removal_calls == ["cell-4"]
     assert "cell-4" in created4, "a removal that failed must not be discarded"
     assert sum(1 for line in watched4 if "export FAILED" in line) == 1
@@ -4314,42 +4303,55 @@ def test_a_volume_that_cannot_be_read_either_ends_the_export_once(
     assert head2 is None
     assert not ephemeral_calls
     assert sum(1 for line in watched2 if "export FAILED" in line) == 1
-    assert _DEAD_CELL_ERROR in next(
-        line for line in watched2 if "export FAILED" in line
-    )
+    hung_line = next(line for line in watched2 if "export FAILED" in line)
+    assert _DEAD_CELL_ERROR in hung_line
+    assert "vol-1" in hung_line
+    assert "hung" in hung_line
 
-
-def test_an_empty_volume_writes_no_patch_and_returns_no_head(monkeypatch, tmp_path):
-    """Criterion 2's empty volume: a dead cell whose volume holds no
-    commits past the base emits the base's `no_commits` line. It writes
-    neither file, and returns `(None, [])`, never a false `export_failed`."""
-    _pin_diff_noprefix(monkeypatch, tmp_path)
-    repo = tmp_path / "volume"
-    base = _volume_repo(repo, with_commits=False)
-    spec = _spec(base_sha=base, stacked_on=None)
-
-    order: list[str] = []
-    _stub_export_network(monkeypatch, order)
+    # A volume whose file list alone cannot be read writes neither file.
     monkeypatch.setattr("saffron.cell.runtime.exec_", _exec_dead)
+    _stub_export_network(monkeypatch, [])
     monkeypatch.setattr(
         "saffron.cell.runtime.run_ephemeral",
-        _run_ephemeral_against(repo, [], from_dir=tmp_path),
+        _run_ephemeral_against(repo, [], from_dir=tmp_path, fail_holding="--name-only"),
     )
-
-    watched: list[str] = []
-    head, subjects = session.export_patch(
-        "cell-1",
+    watched5: list[str] = []
+    head5, _subjects5 = session.export_patch(
+        "cell-5",
         spec,
-        tmp_path / "out",
-        lambda e: watched.append(describe(e)),
+        tmp_path / "out-5",
+        lambda e: watched5.append(describe(e)),
         volume="vol-1",
         image="img-1",
-        created={"cell-1"},
+        created={"cell-5"},
     )
-    assert head is None
-    assert subjects == []
-    assert not (tmp_path / "out" / "patch.diff").exists()
-    assert any("nothing to export" in line for line in watched)
+    assert head5 is None
+    assert not (tmp_path / "out-5").exists() or not list((tmp_path / "out-5").iterdir())
+    assert sum(1 for line in watched5 if "export FAILED" in line) == 1
+
+    # An empty volume: the base's `no_commits` line, neither file, `(None, [])`.
+    empty = tmp_path / "empty"
+    empty_base = _volume_repo(empty, with_commits=False)
+    _stub_export_network(monkeypatch, [])
+    monkeypatch.setattr(
+        "saffron.cell.runtime.run_ephemeral",
+        _run_ephemeral_against(empty, [], from_dir=tmp_path),
+    )
+    watched6: list[str] = []
+    head6, subjects6 = session.export_patch(
+        "cell-6",
+        _spec(base_sha=empty_base, stacked_on=None),
+        tmp_path / "out-6",
+        lambda e: watched6.append(describe(e)),
+        volume="vol-1",
+        image="img-1",
+        created={"cell-6"},
+    )
+    assert head6 is None
+    assert subjects6 == []
+    assert not (tmp_path / "out-6" / "patch.diff").exists()
+    assert any("nothing to export" in line for line in watched6)
+    assert not any("export FAILED" in line for line in watched6)
 
 
 def test_teardown_hands_the_export_the_tasks_own_volume_and_cell_image(
