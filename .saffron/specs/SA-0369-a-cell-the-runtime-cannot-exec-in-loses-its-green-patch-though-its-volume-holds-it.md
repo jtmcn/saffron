@@ -3,7 +3,7 @@ id: SA-0369
 title: A cell the runtime cannot exec in loses its green patch, though its worktree volume still holds it
 type: bug
 priority: 2
-estimated_lines: 126
+estimated_lines: 140
 estimate_measured: true
 touches:
   - saffron/cell/session.py
@@ -51,29 +51,39 @@ max_turns: 245
 risk: standard
 acceptance:
   - claim: >-
-      When every read `session.export_patch` makes from the cell fails, it
+      When `session.export_patch`'s patch read from the cell fails, it
       first removes the cell with `runtime.remove_container`. Once that
       removal succeeds, it drops the cell's name from the `created` set it is
       handed. Then it reads all four again from the worktree volume: the commit subjects,
       the patch, the head sha and the changed files. Each read goes through
       `runtime.run_ephemeral`, in a fresh container of the image the export
       is handed. That container gets no `env` and exactly one mount, the
-      volume handed, read-only at `worktree.WORKTREE_MOUNT`. Its network is one this export
-      creates through `runtime.create_network`, never the cell's own. A
+      volume handed, read-only at `worktree.WORKTREE_MOUNT`. Its network is
+      `saffron-export-<spec id lowercased>`, which this export creates
+      through `runtime.create_network`. That name is neither
+      `saffron-cells-<id>` nor `saffron-critic-net-<id>`. A
       network of that name is removed before the create and again after
       the last read. `patch.diff` and `patch.json` then hold the same bytes
       a live cell's export writes, and the returned head sha and subjects
       are equal. The one `exported` teardown line keeps the base text
       `exported N bytes to <path>`, then names the volume and the cell's
-      error. A cell whose reads succeed is not removed and keeps its name in
-      `created`. It starts no such container and creates no network, and its
-      `exported` line is the base text exactly. The
-      witness drives a live cell and then the same volume behind a dead cell.
-      Both read a rename under a global git config that sets `diff.noprefix`.
+      patch read error. The cell's own "commit subjects are unreadable" line
+      is not emitted on this path. A cell whose patch read succeeds is not
+      removed and keeps its name in `created`. It starts no such container
+      and creates no network, and its `exported` line is the base text
+      exactly. When only its subject read failed, it emits the base's
+      `commit_subjects` line, returns no subjects and writes its patch as at
+      base. The witness drives a live cell, the same volume behind a dead
+      cell whose subject and patch reads both fail, and a live cell whose
+      subject read alone fails. Each reads a rename under a global git
+      config that sets `diff.noprefix`.
     witness: tests/test_session.py::test_a_cell_the_runtime_cannot_exec_in_exports_its_patch_from_the_volume
     wrong_versions:
       - The reader passes no network, so it joins the runtime's default network with full egress.
       - The reader joins the cell's own network, where the task's proxy is reachable.
+      - The export's network reuses the name `saffron-cells-<id>`.
+      - A failed subject read alone sends the export to the volume.
+      - The cell's "commit subjects are unreadable" line is still emitted when the volume answers the subjects.
       - The volume is mounted read-write.
       - The reader is handed the OAuth token, or any `env` at all.
       - The reader also mounts the state volume.
@@ -92,7 +102,7 @@ acceptance:
       - A live cell is removed too.
   - claim: >-
       When the volume cannot be read either, `export_patch` returns
-      `(None, [])` and does not raise. It writes neither file and emits
+      `None` and the subjects the volume gave, and does not raise. It writes neither file and emits
       exactly one `export_failed` teardown line. That line begins
       `patch export FAILED — ` and names the cell's error, the volume and
       the volume's own error. The export's network is removed in this case
@@ -101,7 +111,10 @@ acceptance:
       network create hangs with `runtime.NetworkCreateHung`, and no
       container starts. When the cell's removal exits non-zero, no container
       starts either. The one failure line then names the cell's error and
-      the removal's stderr, and the cell's name stays in `created`. A volume holding no commits past the base emits the
+      the removal's stderr, and the cell's name stays in `created`. A volume
+      whose subject read succeeds and whose patch read fails returns
+      `(None, subjects)` with those subjects and emits the one failure line.
+      A volume holding no commits past the base emits the
       base's `no_commits` line, writes neither file and returns
       `(None, [])`.
     witness: tests/test_session.py::test_a_volume_that_cannot_be_read_either_ends_the_export_once
@@ -115,6 +128,7 @@ acceptance:
       - The network is claimed outside the `try`, so a hung create raises out of `export_patch`.
       - A failed removal is ignored, and the volume is read anyway.
       - The cell's name leaves `created` before its removal succeeds.
+      - A volume whose patch read fails drops the subjects it read.
   - claim: >-
       `_drive_cell`'s teardown hands `export_patch` the task's own worktree
       volume, `saffron-wt-<spec id>`, as `volume`. It hands
@@ -130,7 +144,7 @@ acceptance:
       drives `_drive_cell` with a cell whose reads fail at teardown. Its
       `remove_container` answers a container already removed with a non-zero
       exit, as a missing one does. Three removals of the cell's name reach
-      it: `cell_up`'s pre-clean, the export's, then `cell_down`'s.
+      it: `_drive_cell`'s own pre-clean, the export's, then `cell_down`'s.
     witness: tests/test_session.py::test_a_cell_the_export_removed_is_not_reported_surviving_teardown
     wrong_versions:
       - The export removes the cell and leaves its name in `created`, so `cell_down` reports it surviving.
@@ -172,8 +186,20 @@ export runs, since `cell_down` removes it afterwards
 `container rm -f` on a container, and after `container stop`, a
 `run --rm -v vol:/work:ro` reads the commits made before the removal. `git log`
 shows the last commit and `git fsck` exits 0. Three commits made immediately before
-`rm -f` all survived. The same measurement found `:ro` enforced: `touch` in
-the mount fails with "Read-only file system" and exit 1.
+`rm -f` all survived.
+
+**The read-only flag `Mount(readonly=True)` sends is enforced.** Measured
+on `apple/container` 1.6.1, after the holder was removed with `rm -f`:
+`container run --rm --cap-drop ALL --mount
+type=volume,source=<vol>,target=/work,readonly saffron/cell:saffron` printed
+the commit with `git log`. Its `touch /work/x` then failed with "Read-only
+file system", exit 1. That is the spelling `runtime.Mount.to_flag` builds
+(`saffron/cell/runtime.py:209-211`).
+
+**Each network of the cell is named for its spec.** `_drive_cell` names them
+`saffron-cells-<id>` and `saffron-critic-net-<id>`
+(`saffron/cell/session.py:2163-2164`). It pre-cleans the container with its
+own `runtime.remove_container` call (`saffron/cell/session.py:2176`).
 
 **`cell_down` reports a failed removal of anything in `created`.** It
 removes the container first (`saffron/cell/session.py:1227`). A non-zero
@@ -242,9 +268,17 @@ git fails and a network create that hangs. A `run_ephemeral` that raises,
 and a subnet pool that refuses every create, are left. Both reach the same
 handler in the prototype.
 
-**A cell whose reads partly succeed.** The witnesses drive a cell where
-every read fails. No criterion claims what a cell does when its patch read
-succeeds and a later read fails.
+**A cell whose patch read succeeds and a later read fails.** That cell is
+not read from its volume. Its head sha or changed-files failure emits the
+base's `export_failed` line, and no criterion claims more.
+
+**Teardown time and launchd.** The fallback lengthens a dead cell's
+teardown by up to the removal's, the network's and the four reads' bounds.
+Launchd's stop timeout is not changed here.
+
+**The line's length.** The `exported` and `export_failed` lines render
+clipped at `_DETAIL_BOUND` (`saffron/events.py:807`), while `events.jsonl`
+keeps each whole.
 
 **`events.py`.** The new lines render under the existing `teardown:` rows:
 `exported N bytes`, `patch export FAILED` and `commit subjects unreadable`.
@@ -272,7 +306,13 @@ example `["sh", "-c", 'cd /work && exec "$@"', "sh", *argv]`. Leave
 `timeout_s` at its default or set the seed's 600. Pass no `env`, no
 `cpus` and no `memory`.
 
-**The network.** Name it from the spec id, lowercased: apple/container
+**The trigger.** Read the subjects from the cell first and hold any
+failure. Then read the patch. Only a failed patch read starts the fallback,
+which drops the held failure and reads the subjects from the volume. A
+successful patch read emits the held failure as the base line and goes on
+as at base.
+
+**The network.** Name it `saffron-export-<spec id lowercased>`: apple/container
 refuses an uppercase network name (measured 2026-09-16,
 `tests/test_session.py:1212-1215`). Remove that name first, so a
 SIGKILLed export cannot fail this one's create. Claim it with
@@ -300,7 +340,7 @@ attach would fail.
 **The lines.** On the volume path the `exported` step and `ok=True` stay, so
 `saffron/projection.py:201` still counts it. Append the volume's name and the
 cell's error to the base detail. Keep the base detail byte for byte on a
-live cell. On a failed volume read, emit one `export_failed` line whose
+live cell. The cell's error in the line is its patch read's. On a failed volume read, emit one `export_failed` line whose
 detail starts `patch export FAILED — ` and then the cell's error, so
 `tests/test_session.py:3808`'s substring still holds. A failed volume
 subject read keeps the `commit_subjects` step and names the volume.
@@ -344,6 +384,10 @@ subject read keeps the `commit_subjects` step and names the volume.
   directories, and compare the two files' bytes. Compare each recorded
   mount with `runtime.Mount("volume", <volume>, "/work", readonly=True)` as
   a whole list.
+- Criterion 1's third case: make the stubbed `exec_` fail only a command
+  holding `log`, on a live cell.
+- Criterion 2's partial volume: make the stubbed `run_ephemeral` fail only
+  the patch read, the command holding `-euc`.
 - Criterion 2's empty volume: a second repo whose head is its base.
 - Criterion 3: `_drive` with `_stub_the_runtime`. Wrap `session.export_patch`
   in a spy that records its keywords, appends to `cell.order`, and calls
@@ -362,8 +406,8 @@ Import every name the change adds inside a test body. A module-scope import
 of one makes the reverted test a collection error, which `revert` reads as
 `skip`.
 
-**Measured on a prototype.** A diff built to this spec at base measured 502
-changed tokens on `size_gate` outside `tests/**`, and 1824 with the tests.
+**Measured on a prototype.** A diff built to this spec at base measured 557
+changed tokens on `size_gate` outside `tests/**`, and 2102 with the tests.
 The `bug` ceiling is 1300. Its four witnesses failed with the source
 reverted. Each wrong version listed under the four criteria ran against its
 witness, and each failed it. Deleting the removal call fails criteria 1 and
