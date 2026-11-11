@@ -58,8 +58,8 @@ acceptance:
       enters it only after the cell before it is torn down, through
       `critic_cell` with the same keywords and the same `created` set. The
       fresh cell asks every pair not yet answered, in order. Four stops are
-      driven. The mutator raising as it applies a pair's edit asks that pair
-      again in the fresh cell. So does the `tests` gate raising at a pair's
+      driven. The mutator raising as it applies a pair's edit for its witness
+      ask asks that pair again in the fresh cell. So does the `tests` gate raising at a pair's
       witness ask, and so does a survivor's line read raising. A raise at a
       survivor's second ask files that survivor's finding once, with its
       witness-ask claim, and the fresh cell starts at the next pair. When
@@ -113,7 +113,7 @@ acceptance:
   - claim: >-
       `review.describe_criterion_probes` and `review.describe_wrong_versions`
       each count the edits, across every entry, that carry an `unasked` key.
-      With one or more, the line gains `; N never asked: ` and the `unasked`
+      With one or more, the line gains `; N never answered: ` and the `unasked`
       text of the first such edit. That tail follows the line's counts and
       precedes any `; no session answered: ` tail. An edit whose outcome is
       `error` and which carries no `unasked` key is not counted. The named
@@ -276,8 +276,8 @@ REVIEW lines' docstrings, or give the shared tail its own helper with one.
 - `test_a_survivor_whose_whole_suite_cannot_answer_keeps_todays_blocker`
   (`tests/test_session.py:14634`) asserts the fifth criterion is filed
   `unproven` with `unknown_tree` (`:14745-14755`). Under this change a
-  fresh gate-only cell asks it. Append one `tests` result to its scripted
-  answers for that ask. Add `["t.py::e"]` to its subsets and `e` to its
+  fresh gate-only cell asks it. Append one `fail` `tests` result to its
+  scripted answers for that ask. Add `["t.py::e"]` to its subsets and `e` to its
   mutated list, and assert the outcome that result gives. Correct its
   docstring's sentence about the fifth criterion. Rename no test, since
   `census` compares test names.
