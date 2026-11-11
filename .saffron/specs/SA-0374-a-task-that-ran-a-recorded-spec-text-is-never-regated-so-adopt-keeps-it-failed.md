@@ -53,7 +53,8 @@ acceptance:
       attaches the mutants the task's own row pins, exits 0 on a green
       head, and records the re-gate. The witness drives one task for each
       of `SPEC_TEXT_ORIGINS`, `revision`, `follow_up` and `draft`. Each
-      task holds two rows whose titles differ. It checks the title and the
+      task holds two rows whose titles differ, and both carry that task's
+      own origin, so a reader of `revision` rows alone misses two tasks. It checks the title and the
       attached mutant `reverify` receives, and the recorded head and count.
       A task with no row is still judged against its file at `base_sha`,
       and the same witness checks that file's title reaches `reverify`.
@@ -191,9 +192,9 @@ and `witness` will report `skip` for each. The wrong versions under each
 criterion say what its witness must still catch.
 
 **Why the latest row is the one the cell ran.** Every writer above records
-its row before the cell runs on the task. A later batch that re-runs the
-task records any new row before that cell too. So the latest row is the
-text the newest cell read, which is the cell that produced the head.
+its row before the cell runs on the task. A later batch mints a fresh
+task, so an old task's rows never change after its cell. So the latest row
+is the text the cell read, which is the cell that produced the head.
 
 **Seed each task so the wrong version reaches its branch.**
 
