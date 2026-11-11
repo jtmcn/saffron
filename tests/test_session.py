@@ -14939,7 +14939,7 @@ def test_a_probe_cell_that_stops_is_entered_once_more_for_every_pair_left(
 ):
     """A cell that cannot be entered, or that stops mid-ask, is entered once
     more. The stop can be the mutator, the `tests` gate, a survivor's line
-    read, or a survivor's second ask. The retry happens after the first
+    read, or a survivor's second ask. The fresh cell is entered after the first
     cell is torn down, with the same `critic_cell` keywords and the same
     `created` set. The fresh cell asks every pair not yet answered, in
     order, and a pair it answers carries no `unasked` key. A witness-ask or
@@ -14990,6 +14990,7 @@ def test_a_probe_cell_that_stops_is_entered_once_more_for_every_pair_left(
     assert log_a == ["enter:gate-1", "exit:gate-1", "enter:gate-2", "exit:gate-2"]
     assert kwargs_log_a[0] == kwargs_log_a[1]
     assert kwargs_log_a[0]["created"] is created_a
+    assert kwargs_log_a[1]["created"] is created_a
     a_entry = _outcome_of(scenario_a_pairs, "a")
     b_entry = _outcome_of(scenario_a_pairs, "b")
     assert a_entry["outcome"] == "killed"
@@ -15006,7 +15007,7 @@ def test_a_probe_cell_that_stops_is_entered_once_more_for_every_pair_left(
         scenario_a2_pairs,
         enters=[
             "gate-1",
-            runtime.CellRuntimeError("the second attempt could not enter"),
+            runtime.CellRuntimeError("the fresh cell could not be entered"),
         ],
         run_gate=[
             GateResult(gate="tests", status="fail", tool="pytest 8.0"),
@@ -15018,7 +15019,7 @@ def test_a_probe_cell_that_stops_is_entered_once_more_for_every_pair_left(
     assert log_a2 == [
         "enter:gate-1",
         "exit:gate-1",
-        "enter-failed:the second attempt could not enter",
+        "enter-failed:the fresh cell could not be entered",
     ]
     a2_a = _outcome_of(scenario_a2_pairs, "a")
     a2_b = _outcome_of(scenario_a2_pairs, "b")
@@ -15029,12 +15030,12 @@ def test_a_probe_cell_that_stops_is_entered_once_more_for_every_pair_left(
     assert "unasked" not in a2_b
     assert a2_c["outcome"] == "error"
     assert a2_c["summary"] == (
-        "the probe cell could not be entered: the second attempt could not enter"
+        "the probe cell could not be entered: the fresh cell could not be entered"
     )
-    assert a2_c["unasked"] == "the second attempt could not enter"
+    assert a2_c["unasked"] == "the fresh cell could not be entered"
 
     # Scenario B: the `tests` gate itself raises at a pair's witness ask.
-    # Re-asked whole, surviving on retry.
+    # Re-asked whole, surviving in the fresh cell.
     scenario_b_pairs = _pairs("a")
     log_b, kwargs_log_b, review_b, created_b = _run_apply_criterion_probes(
         monkeypatch,
@@ -15050,13 +15051,14 @@ def test_a_probe_cell_that_stops_is_entered_once_more_for_every_pair_left(
     assert log_b == ["enter:gate-1", "exit:gate-1", "enter:gate-2", "exit:gate-2"]
     assert kwargs_log_b[0] == kwargs_log_b[1]
     assert kwargs_log_b[0]["created"] is created_b
+    assert kwargs_log_b[1]["created"] is created_b
     b_only = _outcome_of(scenario_b_pairs, "a")
     assert b_only["outcome"] == "survived"
     assert "unasked" not in b_only
     assert len(review_b.findings) == 1
 
     # Scenario C: a survivor's line read raises. Re-asked whole, surviving
-    # on retry, this time able to read its own line.
+    # in the fresh cell, this time able to read its own line.
     def _read_at_head_raises_in_gate_1(container, path):
         if container == "gate-1":
             raise runtime.CellRuntimeError("the line read raised")
@@ -15144,6 +15146,7 @@ def test_a_probe_cell_that_stops_is_entered_once_more_for_every_pair_left(
     ]
     assert kwargs_log_f[0] == kwargs_log_f[1]
     assert kwargs_log_f[0]["created"] is created_f
+    assert kwargs_log_f[1]["created"] is created_f
     f_a = _outcome_of(scenario_f_pairs, "a")
     f_b = _outcome_of(scenario_f_pairs, "b")
     assert f_a["outcome"] == "killed"
@@ -15212,6 +15215,7 @@ def test_a_second_stop_files_every_pair_left_as_an_error_naming_the_runtime_erro
     assert log_g == ["enter:gate-1", "exit:gate-1", "enter:gate-2", "exit:gate-2"]
     assert kwargs_log_g[0] == kwargs_log_g[1]
     assert kwargs_log_g[0]["created"] is created_g
+    assert kwargs_log_g[1]["created"] is created_g
 
     g_a = _outcome_of(pairs_g, "a")
     assert g_a["outcome"] == "killed"
@@ -15244,24 +15248,24 @@ def test_a_second_stop_files_every_pair_left_as_an_error_naming_the_runtime_erro
         monkeypatch,
         pairs_h,
         enters=[
-            runtime.CellRuntimeError("the first attempt could not enter"),
-            runtime.CellRuntimeError("the fresh attempt could not enter"),
+            runtime.CellRuntimeError("the first cell could not be entered"),
+            runtime.CellRuntimeError("the fresh cell could not be entered"),
         ],
         run_gate=[],
         mutate=_mutate_ok,
     )
     assert log_h == [
-        "enter-failed:the first attempt could not enter",
-        "enter-failed:the fresh attempt could not enter",
+        "enter-failed:the first cell could not be entered",
+        "enter-failed:the fresh cell could not be entered",
     ]
     h_a = _outcome_of(pairs_h, "a")
     h_b = _outcome_of(pairs_h, "b")
     for entry in (h_a, h_b):
         assert entry["outcome"] == "error"
         assert entry["summary"] == (
-            "the probe cell could not be entered: the fresh attempt could not enter"
+            "the probe cell could not be entered: the fresh cell could not be entered"
         )
-        assert entry["unasked"] == "the fresh attempt could not enter"
+        assert entry["unasked"] == "the fresh cell could not be entered"
 
     # Scenario I: the first cell cannot be entered. The fresh one answers
     # the lone survivor, then its own second ask stops it, leaving nothing to ask.
@@ -15270,7 +15274,7 @@ def test_a_second_stop_files_every_pair_left_as_an_error_naming_the_runtime_erro
         monkeypatch,
         pairs_i,
         enters=[
-            runtime.CellRuntimeError("the first attempt could not enter"),
+            runtime.CellRuntimeError("the first cell could not be entered"),
             "gate-2",
         ],
         run_gate=[
@@ -15280,7 +15284,7 @@ def test_a_second_stop_files_every_pair_left_as_an_error_naming_the_runtime_erro
         mutate=_mutate_ok,
     )
     assert log_i == [
-        "enter-failed:the first attempt could not enter",
+        "enter-failed:the first cell could not be entered",
         "enter:gate-2",
         "exit:gate-2",
     ]

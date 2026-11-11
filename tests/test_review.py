@@ -2851,7 +2851,7 @@ def test_the_wrong_version_line_counts_refused_versions_apart_from_expressed_one
 
 def test_the_review_lines_count_the_edits_no_probe_cell_asked():
     """`_unasked_tail` adds one tail to each REVIEW line for every edit a
-    probe cell's one retry left unasked. It names the first such edit's
+    probe cell's fresh cell left unasked. It names the first such edit's
     own text, before any `; no session answered: ` tail. An edit whose
     outcome is `error` with no `unasked` key is not counted, and the
     named and expressed counts stay as they were. With none, each line

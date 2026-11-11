@@ -638,8 +638,8 @@ def run_criterion_probes(
 
 
 def _unasked_tail(edits: Sequence[Mapping[str, object]]) -> str:
-    """The tail both REVIEW lines append for every edit a probe cell's one
-    retry left unasked (backlog b-7c88f8): a count and the first such edit's
+    """The tail both REVIEW lines append for every edit a probe cell's fresh
+    cell left unasked (backlog b-7c88f8): a count and the first such edit's
     own `unasked` text, between the line's counts and any `; no session
     answered: ` tail. Empty when no edit carries an `unasked` key."""
     unasked = [e["unasked"] for e in edits if e.get("unasked") is not None]
@@ -654,7 +654,7 @@ def describe_criterion_probes(entries: Sequence[Mapping[str, object]]) -> str:
     `describe_wrong_versions` counts versions across every entry. A probe
     with an edit and no `refusal` is named, a null-edit probe is unnamed,
     and a `probe.probe_refusal` refusal is refused. `_unasked_tail` adds a
-    further tail for a named probe its one retry left unasked. The last
+    further tail for a named probe its fresh cell left unasked. The last
     tail names, in entry order, the witness of each entry whose session
     never answered the schema."""
     probes = [
@@ -848,7 +848,7 @@ def describe_wrong_versions(entries: Sequence[Mapping[str, object]]) -> str:
     clause counts every version across every entry. It then counts how
     many named an edit and were not refused, and how many
     `probe.probe_refusal` refused to run. `_unasked_tail` adds a further
-    tail for an expressed version its one retry left unasked. The last
+    tail for an expressed version its fresh cell left unasked. The last
     tail names, in entry order, the witness of each entry whose session
     never answered the schema. With none of either, the line matches the
     first clause alone."""

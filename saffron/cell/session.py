@@ -114,8 +114,8 @@ HISTORY_EXEC_TIMEOUT_S = 600.0
 _PROBE_CELL_UNENTERABLE = "the probe cell could not be entered: "
 _PROBE_BASELINE_UNREADABLE = "the baseline tests gate could not run: "
 
-# What `_apply_criterion_probes` writes on a pair its one retry left
-# unasked, unlike `_PROBE_CELL_UNENTERABLE` for a retry that could not be entered.
+# What `_apply_criterion_probes` writes on a pair its fresh cell left unasked,
+# unlike `_PROBE_CELL_UNENTERABLE`, which names a cell that could not be entered.
 _PROBE_CELL_STOPPED = "the probe cell stopped before this edit's answer was recorded: "
 
 
@@ -2228,11 +2228,11 @@ def _apply_criterion_probes(
         return None
 
     # Entered once more (backlog b-7c88f8) for whatever stop or failed entry
-    # leaves unasked, never a third time, so one fault costs one retry.
+    # leaves unasked, never a third time, so one fault costs one more cell.
     to_ask = with_edit
     cannot_enter = False
     error_text = ""
-    for _attempt in range(2):
+    for _entry in range(2):
         if not to_ask:
             break
         stack = contextlib.ExitStack()
