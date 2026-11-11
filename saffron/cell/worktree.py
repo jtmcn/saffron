@@ -13,6 +13,7 @@ import contextlib
 import shlex
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from saffron.cell import runtime
@@ -272,8 +273,47 @@ def git_argv(*args: str) -> list[str]:
     ]
 
 
-def _git(container: str, *args: str) -> runtime.Completed:
-    return runtime.exec_(container, git_argv(*args), workdir=WORKTREE_MOUNT)
+@dataclass(frozen=True)
+class VolumeTarget:
+    """A worktree volume with no cell left to read it from (b-f582ee).
+
+    `commit_subjects`, `export_patch`, `head_sha` and `changed_files` each
+    take this instead of a container name. It stands in for a cell the
+    runtime can no longer exec into.
+
+    The read runs instead in a fresh, throwaway container of `image`,
+    joined to `network` alone. The volume mounts read-only. No credential
+    reaches it, no egress reaches it, and nothing writes to `/work`.
+    """
+
+    image: str
+    volume: str
+    network: str
+
+
+def _run(target: str | VolumeTarget, argv: Sequence[str]) -> runtime.Completed:
+    """`argv`, run at `WORKTREE_MOUNT`, wherever `target` says to run it.
+
+    A container name execs it in place, exactly as every caller here always
+    has. A `VolumeTarget` has no cell to exec in. It runs instead in a
+    fresh, network-isolated container over the same volume.
+
+    That container changes to `WORKTREE_MOUNT` itself, since `run_ephemeral`
+    takes no working directory of its own.
+    """
+    if isinstance(target, str):
+        return runtime.exec_(target, argv, workdir=WORKTREE_MOUNT)
+    return runtime.run_ephemeral(
+        target.image,
+        ["sh", "-c", f'cd {WORKTREE_MOUNT} && exec "$@"', "sh", *argv],
+        network=target.network,
+        mounts=[runtime.Mount("volume", target.volume, WORKTREE_MOUNT, readonly=True)],
+        timeout_s=600,
+    )
+
+
+def _git(target: str | VolumeTarget, *args: str) -> runtime.Completed:
+    return _run(target, git_argv(*args))
 
 
 def commits_ahead(container: str, base_sha: str) -> int:
@@ -284,17 +324,17 @@ def commits_ahead(container: str, base_sha: str) -> int:
     return int(done.stdout.strip().splitlines()[-1])
 
 
-def head_sha(container: str) -> str:
-    done = _git(container, "rev-parse", "HEAD")
+def head_sha(target: str | VolumeTarget) -> str:
+    done = _git(target, "rev-parse", "HEAD")
     if done.returncode != 0:
         raise runtime.CellRuntimeError(f"rev-parse failed: {done.stderr.strip()}")
     return done.stdout.strip().splitlines()[-1]
 
 
-def commit_subjects(container: str, base_sha: str) -> list[str]:
+def commit_subjects(target: str | VolumeTarget, base_sha: str) -> list[str]:
     """The agent's own commit subjects, newest first — the only surviving trace
     of them once the squash lands (§5.7)."""
-    done = _git(container, "log", "--format=%s", f"{base_sha}..HEAD")
+    done = _git(target, "log", "--format=%s", f"{base_sha}..HEAD")
     if done.returncode != 0:
         raise runtime.CellRuntimeError(f"log failed: {done.stderr.strip()}")
     return [line for line in done.stdout.splitlines() if line.strip()]
@@ -314,7 +354,7 @@ $worktree_prefix --git-dir="$dir" diff {diff_flags} "$1..$head"
 """
 
 
-def export_patch(container: str, base_sha: str) -> str:
+def export_patch(target: str | VolumeTarget, base_sha: str) -> str:
     """The patch every lens, `integrity` and `size` read, and PACKAGE applies.
 
     Read from a fresh bare git dir that borrows the worktree's objects
@@ -328,9 +368,7 @@ def export_patch(container: str, base_sha: str) -> str:
     script = _EXPORT_PATCH_SCRIPT.format(
         prefix=prefix, diff_flags=shlex.join(DIFF_FLAGS)
     )
-    done = runtime.exec_(
-        container, ["sh", "-euc", script, "sh", base_sha], workdir=WORKTREE_MOUNT
-    )
+    done = _run(target, ["sh", "-euc", script, "sh", base_sha])
     if done.returncode != 0:
         raise runtime.CellRuntimeError(f"diff failed: {done.stderr.strip()}")
     return done.stdout
@@ -786,15 +824,13 @@ def source_mutated(container: str, mutant: Mutant) -> Iterator[str | None]:
         raise failed_to_undo
 
 
-def changed_files(container: str, base_sha: str) -> list[str]:
+def changed_files(target: str | VolumeTarget, base_sha: str) -> list[str]:
     """Changed paths, verbatim — they are matched against `touches`.
 
     `-z` for the same reason `repos.mirror` uses it: a path holding a newline
     would otherwise arrive as two paths.
     """
-    done = _git(
-        container, "diff", *DIFF_FLAGS, "--name-only", "-z", f"{base_sha}..HEAD"
-    )
+    done = _git(target, "diff", *DIFF_FLAGS, "--name-only", "-z", f"{base_sha}..HEAD")
     if done.returncode != 0:
         raise runtime.CellRuntimeError(f"diff --name-only failed: {done.stderr}")
     return [path for path in done.stdout.split("\0") if path.strip()]

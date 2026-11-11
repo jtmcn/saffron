@@ -324,7 +324,13 @@ def test_a_stacked_specs_patch_is_exported_against_its_parent_not_the_pin(
     monkeypatch.setattr(wt, "head_sha", lambda c: "c" * 40)
 
     session.export_patch(
-        "cell-1", _spec(stacked_on="d" * 40), tmp_path / "out", lambda _m: None
+        "cell-1",
+        _spec(stacked_on="d" * 40),
+        tmp_path / "out",
+        lambda _m: None,
+        volume="vol-1",
+        image="img",
+        created={"cell-1"},
     )
 
     assert asked == ["d" * 40] * 3, "a consumer still reading the run's pin"
@@ -3844,6 +3850,593 @@ def test_the_agents_subjects_survive_an_export_that_dies(monkeypatch, tmp_path):
     assert outcome.agent_subjects == ["fix the tz default"]
     assert outcome.cell_head_sha is None
     assert any("export FAILED" in line for line in cell.watched)
+
+
+# --- export_patch's fallback to the volume (b-f582ee) ----------------------
+# A real repo stands for the volume, read here by both a live cell and the fallback.
+
+
+def _commit_real(repo, message):
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", message],
+        cwd=repo,
+        check=True,
+    )
+
+
+def _volume_repo(path, *, with_commits=True):
+    """A real repo standing in for the worktree volume. Returns `base_sha`.
+
+    One `git mv` and one added file past the base, the two shapes
+    `changed_files` can carry besides an ordinary edit. With
+    `with_commits` false, HEAD stays at `base_sha` instead.
+    """
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(path)], check=True)
+    (path / "src").mkdir()
+    (path / "src" / "kept.py").write_text("kept = 1\n")
+    (path / "src" / "old_name.py").write_text("old = 1\n")
+    _commit_real(path, "base")
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    if with_commits:
+        subprocess.run(
+            ["git", "mv", "src/old_name.py", "src/new_name.py"], cwd=path, check=True
+        )
+        (path / "src" / "added.py").write_text("added = 1\n")
+        _commit_real(path, "the agent's work")
+    return base
+
+
+def _pin_diff_noprefix(monkeypatch, tmp_path):
+    cfg = tmp_path / "gitconfig"
+    cfg.write_text("[diff]\n\tnoprefix = true\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(cfg))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+
+def _exec_against(repo):
+    """A live cell: run the command for real, against `repo`."""
+
+    def _exec(_container, command, *, workdir=None, timeout_s=900):
+        done = subprocess.run(list(command), cwd=repo, capture_output=True, check=False)
+        return runtime.Completed(
+            done.returncode, runtime._decode(done.stdout), runtime._decode(done.stderr)
+        )
+
+    return _exec
+
+
+_DEAD_CELL_ERROR = "no PID data from sync pipe"
+
+
+def _exec_dead(_container, _command, *, workdir=None, timeout_s=900):
+    return runtime.Completed(1, "", _DEAD_CELL_ERROR)
+
+
+def _exec_cell_subjects_only(repo):
+    """A cell whose subject read alone still works, every other exec dead."""
+
+    def _exec(_container, command, *, workdir=None, timeout_s=900):
+        if "log" not in command:
+            return runtime.Completed(1, "", _DEAD_CELL_ERROR)
+        done = subprocess.run(list(command), cwd=repo, capture_output=True, check=False)
+        return runtime.Completed(
+            done.returncode, runtime._decode(done.stdout), runtime._decode(done.stderr)
+        )
+
+    return _exec
+
+
+def _run_ephemeral_against(repo, calls, *, from_dir, fail_holding=None):
+    """The fallback's own read: run the wrapped command for real, against
+    `repo`. It runs from `from_dir`, not `repo` itself, so a read that
+    forgot to `cd /work` fails instead of silently working. `fail_holding`
+    fails only the one command whose argv holds that substring, standing
+    in for a volume git cannot read.
+    """
+
+    def _run_ephemeral(
+        image,
+        command,
+        *,
+        network=None,
+        env=None,
+        cpus=None,
+        memory=None,
+        mounts=(),
+        timeout_s=120,
+    ):
+        calls.append(
+            SimpleNamespace(
+                image=image,
+                command=list(command),
+                network=network,
+                env=env,
+                cpus=cpus,
+                memory=memory,
+                mounts=list(mounts),
+                timeout_s=timeout_s,
+            )
+        )
+        if fail_holding is not None and any(fail_holding in part for part in command):
+            return runtime.Completed(1, "", f"could not read {repo}")
+        patched = [part.replace("/work", str(repo)) for part in command]
+        done = subprocess.run(patched, cwd=from_dir, capture_output=True, check=False)
+        return runtime.Completed(
+            done.returncode, runtime._decode(done.stdout), runtime._decode(done.stderr)
+        )
+
+    return _run_ephemeral
+
+
+def _stub_export_network(monkeypatch, order, *, hang=False):
+    """`create_network`/`remove_network`/`networks_on_subnet`/`remove_container`,
+    stubbed onto one shared, ordered list. It records the export's own
+    network and container calls, never a real one.
+    """
+
+    def _create_network(name, subnet):
+        order.append(f"create:network:{name}")
+        if hang:
+            raise runtime.NetworkCreateHung(f"{name} hung")
+
+    def _remove_network(name):
+        order.append(f"remove:network:{name}")
+        return runtime.Completed(0, "", "")
+
+    def _networks_on_subnet(subnet, exclude=""):
+        return []
+
+    def _remove_container(name):
+        order.append(f"remove:container:{name}")
+        return runtime.Completed(0, "", "")
+
+    monkeypatch.setattr("saffron.cell.runtime.create_network", _create_network)
+    monkeypatch.setattr("saffron.cell.runtime.remove_network", _remove_network)
+    monkeypatch.setattr("saffron.cell.runtime.networks_on_subnet", _networks_on_subnet)
+    monkeypatch.setattr("saffron.cell.runtime.remove_container", _remove_container)
+
+
+def test_a_cell_the_runtime_cannot_exec_in_exports_its_patch_from_the_volume(
+    monkeypatch, tmp_path
+):
+    """Criterion 1 (b-f582ee). A dead cell's patch read falls back to the
+    volume, through a fresh, read-only, network-isolated container. It
+    produces the same patch, head sha and subjects a live cell's own
+    export would, never the base `export_failed` line."""
+    _pin_diff_noprefix(monkeypatch, tmp_path)
+    repo = tmp_path / "volume"
+    base = _volume_repo(repo)
+    spec = _spec(base_sha=base, stacked_on=None)
+
+    order: list[str] = []
+    _stub_export_network(monkeypatch, order)
+
+    # Live: a container the runtime can exec in.
+    monkeypatch.setattr("saffron.cell.runtime.exec_", _exec_against(repo))
+    watched_live: list[str] = []
+    created_live = {"cell-live"}
+    head_live, subjects_live = session.export_patch(
+        "cell-live",
+        spec,
+        tmp_path / "out-live",
+        lambda e: watched_live.append(describe(e)),
+        volume="vol-1",
+        image="img-1",
+        created=created_live,
+    )
+    assert any("exported" in line for line in watched_live)
+    assert "cell-live" in created_live, "a live cell's container is not removed"
+
+    # Dead: the same cell runtime that cannot exec, falling back to the
+    # same volume's git history through a fresh ephemeral container.
+    monkeypatch.setattr("saffron.cell.runtime.exec_", _exec_dead)
+    ephemeral_calls: list[SimpleNamespace] = []
+    monkeypatch.setattr(
+        "saffron.cell.runtime.run_ephemeral",
+        _run_ephemeral_against(repo, ephemeral_calls, from_dir=tmp_path),
+    )
+    watched_dead: list[str] = []
+    created_dead = {"cell-dead"}
+    head_dead, subjects_dead = session.export_patch(
+        "cell-dead",
+        spec,
+        tmp_path / "out-dead",
+        lambda e: watched_dead.append(describe(e)),
+        volume="vol-1",
+        image="img-1",
+        created=created_dead,
+    )
+
+    assert (tmp_path / "out-live" / "patch.diff").read_bytes() == (
+        tmp_path / "out-dead" / "patch.diff"
+    ).read_bytes()
+    # `patch.json` included: a `files` list the volume read wrong, or did
+    # not read at all, would differ here even though the diff bytes match.
+    assert (tmp_path / "out-live" / "patch.json").read_bytes() == (
+        tmp_path / "out-dead" / "patch.json"
+    ).read_bytes()
+    assert head_dead == head_live
+    assert subjects_dead == subjects_live
+
+    assert "cell-dead" not in created_dead, "the dead cell's name survived removal"
+    assert ephemeral_calls, "the fallback never reached run_ephemeral"
+    for call in ephemeral_calls:
+        assert call.image == "img-1"
+        assert call.env is None
+        assert call.cpus is None
+        assert call.memory is None
+        assert call.mounts == [runtime.Mount("volume", "vol-1", "/work", readonly=True)]
+        assert call.network not in ("saffron-cells-sy-1", "saffron-critic-net-sy-1")
+        assert call.network == "saffron-export-sy-1"
+
+    exported_live = next(line for line in watched_live if "exported" in line)
+    live_bytes = (tmp_path / "out-live" / "patch.diff").stat().st_size
+    assert exported_live == (
+        f"teardown: exported {live_bytes} bytes to {tmp_path / 'out-live' / 'patch.diff'}"
+    ), "a live cell's exported line must stay the base text exactly"
+
+    exported_dead = next(line for line in watched_dead if "exported" in line)
+    assert exported_dead.startswith("teardown: exported ")
+    assert "vol-1" in exported_dead
+    assert _DEAD_CELL_ERROR in exported_dead
+    assert not any("commit subjects are unreadable" in line for line in watched_dead), (
+        "the cell's own held failure must not surface on the fallback path"
+    )
+
+    create_idx = order.index("create:network:saffron-export-sy-1")
+    assert order[:create_idx].count("remove:network:saffron-export-sy-1") == 1
+    assert order[-1] == "remove:network:saffron-export-sy-1"
+    assert order.index("remove:container:cell-dead") < create_idx
+
+    # The cell's own subjects survive a volume whose own subject read
+    # fails, and only a volume that also never answers leaves them empty.
+    monkeypatch.setattr("saffron.cell.runtime.exec_", _exec_cell_subjects_only(repo))
+    monkeypatch.setattr(
+        "saffron.cell.runtime.run_ephemeral",
+        _run_ephemeral_against(repo, [], from_dir=tmp_path, fail_holding="log"),
+    )
+    watched_a: list[str] = []
+    head_a, subjects_a = session.export_patch(
+        "cell-a",
+        spec,
+        tmp_path / "out-a",
+        lambda e: watched_a.append(describe(e)),
+        volume="vol-1",
+        image="img-1",
+        created={"cell-a"},
+    )
+    assert subjects_a == subjects_live
+    assert head_a is not None
+    assert any("unreadable" in line and "vol-1" in line for line in watched_a)
+
+    monkeypatch.setattr("saffron.cell.runtime.exec_", _exec_dead)
+    monkeypatch.setattr(
+        "saffron.cell.runtime.run_ephemeral",
+        _run_ephemeral_against(repo, [], from_dir=tmp_path, fail_holding="log"),
+    )
+    head_b, subjects_b = session.export_patch(
+        "cell-b",
+        spec,
+        tmp_path / "out-b",
+        lambda e: None,
+        volume="vol-1",
+        image="img-1",
+        created={"cell-b"},
+    )
+    assert subjects_b == [], "a read nobody answered must default empty"
+    assert head_b is not None
+
+    # A live cell whose patch read succeeds but whose subject read fails
+    # keeps its container, reports the base line and never reads the volume.
+    def _exec_no_log(_container, command, *, workdir=None, timeout_s=900):
+        if "log" in command:
+            return runtime.Completed(1, "", "log failed")
+        return _exec_against(repo)(_container, command, workdir=workdir)
+
+    def _no_volume_read(*_a, **_k):
+        raise AssertionError("a live cell's patch read must never reach the volume")
+
+    order_c: list[str] = []
+    _stub_export_network(monkeypatch, order_c)
+    monkeypatch.setattr("saffron.cell.runtime.exec_", _exec_no_log)
+    monkeypatch.setattr("saffron.cell.runtime.run_ephemeral", _no_volume_read)
+    watched_c: list[str] = []
+    created_c = {"cell-c"}
+    head_c, subjects_c = session.export_patch(
+        "cell-c",
+        spec,
+        tmp_path / "out-c",
+        lambda e: watched_c.append(describe(e)),
+        volume="vol-1",
+        image="img-1",
+        created=created_c,
+    )
+    assert order_c == [], "a live cell claims no export network"
+    assert subjects_c == []
+    assert head_c == head_live
+    assert "cell-c" in created_c
+    assert any("commit subjects are unreadable" in line for line in watched_c)
+    exported_c = next(line for line in watched_c if "exported" in line)
+    assert "vol-1" not in exported_c, "a live cell's exported line must stay base text"
+
+
+def test_a_volume_that_cannot_be_read_either_ends_the_export_once(
+    monkeypatch, tmp_path
+):
+    """Criterion 2 (b-f582ee). When the volume cannot be read either,
+    `export_patch` returns `(None, ...)` without raising, and writes neither
+    file. Drives a volume whose own subject read fails, a volume whose
+    network create hangs, and an empty volume."""
+    _pin_diff_noprefix(monkeypatch, tmp_path)
+    repo = tmp_path / "volume"
+    base = _volume_repo(repo)
+    spec = _spec(base_sha=base, stacked_on=None)
+    monkeypatch.setattr("saffron.cell.runtime.exec_", _exec_dead)
+
+    # The reader's own git fails on the volume, for both reads: one
+    # `export_failed` line, plus one `commit_subjects` line naming the volume.
+    order: list[str] = []
+    _stub_export_network(monkeypatch, order)
+    monkeypatch.setattr(
+        "saffron.cell.runtime.run_ephemeral",
+        lambda *a, **k: runtime.Completed(1, "", "could not read the volume"),
+    )
+    watched: list[str] = []
+    created = {"cell-1"}
+    head, subjects = session.export_patch(
+        "cell-1",
+        spec,
+        tmp_path / "out-1",
+        lambda e: watched.append(describe(e)),
+        volume="vol-1",
+        image="img-1",
+        created=created,
+    )
+    assert head is None
+    assert subjects == []
+    assert not (tmp_path / "out-1").exists() or not list((tmp_path / "out-1").iterdir())
+    export_failed_line = next(line for line in watched if "export FAILED" in line)
+    assert sum(1 for line in watched if "export FAILED" in line) == 1
+    assert "vol-1" in export_failed_line
+    assert _DEAD_CELL_ERROR in export_failed_line
+    assert "could not read the volume" in export_failed_line
+    assert any("unreadable" in step and "vol-1" in step for step in watched)
+    assert "cell-1" not in created
+    # The network is removed before the create and again once the last
+    # read, successful or not, leaves this function.
+    assert order.count("remove:network:saffron-export-sy-1") == 2
+    assert order[-1] == "remove:network:saffron-export-sy-1"
+
+    # A partial volume: its subjects answer, but its patch read does not.
+    order3: list[str] = []
+    _stub_export_network(monkeypatch, order3)
+    monkeypatch.setattr(
+        "saffron.cell.runtime.run_ephemeral",
+        _run_ephemeral_against(repo, [], from_dir=tmp_path, fail_holding="-euc"),
+    )
+    watched3: list[str] = []
+    head3, subjects3 = session.export_patch(
+        "cell-3",
+        spec,
+        tmp_path / "out-3",
+        lambda e: watched3.append(describe(e)),
+        volume="vol-1",
+        image="img-1",
+        created={"cell-3"},
+    )
+    assert head3 is None
+    assert subjects3 == ["the agent's work"]
+    assert sum(1 for line in watched3 if "export FAILED" in line) == 1
+
+    # The removal of the cell's container itself fails: no network is
+    # claimed and no container starts.
+    removal_calls: list[str] = []
+
+    def _remove_container_fails(name):
+        removal_calls.append(name)
+        return runtime.Completed(1, "", "boom: container busy")
+
+    monkeypatch.setattr(
+        "saffron.cell.runtime.remove_container", _remove_container_fails
+    )
+
+    def _never_create(*_a, **_k):
+        pytest.fail("no network is claimed once the container removal fails")
+
+    def _never_ephemeral(*_a, **_k):
+        pytest.fail("no container starts once the container removal fails")
+
+    monkeypatch.setattr("saffron.cell.runtime.create_network", _never_create)
+    monkeypatch.setattr("saffron.cell.runtime.run_ephemeral", _never_ephemeral)
+    # The cell's own subject read still answers, so its subjects must survive.
+    monkeypatch.setattr("saffron.cell.runtime.exec_", _exec_cell_subjects_only(repo))
+    watched4: list[str] = []
+    created4 = {"cell-4"}
+    head4, subjects4 = session.export_patch(
+        "cell-4",
+        spec,
+        tmp_path / "out-4",
+        lambda e: watched4.append(describe(e)),
+        volume="vol-1",
+        image="img-1",
+        created=created4,
+    )
+    assert head4 is None
+    assert subjects4 == ["the agent's work"]
+    assert removal_calls == ["cell-4"]
+    assert "cell-4" in created4, "a removal that failed must not be discarded"
+    assert sum(1 for line in watched4 if "export FAILED" in line) == 1
+    failed_line = next(line for line in watched4 if "export FAILED" in line)
+    assert _DEAD_CELL_ERROR in failed_line
+    assert "boom: container busy" in failed_line
+
+    # The network create hangs: no container starts, and the one failure
+    # line still carries the cell's own original error.
+    order2: list[str] = []
+    _stub_export_network(monkeypatch, order2, hang=True)
+    ephemeral_calls: list[SimpleNamespace] = []
+
+    def _never(*_a, **_k):
+        ephemeral_calls.append(SimpleNamespace())
+        pytest.fail("no container starts once the network create has hung")
+
+    monkeypatch.setattr("saffron.cell.runtime.run_ephemeral", _never)
+    watched2: list[str] = []
+    created2 = {"cell-2"}
+    head2, subjects2 = session.export_patch(
+        "cell-2",
+        spec,
+        tmp_path / "out-2",
+        lambda e: watched2.append(describe(e)),
+        volume="vol-1",
+        image="img-1",
+        created=created2,
+    )
+    assert head2 is None
+    assert not ephemeral_calls
+    assert sum(1 for line in watched2 if "export FAILED" in line) == 1
+    hung_line = next(line for line in watched2 if "export FAILED" in line)
+    assert _DEAD_CELL_ERROR in hung_line
+    assert "vol-1" in hung_line
+    assert "hung" in hung_line
+
+    # A volume whose file list alone cannot be read writes neither file.
+    monkeypatch.setattr("saffron.cell.runtime.exec_", _exec_dead)
+    _stub_export_network(monkeypatch, [])
+    monkeypatch.setattr(
+        "saffron.cell.runtime.run_ephemeral",
+        _run_ephemeral_against(repo, [], from_dir=tmp_path, fail_holding="--name-only"),
+    )
+    watched5: list[str] = []
+    head5, _subjects5 = session.export_patch(
+        "cell-5",
+        spec,
+        tmp_path / "out-5",
+        lambda e: watched5.append(describe(e)),
+        volume="vol-1",
+        image="img-1",
+        created={"cell-5"},
+    )
+    assert head5 is None
+    assert not (tmp_path / "out-5").exists() or not list((tmp_path / "out-5").iterdir())
+    assert sum(1 for line in watched5 if "export FAILED" in line) == 1
+
+    # An empty volume: the base's `no_commits` line, neither file, `(None, [])`.
+    empty = tmp_path / "empty"
+    empty_base = _volume_repo(empty, with_commits=False)
+    _stub_export_network(monkeypatch, [])
+    monkeypatch.setattr(
+        "saffron.cell.runtime.run_ephemeral",
+        _run_ephemeral_against(empty, [], from_dir=tmp_path),
+    )
+    watched6: list[str] = []
+    head6, subjects6 = session.export_patch(
+        "cell-6",
+        _spec(base_sha=empty_base, stacked_on=None),
+        tmp_path / "out-6",
+        lambda e: watched6.append(describe(e)),
+        volume="vol-1",
+        image="img-1",
+        created={"cell-6"},
+    )
+    assert head6 is None
+    assert subjects6 == []
+    assert not (tmp_path / "out-6" / "patch.diff").exists()
+    assert any("nothing to export" in line for line in watched6)
+    assert not any("export FAILED" in line for line in watched6)
+
+
+def test_teardown_hands_the_export_the_tasks_own_volume_and_cell_image(
+    monkeypatch, tmp_path
+):
+    """Criterion 3 (b-f582ee). `_drive_cell`'s teardown hands `export_patch`
+    the task's own worktree volume. It hands the image the worktree was
+    seeded with too, never the state volume and never the base image."""
+    from saffron.repos import image as image_mod
+
+    cell = _stub_the_runtime(monkeypatch)
+    real_export_patch = session.export_patch
+    spy_calls: list[dict] = []
+
+    def _spy(container, spec, task_dir, emit, **kwargs):
+        spy_calls.append(kwargs)
+        return real_export_patch(container, spec, task_dir, emit, **kwargs)
+
+    monkeypatch.setattr(session, "export_patch", _spy)
+
+    outcome, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert len(spy_calls) == 1
+    assert ("volume", "saffron-wt-SY-1") in cell.removed, (
+        "cell_up's own pre-clean is what names the volume this compares against"
+    )
+    assert spy_calls[0]["volume"] == "saffron-wt-SY-1"
+    assert spy_calls[0]["image"] == image_mod.cell_tag(tmp_path / "repo")
+    assert spy_calls[0]["volume"] != "saffron-st-SY-1"
+    assert spy_calls[0]["image"] != "img"  # the base image `build_cell_image` fakes
+
+
+def test_a_container_the_export_removed_is_not_reported_surviving_teardown(
+    monkeypatch, tmp_path
+):
+    """Criterion 4 (b-f582ee). The export's own fallback removes the cell's
+    container first. `cell_down`'s second removal of it must not then
+    read as a leak. A `container rm -f` of a missing name exits
+    non-zero (measured)."""
+    cell = _stub_the_runtime(monkeypatch)
+
+    def _dies(_container, _sha):
+        if any(line.startswith("teardown") for line in cell.watched):
+            raise runtime.CellRuntimeError("no such cell")
+        return _DIFF
+
+    monkeypatch.setattr("saffron.cell.worktree.export_patch", _dies)
+
+    container = "saffron-cell-SY-1"
+    removals: list[str] = []
+
+    def _remove_container(name):
+        if name != container:
+            return runtime.Completed(0, "", "")
+        removals.append(name)
+        # The first two calls for this name succeed: the pre-clean, then
+        # the export's own removal. A third call finds it already gone.
+        if len(removals) <= 2:
+            return runtime.Completed(0, "", "")
+        return runtime.Completed(1, "", f"container with ID {name} not found")
+
+    monkeypatch.setattr("saffron.cell.runtime.remove_container", _remove_container)
+
+    def _fail_ephemeral(*_a, **_k):
+        pytest.fail(
+            "the fallback must read the stubbed worktree functions, "
+            "never runtime.run_ephemeral directly"
+        )
+
+    monkeypatch.setattr("saffron.cell.runtime.run_ephemeral", _fail_ephemeral)
+
+    outcome, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+
+    assert outcome.state == "READY_FOR_REVIEW"
+    # Three calls for this name: the pre-clean, the export's own removal,
+    # and `cell_down`'s. This proves the fallback's removal ran.
+    assert len(removals) == 3
+    assert not any("survived" in line and container in line for line in cell.watched), (
+        "the export's own removal of the container must not read as a leak"
+    )
 
 
 def test_a_diff_outside_touches_fails_the_suite(monkeypatch, tmp_path):
