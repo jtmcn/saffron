@@ -200,6 +200,15 @@ def counted_header(lines: Sequence[QueueLine]) -> dict[str, str]:
     }
 
 
+# The header key every page writer spells through `accept_rate_header`.
+ACCEPT_RATE_KEY = "trailing accept rate"
+
+
+def accept_rate_header(ledger: Ledger) -> dict[str, str]:
+    """The page header field that carries `trailing_accept_rate`."""
+    return {ACCEPT_RATE_KEY: trailing_accept_rate(ledger)}
+
+
 def trailing_accept_rate(ledger: Ledger) -> str:
     """§6's one number: the merged share of the twenty newest settled tasks,
     pooled across every repo the ledger holds. Half rounds up, and the

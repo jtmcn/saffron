@@ -62,7 +62,7 @@ from saffron.record.migrate import migrate_and_push
 from saffron.record.refs import RefsRecord
 from saffron.record.routed import RoutedRecord
 from saffron.replay import replay
-from saffron.report.index import orphan_rows, trailing_accept_rate
+from saffron.report.index import accept_rate_header, orphan_rows
 from saffron.report.stack import write_stack_view
 from saffron.repos import image as repo_image
 from saffron.repos import mirror as git_mirror
@@ -2548,7 +2548,7 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                         out_dir,
                         repo.name,
                         spec_ids,
-                        header={"trailing accept rate": trailing_accept_rate(ledger)},
+                        header=accept_rate_header(ledger),
                     )
                 except Exception as exc:
                     print(f"batch: the queue page could not be rewritten: {exc}")

@@ -1077,7 +1077,7 @@ def _finish(ledger, outcome, out_dir: Path, spec, repo_name: str, result):
             unread=outcome.unread,
             unanswered=outcome.unanswered,
         ),
-        header={"trailing accept rate": index_report.trailing_accept_rate(ledger)},
+        header=index_report.accept_rate_header(ledger),
     )
     return result
 

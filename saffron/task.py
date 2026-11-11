@@ -909,9 +909,7 @@ def run_task(
             index_report.append_queue_line(
                 out_dir,
                 _live_row(state),
-                header={
-                    "trailing accept rate": index_report.trailing_accept_rate(ledger)
-                },
+                header=index_report.accept_rate_header(ledger),
             )
         except Exception as exc:
             print(f"{spec.id}: the live row for {state} could not be written: {exc}")
@@ -934,11 +932,7 @@ def run_task(
                 index_report.append_queue_line(
                     out_dir,
                     _live_row("ORPHANED"),
-                    header={
-                        "trailing accept rate": index_report.trailing_accept_rate(
-                            ledger
-                        )
-                    },
+                    header=index_report.accept_rate_header(ledger),
                 )
             except Exception as exc:
                 print(
@@ -1035,11 +1029,7 @@ def run_task(
                         unread=outcome.unread,
                         unanswered=outcome.unanswered,
                     ),
-                    header={
-                        "trailing accept rate": index_report.trailing_accept_rate(
-                            ledger
-                        )
-                    },
+                    header=index_report.accept_rate_header(ledger),
                 )
                 print(f"{spec.id:<10} EXHAUSTED  {combined_note}")
                 outcome.state = "EXHAUSTED"
@@ -1080,9 +1070,7 @@ def run_task(
                     unread=outcome.unread,
                     unanswered=outcome.unanswered,
                 ),
-                header={
-                    "trailing accept rate": index_report.trailing_accept_rate(ledger)
-                },
+                header=index_report.accept_rate_header(ledger),
             )
             print(f"{spec.id:<10} {outcome.state}  {pushed.note}")
     finally:

@@ -212,3 +212,16 @@ def test_the_stack_view_page_carries_the_trailing_accept_rate(tmp_path):
     written = write_stack_view(out_dir, ledger, {})
     assert written is not None
     assert "trailing accept rate <strong>75% of 4</strong>" in written.read_text()
+
+
+def test_only_the_index_report_spells_the_accept_rate_header_key():
+    """b-2944c9: each page writer takes the field from
+    `index.accept_rate_header`, so a typo at one writer cannot drop the
+    rate from that writer's pages alone."""
+    root = Path(__file__).resolve().parents[1] / "saffron"
+    spelled = sorted(
+        str(path.relative_to(root.parent))
+        for path in root.rglob("*.py")
+        if '"trailing accept rate"' in path.read_text()
+    )
+    assert spelled == ["saffron/report/index.py"]
