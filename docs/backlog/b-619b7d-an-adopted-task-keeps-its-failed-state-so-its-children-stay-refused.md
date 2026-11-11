@@ -4,7 +4,7 @@ title: "`saffron adopt` keeps a task `EXHAUSTED`, refuses `MERGE_FAILED`, and no
 status: partial
 tier: 2
 filed: 2026-10-19
-specs: [SA-0313]
+specs: [SA-0313, SA-0374]
 prs: [961]
 commits: []
 cites: [§4.2.1]
