@@ -107,7 +107,7 @@ stopped it. The overrun stopped its batch after two of four specs.
 ### Tier 2 — the morning after
 
 **Placed 2026-11-07**, in grooming, from three open items no tier named:
-~~**b-a714d2**~~, **b-d9ed45**, then **b-2bc0d5**. A second batch stamps a live
+~~**b-a714d2**~~, **b-d9ed45**, then ~~**b-2bc0d5**~~. A second batch stamps a live
 task `ORPHANED`, because nothing holds one batch at a time. A second run of one
 spec removes the first run's container. Cell images and the build cache are
 never reclaimed, and one host's free disk fell to 16 GB. The first two stand
@@ -117,11 +117,16 @@ between ADR 10's sequence and two cells on one host.
 refuses a finish's follow-up as not in the order. It took the rank of
 ~~**b-25f2b2**~~, the tier 2 item grooming folded into it.
 
-**Placed 2026-11-07**, from reviewing `SA-0340`: **b-3cf039**. `migrate`
+**Placed 2026-11-10**, from the spec loop's run 60: **b-96508a**, then
+**b-16c819**. The stack's end review hands its lenses a spec with no mutant
+from the ref. A session test fakes `subprocess.run` for every argv, so new
+code under `cell_up` must avoid `run`.
+
+**Placed 2026-11-07**, from reviewing `SA-0340`: ~~**b-3cf039**~~. `migrate`
 derives no `rebuttal` fact for a blocker that met REBUT's early exit, so it
 refuses the ref.
 
-**Placed 2026-11-07**, from reviewing `SA-0338`: **b-c5da95**. Four commands
+**Placed 2026-11-07**, from reviewing `SA-0338`: ~~**b-c5da95**~~. Four commands
 load a spec without the ref's mutants, so a regate can judge a witness the cell
 set aside.
 

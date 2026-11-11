@@ -1,9 +1,12 @@
 """Reading and writing a criterion's mutant on `refs/saffron/mutants`
 (DESIGN.md §5.4.1, backlog item 80).
 
-The reader is `run_task` and `cli._stack_mint`'s shared path in. The writer
-is `saffron mutant`'s own work (`SA-0339`). It fetches origin's copy of the
-ref and builds a new commit on top of it, then pushes. It never uses
+The reader is `attach_mutants_at`, which `run_task` calls. `cli._stack_mint`
+only pins `ref_commit`'s answer on the task row, for `run_task` to read
+later. `run_regate`, `package_ready_task` and `run_commit_review` read it
+the same way, with no implementing cell (`b-c5da95`). The writer is
+`saffron mutant`'s own work (`SA-0339`). It fetches origin's copy of the ref
+and builds a new commit on top of it, then pushes. It never uses
 `saffron/repos/mirror.py`'s helpers. Those pass no environment, and the
 writer carries `GIT_TERMINAL_PROMPT=0` on every process it starts.
 """
@@ -25,7 +28,7 @@ from saffron.intake import (
     refuse_disclosed_mutants,
     refuse_inline_mutants,
 )
-from saffron.repos.mirror import MUTANTS_REF, _run, file_at
+from saffron.repos.mirror import MUTANTS_REF, _run, file_at, has_commit
 
 
 class MutantsError(SpecError):
@@ -122,6 +125,25 @@ def attach_mutants(spec: Spec, found: dict[str, Mutant]) -> Spec:
     attached = spec.model_copy(update={"acceptance": criteria})
     refuse_disclosed_mutants(attached)
     return attached
+
+
+def attach_mutants_at(mirror: Path, commit: str | None, spec: Spec) -> Spec:
+    """`spec` with its mutants attached from `commit` in `mirror`, for
+    `run_task` and for every caller that judges a spec with no implementing
+    cell: `run_regate`, `package_ready_task` and `run_commit_review`.
+
+    A `spec` that already declares any mutant inline comes back untouched,
+    with no read of the ref or the mirror: only `run_task` refuses an
+    inline mutant, and every other caller still judges the spec by it.
+    Otherwise raises `MutantsError` for a `commit` the mirror lacks, in
+    `run_task`'s own words, then runs `read_mutants` and `attach_mutants`.
+    """
+    if any(criterion.mutant is not None for criterion in spec.acceptance):
+        return spec
+    if commit is not None and not has_commit(mirror, commit):
+        raise MutantsError(f"mutants commit {commit[:12]} is not in the mirror")
+    found = read_mutants(mirror, commit, spec.id)
+    return attach_mutants(spec, found)
 
 
 class MutantWriteRefused(Exception):

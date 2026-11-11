@@ -2361,6 +2361,28 @@ def _print_batch_plan(
     _print_scan_gaps(resolved.repo_slug, resolved.gh_failures, resolved.policy_unread)
 
 
+def _reclaim_build_cache() -> None:
+    """Bound the build cache before readiness reads the disk (b-2bc0d5).
+    A refusal is printed, and the night goes on with the cache it has."""
+    try:
+        done = runtime.reclaim_build_cache()
+    except runtime.CellRuntimeError as exc:
+        print(f"batch: build cache not reclaimed — {exc}")
+        return
+    if done is None:
+        return
+    if done.timed_out:
+        print(
+            "batch: build cache not reclaimed — timed out after "
+            f"{runtime.RECLAIM_BUILD_CACHE_TIMEOUT_S:g}s"
+        )
+        return
+    if done.returncode == 0:
+        return
+    reason = done.stderr.strip() or f"exit {done.returncode}"
+    print(f"batch: build cache not reclaimed — {reason}")
+
+
 def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     """`saffron batch --repo . --budget 50 --until 06:30` — §4.2.1's night,
     driven. Resolves the queue, asserting the batch-only premise `saffron
@@ -2394,6 +2416,10 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     if refusal is not None:
         print(f"batch: refused — {refusal}")
         return 2
+
+    # Dead weight a night does not need to keep (backlog b-2bc0d5), freed
+    # before readiness asks about disk headroom.
+    _reclaim_build_cache()
 
     repo = args.repo.resolve()
     until = (

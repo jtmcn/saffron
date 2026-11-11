@@ -1,11 +1,12 @@
 ---
 id: b-c5da95
 title: "`regate`, `adopt`, `package` and `review` read no mutant from the ref, so they judge a witness the cell set aside"
-status: open
+status: done
+closed: 2026-11-10
 tier: 2
 filed: 2026-11-07
 specs: [SA-0363]
-prs: []
+prs: [1135]
 commits: []
 cites: [§5.4.1]
 related: [80]
@@ -38,3 +39,5 @@ witness the cell set aside and finds no new failure.
 - 2026-11-07: filed with `SA-0338`, from its first spec review.
 - 2026-11-10: specced as `SA-0363`, with `regate`, `adopt`, `package` and
   `review` attaching through one helper.
+- 2026-11-10: closed by `SA-0363` (#1135) in the spec loop's run 60. The
+  review strengthened each decline witness with a YAML syntax error.

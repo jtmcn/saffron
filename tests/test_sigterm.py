@@ -279,8 +279,10 @@ import time
 from pathlib import Path
 
 from saffron import cli, preflight
+from saffron.cell import runtime
 
 MARKER = Path("__MARKER__")
+RECLAIMED = Path("__MARKER__-reclaimed")
 
 _spec1 = cli.Spec(id="SY-1", title="One", type="feature", touches=["src/**"])
 _spec2 = cli.Spec(id="SY-2", title="Two", type="feature", touches=["src/**"])
@@ -331,6 +333,12 @@ def _fake_run_task(spec, spec_sha, **kwargs):
     raise AssertionError("run_task stub should not return")
 
 
+def _fake_reclaim(timeout_s=0.0):
+    RECLAIMED.write_text("stub")
+    return runtime.Completed(0, "", "")
+
+
+runtime.reclaim_build_cache = _fake_reclaim
 preflight.check_readiness = _fake_readiness
 cli._resolve_queue = _fake_resolve_queue
 cli._protected_paths_at = _fake_protected_paths_at
@@ -391,6 +399,8 @@ def test_a_batch_sent_sigterm_exits_143_with_its_log_flushed(tmp_path):
         proc.wait()
 
     assert proc.returncode == 143
+    # The stub, never the host's own builder, took the batch's reclaim.
+    assert Path(f"{marker}-reclaimed").read_text() == "stub"
     lines = [line for line in stdout.splitlines() if line]
     assert lines[-1:] == ["run_task: SY-1"]
     assert "SY-2       starting" not in stdout

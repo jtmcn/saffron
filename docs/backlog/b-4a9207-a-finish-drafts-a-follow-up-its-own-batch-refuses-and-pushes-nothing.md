@@ -41,3 +41,9 @@ gate that failed.
   their stacks merged. The skill runs a finish before the merge. Each finish
   pooled concerns the review commits had fixed, and could not read its
   deleted heads. This is the delegate's error, not a recurrence of this item.
+- 2026-11-10: recurred in the spec loop's run 60. Finish 78's two concerns
+  were one-line docstrings. `SA-0366`'s draft failed `prose` on a
+  contraction. `SA-0367`'s witness passed at its base, since review commit
+  `80f41af0` had fixed its line. The finish pushed #1138 with both drafts and
+  ended `INFRASTRUCTURE`. The delegate fixed `SA-0366`'s line in run 60's
+  step 5 pull request and closed #1138.

@@ -2920,3 +2920,22 @@ critic's own, so they have no line.
 - `SA-0362` (#1127): a new test helper restated `_rebuttal_log` line for
   line, and two tests re-imported `Attempt` under an alias. **Bucket 3**,
   conventions. **Landed:** a review commit on #1127.
+
+## 2026-11-10, spec loop run 60 (#1135, #1136, #1137)
+
+- `SA-0363` (#1135): the three decline witnesses fed only a one-line parser
+  error, so a reason that kept its newlines passed. **Bucket 1**, a witness
+  that cannot fail. **Landed:** a review commit on #1135.
+- `SA-0363` (#1135): two test files restated six git fixture helpers line for
+  line. **Bucket 3**, conventions. **Landed:** a review commit on #1135.
+- `SA-0364` (#1136): no witness migrated against the live record, though a
+  refused live ref is the defect. **Bucket 1**, a witness that cannot fail.
+  **Landed:** a review commit on #1136.
+- `SA-0364` (#1136): no note sat between a blocker and a concern, so a
+  position counted over asked findings passed. **Bucket 1**, a witness that
+  cannot fail. **Landed:** a review commit on #1136.
+- `SA-0365` (#1137): the origin read had no bound, so a wedged git could stall
+  a cell's start. **Bucket 2**, a line that every host subprocess takes a
+  bound. **Landed:** a review commit on #1137.
+- `SA-0365` (#1137): `_origin_name` reads git through `Popen` only to dodge a
+  session test's fake. **Bucket 3**. **Open:** b-16c819.

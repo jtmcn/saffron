@@ -777,14 +777,9 @@ def run_task(
         if task_id is not None
         else mutants.ref_commit(base.mirror)
     )
-    if mutants_commit is not None and not has_commit(base.mirror, mutants_commit):
-        reason = f"mutants commit {mutants_commit[:12]} is not in the mirror"
-        print(f"{spec.id:<10} refused  {reason}")
-        return Refused(reason=reason)
     try:
         refuse_inline_mutants(spec)
-        found = mutants.read_mutants(base.mirror, mutants_commit, spec.id)
-        spec = mutants.attach_mutants(spec, found)
+        spec = mutants.attach_mutants_at(base.mirror, mutants_commit, spec)
     except SpecError as exc:
         reason = " ".join(str(exc).split())
         print(f"{spec.id:<10} refused  {reason}")
@@ -1440,10 +1435,10 @@ def package_ready_task(
 
     Returns `ready_task`'s `Refused` untouched, before the image or the
     network exist. `ready_task`'s own `tree_base` fallback reads
-    `mirror_path` earlier, whether it then refuses or not. On a `ReadyTask` it
-    prepares the mirror and builds the repo's image. It then runs N1's
-    host-binding probe in a network named for this spec id, and calls
-    `package_phase.package` once.
+    `mirror_path` earlier, whether it then refuses or not. On a `ReadyTask`
+    it prepares the mirror, attaches the row's own pinned mutants
+    (`b-c5da95`), and builds the repo's image. It then runs N1's
+    host-binding probe and calls `package_phase.package` once.
     """
     ready = ready_task(
         spec_id,
@@ -1457,6 +1452,12 @@ def package_ready_task(
         return ready
 
     mirror, _, _ = preflight.prepare_mirror(repo, mirror_path)
+    try:
+        spec = mutants.attach_mutants_at(
+            mirror, ledger.task_mutants_commit(ready.outcome.task_id), ready.spec
+        )
+    except SpecError as exc:
+        return Refused(reason=" ".join(str(exc).split()))
     image = repo_image.build_cell_image(repo)
 
     # A prefix no other network uses, so a killed invocation's leftover cannot
@@ -1492,7 +1493,7 @@ def package_ready_task(
 
     return package_phase.package(
         ready.outcome,
-        spec=ready.spec,
+        spec=spec,
         repo=repo,
         mirror=mirror,
         image=image,

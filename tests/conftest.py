@@ -98,6 +98,21 @@ def no_host_tool_exec(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_build_cache_reclaim(request, monkeypatch):
+    """An unmarked test never drops the host's build cache, which every batch
+    it drives would reach. Returns the real function for the witness that
+    drives it, or None where it is absent."""
+    real = getattr(runtime, "reclaim_build_cache", None)
+    if not request.node.get_closest_marker("cell"):
+
+        def _stub(timeout_s: float = 0.0) -> runtime.Completed:
+            return runtime.Completed(0, "", "")
+
+        monkeypatch.setattr(runtime, "reclaim_build_cache", _stub, raising=False)
+    return real
+
+
+@pytest.fixture(autouse=True)
 def no_network_git_push(request, monkeypatch):
     """Pushes at exit can now reach a repo row's real origin
     (`push_unpushed`, SA-0335). A test naming an `https://github.com/...`

@@ -237,6 +237,8 @@ def test_every_declared_runtime_satisfies_the_dialect():
         assert isinstance(dialect.shares_kernel, bool), name
         assert isinstance(dialect.unattended, bool), name
         assert callable(dialect.host_refusal), name
+        argv = dialect.build_cache_reclaim_argv
+        assert argv is None or argv[0] == dialect.binary, name
 
 
 def test_each_dialect_says_whether_it_shares_the_host_kernel():
@@ -1061,3 +1063,23 @@ def test_a_stop_during_a_silent_turn_unwinds_without_waiting_for_the_turn(
         )
     elapsed = time.monotonic() - started
     assert elapsed < runtime.STOP_UNWIND_S, elapsed
+
+
+def test_each_runtime_reclaims_its_build_cache_with_its_own_command(
+    monkeypatch, no_build_cache_reclaim
+):
+    """apple's builder holds the cache, so it is deleted (measured on 1.6.1).
+    podman has no measured command, so nothing executes for it."""
+    seen: list[tuple[list[str], float]] = []
+
+    def _call(argv, timeout_s):
+        seen.append((list(argv), timeout_s))
+        return runtime.Completed(0, "", "")
+
+    monkeypatch.setattr(runtime, "_call", _call)
+    monkeypatch.setattr(runtime, "_selected", apple.DIALECT)
+    assert no_build_cache_reclaim() == runtime.Completed(0, "", "")
+    assert seen == [(["container", "builder", "delete", "--force"], 600.0)]
+    monkeypatch.setattr(runtime, "_selected", podman.DIALECT)
+    assert no_build_cache_reclaim() is None
+    assert len(seen) == 1
