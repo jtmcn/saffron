@@ -47,3 +47,4 @@ one entry.
 
 - 2026-10-24: filed with ADR 11 (#963).
 - 2026-10-27: in the spec loop's run 49 a Standards seat found "parent", Predecessor's avoided word, in #977's docstrings, and bare "suite" in #978's tests. `terms` passed both.
+- 2026-11-11: in the spec loop's run 63 a Standards seat found "retry", on the Attempt and Repair `_Avoid_` lines, in #1158's comments and docstrings. `terms` passed it.

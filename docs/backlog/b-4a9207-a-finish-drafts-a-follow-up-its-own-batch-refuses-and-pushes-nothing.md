@@ -52,3 +52,6 @@ gate that failed.
   PACKAGE, and review commit `12e8c6a6` the other. One was pooled. The other
   became `SA-0370`, refused for 11 citations. The finishing layer edited
   `SA-0369`'s spec, went red on `prose` and `census`, and pushed nothing.
+- 2026-11-11: a correction to the line above, from the spec loop's run 63.
+  REBUT changed the code behind both concerns before PACKAGE. Review commit
+  `12e8c6a6` fixed neither. b-1b05be's Record line has the two cited lines.
