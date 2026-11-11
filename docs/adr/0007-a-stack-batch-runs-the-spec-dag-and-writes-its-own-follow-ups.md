@@ -69,6 +69,9 @@ re-offers (`SA-0234`). A `PREFLIGHT_FAILED` outcome is offered again the same
 way (`SA-0261`). A raise from the PACKAGE of a task in `READY_FOR_REVIEW`
 is not offered again. For a spec of the order it is a miss (`SA-0316`). A `GATE_ERROR`
 outcome is still a miss.
+Amended 2026-11-11, b-323c97 (`SA-0373`): a missed task that `saffron adopt`
+later moves to `READY_FOR_REVIEW` becomes the batch's top layer, if it ran
+after every layer. Otherwise adopt says no end review reads it.
 
 **Spec review runs inside the batch.**
 

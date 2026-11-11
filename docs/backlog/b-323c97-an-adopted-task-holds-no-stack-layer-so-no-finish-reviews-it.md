@@ -4,7 +4,7 @@ title: An adopted task holds no stack layer, so its batch's finish refuses and n
 status: open
 tier: 2
 filed: 2026-10-29
-specs: []
+specs: [SA-0373]
 prs: []
 commits: []
 cites: [§5.7]
