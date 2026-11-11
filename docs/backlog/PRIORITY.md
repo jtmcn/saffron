@@ -461,7 +461,7 @@ Each line keeps the order it was filed in.
   ~~**b-04d4c2**~~.
 - From the stack batch's spec reviews: ~~**b-2d9ae9**~~, ~~**b-223244**~~,
   **b-acee54**, **b-6518ba**, ~~**b-6a101f**~~, **b-7eb5f5** and **b-22ff3f**.
-  **b-f41001** is what #1147 left of b-6a101f: three extraction re-prompts
+  ~~**b-f41001**~~ is what #1147 left of b-6a101f: three extraction re-prompts
   and REBUT's fix turn still carry the turn before them.
 - From the 2026-09-27 size pricing and spec loop run 32: **b-41664e**, **b-4b386f**,
   ~~**b-d96f14**~~, ~~**b-9b94c9**~~, **b-ff3141**, ~~**b-a99c76**~~, **b-3a8504**,

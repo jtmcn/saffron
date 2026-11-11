@@ -276,6 +276,8 @@ def run_rebuttal(
             options=options,
             resume=session_id,
             emit=emit,
+            # The carry stays: the fix turn is a full turn of the implement
+            # session, unlike the extractions below (b-f41001).
             last_cost_usd=last_cost_usd,
         )
     except implement.AgentFailed as failed:
