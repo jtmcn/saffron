@@ -15786,3 +15786,161 @@ def test_every_writer_adapter_hands_its_session_the_faults_of_its_own_head(
     assert writer_calls[2]["emit"] is print
 
     ledger.close()
+
+
+def _end_review_mutants_home(tmp_path, monkeypatch):
+    """One closed stack batch of one layer, `SY-1`, whose task row pins
+    the mutants commit naming `pinned-find`. `refs/saffron/mutants` has
+    since moved to one naming `moved-find`. The mirror holds `.saffron/`
+    and `CLAUDE.md` at base. Branch fetches, the critic cell and the two
+    lenses are faked, and every `review_layer` call lands in `calls`."""
+    mirror = tmp_path / "mirror"
+    mirror.mkdir(parents=True)
+    _git(mirror, "init", "-q")
+    (mirror / ".saffron").mkdir()
+    (mirror / ".saffron" / "policy.yaml").write_text("gates: {}\n")
+    (mirror / "CLAUDE.md").write_text("claude at base\n")
+    _git(mirror, "add", "-A")
+    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "base")
+    base_sha = _rev_parse(mirror, "HEAD")
+    (mirror / "layer.txt").write_text("layer\n")
+    _git(mirror, "add", "-A")
+    _git(mirror, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "SY-1")
+    layer_sha = _rev_parse(mirror, "HEAD")
+
+    def mutants_commit(find, parent=None):
+        text = f"tests/test_sy.py::t:\n  file: src/elsewhere.py\n  find: {find}\n"
+        blob = subprocess.run(
+            ["git", "-C", str(mirror), "hash-object", "-w", "--stdin"],
+            input=text,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        tree = subprocess.run(
+            ["git", "-C", str(mirror), "mktree"],
+            input=f"100644 blob {blob}\tSY-1.yaml\n",
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        args = ["-c", "user.email=t@t", "-c", "user.name=T", "commit-tree", tree]
+        args += ["-m", "mutants"] + (["-p", parent] if parent else [])
+        return _git(mirror, *args)
+
+    pinned_commit = mutants_commit("pinned-find")
+    _git(
+        mirror,
+        "update-ref",
+        "refs/saffron/mutants",
+        mutants_commit("moved-find", parent=pinned_commit),
+    )
+
+    url = "https://github.com/o/r.git"
+    home = tmp_path / "home"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    ledger = Ledger(home / "ledger.db")
+    repo_id = ledger.upsert_repo("r", url, str(mirror), policy_sha=None)
+    batch_id = ledger.create_batch(40.0)
+    run_id = ledger.create_run(repo_id, base_sha, batch_id=batch_id)
+    task_id = ledger.create_task(
+        run_id,
+        spec_id="SY-1",
+        spec_sha="s" * 64,
+        branch=spec_branch("SY-1"),
+        mutants_commit=pinned_commit,
+    )
+    ledger.set_task_package(
+        task_id, "READY_FOR_REVIEW", spec_branch("SY-1"), layer_sha, "https://h/1"
+    )
+    ledger.record_stack_layer(
+        task_id, position=1, predecessor_task_id=None, generation=0
+    )
+    ledger.close_batch(batch_id, "DRAINED")
+    ledger.close()
+
+    monkeypatch.setattr(
+        cli.package_phase, "fetch_parent_branch", lambda m, u, branch: layer_sha
+    )
+    monkeypatch.setattr(
+        cli.package_phase, "fetch_default_branch", lambda m, u: ("main", base_sha)
+    )
+
+    @contextmanager
+    def fake_layer_cell(fields, **kwargs):
+        yield "critic"
+
+    monkeypatch.setattr(end_review, "layer_cell", fake_layer_cell)
+    calls: list = []
+
+    def spy_review_layer(container, fields, **kwargs):
+        calls.append((fields.spec_id, list(kwargs["acceptance"])))
+        return [review.LensReview(lens, cost_usd=0.0) for lens in end_review.END_LENSES]
+
+    monkeypatch.setattr(end_review, "review_layer", spy_review_layer)
+    text = (
+        "---\nid: SY-1\ntitle: t\ntype: bug\nacceptance:\n"
+        "  - claim: it holds\n    witness: tests/test_sy.py::t\n---\nbody\n"
+    )
+    return SimpleNamespace(
+        home=home,
+        repo=repo,
+        mirror=mirror,
+        url=url,
+        base_sha=base_sha,
+        batch_id=batch_id,
+        spec=intake.parse_spec(text),
+        calls=calls,
+    )
+
+
+def test_both_end_review_paths_hand_their_lenses_the_mutants_each_layers_row_pins(
+    tmp_path, monkeypatch, capsys
+):
+    """The in-batch end review and `saffron finish` each hand a layer's
+    lenses the mutant its task row pins (b-96508a). The first reads a parsed
+    spec text, and the second reads `deferred.json`'s stored specs."""
+    pinned_mutant = intake.Mutant(file="src/elsewhere.py", find="pinned-find")
+
+    batch = _end_review_mutants_home(tmp_path / "batch", monkeypatch)
+    ledger = Ledger(batch.home / "ledger.db")
+    run = cli._stack_end_review(
+        pinned=task.PinnedBase(
+            mirror=batch.mirror, url=batch.url, base_sha=batch.base_sha
+        ),
+        repo=batch.repo,
+        ledger=ledger,
+        out_dir=batch.home / "out",
+    )
+    assert batch.spec.acceptance[0].mutant is None
+    run(str(batch.batch_id), 6.0, {"SY-1": batch.spec})
+    ledger.close()
+    assert [(s, a[0].mutant) for s, a in batch.calls] == [("SY-1", pinned_mutant)]
+
+    finish = _end_review_mutants_home(tmp_path / "finish", monkeypatch)
+    out_dir = finish.home / "batches" / "v0"
+    deferred_dir = out_dir / "finish" / str(finish.batch_id)
+    deferred_dir.mkdir(parents=True)
+    payload = {
+        "batch_id": finish.batch_id,
+        "reserve_usd": 6.0,
+        "writer_usd": 3.0,
+        "base_sha": finish.base_sha,
+        "url": finish.url,
+        "mirror": str(finish.mirror),
+        "repo": str(finish.repo.resolve()),
+        "specs": {"SY-1": finish.spec.model_dump(mode="json", exclude_unset=True)},
+    }
+    (deferred_dir / cli.DEFERRED_NAME).write_text(json.dumps(payload))
+    assert "mutant" not in json.dumps(payload["specs"])
+    _finish_readiness_passes(monkeypatch)
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "t")
+    monkeypatch.setattr(cli, "_stack_follow_ups", lambda **kw: lambda b, s: [])
+    monkeypatch.setattr(cli, "_stack_finish", lambda **kw: lambda b, unrun: None)
+    monkeypatch.setattr(cli, "write_stack_view", lambda *a, **k: None)
+
+    argv = ["--home", str(finish.home), "finish", str(finish.batch_id)]
+    assert main([*argv, "--repo", str(finish.repo)]) == 0
+    assert "finish: DRAINED" in capsys.readouterr().out
+    assert [(s, a[0].mutant) for s, a in finish.calls] == [("SY-1", pinned_mutant)]

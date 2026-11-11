@@ -1,11 +1,12 @@
 ---
 id: b-16c819
 title: A session test fakes `subprocess.run` for every argv, so new code under `cell_up` must avoid `run`
-status: open
+status: done
+closed: 2026-11-10
 tier: 2
 filed: 2026-11-10
 specs: []
-prs: []
+prs: [1142]
 commits: []
 cites: []
 related: [b-2bc0d5]
@@ -32,3 +33,5 @@ its timeout, and the comment goes.
 ## Record
 
 - 2026-11-10: filed from the spec loop's run 60.
+- 2026-11-10: fixed by hand in #1142. The fake answers only `lsof`, and
+  `_origin_name` reads git with `subprocess.run` and its timeout.

@@ -117,8 +117,8 @@ between ADR 10's sequence and two cells on one host.
 refuses a finish's follow-up as not in the order. It took the rank of
 ~~**b-25f2b2**~~, the tier 2 item grooming folded into it.
 
-**Placed 2026-11-10**, from the spec loop's run 60: **b-96508a**, then
-**b-16c819**. The stack's end review hands its lenses a spec with no mutant
+**Placed 2026-11-10**, from the spec loop's run 60: ~~**b-96508a**~~, then
+~~**b-16c819**~~. The stack's end review hands its lenses a spec with no mutant
 from the ref. A session test fakes `subprocess.run` for every argv, so new
 code under `cell_up` must avoid `run`.
 

@@ -3,12 +3,13 @@
 
 The reader is `attach_mutants_at`, which `run_task` calls. `cli._stack_mint`
 only pins `ref_commit`'s answer on the task row, for `run_task` to read
-later. `run_regate`, `package_ready_task` and `run_commit_review` read it
-the same way, with no implementing cell (`b-c5da95`). The writer is
-`saffron mutant`'s own work (`SA-0339`). It fetches origin's copy of the ref
-and builds a new commit on top of it, then pushes. It never uses
-`saffron/repos/mirror.py`'s helpers. Those pass no environment, and the
-writer carries `GIT_TERMINAL_PROMPT=0` on every process it starts.
+later. `run_regate`, `package_ready_task`, `run_commit_review` and the end
+review's `_review_one_layer` read it the same way, with no implementing cell
+(`b-c5da95`, `b-96508a`). The writer is `saffron mutant`'s own work
+(`SA-0339`). It fetches origin's copy of the ref and builds a new commit on
+top of it, then pushes. It never uses `saffron/repos/mirror.py`'s helpers.
+Those pass no environment, and the writer carries `GIT_TERMINAL_PROMPT=0`
+on every process it starts.
 """
 
 from __future__ import annotations
@@ -129,8 +130,7 @@ def attach_mutants(spec: Spec, found: dict[str, Mutant]) -> Spec:
 
 def attach_mutants_at(mirror: Path, commit: str | None, spec: Spec) -> Spec:
     """`spec` with its mutants attached from `commit` in `mirror`, for
-    `run_task` and for every caller that judges a spec with no implementing
-    cell: `run_regate`, `package_ready_task` and `run_commit_review`.
+    `run_task` and each judge with no implementing cell (module docstring).
 
     A `spec` that already declares any mutant inline comes back untouched,
     with no read of the ref or the mirror: only `run_task` refuses an
