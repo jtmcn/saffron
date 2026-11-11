@@ -13531,10 +13531,12 @@ def test_a_finish_writes_its_suite_comparison_beside_its_findings(
 
     monkeypatch.setattr(cli.git_mirror, "export_saffron_dir", _fake_export)
 
+    returned: list[object] = []
+
     def _fake_publish_finish(
         ledger, batch_id, sha, *, mirror, url, slug, verify, gh, workdir, heads=()
     ):
-        verify("c" * 40, "d" * 40)
+        returned.append(verify("c" * 40, "d" * 40))
         return ["a published line"]
 
     monkeypatch.setattr(finish_module, "publish_finish", _fake_publish_finish)
@@ -13544,8 +13546,8 @@ def test_a_finish_writes_its_suite_comparison_beside_its_findings(
         monkeypatch.setattr(package_phase, "reverify", lambda **_k: comparison)
         home = tmp_path / name
         assert main(["--home", str(home), "batch", "--stack"]) == 0
-        capsys.readouterr()
-        return home / "batches" / "v0" / "finish" / "3" / finish_module.VERIFY_NAME
+        assert "finish: a published line" in capsys.readouterr().out
+        return home / "batches" / "v0" / "finish" / "3" / "verify.json"
 
     failure_a = NewFailure(
         gate="tests", failure=Failure(file="a.py", line=1, code="E1", message="m")
@@ -13569,6 +13571,12 @@ def test_a_finish_writes_its_suite_comparison_beside_its_findings(
                     failures=[failure_b.failure],
                 ),
                 GateResult(gate="format", status="pass", tool="ruff 1"),
+                GateResult(
+                    gate="types",
+                    status="fail",
+                    tool="ty 1",
+                    failures=[Failure(file="b.py", line=2, code="T1", message="old")],
+                ),
             ],
             effective_risk="standard",
             advisory_gates=frozenset(),
@@ -13576,6 +13584,7 @@ def test_a_finish_writes_its_suite_comparison_beside_its_findings(
         new_failures=(failure_a, failure_b),
     )
     red_dest = _run("red", red)
+    assert returned == [(failure_a, failure_b)]
     red_payload = json.loads(red_dest.read_text())
     assert red_payload["commit"] == "c" * 40
     assert red_payload["base"] == "d" * 40
@@ -13602,6 +13611,7 @@ def test_a_finish_writes_its_suite_comparison_beside_its_findings(
         new_failures=(),
     )
     green_dest = _run("green", green)
+    assert returned[-1] == ()
     green_payload = json.loads(green_dest.read_text())
     assert green_payload["commit"] == "c" * 40
     assert green_payload["base"] == "d" * 40

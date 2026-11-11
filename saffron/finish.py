@@ -446,13 +446,13 @@ def write_verify_comparison(
     comparison: SuiteComparison, *, sha: str, base: str, mirror: Path, dest: Path
 ) -> Path:
     """The finishing suite's own head comparison, written beside
-    `FINDINGS_NAME` (`SA-0368`). It is the one record a red `escalate:`
-    line leaves, since the commit it judged is pushed only once the
-    suite is green.
+    `FINDINGS_NAME` (`SA-0368`). It is the one file that names a red
+    `escalate:` line's failures, since the commit it judged is pushed
+    only once the suite is green.
 
-    A head gate result that only passed, or that failed with nothing
-    new, is left out. The operator already saw it pass, or saw it fail
-    at base too. Both lists are empty on a green comparison."""
+    A head gate result with no new failure is left out, since a failure
+    the base also carries is not the finishing layer's. Both lists are
+    empty on a green comparison."""
     new_identities = {
         identity(failure.gate, failure.failure) for failure in comparison.new_failures
     }
