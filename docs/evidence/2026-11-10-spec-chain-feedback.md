@@ -75,3 +75,20 @@ The delegate measured the one fact the writer could not, since it was told to st
 20. Pre-flight 4 should name the order each writer of a compared sequence writes in, as well as the writer.
 21. For a string transform, pre-flight 1 should list the inputs that tell the intended transform from its near neighbours (suffix and character strip, end and anywhere).
 22. The writer's brief should say whether a live measurement that changes host state is allowed. A read-only brief left a fact open that the delegate settled in a minute.
+
+## SA-0368 (b-fe82d9), after spec loop run 60
+
+One writer drafted it in 25 minutes, with no question back. One review followed. It found no blocker, so the chain stopped there. The delegate applied its findings by hand.
+
+**Review 1: 0 blockers, 1 concern, 7 notes.**
+
+- The concern was criterion 2's clip, which read two ways: the rendering clipped to 500 characters, or the whole line with its two-space prefix clipped as `describe` clips a detail. A long failure gets a different answer under each, and no wrong version tells them apart. Pre-flight 2 missed it. The two readings sat inside one criterion, not across two. The prototype had chosen the first, so the delegate wrote that line out in full.
+- A note counted three red cases where the spec said two. Pre-flight 5 missed it, because the count was in the Notes and no command counts there.
+- A note found a citation on the escalate return where the claim was about the push. `cite` resolves a line and cannot tell whether it says what the sentence claims.
+- Notes not applied: drive more failures than a plausible cap, put a control character in `file` as well as `message`, and the $0.36 budget margin.
+
+The writer used SA-0362's measure for size: tokens outside `tests/**`. With the tests counted, `check` prices 1332 tokens against a ceiling of 1300 and would split. The cell's `size` gate counts what the writer counted, so the spec runs whole.
+
+## Checks to build (SA-0368)
+
+23. Pre-flight 2 should read each criterion that writes a string through a helper for two readings of the same claim. The witness compares whole lines, so the claim has to give one exact expression.
