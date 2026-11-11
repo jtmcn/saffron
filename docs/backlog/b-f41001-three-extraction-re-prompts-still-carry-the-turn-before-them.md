@@ -1,12 +1,12 @@
 ---
 id: b-f41001
 title: Three extraction re-prompts still charge a killed turn the cost of the turn before them
-status: open
+status: done
 tier: 3
 filed: 2026-11-11
-closed:
+closed: 2026-11-11
 specs: []
-prs: []
+prs: [1152]
 commits: []
 cites: [§4.1]
 related: [b-6a101f, b-593d50]
@@ -42,3 +42,5 @@ decided either way, with the reason written down.
 ## Record
 
 - 2026-11-11: filed from the review of #1147.
+- 2026-11-11: done by hand in #1152. Five re-prompts pass no carry. REBUT's
+  fix turn keeps its carry, since it is a full turn of the implement session.
