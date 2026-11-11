@@ -1136,6 +1136,7 @@ FAMILIES: tuple[_Family, ...] = (
     _Family("PACKAGE: conflicts with", _PKG, PhaseStart),
     _Family("PACKAGE: refusing to push", _PKG, PhaseStart),
     _Family("PACKAGE: N new failures against", _PKG, PhaseStart),
+    _Family("PACKAGE: (per-failure, [gate] file:line code: message)", _PKG, PhaseStart),
     _Family("PACKAGE: (LeaseRejected)", _PKG, PhaseStart),
     _Family("PACKAGE: (pr_url)", _PKG, PhaseStart),
     _Family("PACKAGE: could not remove", _PKG, PhaseStart),

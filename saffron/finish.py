@@ -27,8 +27,11 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from saffron.cell.runtime import CellRuntimeError
+from saffron.events import _DETAIL_BOUND, _clean
 from saffron.follow_up import Pooled
 from saffron.gates.baseline import NewFailure, render
+from saffron.gates.contract import identity
+from saffron.gates.suite import SuiteComparison
 from saffron.intake import Spec
 from saffron.ledger import _REVISION_PATH, Ledger
 from saffron.phases import package as package_phase
@@ -38,6 +41,9 @@ from saffron.repos.policy import Policy
 
 # The backlog pool file the finish writes beside its tree (`SA-0174`).
 FINDINGS_NAME = "findings.json"
+
+# The finishing suite's own comparison, beside `FINDINGS_NAME` (`SA-0368`).
+VERIFY_NAME = "verify.json"
 
 # ADR 7's one exception to the repo's own `protected` list: the finishing
 # commit touches only a spec directly in the spec directory, never `done/`.
@@ -436,6 +442,43 @@ def _new_failures(n: int) -> str:
     return f"{n} new failure" + ("" if n == 1 else "s")
 
 
+def write_verify_comparison(
+    comparison: SuiteComparison, *, sha: str, base: str, mirror: Path, dest: Path
+) -> Path:
+    """The finishing suite's own head comparison, written beside
+    `FINDINGS_NAME` (`SA-0368`). It is the one record a red `escalate:`
+    line leaves, since the commit it judged is pushed only once the
+    suite is green.
+
+    A head gate result that only passed, or that failed with nothing
+    new, is left out. The operator already saw it pass, or saw it fail
+    at base too. Both lists are empty on a green comparison."""
+    new_identities = {
+        identity(failure.gate, failure.failure) for failure in comparison.new_failures
+    }
+    gates = [
+        result.model_dump(mode="json")
+        for result in comparison.run.results
+        if any(
+            identity(result.gate, failure) in new_identities
+            for failure in result.failures
+        )
+    ]
+    payload = {
+        "commit": sha,
+        "base": base,
+        "mirror": str(mirror),
+        "new_failures": [
+            {"gate": failure.gate, **failure.failure.model_dump(mode="json")}
+            for failure in comparison.new_failures
+        ],
+        "gates": gates,
+    }
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(json.dumps(payload, indent=2))
+    return dest
+
+
 def publish_finish(
     ledger: Ledger,
     batch_id: int,
@@ -444,21 +487,21 @@ def publish_finish(
     mirror: Path,
     url: str,
     slug: str,
-    verify: Callable[[str, str], int],
+    verify: Callable[[str, str], Sequence[NewFailure]],
     gh: package_phase.GhRunner,
     workdir: Path,
     heads: Mapping[str, str] = {},
 ) -> list[str]:
-    """Judge `sha` with the finishing suite, then push it and open its draft
-    pull request (ADR 7). Every check below runs before the one push, in
-    order, and each returns one line starting `ESCALATE` on its own failure.
+    """Judge `sha` with the finishing suite, then push it and open its
+    draft pull request (ADR 7). Every check below runs before the one
+    push, each returning one line starting `ESCALATE` on its own
+    failure. A red suite returns that line plus one more per failure, in
+    `verify`'s own order (`SA-0368`).
 
-    A temporary ref names `sha` for `verify`'s own span, since a gate-only
-    cell's seed can only fetch a branch. Each layer's remote head is read
-    against its own entry in `heads`, else its `pushed_sha`. Each pull
-    request's base is read against its predecessor's branch, bottom to
-    top. Only then is `sha` pushed, recorded, and handed to `gh pr create`.
-    """
+    A temporary ref names `sha` for `verify`'s own span, since a
+    gate-only cell's seed can only fetch a branch. Each layer's head and
+    each pull request's base are checked next, bottom to top, before
+    `sha` is pushed and handed to `gh pr create`."""
     layers = ledger.stack_layers(batch_id)
     top = layers[-1]
     top_head = heads.get(top["task_key"], top["pushed_sha"])
@@ -470,8 +513,12 @@ def publish_finish(
         return [f"{ESCALATE}the finishing suite did not finish: {exc}"]
     finally:
         git_mirror._git(mirror, "update-ref", "-d", ref)
-    if new_failures > 0:
-        return [f"{ESCALATE}red suite, {_new_failures(new_failures)}"]
+    if new_failures:
+        lines = [f"{ESCALATE}red suite, {_new_failures(len(new_failures))}"]
+        lines.extend(
+            "  " + _clean(render(failure), _DETAIL_BOUND) for failure in new_failures
+        )
+        return lines
 
     default = package_phase.default_branch(url, cwd=mirror)
     for layer in layers:
