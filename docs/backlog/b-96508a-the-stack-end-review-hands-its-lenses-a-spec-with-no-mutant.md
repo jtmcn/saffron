@@ -1,11 +1,12 @@
 ---
 id: b-96508a
 title: The stack's end review hands its lenses a spec with no mutant from the ref, so it judges a witness the cell set aside
-status: open
+status: done
+closed: 2026-11-10
 tier: 2
 filed: 2026-11-10
 specs: []
-prs: []
+prs: [1143]
 commits: []
 cites: [§5.4.1, §4.2.1]
 related: [b-c5da95, 80]
@@ -31,3 +32,7 @@ only on the ref.
 ## Record
 
 - 2026-11-10: filed from the spec loop's run 60.
+- 2026-11-10: fixed by hand in #1143, from the `SA-0368` spec writer's prototype. No
+  lens prompt renders a mutant, so a lens reads the same text as before. The
+  fix holds every judging path to one spec object, and a layer whose pinned
+  commit cannot be read now errors before its cell opens.
