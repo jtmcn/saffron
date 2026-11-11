@@ -75,11 +75,10 @@ acceptance:
       `finish.publish_finish`'s `verify` returns the new failures themselves.
       On a red suite its first line is still the escalation line it prints
       at base, `escalate: red suite, N new failures`. One line follows per new
-      failure, in the order `verify` returned them. Each is two spaces
-      and `baseline.render` of that failure, with every control character
-      replaced by a space and the rendering clipped to
-      `events._DETAIL_BOUND` characters, the clip `describe` gives a
-      `PhaseStart` detail. The witness drives a failure with a file and a
+      failure, in the order `verify` returned them. Each is exactly
+      `"  " + events._clean(baseline.render(failure), events._DETAIL_BOUND)`:
+      two spaces, then the rendering with every control character replaced
+      by a space and clipped to 500 characters. The witness drives a failure with a file and a
       line, one with no file, and one whose message carries an escape
       sequence, a newline and a tab and runs past 2000 characters.
     witness: tests/test_finish.py::test_a_red_finish_names_each_new_failure_it_counts
@@ -99,7 +98,7 @@ acceptance:
       suite returns. The file holds the commit judged, the base it was
       judged against, the mirror that holds the commit, each new failure as
       its gate and its failure's fields, and each head gate result that
-      carries a new failure, as `GateResult` dumps. A head gate result that
+      carries a new failure, as `saffron.gates.contract.GateResult` dumps. A head gate result that
       fails with no new failure, and one that passes, are left out. A green
       comparison writes the file with both lists empty. `publish_finish` is
       handed a `verify` that returns the new failures themselves, and
@@ -149,7 +148,7 @@ each returned line after `finish: ` (`saffron/cli.py:1320-1321`).
 No line writes a gate result there or anywhere under `finish/<batch id>/`.
 The finish's own file there is `findings.json` (`saffron/cli.py:1260`,
 `saffron/finish.py:40`). The finishing commit is pushed only after a green
-suite (`saffron/finish.py:473-474`), so a red one lives only in the pinned
+suite (`saffron/finish.py:553`), so a red one lives only in the pinned
 mirror.
 
 **The renderer exists.** `baseline.render` writes a `NewFailure` as
@@ -229,8 +228,8 @@ names.
   and `-> int` fakes (`:1841`, `:2024`, `:2423`, `:2555`, `:2693`). Return
   `()` for green and real `NewFailure` tuples for red. The `types` gate reads
   `tests/**`. `test_each_escalation_leaves_the_stack_unpushed` asserts
-  `len(lines) == 1` (`tests/test_finish.py:2439`). Its two red cases now
-  return one line more per failure.
+  `len(lines) == 1` (`tests/test_finish.py:2439`). Its three red cases
+  (`red`, `red-one`, `red-and-moved`) now return one line more per failure.
 - `tests/test_cli.py::test_a_stack_batch_publishes_its_finish_through_the_finishing_suite`
   fakes a comparison with `new_failures = ("a", "b")`
   (`tests/test_cli.py:13342-13343`) and asserts a count of 2
@@ -255,7 +254,7 @@ names.
 - Criterion 3: `main(["--home", ..., "batch", "--stack"])` with the fakes the
   existing finish test uses (`tests/test_cli.py:13311-13338`). Use one home
   per comparison, red then green. Read the file with `json.loads` and compare
-  each gate result through `GateResult.model_validate`.
+  each gate result through `saffron.gates.contract.GateResult.model_validate`.
 
 Import every name the change adds inside a test body. A module-scope import
 of one makes the reverted test a collection error, which `revert` reads as
