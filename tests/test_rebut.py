@@ -194,11 +194,11 @@ def test_an_extraction_that_is_not_the_schema_is_re_prompted_once_quoting_its_er
         assert calls[0]["kwargs"]["last_cost_usd"] == 0.01
         assert calls[0]["kwargs"]["resume"] == "sess-1"
         assert calls[1]["kwargs"]["resume"] == "fix-sess"
-        assert calls[1]["kwargs"]["last_cost_usd"] == pytest.approx(0.10)
+        assert calls[1]["kwargs"]["last_cost_usd"] == 0.0
         assert calls[1]["options"]["output_format"] == rebut._REBUTTALS_FORMAT
         assert calls[2]["prompt"] == f"{first_error}\n\n{rebut.EXTRACT_PROMPT}"
         assert calls[2]["kwargs"]["resume"] == "extract-sess"
-        assert calls[2]["kwargs"]["last_cost_usd"] == pytest.approx(0.20)
+        assert calls[2]["kwargs"]["last_cost_usd"] == 0.0
         assert calls[2]["options"]["output_format"] == rebut._REBUTTALS_FORMAT
 
         (event,) = events
@@ -362,6 +362,57 @@ def test_a_turn_that_raised_is_never_re_prompted_and_the_fix_turn_never_repeats(
     assert turn.reprompt_error == first_error
     assert turn.cost_usd == pytest.approx(0.10 + 0.20 + 0.05)
     assert len(record) == 3
+
+
+def test_a_killed_extraction_charges_its_own_floor_and_not_the_fix_turn_again():
+    """b-6a101f: a turn killed before its result event costs
+    `max(floor, last_cost_usd)` (`implement.run_agent`). So neither the
+    extraction nor its re-prompt carries an earlier turn's cost, and a
+    killed one adds only what its own stream spent."""
+    numbered = [(1, _blocker())]
+
+    def killed(floor):
+        def agent_turn(last_cost_usd):
+            return implement.AgentFailed(
+                "the agent produced no result event, exited -6",
+                _turn(session_id=None, cost=max(floor, last_cost_usd)),
+            )
+
+        return agent_turn
+
+    for scripted_turns, expected in (
+        (
+            [_turn(session_id="fix-sess", cost=3.50, text="Fixed."), killed(0.02)],
+            3.50 + 0.02,
+        ),
+        (
+            [
+                _turn(session_id="fix-sess", cost=3.50, text="Fixed."),
+                _turn(session_id="extract-sess", cost=0.40, structured_output=None),
+                killed(0.03),
+            ],
+            3.50 + 0.40 + 0.03,
+        ),
+    ):
+        scripted = iter(scripted_turns)
+
+        def agent(container, *, prompt, options, last_cost_usd=0.0, _s=scripted, **kw):
+            turn = next(_s)
+            if callable(turn):
+                raise turn(last_cost_usd)
+            return turn
+
+        turn = rebut.run_rebuttal(
+            "cell",
+            blockers=numbered,
+            options=OPTIONS,
+            session_id="sess-1",
+            agent=agent,
+            spec_id="SY-1",
+            emit=lambda _e: None,
+        )
+        assert turn.error is not None
+        assert turn.cost_usd == pytest.approx(expected)
 
 
 # --- backlog item 117: `blocker_lines` shows a survived probe ---

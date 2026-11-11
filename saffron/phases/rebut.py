@@ -295,7 +295,9 @@ def run_rebuttal(
             options=extract_options,
             resume=session_id,
             emit=emit,
-            last_cost_usd=attempt.cost_usd_est,
+            # No carry: a killed extraction charges its own floor, never the
+            # fix turn's cost a second time (b-6a101f).
+            last_cost_usd=0.0,
         )
     except implement.AgentFailed as failed:
         cost = attempt.cost_usd_est + (
@@ -329,7 +331,7 @@ def run_rebuttal(
             options=extract_options,
             resume=session_id,
             emit=emit,
-            last_cost_usd=extracted.cost_usd_est,
+            last_cost_usd=0.0,
         )
     except implement.AgentFailed as failed:
         cost = spent + (failed.attempt.cost_usd_est if failed.attempt else 0.0)

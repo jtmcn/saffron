@@ -1,12 +1,12 @@
 ---
 id: b-6a101f
 title: REBUT charges a killed extraction turn the first turn's cost a second time
-status: open
+status: done
 tier: 3
 filed: 2026-09-25
-closed:
+closed: 2026-11-11
 specs: []
-prs: []
+prs: [1147]
 commits: []
 cites: [§4.1]
 related: [b-792ab2]
@@ -31,3 +31,5 @@ A killed turn with no result event adds nothing to REBUT's cost.
 - 2026-11-11: seen in the spec loop's run 61. `SA-0368`'s REBUT agent died
   with exit -6, and the log said its extraction "ran out of its $4.00
   reserve". No turn spent that reserve. The line names a cap for a crash.
+- 2026-11-11: done by hand in #1147. The extraction and its re-prompt pass
+  no carry, so a killed one charges only its own floor.
