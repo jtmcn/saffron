@@ -1825,6 +1825,7 @@ def test_a_green_finish_pushes_its_own_branch_and_opens_its_draft_pull_request(
     tmp_path, monkeypatch
 ):
     from saffron.finish import PUSHED, publish_finish
+    from saffron.gates.baseline import NewFailure
     from saffron.repos import mirror as git_mirror
 
     _isolate_git(tmp_path, monkeypatch)
@@ -1838,10 +1839,10 @@ def test_a_green_finish_pushes_its_own_branch_and_opens_its_draft_pull_request(
         gh = _FakeGh(_bases(s.layers))
         verify_calls: list[tuple[str, str]] = []
 
-        def verify(sha_arg: str, base_arg: str) -> int:
+        def verify(sha_arg: str, base_arg: str) -> tuple[NewFailure, ...]:
             verify_calls.append((sha_arg, base_arg))
             assert git_mirror._git(s.mirror, "rev-parse", ref) == sha_arg
-            return 0
+            return ()
 
         before_remote = _refs(s.remote)
         before_mirror = _refs(s.mirror)
@@ -1950,7 +1951,7 @@ def test_a_green_finish_pushes_its_own_branch_and_opens_its_draft_pull_request(
             mirror=s.mirror,
             url=s.url,
             slug=s.slug,
-            verify=lambda sha_arg, base_arg: 0,
+            verify=lambda sha_arg, base_arg: (),
             gh=gh,
             workdir=workdir,
         )
@@ -1987,7 +1988,7 @@ def test_a_green_finish_pushes_its_own_branch_and_opens_its_draft_pull_request(
             mirror=s.mirror,
             url=s.url,
             slug=s.slug,
-            verify=lambda sha_arg, base_arg: 0,
+            verify=lambda sha_arg, base_arg: (),
             gh=gh,
             workdir=tmp_path / "push-gh-fails",
         )
@@ -2006,6 +2007,7 @@ def test_a_finishing_layers_fact_reaches_the_origin_at_exit(tmp_path, monkeypatc
     origin once `push_unpushed` runs, the way a command's own exit runs
     it. Driven on a top layer an earlier call already pushed."""
     from saffron.finish import publish_finish
+    from saffron.gates.baseline import NewFailure
     from saffron.record.refs import RefsRecord
     from saffron.record.routed import RoutedRecord
     from saffron.repos import mirror as git_mirror
@@ -2021,9 +2023,9 @@ def test_a_finishing_layers_fact_reaches_the_origin_at_exit(tmp_path, monkeypatc
     ref = f"refs/heads/saffron-finish/{s.batch_id}"
     gh = _FakeGh(_bases(s.layers))
 
-    def verify(sha_arg: str, base_arg: str) -> int:
+    def verify(sha_arg: str, base_arg: str) -> tuple[NewFailure, ...]:
         assert git_mirror._git(s.mirror, "rev-parse", ref) == sha_arg
-        return 0
+        return ()
 
     publish_finish(
         s.ledger,
@@ -2222,7 +2224,7 @@ def test_a_stack_on_an_earlier_pull_request_is_finished_against_its_branch_and_n
         mirror=s_escalate.mirror,
         url=s_escalate.url,
         slug=s_escalate.slug,
-        verify=lambda sha_arg, base_arg: 0,
+        verify=lambda sha_arg, base_arg: (),
         gh=gh_escalate,
         workdir=tmp_path / "push-escalate",
     )
@@ -2256,7 +2258,7 @@ def test_a_stack_on_an_earlier_pull_request_is_finished_against_its_branch_and_n
         mirror=s_pushed.mirror,
         url=s_pushed.url,
         slug=s_pushed.slug,
-        verify=lambda sha_arg, base_arg: 0,
+        verify=lambda sha_arg, base_arg: (),
         gh=gh_pushed,
         workdir=workdir,
     )
@@ -2351,7 +2353,7 @@ def test_a_finish_whose_stack_base_row_is_missing_escalates_and_names_it(
         mirror=earlier.mirror,
         url=earlier.url,
         slug=earlier.slug,
-        verify=lambda sha_arg, base_arg: 0,
+        verify=lambda sha_arg, base_arg: (),
         gh=gh,
         workdir=tmp_path / "push",
     )
@@ -2362,11 +2364,24 @@ def test_a_finish_whose_stack_base_row_is_missing_escalates_and_names_it(
 def test_each_escalation_leaves_the_stack_unpushed(tmp_path, monkeypatch):
     from saffron.cell.runtime import CellRuntimeError
     from saffron.finish import ESCALATE, publish_finish
+    from saffron.gates.baseline import NewFailure
+    from saffron.gates.contract import Failure
     from saffron.phases import package as package_phase
 
     # Pinned once here: every case below checks the literal text instead,
     # so a change to this constant cannot move expectation and output together.
     assert ESCALATE == "escalate: "
+
+    def _failures(n: int) -> tuple[NewFailure, ...]:
+        return tuple(
+            NewFailure(
+                gate="tests",
+                failure=Failure(
+                    file=f"f{i}.py", line=i + 1, code=f"E{i}", message=f"boom {i}"
+                ),
+            )
+            for i in range(n)
+        )
 
     _isolate_git(tmp_path, monkeypatch)
 
@@ -2399,6 +2414,7 @@ def test_each_escalation_leaves_the_stack_unpushed(tmp_path, monkeypatch):
         expected_prefix_fn,
         expected_pr_view_count,
         expected_line_fn=None,
+        expected_extra_lines=0,
     ):
         s, sha, top = _fresh(name)
         branch = f"saffron/batch-{s.batch_id}-finish"
@@ -2420,7 +2436,7 @@ def test_each_escalation_leaves_the_stack_unpushed(tmp_path, monkeypatch):
         before_mirror = _refs(s.mirror)
         verify_calls: list[tuple[str, str]] = []
 
-        def _verify_wrap(sha_arg: str, base_arg: str) -> int:
+        def _verify_wrap(sha_arg: str, base_arg: str) -> tuple[NewFailure, ...]:
             verify_calls.append((sha_arg, base_arg))
             return verify(sha_arg, base_arg)
 
@@ -2436,7 +2452,7 @@ def test_each_escalation_leaves_the_stack_unpushed(tmp_path, monkeypatch):
             workdir=tmp_path / f"{name}-push",
         )
         expected_prefix = expected_prefix_fn(s, branch)
-        assert len(lines) == 1
+        assert len(lines) == 1 + expected_extra_lines
         assert lines[0].startswith("escalate: ")
         assert lines[0].startswith(expected_prefix)
         if expected_line_fn is not None:
@@ -2447,19 +2463,21 @@ def test_each_escalation_leaves_the_stack_unpushed(tmp_path, monkeypatch):
 
     _run_case(
         "red",
-        verify=lambda sha_arg, base_arg: 2,
+        verify=lambda sha_arg, base_arg: _failures(2),
         expected_prefix_fn=lambda s, branch: "escalate: red suite, 2 new failure",
         # The exact word, plural at 2: pins the suffix `_new_failures` picks, not
         # the prefix the two counts share.
         expected_line_fn=lambda s, branch: "escalate: red suite, 2 new failures",
         expected_pr_view_count=0,
+        expected_extra_lines=2,
     )
     _run_case(
         "red-one",
-        verify=lambda sha_arg, base_arg: 1,
+        verify=lambda sha_arg, base_arg: _failures(1),
         expected_prefix_fn=lambda s, branch: "escalate: red suite, 1 new failure",
         expected_line_fn=lambda s, branch: "escalate: red suite, 1 new failure",
         expected_pr_view_count=0,
+        expected_extra_lines=1,
     )
     _run_case(
         "suite-broke",
@@ -2483,35 +2501,36 @@ def test_each_escalation_leaves_the_stack_unpushed(tmp_path, monkeypatch):
     )
     _run_case(
         "red-and-moved",
-        verify=lambda sha_arg, base_arg: 2,
+        verify=lambda sha_arg, base_arg: _failures(2),
         hand_push_branch="saffron/TE-2",
         expected_prefix_fn=lambda s, branch: "escalate: red suite, 2 new failure",
         expected_pr_view_count=0,
+        expected_extra_lines=2,
     )
     _run_case(
         "bottom-moved",
-        verify=lambda sha_arg, base_arg: 0,
+        verify=lambda sha_arg, base_arg: (),
         hand_push_branch="saffron/TE-1",
         expected_prefix_fn=lambda s, branch: "escalate: saffron/TE-1 is at",
         expected_pr_view_count=0,
     )
     _run_case(
         "middle-moved",
-        verify=lambda sha_arg, base_arg: 0,
+        verify=lambda sha_arg, base_arg: (),
         hand_push_branch="saffron/TE-2",
         expected_prefix_fn=lambda s, branch: "escalate: saffron/TE-2 is at",
         expected_pr_view_count=0,
     )
     _run_case(
         "top-moved",
-        verify=lambda sha_arg, base_arg: 0,
+        verify=lambda sha_arg, base_arg: (),
         hand_push_branch="saffron/TE-3",
         expected_prefix_fn=lambda s, branch: "escalate: saffron/TE-3 is at",
         expected_pr_view_count=0,
     )
     _run_case(
         "bottom-base",
-        verify=lambda sha_arg, base_arg: 0,
+        verify=lambda sha_arg, base_arg: (),
         wrong_base_fn=lambda layers: {layers[0]["pr_url"]: "saffron/TE-9"},
         expected_prefix_fn=lambda s, branch: (
             "escalate: TE-1's pull request targets saffron/TE-9, not trunk"
@@ -2520,7 +2539,7 @@ def test_each_escalation_leaves_the_stack_unpushed(tmp_path, monkeypatch):
     )
     _run_case(
         "middle-base",
-        verify=lambda sha_arg, base_arg: 0,
+        verify=lambda sha_arg, base_arg: (),
         wrong_base_fn=lambda layers: {layers[1]["pr_url"]: "trunk"},
         expected_prefix_fn=lambda s, branch: (
             "escalate: TE-2's pull request targets trunk, not saffron/TE-1"
@@ -2529,7 +2548,7 @@ def test_each_escalation_leaves_the_stack_unpushed(tmp_path, monkeypatch):
     )
     _run_case(
         "top-unread",
-        verify=lambda sha_arg, base_arg: 0,
+        verify=lambda sha_arg, base_arg: (),
         missing_base_specs=("TE-3",),
         expected_prefix_fn=lambda s, branch: (
             "escalate: TE-3's pull request targets nothing readable, not saffron/TE-2"
@@ -2538,7 +2557,7 @@ def test_each_escalation_leaves_the_stack_unpushed(tmp_path, monkeypatch):
     )
     _run_case(
         "finish-exists",
-        verify=lambda sha_arg, base_arg: 0,
+        verify=lambda sha_arg, base_arg: (),
         seed_finish=True,
         expected_prefix_fn=lambda s, branch: f"escalate: {branch} already exists",
         expected_pr_view_count=3,
@@ -2552,9 +2571,9 @@ def test_each_escalation_leaves_the_stack_unpushed(tmp_path, monkeypatch):
     before_mirror = _refs(s.mirror)
     verify_calls: list[tuple[str, str]] = []
 
-    def _verify(sha_arg: str, base_arg: str) -> int:
+    def _verify(sha_arg: str, base_arg: str) -> tuple[NewFailure, ...]:
         verify_calls.append((sha_arg, base_arg))
-        return 0
+        return ()
 
     with monkeypatch.context() as m:
         m.setattr(
@@ -2579,6 +2598,56 @@ def test_each_escalation_leaves_the_stack_unpushed(tmp_path, monkeypatch):
     assert verify_calls == [(sha, top["head"])]
     assert len(gh.calls) == 3
     _assert_untouched(s, before_remote, before_mirror)
+
+
+def test_a_red_finish_names_each_new_failure_it_counts(tmp_path, monkeypatch):
+    """`publish_finish`'s `verify` returns the new failures themselves. On
+    a red suite its first line is still the escalation line it prints at
+    base, `escalate: red suite, N new failures`. One line follows per new
+    failure, in the order `verify` returned them, cleaned and clipped the
+    way `events._clean` and `events._DETAIL_BOUND` already do (`SA-0368`)."""
+    from saffron.events import _DETAIL_BOUND, _clean
+    from saffron.finish import publish_finish
+    from saffron.gates.baseline import NewFailure, render
+    from saffron.gates.contract import Failure
+
+    _isolate_git(tmp_path, monkeypatch)
+    s = _stack(tmp_path / "red", 3)
+    top = s.layers[-1]
+    sha = _finishing_commit(s.mirror, top["head"])
+
+    long_message = "\x1b[2Jboom\nwith\ttabs " + "x" * 2000
+    failures = (
+        NewFailure(
+            gate="zebra",
+            failure=Failure(file="z.py", line=9, code="Z9", message="boom"),
+        ),
+        NewFailure(
+            gate="apple",
+            failure=Failure(file="", line=None, code="A1", message="too big"),
+        ),
+        NewFailure(
+            gate="mango",
+            failure=Failure(file="m.py", line=1, code="M5", message=long_message),
+        ),
+    )
+
+    gh = _FakeGh(_bases(s.layers))
+    lines = publish_finish(
+        s.ledger,
+        s.batch_id,
+        sha,
+        mirror=s.mirror,
+        url=s.url,
+        slug=s.slug,
+        verify=lambda sha_arg, base_arg: failures,
+        gh=gh,
+        workdir=tmp_path / "red-push",
+    )
+
+    assert lines[0] == "escalate: red suite, 3 new failures"
+    assert lines[1:] == ["  " + _clean(render(f), _DETAIL_BOUND) for f in failures]
+    assert len(gh.calls) == 0
 
 
 def test_a_worktree_left_behind_is_named_on_the_escalation_and_the_raise_paths(
@@ -2612,7 +2681,7 @@ def test_a_worktree_left_behind_is_named_on_the_escalation_and_the_raise_paths(
         mirror=s.mirror,
         url=s.url,
         slug=s.slug,
-        verify=lambda sha_arg, base_arg: 0,
+        verify=lambda sha_arg, base_arg: (),
         gh=_FakeGh(_bases(s.layers)),
         workdir=workdir,
     )
@@ -2637,7 +2706,7 @@ def test_a_worktree_left_behind_is_named_on_the_escalation_and_the_raise_paths(
             mirror=s.mirror,
             url=s.url,
             slug=s.slug,
-            verify=lambda sha_arg, base_arg: 0,
+            verify=lambda sha_arg, base_arg: (),
             gh=gh,
             workdir=workdir,
         )
@@ -2654,6 +2723,7 @@ def test_a_finish_handed_graded_heads_judges_and_checks_each_layer_at_its_graded
     not name. A branch found at its own entry does not escalate. One
     found anywhere else does, naming the head it was checked against."""
     from saffron.finish import ESCALATE, PUSHED, publish_finish
+    from saffron.gates.baseline import NewFailure
 
     _isolate_git(tmp_path, monkeypatch)
 
@@ -2690,9 +2760,9 @@ def test_a_finish_handed_graded_heads_judges_and_checks_each_layer_at_its_graded
         gh = _FakeGh(_bases(rows))
         verify_calls: list[tuple[str, str]] = []
 
-        def verify(sha_arg: str, base_arg: str) -> int:
+        def verify(sha_arg: str, base_arg: str) -> tuple[NewFailure, ...]:
             verify_calls.append((sha_arg, base_arg))
-            return 0
+            return ()
 
         lines = publish_finish(
             s.ledger,

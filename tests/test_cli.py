@@ -13337,10 +13337,39 @@ def test_a_stack_batch_publishes_its_finish_through_the_finishing_suite(
 
     monkeypatch.setattr(cli.git_mirror, "export_saffron_dir", _fake_export)
 
+    from saffron.gates.baseline import NewFailure
+    from saffron.gates.contract import Failure, GateResult
+    from saffron.gates.suite import SuiteRun
+
     reverify_calls: list[dict] = []
 
+    _failure_a = NewFailure(
+        gate="tests", failure=Failure(file="a.py", line=1, code="E1", message="m")
+    )
+    _failure_b = NewFailure(
+        gate="lint", failure=Failure(file="b.py", line=2, code="E2", message="n")
+    )
+
     class _Comparison:
-        new_failures = ("a", "b")
+        new_failures = (_failure_a, _failure_b)
+        run = SuiteRun(
+            results=[
+                GateResult(
+                    gate="tests",
+                    status="fail",
+                    tool="pytest 1",
+                    failures=[_failure_a.failure],
+                ),
+                GateResult(
+                    gate="lint",
+                    status="fail",
+                    tool="ruff 1",
+                    failures=[_failure_b.failure],
+                ),
+            ],
+            effective_risk="standard",
+            advisory_gates=frozenset(),
+        )
 
     def _fake_reverify(**kwargs):
         reverify_calls.append(kwargs)
@@ -13349,7 +13378,7 @@ def test_a_stack_batch_publishes_its_finish_through_the_finishing_suite(
     monkeypatch.setattr(package_phase, "reverify", _fake_reverify)
 
     publish_calls: list[dict] = []
-    verify_result: dict[str, int] = {}
+    verify_result: dict[str, tuple] = {}
 
     def _fake_publish_finish(
         ledger, batch_id, sha, *, mirror, url, slug, verify, gh, workdir, heads=()
@@ -13389,7 +13418,7 @@ def test_a_stack_batch_publishes_its_finish_through_the_finishing_suite(
     assert call["url"] == "https://github.com/o/r.git"
     assert call["slug"] == "o/r"
     assert call["workdir"] == home / "batches" / "v0" / "finish" / "3" / "push"
-    assert verify_result["value"] == 2
+    assert verify_result["value"] == (_failure_a, _failure_b)
     assert export_calls == [(tmp_path / "pinned-mirror.git", "a" * 40, gates_dir)]
 
     assert len(reverify_calls) == 1
@@ -13454,6 +13483,140 @@ def test_a_stack_batch_publishes_its_finish_through_the_finishing_suite(
         printed = capsys.readouterr().out
         assert "finish: no layer, so nothing committed" in printed
     assert len(publish_calls) == before
+
+
+def test_a_finish_writes_its_suite_comparison_beside_its_findings(
+    tmp_path, monkeypatch, capsys
+):
+    """`cli._stack_finish` writes the finishing suite's comparison to
+    `verify.json`, beside `findings.json`, on every comparison `verify`
+    returns. The file names the commit judged, the base it was judged
+    against, and the mirror that holds it. It also carries each new
+    failure's own fields, and each head gate result that carries one of
+    them (`SA-0368`). A head gate result that only passed, or that
+    failed with nothing new, is left out, and a green comparison still
+    writes both lists empty."""
+    import shutil
+
+    from saffron import finish as finish_module
+    from saffron.gates.baseline import NewFailure
+    from saffron.gates.contract import Failure, GateResult
+    from saffron.gates.suite import SuiteComparison, SuiteRun
+    from saffron.phases import package as package_phase
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("saffron.phases.package.real_remote", lambda _repo: "o/r")
+    monkeypatch.setattr(
+        cli, "_resolve_queue", lambda *a, **k: _fake_batch_resolution(tmp_path)
+    )
+
+    def _fake_run_stack_batch(candidates, ledger, budget_usd, until, runner, **kwargs):
+        kwargs["finish"](3, [5, 6])
+        return "UNTIL"
+
+    monkeypatch.setattr(cli, "run_stack_batch", _fake_run_stack_batch)
+    monkeypatch.setattr(finish_module, "write_findings", lambda *a, **k: Path("x"))
+    monkeypatch.setattr(finish_module, "commit_finish", lambda *a, **k: "c" * 40)
+
+    repo_root = Path(__file__).resolve().parents[1]
+
+    def _fake_export(mirror, sha, dest):
+        dest_saffron = dest / ".saffron"
+        dest_saffron.mkdir(parents=True, exist_ok=True)
+        shutil.copy(
+            repo_root / ".saffron" / "policy.yaml", dest_saffron / "policy.yaml"
+        )
+        shutil.copytree(repo_root / ".saffron" / "gates", dest_saffron / "gates")
+        return dest
+
+    monkeypatch.setattr(cli.git_mirror, "export_saffron_dir", _fake_export)
+
+    returned: list[object] = []
+
+    def _fake_publish_finish(
+        ledger, batch_id, sha, *, mirror, url, slug, verify, gh, workdir, heads=()
+    ):
+        returned.append(verify("c" * 40, "d" * 40))
+        return ["a published line"]
+
+    monkeypatch.setattr(finish_module, "publish_finish", _fake_publish_finish)
+    _readiness_passes(monkeypatch, tmp_path)
+
+    def _run(name: str, comparison: SuiteComparison) -> Path:
+        monkeypatch.setattr(package_phase, "reverify", lambda **_k: comparison)
+        home = tmp_path / name
+        assert main(["--home", str(home), "batch", "--stack"]) == 0
+        assert "finish: a published line" in capsys.readouterr().out
+        return home / "batches" / "v0" / "finish" / "3" / "verify.json"
+
+    failure_a = NewFailure(
+        gate="tests", failure=Failure(file="a.py", line=1, code="E1", message="m")
+    )
+    failure_b = NewFailure(
+        gate="lint", failure=Failure(file="", line=None, code="E2", message="n")
+    )
+    red = SuiteComparison(
+        run=SuiteRun(
+            results=[
+                GateResult(
+                    gate="tests",
+                    status="fail",
+                    tool="pytest 1",
+                    failures=[failure_a.failure],
+                ),
+                GateResult(
+                    gate="lint",
+                    status="fail",
+                    tool="ruff 1",
+                    failures=[failure_b.failure],
+                ),
+                GateResult(gate="format", status="pass", tool="ruff 1"),
+                GateResult(
+                    gate="types",
+                    status="fail",
+                    tool="ty 1",
+                    failures=[Failure(file="b.py", line=2, code="T1", message="old")],
+                ),
+            ],
+            effective_risk="standard",
+            advisory_gates=frozenset(),
+        ),
+        new_failures=(failure_a, failure_b),
+    )
+    red_dest = _run("red", red)
+    assert returned == [(failure_a, failure_b)]
+    red_payload = json.loads(red_dest.read_text())
+    assert red_payload["commit"] == "c" * 40
+    assert red_payload["base"] == "d" * 40
+    assert red_payload["mirror"] == str(tmp_path / "pinned-mirror.git")
+    assert red_payload["new_failures"] == [
+        {"gate": "tests", "file": "a.py", "line": 1, "code": "E1", "message": "m"},
+        {"gate": "lint", "file": "", "line": None, "code": "E2", "message": "n"},
+    ]
+    assert [GateResult.model_validate(g) for g in red_payload["gates"]] == [
+        GateResult(
+            gate="tests", status="fail", tool="pytest 1", failures=[failure_a.failure]
+        ),
+        GateResult(
+            gate="lint", status="fail", tool="ruff 1", failures=[failure_b.failure]
+        ),
+    ]
+
+    green = SuiteComparison(
+        run=SuiteRun(
+            results=[GateResult(gate="tests", status="pass", tool="pytest 1")],
+            effective_risk="standard",
+            advisory_gates=frozenset(),
+        ),
+        new_failures=(),
+    )
+    green_dest = _run("green", green)
+    assert returned[-1] == ()
+    green_payload = json.loads(green_dest.read_text())
+    assert green_payload["commit"] == "c" * 40
+    assert green_payload["base"] == "d" * 40
+    assert green_payload["new_failures"] == []
+    assert green_payload["gates"] == []
 
 
 def test_a_stack_batchs_follow_up_judge_runs_the_finishing_suite_on_each_draft_atop_the_top_head(

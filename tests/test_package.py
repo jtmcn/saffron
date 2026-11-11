@@ -1835,6 +1835,84 @@ def test_new_failures_after_the_rebase_are_the_tasks_failure(monkeypatch, packag
     ]
 
 
+def test_packages_re_verify_names_each_new_failure_it_counts(
+    monkeypatch, packageable, capsys
+):
+    """PACKAGE's re-verify emits its count line as at base, then one
+    `PACKAGE:` line per new failure, in `comparison.new_failures` order
+    (`SA-0368`). Driven with no `emit`, so the printed lines and
+    `events.jsonl` both come from `describe()` alone. The base holds
+    still first, then the default branch moves, and each note is
+    compared whole against its own mirror commit."""
+    import re
+
+    from saffron.events import PhaseStart, describe, read_log
+    from saffron.gates.baseline import NewFailure, render
+    from saffron.gates.contract import Failure
+
+    failure_a = NewFailure(
+        gate="tests", failure=Failure(file="f.py", line=3, code="E1", message="boom")
+    )
+    failure_b = NewFailure(
+        gate="lint", failure=Failure(file="", line=None, code="E2", message="missing")
+    )
+    monkeypatch.setattr(
+        "saffron.phases.package.reverify",
+        lambda **_k: _reverified(failure_a, failure_b),
+    )
+    expected_failure_lines = [
+        f"PACKAGE:   {render(failure_a)}",
+        f"PACKAGE:   {render(failure_b)}",
+    ]
+    kwargs = {k: v for k, v in packageable.kwargs.items() if k != "emit"}
+
+    capsys.readouterr()
+    result = package(packageable.outcome, gh=_no_gh, **kwargs)
+    assert result.state == "MERGE_FAILED"
+    printed = capsys.readouterr().out.splitlines()
+    assert printed[-3:] == [
+        "PACKAGE: 2 new failures against main",
+        *expected_failure_lines,
+    ]
+
+    match = re.search(r"\(([0-9a-f]{12}) in the mirror\)", result.note)
+    assert match is not None
+    assert result.note == (
+        f"2 new failures re-verifying the packaged commit ({match.group(1)} "
+        "in the mirror) — the base did not move"
+    )
+
+    logged = [
+        describe(event)
+        for event in read_log(packageable.outcome.task_dir)
+        if isinstance(event, PhaseStart) and event.label == "PACKAGE"
+    ]
+    assert logged[-3:] == [
+        "PACKAGE: 2 new failures against main",
+        *expected_failure_lines,
+    ]
+
+    (packageable.work / "other.txt").write_text("main moved\n")
+    git(packageable.work, "add", "-A")
+    git(packageable.work, "commit", "-qm", "main moved")
+    git(packageable.work, "push", "-q", "origin", "main")
+
+    capsys.readouterr()
+    result2 = package(packageable.outcome, gh=_no_gh, **kwargs)
+    assert result2.state == "MERGE_FAILED"
+    printed2 = capsys.readouterr().out.splitlines()
+    assert printed2[-3:] == [
+        "PACKAGE: 2 new failures against main",
+        *expected_failure_lines,
+    ]
+
+    match2 = re.search(r"\(([0-9a-f]{12}) in the mirror\)", result2.note)
+    assert match2 is not None
+    assert (
+        result2.note == f"2 new failures after rebase ({match2.group(1)} in the mirror)"
+    )
+
+
 def _no_gh(argv):
     raise AssertionError("gh must not be reached")
 

@@ -30,6 +30,7 @@ from saffron.credentials import (
     matches_own_token,
 )
 from saffron.events import Event, EventLog, PhaseStart, describe
+from saffron.gates.baseline import render
 from saffron.gates.contract import split_lines
 from saffron.gates.core.scope import scope_gate
 from saffron.gates.suite import CellTree, GateSuite, SuiteComparison
@@ -894,6 +895,10 @@ def package(
         outcome.advisory_gates = sorted(comparison.run.advisory_gates)
         if new := comparison.new_failures:
             _emit_package(f"{len(new)} new failures against {target_branch}")
+            # One line per failure, not only a count (`SA-0368`): the only
+            # place they are named, since a red re-verify pushes nothing.
+            for failure in new:
+                _emit_package("  " + render(failure))
             # Not `pushed`: this returns before the push, and a `pushed_sha`
             # no remote has is a claim, not a record. The wording splits on
             # `moved` so cell gate results that did not reproduce (the base

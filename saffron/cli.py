@@ -1135,16 +1135,17 @@ def _finish_verify(
     repo: Path,
     gates_dir: Path,
     only: Collection[str] | None = None,
+    verify_dest: Path | None = None,
 ) -> Callable[[str, str], tuple[NewFailure, ...]]:
     """The `verify` callable `finish.publish_finish` and `finish.judge_draft`
-    share. `_stack_finish` counts its result, and `judge_draft` renders it.
+    share, returning each new failure rather than a bare count.
 
-    Exports `.saffron/` from the pinned mirror at the pinned base. Builds
-    the finishing suite over the policy it finds there, and runs
-    `package_phase.reverify` in the repo's own cell image. Returns the
-    suite's own new failures. `only`, when given, narrows the loaded
-    policy's declared `gates` to those names first (`_draft_faults`,
-    SA-0353). Core gates sit outside that dict, so they still run."""
+    Exports `.saffron/` from the pinned mirror at the pinned base, builds
+    the finishing suite, and runs `package_phase.reverify` in the repo's
+    own cell image. `only`, when given, narrows the declared `gates` to
+    those names first (`_draft_faults`, SA-0353), though core gates always
+    run. `verify_dest`, when given, also records the comparison through
+    `finish.write_verify_comparison` (`SA-0368`)."""
 
     def verify(sha: str, base: str) -> tuple[NewFailure, ...]:
         git_mirror.export_saffron_dir(pinned.mirror, pinned.base_sha, gates_dir)
@@ -1163,6 +1164,10 @@ def _finish_verify(
             image=repo_image.cell_tag(repo),
             spec=spec,
         )
+        if verify_dest is not None:
+            finish.write_verify_comparison(
+                comparison, sha=sha, base=base, mirror=pinned.mirror, dest=verify_dest
+            )
         return comparison.new_failures
 
     return verify
@@ -1298,6 +1303,7 @@ def _stack_finish(
                 pinned=pinned,
                 repo=repo,
                 gates_dir=out_dir / "finish" / str(batch_id) / "gates",
+                verify_dest=out_dir / "finish" / str(batch_id) / finish.VERIFY_NAME,
             )
             lines = finish.publish_finish(
                 ledger,
@@ -1306,9 +1312,7 @@ def _stack_finish(
                 mirror=pinned.mirror,
                 url=pinned.url,
                 slug=slug,
-                verify=lambda commit_sha, base_sha: len(
-                    raw_verify(commit_sha, base_sha)
-                ),
+                verify=raw_verify,
                 gh=_guarded_gh([]),
                 workdir=out_dir / "finish" / str(batch_id) / "push",
                 heads=heads,
