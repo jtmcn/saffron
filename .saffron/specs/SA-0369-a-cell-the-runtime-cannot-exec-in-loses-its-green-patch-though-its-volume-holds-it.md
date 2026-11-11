@@ -52,8 +52,9 @@ risk: standard
 acceptance:
   - claim: >-
       When `session.export_patch`'s patch read from the cell fails, it
-      first removes the cell with `runtime.remove_container`. Once that
-      removal succeeds, it drops the cell's name from the `created` set it is
+      first removes the cell's container with `runtime.remove_container`.
+      The worktree volume is kept. Once that
+      removal succeeds, it drops the container's name from the `created` set it is
       handed. Then it reads all four again from the worktree volume: the commit subjects,
       the patch, the head sha and the changed files. Each read goes through
       `runtime.run_ephemeral`, in a fresh container of the image the export
@@ -65,11 +66,12 @@ acceptance:
       network of that name is removed before the create and again after
       the last read. `patch.diff` and `patch.json` then hold the same bytes
       a live cell's export writes, and the returned head sha and subjects
-      are equal. The one `exported` teardown line keeps the base text
+      are equal. When the volume's subject read fails and the cell read its
+      subjects, the cell's subjects are returned. The one `exported` teardown line keeps the base text
       `exported N bytes to <path>`, then names the volume and the cell's
       patch read error. The cell's own "commit subjects are unreadable" line
-      is not emitted on this path. A cell whose patch read succeeds is not
-      removed and keeps its name in `created`. It starts no such container
+      is not emitted on this path. A cell whose patch read succeeds keeps its
+      container, and the container's name stays in `created`. It starts no such container
       and creates no network, and its `exported` line is the base text
       exactly. When only its subject read failed, it emits the base's
       `commit_subjects` line, returns no subjects and writes its patch as at
@@ -96,22 +98,25 @@ acceptance:
       - The `exported` line does not name the volume.
       - A live cell's `exported` line names the volume as well.
       - The volume is read even when the cell's reads succeed.
-      - The cell is not removed before the volume reads, so the volume cannot attach.
+      - The cell's container is not removed before the volume reads, so the volume cannot attach.
       - The removal happens after the first volume read.
       - The cell's name stays in `created`.
-      - A live cell is removed too.
+      - A live cell's container is removed too.
+      - A volume whose subject read fails drops the subjects the cell already read.
   - claim: >-
       When the volume cannot be read either, `export_patch` returns
-      `None` and the subjects the volume gave, and does not raise. It writes neither file and emits
+      `None` and the subjects the volume gave, or the cell's when the volume
+      gave none and the cell read them. It does not raise. It writes neither file and emits
       exactly one `export_failed` teardown line. That line begins
       `patch export FAILED — ` and names the cell's error, the volume and
       the volume's own error. The export's network is removed in this case
       too. The witness drives two such volumes. In one the reader's git
       fails, and a `commit_subjects` line names the volume. In the other the
       network create hangs with `runtime.NetworkCreateHung`, and no
-      container starts. When the cell's removal exits non-zero, no container
+      container starts. When the removal of the cell's container exits non-zero, no container
       starts either. The one failure line then names the cell's error and
-      the removal's stderr, and the cell's name stays in `created`. A volume
+      the removal's stderr, and the container's name stays in `created`. In
+      that case a cell whose subject read succeeded returns its own subjects. A volume
       whose subject read succeeds and whose patch read fails returns
       `(None, subjects)` with those subjects and emits the one failure line.
       A volume holding no commits past the base emits the
@@ -127,7 +132,8 @@ acceptance:
       - A volume with no commits writes an empty `patch.diff`.
       - The network is claimed outside the `try`, so a hung create raises out of `export_patch`.
       - A failed removal is ignored, and the volume is read anyway.
-      - The cell's name leaves `created` before its removal succeeds.
+      - The container's name leaves `created` before its removal succeeds.
+      - A failed removal drops the subjects the cell already read.
       - A volume whose patch read fails drops the subjects it read.
   - claim: >-
       `_drive_cell`'s teardown hands `export_patch` the task's own worktree
@@ -139,16 +145,17 @@ acceptance:
       - The state volume is handed as `volume`.
       - The base image is handed as `image`.
   - claim: >-
-      When teardown's export removed a dead cell, `cell_down`'s second
+      When teardown's export removed a dead cell's container, `cell_down`'s second
       removal of that container emits no `survived` line for it. The witness
       drives `_drive_cell` with a cell whose reads fail at teardown. Its
       `remove_container` answers a container already removed with a non-zero
-      exit, as a missing one does. Three removals of the cell's name reach
+      exit, as a missing one does (measured: `container rm -f` of a missing
+      name exits 1). Three removals of the container's name reach
       it: `_drive_cell`'s own pre-clean, the export's, then `cell_down`'s.
-    witness: tests/test_session.py::test_a_cell_the_export_removed_is_not_reported_surviving_teardown
+    witness: tests/test_session.py::test_a_container_the_export_removed_is_not_reported_surviving_teardown
     wrong_versions:
-      - The export removes the cell and leaves its name in `created`, so `cell_down` reports it surviving.
-      - The export never removes the cell.
+      - The export removes the cell's container and leaves its name in `created`, so `cell_down` reports it surviving.
+      - The export never removes the cell's container.
 ---
 
 ## Context
@@ -180,7 +187,8 @@ internal network. While a container mounting a volume exists, a second
 `Error: failed to bootstrap container ... VZErrorDomain Code=2 "The storage
 device attachment is invalid."` The cell container still exists when the
 export runs, since `cell_down` removes it afterwards
-(`saffron/cell/session.py:1227`). So the fallback removes the cell first.
+(`saffron/cell/session.py:1227`). So the fallback removes the cell's
+container first, and keeps its worktree volume.
 
 **Removing the cell first loses no commit.** Measured the same way: after
 `container rm -f` on a container, and after `container stop`, a
@@ -309,6 +317,9 @@ example `["sh", "-c", 'cd /work && exec "$@"', "sh", *argv]`. Leave
 **The trigger.** Read the subjects from the cell first and hold any
 failure. Then read the patch. Only a failed patch read starts the fallback,
 which drops the held failure and reads the subjects from the volume. A
+cell whose own subject read succeeded keeps those subjects. They are
+returned when the volume gives none. Base never loses them to a failed
+patch read (`tests/test_session.py:3828`). A
 successful patch read emits the held failure as the base line and goes on
 as at base.
 
