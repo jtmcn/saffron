@@ -34,3 +34,6 @@ its finish reads it. Or `adopt` says the task will get no end review.
   `saffron finish 66` refused with "batch 66 holds no layer", and its $47.50
   reserve went unspent.
 - 2026-11-09: recurred in the spec loop's run 56. `SA-0353` ended `EXHAUSTED` and was adopted on #1099. `saffron finish 73` did not refuse this time. It graded `SA-0354`'s layer against `SA-0355`, so `SA-0353`'s whole diff read as `SA-0354`'s. That raised eight false out-of-`touches` blockers. Six were pooled and two became follow-ups.
+- 2026-11-11: recurred in the spec loop's run 61. `SA-0368` ended
+  `EXHAUSTED` and was adopted on #1145. `saffron finish 79` refused with
+  "batch 79 holds no layer", and its $30 reserve went unspent.

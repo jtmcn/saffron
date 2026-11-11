@@ -47,3 +47,8 @@ gate that failed.
   `80f41af0` had fixed its line. The finish pushed #1138 with both drafts and
   ended `INFRASTRUCTURE`. The delegate fixed `SA-0366`'s line in run 60's
   step 5 pull request and closed #1138.
+- 2026-11-11: recurred in the spec loop's run 62. Finish 80 graded the
+  in-cell critic's two concerns at PACKAGE's head. REBUT had fixed one before
+  PACKAGE, and review commit `12e8c6a6` the other. One was pooled. The other
+  became `SA-0370`, refused for 11 citations. The finishing layer edited
+  `SA-0369`'s spec, went red on `prose` and `census`, and pushed nothing.

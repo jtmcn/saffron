@@ -65,3 +65,8 @@ command can package it, and says which command does.
   so no blocker was answered and the task reads `EXHAUSTED` at $39.92 of $52.
   The patch was exported, and PACKAGE opened #1145. A runtime death read as
   `EXHAUSTED` is an `error` charged to the task.
+- 2026-11-11: `SA-0369` (#1150) landed in the spec loop's run 62. A cell
+  the runtime cannot exec in now has its container removed, and its patch is
+  read from the worktree volume by a read-only container. Resuming an
+  `ORPHANED` task's patch is still open, and so is a runtime death read as
+  `EXHAUSTED`.
