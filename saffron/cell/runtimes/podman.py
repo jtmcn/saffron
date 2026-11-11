@@ -12,7 +12,7 @@ The interaction is the shell-out and structured `inspect` the seam was already
 written for.
 
 **What it gives up is the per-cell VM, and that is the whole of the trade.**
-Every value below is measured, in
+Every value below but `build_cache_reclaim_argv` is measured, in
 `docs/evidence/2026-09-11-podman-as-a-second-cell-runtime.md`.
 """
 
@@ -77,6 +77,12 @@ class Podman:
         this runtime is for one attended task before it is for a night.
         """
         return ["--cpuset-cpus", f"0-{cpus - 1}"]
+
+    @property
+    def build_cache_reclaim_argv(self) -> list[str] | None:
+        # No host that measured apple also had podman, so this is absence
+        # of evidence (backlog item b-2bc0d5), not a measured difference.
+        return None
 
     @property
     def shares_kernel(self) -> bool:
