@@ -11,26 +11,34 @@ layer's task. Each layer is then walked top down: its end-review findings,
 then its own in-cell REVIEW concerns.
 
 An in-cell concern still anchors over the packaged range, since its line
-was recorded there. But the code it cites can move again before the end
-review reads the layer. When the layer's graded head (`graded_fields`)
-differs from its packaged one, hunks of their diff mark lines at risk.
-A concern `_decide` would file `qualified` is filed `unverified` instead
-when its line sits in such a hunk. The reason then names both heads in
-full. End-review and join findings, already read at the graded head, are
-never subject to this.
+was recorded there. The code it cites can move again, inside the task's
+own REBUT or after the end review grades the layer. A concern `_decide`
+would file `qualified` is filed `unverified` instead. That happens when
+its line sits in a hunk of the diff from the graded head
+(`graded_fields`) to the tree the critic read. That tree is rebuilt from
+`out_dir`'s SA-0375 record, under a throwaway git index, when the record
+binds to the layer's task. Otherwise the diff falls back to the packaged
+head, and `note` says why. The reason names whichever side was read and
+the graded head, both in full. End-review and join findings, already
+read at the graded head, never meet this.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
+import subprocess
+import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
-from saffron import end_review
+from saffron import end_review, events
 from saffron.agents.findings import Finding, Severity, anchor, parse_diff
 from saffron.cell import session
-from saffron.cell.worktree import DIFF_FLAGS
+from saffron.cell.worktree import DIFF_FLAGS, git_argv
 from saffron.gates.contract import GateResult
 from saffron.intake import Mutant
 from saffron.ledger import Ledger
@@ -105,6 +113,94 @@ def _in_cell_concerns(ledger: Ledger, task_id: int) -> list[Finding]:
     ]
 
 
+def _binds_task(task_dir: Path, sha256: str, task_key: str) -> bool:
+    """Whether a REVIEW phase line in `task_dir / 'events.jsonl'` naming
+    `sha256` is followed, before any other `RecordAppend`, by one under
+    `task_key`. A later task of the same spec, or `saffron reconcile`,
+    appends to the same file long after. Only the first `RecordAppend`
+    after the matching line is read."""
+    target = f"reviewed diff recorded, sha256 {sha256}"
+    bound = False
+    for event in events.read_log(task_dir):
+        if bound:
+            if isinstance(event, events.RecordAppend):
+                return event.task_key == task_key
+            continue
+        if (
+            isinstance(event, events.PhaseStart)
+            and event.phase == "REVIEW"
+            and event.label == "REVIEW"
+            and event.detail == target
+        ):
+            bound = True
+    return False
+
+
+def _rebuild_tree(mirror: Path, tree_base: str, raw: str) -> tuple[str | None, str]:
+    """`tree_base` plus `raw` applied, as a new tree id in `mirror`. Never
+    the worktree, which this bare mirror has none of. Built under a fresh
+    `GIT_INDEX_FILE` so the mirror's own index, if it has one, is left
+    alone. Each of `read-tree`, `apply --cached` and `write-tree` runs
+    under `worktree.git_argv`'s pins, the same ones the critic cell's own
+    `git apply` ran under."""
+    with tempfile.TemporaryDirectory() as tmp:
+        index_path = Path(tmp) / "index"
+        env = dict(os.environ)
+        env["GIT_INDEX_FILE"] = str(index_path)
+        read = subprocess.run(
+            git_argv("-C", str(mirror), "read-tree", tree_base),
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        if read.returncode != 0:
+            return None, f"the mirror lacks its tree base {tree_base}"
+        applied = subprocess.run(
+            git_argv("-C", str(mirror), "apply", "--cached", "--whitespace=nowarn"),
+            input=raw,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        if applied.returncode != 0:
+            return None, f"its diff does not apply to {tree_base}"
+        written = subprocess.run(
+            git_argv("-C", str(mirror), "write-tree"),
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        return written.stdout.strip(), ""
+
+
+def _reviewed_tree(
+    mirror: Path, out_dir: Path, spec_id: str, task_key: str
+) -> tuple[str | None, str]:
+    """The critic's own tree for a layer's in-cell concerns, rebuilt from
+    SA-0375's record at `out_dir / spec_id / 'reviewed-diff.json'`, or
+    `None` with the cause it could not be used. Checked in order: the
+    file exists, parses as the expected object, hashes to its own
+    `sha256`, and `_binds_task` reads it as this task's. Only then is it
+    rebuilt, so a bad mirror never masks an earlier cause."""
+    path = out_dir / spec_id / "reviewed-diff.json"
+    if not path.is_file():
+        return None, "no reviewed-diff.json"
+    try:
+        data = json.loads(path.read_text())
+        tree_base = data["tree_base"]
+        raw = data["raw"]
+        sha256 = data["sha256"]
+        if not all(isinstance(value, str) for value in (tree_base, raw, sha256)):
+            raise TypeError
+    except (OSError, ValueError, KeyError, TypeError):
+        return None, "reviewed-diff.json is unreadable"
+    if hashlib.sha256(raw.encode("utf-8")).hexdigest() != sha256:
+        return None, "its sha256 does not match its diff"
+    if not _binds_task(out_dir / spec_id, sha256, task_key):
+        return None, "no REVIEW line binds it to this task"
+    return _rebuild_tree(mirror, tree_base, raw)
+
+
 def _qualify_range(
     ledger: Ledger,
     inputs: list[Finding],
@@ -124,26 +220,40 @@ def _qualify_range(
     gates: dict[str, Path],
     created: set[str],
     note: Callable[[str, bool, str], None],
+    out_dir: Path,
     graded_head: str | None = None,
 ) -> list[Qualified]:
     """One range's findings, anchored over `base..head`, probed and decided,
     each recorded under `task_id` in the order given. Builds no group.
-    `qualify` does, across every range's own call, so a later one can
-    extend an earlier one's. A read the mirror cannot answer raises before
-    any finding in the range is recorded.
+    `qualify` does, so a later range can extend an earlier one's. A read
+    the mirror cannot answer raises before any finding is recorded.
 
-    `graded_head` is set for a layer's in-cell concerns. A `qualified`
-    finding whose cited line sits in a hunk of `graded_head..head`, read
-    on `head`'s side, becomes `unverified`. That diff is read first, so a
-    bad mirror still raises before any row here is recorded."""
+    `graded_head`, when set, marks a layer's in-cell concerns. A
+    `qualified` finding there becomes `unverified` when its line sits in
+    a hunk of the diff from `graded_head` to the critic's own tree. That
+    tree is rebuilt from `out_dir`'s SA-0375 record, or `head` stands in
+    when the record cannot be used."""
     diff = _git(mirror, "diff", *DIFF_FLAGS, f"{base}..{head}", strip=False)
     findings = anchor(inputs, diff, read_head=partial(file_at, mirror, head))
     filed: dict[int, Severity] = {id(f): f.severity for f in findings}
 
     stale: dict[str, set[int]] = {}
-    if graded_head is not None and graded_head != head:
+    stale_label = ""
+    stale_ref = ""
+    if graded_head is not None:
+        tree, cause = _reviewed_tree(mirror, out_dir, spec_id, task_key)
+        if tree is not None:
+            stale_label, stale_ref = "the tree its critic read", tree
+        else:
+            note(
+                "reviewed_diff",
+                False,
+                f"{spec_id}: {cause}, so its in-cell concerns are checked "
+                "from the packaged head",
+            )
+            stale_label, stale_ref = "the packaged head", head
         later_diff = _git(
-            mirror, "diff", *DIFF_FLAGS, f"{graded_head}..{head}", strip=False
+            mirror, "diff", *DIFF_FLAGS, f"{graded_head}..{stale_ref}", strip=False
         )
         stale = parse_diff(later_diff).hunk_lines
 
@@ -192,7 +302,7 @@ def _qualify_range(
         if outcome == "qualified" and f.line in stale.get(f.file, ()):
             outcome = "unverified"
             reason = (
-                f"its cited line changed between the packaged head {head} "
+                f"its cited line changed between {stale_label} {stale_ref} "
                 f"and the graded head {graded_head} after it was cited"
             )
         ledger.record_qualification(
@@ -246,17 +356,18 @@ def qualify(
     gates: dict[str, Path],
     created: set[str],
     note: Callable[[str, bool, str], None],
+    out_dir: Path,
 ) -> Qualification:
     """The join's findings first, over the whole stack, then every layer's
-    end-review findings and in-cell concerns, top down. Groups and pools the
-    findings every range decides, so the join's and the top layer's own can
-    share one group. A read the mirror cannot answer raises out of it, and
-    ranges walked earlier keep their rows.
+    end-review findings and in-cell concerns, top down. Groups and pools
+    the findings every range decides, so one group can span two ranges.
+    A bad mirror raises out of it, and ranges walked earlier keep their
+    rows.
 
-    `fields` is the end review's own `StackReview.fields`, read by the join
-    and each layer's end-review findings through `graded_fields`. A layer's
-    in-cell concern keeps the packaged range, but is `unverified` instead
-    of `qualified` when its line sits in a later hunk."""
+    `fields` is the end review's own `StackReview.fields`. `out_dir` is
+    the batch tree's root, holding each task's own directory. A hunk
+    there makes a concern `unverified`. Elsewhere it stays `qualified`,
+    against the packaged head when the record cannot be used."""
     groups: dict[tuple[str, str], list[Qualified]] = {}
     pool: list[Qualified] = []
 
@@ -291,6 +402,7 @@ def qualify(
                 gates=gates,
                 created=created,
                 note=note,
+                out_dir=out_dir,
             )
         )
 
@@ -319,6 +431,7 @@ def qualify(
                     gates=gates,
                     created=created,
                     note=note,
+                    out_dir=out_dir,
                 )
             )
         if concerns:
@@ -344,6 +457,7 @@ def qualify(
                     gates=gates,
                     created=created,
                     note=note,
+                    out_dir=out_dir,
                     graded_head=graded_head,
                 )
             )

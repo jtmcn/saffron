@@ -13049,6 +13049,87 @@ def test_a_stack_batchs_follow_up_writer_is_seeded_at_the_top_head_the_end_revie
     ledger.close()
 
 
+def test_a_stack_batchs_qualify_reads_task_directories_under_the_batch_tree(
+    tmp_path, monkeypatch
+):
+    """`_stack_follow_ups` hands `qualify.qualify` its own `out_dir`, the
+    batch tree's root where each task keeps its own directory. Never a
+    follow-ups subdirectory, where no task directory lives."""
+    rig = _follow_ups_mirror(tmp_path)
+    mirror, base_sha = rig.mirror, rig.base_sha
+    pinned_url = "https://github.com/o/r.git"
+
+    ledger = Ledger(tmp_path / "ledger.db")
+    repo_id = ledger.upsert_repo("r", pinned_url, str(mirror), policy_sha=None)
+    pinned = task.PinnedBase(mirror=mirror, url=pinned_url, base_sha=base_sha)
+
+    run_id = ledger.create_run(repo_id, base_sha)
+    task_id = ledger.create_task(run_id, "SY-1", "s" * 64, "saffron/SY-1")
+    ledger.set_task_package(
+        task_id, "READY_FOR_REVIEW", "saffron/SY-1", "2" * 40, "https://pr/1"
+    )
+    ledger.record_stack_layer(
+        task_id, position=1, predecessor_task_id=None, generation=1
+    )
+    key = ledger.record_key(task_id)
+    assert key is not None
+
+    monkeypatch.setattr(cli.runtime, "remove_container", lambda _container: None)
+    monkeypatch.setattr(
+        cli.package_phase, "fetch_default_branch", lambda _m, _u: ("main", base_sha)
+    )
+
+    @contextmanager
+    def _fake_layer_cell(fields, **kwargs):
+        yield "fake-container"
+
+    monkeypatch.setattr(cli.end_review, "layer_cell", _fake_layer_cell)
+
+    def _fake_run_spec_writer(container, *, system_prompt, prompt, agent, faults, emit):
+        return spec_review.SpecWriterSession(
+            text="",
+            cost_usd=0.0,
+            error="stub, never written",
+            resets_at=None,
+            session_id="s",
+            num_turns=0,
+            spec_sha=None,
+        )
+
+    monkeypatch.setattr(cli.spec_review, "run_spec_writer", _fake_run_spec_writer)
+
+    qualify_out_dirs: list = []
+
+    def _fake_qualify(ledger_arg, layers, join, **kwargs):
+        qualify_out_dirs.append(kwargs["out_dir"])
+        return qualify.Qualification(groups=[], pool=[])
+
+    monkeypatch.setattr(cli.qualify, "qualify", _fake_qualify)
+
+    def _fake_write_follow_ups(ledger_arg, stack_arg, *, qualify, write, **kwargs):
+        qualify(stack_arg.layers, stack_arg.join)
+        return []
+
+    monkeypatch.setattr(cli.follow_up, "write_follow_ups", _fake_write_follow_ups)
+
+    stack = end_review.StackReview(join=None, layers=[end_review.LayerReview(key, [])])
+    out_dir = tmp_path / "out"
+    make = cli._stack_follow_ups(
+        pinned=pinned,
+        repo=Path("/repo-sentinel"),
+        ledger=ledger,
+        out_dir=out_dir,
+        cap_usd=1.0,
+        pooled=[],
+    )
+    make("7", stack)
+
+    assert qualify_out_dirs == [out_dir]
+    assert qualify_out_dirs[0] != out_dir / "follow-ups" / "7"
+
+    ledger.close()
+
+
 def test_a_stack_batchs_follow_up_cite_reads_the_head_its_batchs_own_cite_reads(
     tmp_path, monkeypatch
 ):

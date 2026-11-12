@@ -1871,6 +1871,7 @@ def _stack_follow_ups(
                     gates=policy.gate_executables(Path(worktree.GATES_MOUNT)),
                     created=created,
                     note=note,
+                    out_dir=out_dir,
                 )
                 return kept
 

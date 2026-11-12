@@ -7,6 +7,7 @@ and a module-scope import would fail collection under `revert`.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from dataclasses import dataclass, replace
@@ -14,10 +15,11 @@ from pathlib import Path
 
 import pytest
 
-from saffron import finish
+from saffron import events, finish
 from saffron import probe as probe_check
 from saffron.agents.findings import Finding, Severity
 from saffron.cell import session
+from saffron.cell.worktree import DIFF_FLAGS
 from saffron.end_review import LayerFields, LayerReview, layer_fields
 from saffron.gates.contract import GateResult
 from saffron.intake import Mutant
@@ -347,6 +349,9 @@ class _Built:
     note: object
     join_review: review.LensReview | None = None
     batch_id: int | None = None
+    # No `reviewed-diff.json` lives under a sentinel no test writes to, so a
+    # fixture that does not care about SA-0375's record keeps today's drop.
+    out_dir: Path = Path("/no-such-out-dir")
 
     def run(self, qualify_fn, fields: dict[str, LayerFields] | None = None):
         if fields is None:
@@ -367,6 +372,7 @@ class _Built:
             gates=self.gates,
             created=self.created,
             note=self.note,
+            out_dir=self.out_dir,
         )
 
 
@@ -1537,3 +1543,475 @@ def test_an_in_cell_concern_whose_cited_line_a_review_commit_changed_is_not_draf
     assert by_claim["c-u3"]["outcome"] == "unanchored"
     for claim in ("er-a10", "c-a44", "c-b6", "c1-a10"):
         assert by_claim[claim]["outcome"] == "follow_up"
+
+
+@dataclass
+class _ReviewedTreeFixture:
+    """`A`/`T1`/`P`/`T2`/`H`/`G`, exactly as this spec's own notes
+    describe. TE-1's critic tree `T1` is rewritten once more into its
+    packaged head `P`. TE-2's critic tree `T2` is rewritten into its
+    packaged head `H`, then graded at `G`. `te1_record`/`te2_record` are
+    each `(tree_base, raw, sha256)`, and `te1_tree`/`te2_tree` are the
+    tree ids rebuilding each record must produce."""
+
+    built: _Built
+    shas: dict[str, str]
+    te1_key: str
+    te2_key: str
+    te1_record: tuple[str, str, str]
+    te2_record: tuple[str, str, str]
+    te1_tree: str
+    te2_tree: str
+
+
+def _record_for(mirror: Path, base: str, head: str) -> tuple[str, str, str]:
+    """`(base, raw, sha256)`, `raw` being `git diff` with `DIFF_FLAGS`
+    from `base` to `head`, hashed as SA-0375 hashes it."""
+    raw = _git(mirror, "diff", *DIFF_FLAGS, f"{base}..{head}")
+    return base, raw, hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _write_review_log(out_dir: Path, spec_id: str, sha256: str, task_key: str) -> None:
+    """One task's own REVIEW phase line naming `sha256`, with the
+    `RecordAppend` production writes after it (the first lens's own
+    attempt, opened under the same task)."""
+    log = events.EventLog(out_dir / spec_id)
+    log.append(
+        events.Ceilings(
+            timestamp=0.0,
+            spec_id=spec_id,
+            budget_usd=1.0,
+            max_attempts=1,
+            max_turns=1,
+            budget_source="flag",
+            attempts_source="flag",
+            turns_source="flag",
+        )
+    )
+    log.append(
+        events.PhaseStart(
+            timestamp=0.0,
+            spec_id=spec_id,
+            phase="REVIEW",
+            label="REVIEW",
+            detail=f"reviewed diff recorded, sha256 {sha256}",
+        )
+    )
+    log.append(
+        events.RecordAppend(
+            timestamp=0.0,
+            spec_id=spec_id,
+            fact_kind="attempt_opened",
+            task_key=task_key,
+        )
+    )
+
+
+def _write_review_record(
+    out_dir: Path, spec_id: str, tree_base: str, raw: str, sha256: str
+) -> None:
+    task_dir = out_dir / spec_id
+    task_dir.mkdir(parents=True, exist_ok=True)
+    (task_dir / "reviewed-diff.json").write_text(
+        json.dumps({"tree_base": tree_base, "raw": raw, "sha256": sha256}, indent=2)
+    )
+
+
+def _reviewed_tree_fixture(tmp_path: Path, monkeypatch) -> _ReviewedTreeFixture:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    config = tmp_path / "gitconfig"
+    config.write_text("[diff]\n    context = 0\n[apply]\n    whitespace = fix\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    mirror = tmp_path / "mirror"
+    mirror.mkdir()
+    _git(mirror, "init", "-q")
+
+    def commit(message: str) -> str:
+        _git(mirror, "add", "-A")
+        _git(mirror, "commit", "-q", "-m", message)
+        return _git(mirror, "rev-parse", "HEAD").strip()
+
+    def write_a(lines: list[str]) -> None:
+        (mirror / "src" / "a.py").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    a = [f"a{i}" for i in range(1, 61)]
+    a[45] = "a46 retry_budget"
+    (mirror / "src").mkdir(parents=True, exist_ok=True)
+    write_a(a)
+    p = [f"p{i}" for i in range(1, 13)]
+    _write(mirror, "src/p.py", p)
+    shas = {"A": commit("A")}
+
+    p[4] = "p5_t1"
+    p[7] = "p8_t1"
+    _write(mirror, "src/p.py", p)
+    shas["T1"] = commit("T1")
+
+    p2 = list(p)
+    p2[7] = "p8_p"
+    _write(mirror, "src/p.py", p2)
+    shas["P"] = commit("P")
+
+    a2 = list(a)
+    a2[9] = "a10_t2_é"
+    a2[29] = "a30_t2 "
+    a2[49] = "a50_t2 retry_budget"
+    write_a(a2)
+    p3 = list(p2)
+    p3[4] = "p5_t2"
+    _write(mirror, "src/p.py", p3)
+    shas["T2"] = commit("T2")
+
+    # `H`'s parent is `P`. Its tree is `T2`'s own content, read back
+    # since checkout resets the worktree, plus REBUT's own two edits.
+    _git(mirror, "checkout", "-q", shas["P"])
+    a3 = list(a2)
+    a3[9] = "a10_h"
+    a3[40:40] = ["ins1", "ins2", "ins3", "ins4"]
+    write_a(a3)
+    _write(mirror, "src/p.py", p3)
+    shas["H"] = commit("H")
+
+    a4 = list(a3)
+    a4[29] = "a30_g"
+    a4[49] = "a50_g"
+    write_a(a4)
+    shas["G"] = commit("G")
+
+    te1_record = _record_for(mirror, shas["A"], shas["T1"])
+    te2_record = _record_for(mirror, shas["P"], shas["T2"])
+    te1_tree = _git(mirror, "rev-parse", f"{shas['T1']}^{{tree}}").strip()
+    te2_tree = _git(mirror, "rev-parse", f"{shas['T2']}^{{tree}}").strip()
+
+    ledger = Ledger(tmp_path / "ledger.db", record=MemoryRecord())
+    repo_id = ledger.upsert_repo(
+        "acme", "https://example/o", "/m.git", policy_sha="p" * 64
+    )
+    batch_id = ledger.create_batch(100.0)
+    run1 = ledger.create_run(repo_id, base_sha=shas["A"], batch_id=batch_id)
+    task1 = ledger.create_task(
+        run1, spec_id="TE-1", spec_sha="s" * 64, branch="saffron/TE-1"
+    )
+    run2 = ledger.create_run(repo_id, base_sha=shas["A"], batch_id=batch_id)
+    task2 = ledger.create_task(
+        run2, spec_id="TE-2", spec_sha="s" * 64, branch="saffron/TE-2"
+    )
+
+    ledger.set_task_package(
+        task1, "READY_FOR_REVIEW", "saffron/TE-1", shas["P"], "https://pr/1"
+    )
+    ledger.set_task_package(
+        task2, "READY_FOR_REVIEW", "saffron/TE-2", shas["H"], "https://pr/2"
+    )
+    ledger.record_stack_layer(task1, position=1, predecessor_task_id=None, generation=0)
+    ledger.record_stack_layer(
+        task2, position=2, predecessor_task_id=task1, generation=0
+    )
+
+    te1_key = _key(ledger, task1)
+    te2_key = _key(ledger, task2)
+
+    te1_concerns = [
+        _finding("correctness", "concern", "src/p.py", 8, "c1-p8"),
+        _finding("correctness", "concern", "src/p.py", 2, "c1-p2"),
+    ]
+    te2_concerns = [
+        _finding("correctness", "concern", "src/a.py", 10, "c-a10"),
+        _finding("correctness", "concern", "src/a.py", 13, "c-a13"),
+        _finding("correctness", "concern", "src/a.py", 30, "c-a30"),
+        _finding("correctness", "concern", "src/a.py", 50, "c-a50"),
+    ]
+    ledger.record_findings(task1, te1_concerns)
+    ledger.record_findings(task2, te2_concerns)
+
+    layers = [LayerReview(te2_key, []), LayerReview(te1_key, [])]
+
+    built = _Built(
+        ledger,
+        layers,
+        mirror,
+        shas,
+        [],
+        repo=Path("/repo-sentinel"),
+        gates_dir=Path("/gates-sentinel"),
+        thread_env={"SENTINEL": "1"},
+        test_paths=["tests/**"],
+        gates={"tests": Path("/gates-sentinel/tests")},
+        created=set(),
+        note=lambda step, ok, detail: None,
+        join_review=None,
+        batch_id=batch_id,
+    )
+
+    return _ReviewedTreeFixture(
+        built=built,
+        shas=shas,
+        te1_key=te1_key,
+        te2_key=te2_key,
+        te1_record=te1_record,
+        te2_record=te2_record,
+        te1_tree=te1_tree,
+        te2_tree=te2_tree,
+    )
+
+
+def test_an_in_cell_concern_is_dropped_when_its_line_changed_since_the_tree_its_critic_read(
+    tmp_path, monkeypatch
+):
+    """A concern still anchors over its packaged range. It is
+    `unverified` when its cited line sits in a hunk of the diff from the
+    graded head to the tree the critic read. That tree is rebuilt from
+    SA-0375's own record, whether or not the end review graded the
+    layer at a further head. TE-2 is graded one commit above its
+    packaged head. TE-1 is graded at its own packaged head, and its
+    REBUT still moved what its own critic read.
+    """
+    from saffron.qualify import qualify
+
+    fixture = _reviewed_tree_fixture(tmp_path, monkeypatch)
+    built = fixture.built
+    te1_key, te2_key = fixture.te1_key, fixture.te2_key
+    shas = fixture.shas
+
+    out_dir = tmp_path / "out"
+    te1_tree_base, te1_raw, te1_sha256 = fixture.te1_record
+    te2_tree_base, te2_raw, te2_sha256 = fixture.te2_record
+    _write_review_record(out_dir, "TE-1", te1_tree_base, te1_raw, te1_sha256)
+    _write_review_log(out_dir, "TE-1", te1_sha256, te1_key)
+    _write_review_record(out_dir, "TE-2", te2_tree_base, te2_raw, te2_sha256)
+    _write_review_log(out_dir, "TE-2", te2_sha256, te2_key)
+    # A later task of TE-2's own spec stopped before REVIEW. It still
+    # appends here, long after the line that already bound this record.
+    later_log = events.EventLog(out_dir / "TE-2")
+    later_log.append(
+        events.Ceilings(
+            timestamp=1.0,
+            spec_id="TE-2",
+            budget_usd=1.0,
+            max_attempts=1,
+            max_turns=1,
+            budget_source="flag",
+            attempts_source="flag",
+            turns_source="flag",
+        )
+    )
+    later_log.append(
+        events.RecordAppend(
+            timestamp=1.0,
+            spec_id="TE-2",
+            fact_kind="attempt_opened",
+            task_key="TE-2-later",
+        )
+    )
+
+    built.out_dir = out_dir
+    fields = {
+        te1_key: layer_fields(built.ledger, te1_key),
+        te2_key: replace(layer_fields(built.ledger, te2_key), head=shas["G"]),
+    }
+
+    result = built.run(qualify, fields=fields)
+
+    pool = {(q.task_key, q.finding.claim): (q.outcome, q.reason) for q in result.pool}
+    te2_reason = (
+        f"its cited line changed between the tree its critic read "
+        f"{fixture.te2_tree} and the graded head {shas['G']} after it was cited"
+    )
+    for claim in ("c-a10", "c-a13", "c-a30"):
+        outcome, reason = pool[(te2_key, claim)]
+        assert outcome == "unverified"
+        assert reason == te2_reason
+
+    te1_reason = (
+        f"its cited line changed between the tree its critic read "
+        f"{fixture.te1_tree} and the graded head {shas['P']} after it was cited"
+    )
+    outcome, reason = pool[(te1_key, "c1-p8")]
+    assert outcome == "unverified"
+    assert reason == te1_reason
+    assert pool[(te1_key, "c1-p2")] == ("unanchored", "")
+
+    groups = {
+        (g.task_key, g.file): [f.finding.claim for f in g.findings]
+        for g in result.groups
+    }
+    assert groups == {(te2_key, "src/a.py"): ["c-a50"]}
+
+    assert built.batch_id is not None
+    written = finish.write_findings(
+        built.ledger, built.batch_id, [], tmp_path / "findings.json"
+    )
+    data = json.loads(written.read_text())
+    by_claim = {row["claim"]: row for row in data["findings"]}
+    for claim in ("c-a10", "c-a13", "c-a30"):
+        assert by_claim[claim]["outcome"] == "unverified"
+        assert by_claim[claim]["reason"] == te2_reason
+    assert by_claim["c1-p8"]["outcome"] == "unverified"
+    assert by_claim["c1-p8"]["reason"] == te1_reason
+    assert by_claim["c1-p2"]["outcome"] == "unanchored"
+    assert by_claim["c-a50"]["outcome"] == "follow_up"
+
+
+def test_a_layer_whose_record_cannot_be_used_keeps_the_packaged_heads_check(
+    tmp_path, monkeypatch
+):
+    """A layer whose record cannot be used calls `note` once, naming the
+    cause, and keeps the drop from the packaged head to the graded head.
+    Six causes run on the stacked layer (TE-2), each in its own tree,
+    while the unstacked layer's (TE-1's) record stays bound throughout.
+    """
+    from saffron.qualify import qualify
+
+    def _missing(out_dir: Path, fixture: _ReviewedTreeFixture) -> None:
+        pass
+
+    def _unreadable(out_dir: Path, fixture: _ReviewedTreeFixture) -> None:
+        tree_base, raw, sha256 = fixture.te2_record
+        full = json.dumps({"tree_base": tree_base, "raw": raw, "sha256": sha256})
+        task_dir = out_dir / "TE-2"
+        task_dir.mkdir(parents=True, exist_ok=True)
+        (task_dir / "reviewed-diff.json").write_text(full[:40])
+
+    def _hash_mismatch(out_dir: Path, fixture: _ReviewedTreeFixture) -> None:
+        tree_base, raw, sha256 = fixture.te2_record
+        edited = raw.replace("+a10_t2_é", "+a10_t2_é_edited", 1)
+        _write_review_record(out_dir, "TE-2", tree_base, edited, sha256)
+
+    def _unbound(out_dir: Path, fixture: _ReviewedTreeFixture) -> None:
+        tree_base, raw, sha256 = fixture.te2_record
+        _write_review_record(out_dir, "TE-2", tree_base, raw, sha256)
+        log = events.EventLog(out_dir / "TE-2")
+        log.append(
+            events.Ceilings(
+                timestamp=0.0,
+                spec_id="TE-2",
+                budget_usd=1.0,
+                max_attempts=1,
+                max_turns=1,
+                budget_source="flag",
+                attempts_source="flag",
+                turns_source="flag",
+            )
+        )
+        log.append(
+            events.PhaseStart(
+                timestamp=0.0,
+                spec_id="TE-2",
+                phase="REVIEW",
+                label="REVIEW",
+                detail=f"reviewed diff recorded, sha256 {sha256}",
+            )
+        )
+        # A second task's own lifecycle follows here. Its `RecordAppend`
+        # is the next one after the hash line, so binding reads it.
+        log.append(
+            events.Ceilings(
+                timestamp=1.0,
+                spec_id="TE-2",
+                budget_usd=1.0,
+                max_attempts=1,
+                max_turns=1,
+                budget_source="flag",
+                attempts_source="flag",
+                turns_source="flag",
+            )
+        )
+        log.append(
+            events.RecordAppend(
+                timestamp=1.0,
+                spec_id="TE-2",
+                fact_kind="attempt_opened",
+                task_key="TE-2-other",
+            )
+        )
+        log.append(
+            events.RecordAppend(
+                timestamp=2.0,
+                spec_id="TE-2",
+                fact_kind="qualification",
+                task_key=fixture.te2_key,
+            )
+        )
+
+    def _missing_tree_base(out_dir: Path, fixture: _ReviewedTreeFixture) -> None:
+        _, raw, sha256 = fixture.te2_record
+        lost = "ab" * 20
+        _write_review_record(out_dir, "TE-2", lost, raw, sha256)
+        _write_review_log(out_dir, "TE-2", sha256, fixture.te2_key)
+
+    def _does_not_apply(out_dir: Path, fixture: _ReviewedTreeFixture) -> None:
+        _, raw, sha256 = fixture.te2_record
+        _write_review_record(out_dir, "TE-2", fixture.shas["A"], raw, sha256)
+        _write_review_log(out_dir, "TE-2", sha256, fixture.te2_key)
+
+    causes = [
+        ("no reviewed-diff.json", _missing),
+        ("reviewed-diff.json is unreadable", _unreadable),
+        ("its sha256 does not match its diff", _hash_mismatch),
+        ("no REVIEW line binds it to this task", _unbound),
+        (None, _missing_tree_base),  # named below, once the sha is known
+        (None, _does_not_apply),
+    ]
+
+    for index, (cause, setup) in enumerate(causes):
+        fixture = _reviewed_tree_fixture(tmp_path / f"case-{index}", monkeypatch)
+        built = fixture.built
+        te1_key, te2_key = fixture.te1_key, fixture.te2_key
+        shas = fixture.shas
+
+        te1_tree_base, te1_raw, te1_sha256 = fixture.te1_record
+        out_dir = tmp_path / f"case-{index}" / "out"
+        _write_review_record(out_dir, "TE-1", te1_tree_base, te1_raw, te1_sha256)
+        _write_review_log(out_dir, "TE-1", te1_sha256, te1_key)
+        setup(out_dir, fixture)
+
+        if cause is None:
+            cause = (
+                f"the mirror lacks its tree base {('ab' * 20)}"
+                if setup is _missing_tree_base
+                else f"its diff does not apply to {shas['A']}"
+            )
+
+        notes: list[tuple[str, bool, str]] = []
+        built.note = lambda step, ok, detail, notes=notes: notes.append(
+            (step, ok, detail)
+        )
+        built.out_dir = out_dir
+        fields = {
+            te1_key: layer_fields(built.ledger, te1_key),
+            te2_key: replace(layer_fields(built.ledger, te2_key), head=shas["G"]),
+        }
+
+        result = built.run(qualify, fields=fields)
+
+        assert notes == [
+            (
+                "reviewed_diff",
+                False,
+                f"TE-2: {cause}, so its in-cell concerns are checked "
+                "from the packaged head",
+            )
+        ]
+
+        pool = {(q.task_key, q.finding.claim): q.outcome for q in result.pool}
+        te1_reason = (
+            f"its cited line changed between the tree its critic read "
+            f"{fixture.te1_tree} and the graded head {shas['P']} after it was "
+            "cited"
+        )
+        pool_reasons = {(q.task_key, q.finding.claim): q.reason for q in result.pool}
+        assert pool[(te2_key, "c-a30")] == "unverified"
+        assert pool[(te2_key, "c-a50")] == "unverified"
+        assert pool_reasons[(te2_key, "c-a30")] == (
+            f"its cited line changed between the packaged head {shas['H']} "
+            f"and the graded head {shas['G']} after it was cited"
+        )
+        assert pool[(te1_key, "c1-p8")] == "unverified"
+        assert pool_reasons[(te1_key, "c1-p8")] == te1_reason
+        assert pool[(te1_key, "c1-p2")] == "unanchored"
+
+        groups = {
+            (g.task_key, g.file): sorted(f.finding.claim for f in g.findings)
+            for g in result.groups
+        }
+        assert groups == {(te2_key, "src/a.py"): ["c-a10", "c-a13"]}
