@@ -57,7 +57,8 @@ acceptance:
       `N citation(s) do not resolve: ` and the lines joined by `; `. The
       draft is still judged, and a red judgement's own reason follows that
       one, joined by `; `. A second refusal pools the group with the second
-      reason. A `cite` that raises pools its group as
+      reason. A `cite` that raises charges the session, as a raising
+      `judge` does. It pools its group as
       `cite raised <type>: <message>`, judges nothing, and pools every later
       group with that reason unwritten. The witness drives six groups. The
       first is a red cite whose green resend is minted. The second is a red
@@ -73,6 +74,7 @@ acceptance:
       - A red cite gets a send-back of its own, apart from the parse and judge send-back, so a third draft is written.
       - A raising cite is read as a red one and sent back.
       - A raising cite pools only its own group, so the later group is still written.
+      - A raising cite pools its group without charging the session, so the writer's spend reads low.
       - The reason names the count and not the lines.
       - "`cite` reads the writer's prompt rather than the draft's text."
       - The lines are joined by `, ` rather than `; `.
@@ -85,8 +87,10 @@ acceptance:
       `_stack_cite` reads when the batch reviews the first follow-up atop the
       top layer. The witness seeds a top layer whose remote branch carries
       one commit past its packaged head, which the mirror lacks, and a stack
-      review with no graded fields. Its text holds two citations that
-      resolve at no head. Its lines must equal `_stack_cite`'s own defects
+      review with no graded fields. Its text holds four citations, two of
+      which resolve at no head. The follow-up's `cite` runs before
+      `_stack_cite`, while the mirror's own ref still names the packaged
+      commit. Its lines must equal `_stack_cite`'s own defects
       for a follow-up atop that layer, in order. They must differ from the
       lines at the packaged head and at the pinned base.
     witness: tests/test_cli.py::test_a_stack_batchs_follow_up_cite_reads_the_head_its_batchs_own_cite_reads
@@ -207,6 +211,11 @@ Name each failing gate on the escalation line.
   are read at that branch, which no draft can know. This spec checks every
   draft at the top layer's branch.
 - **The batch's own refusal.** `saffron/batch.py` keeps its check as it is.
+- **The writer's view of the cited tree.** The writer's cell, its faults and
+  `judge` read the top layer's packaged head. `cite` reads the fetched
+  branch tip, which a review commit can move past that head. A draft whose
+  citations fail there gets the defect lines alone on its one resend. A
+  second failure pools it. That is still cheaper than a mint the batch refuses.
 
 ## Notes for the agent
 
@@ -241,6 +250,9 @@ backticked citations. The prototype cited lines 7 to 9, 20 to 25, 40 to
 41 and 50 to 52 of one file. That file held 5, 10 and 30 lines at the base,
 packaged and review commits. Compare with `cli._stack_cite(pinned=pinned)`
 called with the follow-up, the layer as `Candidate`, and the same text.
+Call the follow-up's `cite` first. `_stack_cite` fetches the branch and
+moves the mirror's ref, so called first it would let the no-fetch wrong
+version pass.
 
 **Tests that pin the old shapes.** Two fakes in `tests/test_cli.py` list
 `write_follow_ups`'s keywords by name and need `cite=None`. They are
