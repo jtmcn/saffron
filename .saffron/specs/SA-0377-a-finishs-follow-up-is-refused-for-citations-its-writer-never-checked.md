@@ -212,7 +212,8 @@ Name each failing gate on the escalation line.
   draft at the top layer's branch.
 - **The batch's own refusal.** `saffron/batch.py` keeps its check as it is.
 - **The writer's view of the cited tree.** The writer's cell, its faults and
-  `judge` read the top layer's packaged head. `cite` reads the fetched
+  `judge` read `top.head`. That is the head the end review graded, else the
+  packaged head. `cite` reads the fetched
   branch tip, which a review commit can move past that head. A draft whose
   citations fail there gets the defect lines alone on its one resend. A
   second failure pools it. That is still cheaper than a mint the batch refuses.
@@ -236,7 +237,9 @@ pick it out. Assert the positive half of each absence. A judged draft for
 group one comes before the check that group five's draft was never judged.
 Cited drafts for groups one to three come before the check that group four's
 was never cited. A second draft for group two comes before the check for no
-third.
+third. List the origin task's writing-phase attempts' session ids, as
+`tests/test_follow_up.py:1659-1664` does for a raising `judge`. The list
+must include group five's raising draft's session.
 
 **Seeding criterion 2.** A non-bare `remote` repository, with `trunk` at
 the base and `saffron/SY-1` holding the packaged commit, then a review
