@@ -3,7 +3,7 @@ id: SA-0378
 title: The finish reads an in-cell concern's line from the packaged head, not the tree its lenses read, so a line REBUT changed stays live
 type: bug
 priority: 2
-estimated_lines: 86
+estimated_lines: 119
 estimate_measured: true
 depends_on: [SA-0377, SA-0375, SA-0373]
 consumes:
@@ -60,7 +60,8 @@ acceptance:
       task. It is bound when a REVIEW phase line in that directory's
       `events.jsonl` names the `sha256`, and the next `RecordAppend` line
       after it carries the layer's task key. A used record's tree is
-      rebuilt as `tree_base` with `raw` applied. A concern `_decide` would file `qualified` is then filed `unverified`
+      rebuilt as `tree_base` with `raw` applied, whatever the host's
+      `apply.whitespace` says. A concern `_decide` would file `qualified` is then filed `unverified`
       when its cited line sits in a hunk of the diff from the graded head
       to that tree. The diff is read with `DIFF_FLAGS` on the tree's side.
       This holds whether or not the graded head is the packaged one. The
@@ -69,7 +70,7 @@ acceptance:
       rebuilt tree's id and the graded head are both in full. The witness
       drives a stacked layer, graded one review commit above its packaged
       head, and an unstacked one graded at its packaged head. Both records
-      are bound. A later task of the stacked layer's spec stopped before
+      are bound, and the host's `apply.whitespace` is `fix`. A later task of the stacked layer's spec stopped before
       REVIEW. Four concerns cite the stacked layer's tree. Its REBUT rewrote
       the first in place, and the second sits three lines below it. Its
       review commit rewrote the third, and the line four lines above the
@@ -91,6 +92,7 @@ acceptance:
       - The record is bound only when its line sits after the log's last `Ceilings` line, so the later task's span unbinds it.
       - The reason names the packaged head, or the tree's first 12 characters.
       - The dropped concern is recorded `killed`, so `finish.write_findings` never writes it.
+      - "`git apply --cached` runs without `--whitespace=nowarn`, so the host's `apply.whitespace=fix` strips the stacked record's trailing space and the reason names another tree."
   - claim: >-
       A layer with in-cell concerns whose record cannot be used keeps the
       drop from the packaged head to the graded head as before. It calls
@@ -102,7 +104,9 @@ acceptance:
       truncated file. They go on with `its sha256 does not match its diff`
       and `no REVIEW line binds it to this task`. The last two are `the
       mirror lacks its tree base <sha>` and `its diff does not apply to
-      <sha>`. In each case two concerns are `unverified` with the packaged
+      <sha>`. In the other task's case, a `RecordAppend` under the layer's
+      own key ends the log, as `saffron reconcile` writes one long after
+      the task. In each case two concerns are `unverified` with the packaged
       head's reason, two stay `qualified`, and the only note is the stacked
       layer's.
     witness: tests/test_qualify.py::test_a_layer_whose_record_cannot_be_used_keeps_the_packaged_heads_check
@@ -111,6 +115,7 @@ acceptance:
       - The recorded `sha256` is trusted without hashing `raw`, so an edited `raw` is rebuilt.
       - The record is bound by any REVIEW line naming its hash, so a later task's record is read as this task's.
       - The record is bound when its hash line and a `RecordAppend` under the layer's key both sit anywhere in the log.
+      - The record is bound when any `RecordAppend` after its hash line carries the layer's key, so the trailing reconcile line binds the other task's record and the concern its review commit rewrote takes the tree's reason.
       - A `tree_base` the mirror lacks raises out of `qualify`.
       - A diff that does not apply raises out of `qualify`.
       - Every cause prints the same words.
@@ -169,10 +174,15 @@ scope says. So this spec binds the file to its task before using it.
 **Why the next `RecordAppend` binds it.** The ledger's sink writes a
 line per fact into its task's directory, naming the task key (`saffron/ledger.py:675-698`, `saffron/cli.py:116-125`,
 `saffron/events.py:389-398`). Every command's ledger carries that sink
-(`saffron/cli.py:398-402`). Each lens session opens an attempt, and
-`SA-0369`'s log shows its `attempt_opened` line right after the lens's own
-REVIEW line (`~/.saffron/batches/v0/SA-0369/events.jsonl`, line 1932). A
-later task of the spec writes its own key there.
+(`saffron/cli.py:398-402`). Each lens session opens an attempt, so
+`SA-0375`'s line is followed by the first lens's `attempt_opened` line.
+`SA-0369`'s log shows that order between two lenses. Line 1931 is the
+correctness lens's REVIEW line, and line 1932 opens the next lens's
+attempt (`~/.saffron/batches/v0/SA-0369/events.jsonl`). A later task of the
+spec writes its own key there. So does `saffron reconcile`, for an old
+task, long after it ended (`~/.saffron/batches/v0/SA-0336/events.jsonl`,
+its last two lines). The sink routes by spec id (`saffron/cli.py:122-123`).
+So only the next `RecordAppend` binds, never a later one.
 
 **Where `out_dir` comes from.** `qualify.qualify` takes no directory now
 (`saffron/qualify.py:235-249`). Its one caller is `run_qualify` inside
@@ -203,10 +213,15 @@ Rebuild it in the mirror under a temporary `GIT_INDEX_FILE`, with
 `read-tree` of `tree_base`, `apply --cached` with `raw` on stdin, and
 `write-tree`. Use `worktree.git_argv` for those three calls, the pins the
 critic cell's own `git apply` ran under (`saffron/cell/session.py:1471`).
+Pass `--whitespace=nowarn` to `apply`, since `git_argv` pins no
+`apply.whitespace`.
 Pass the tree to `_qualify_range`. There, diff the graded head against the
 tree with `DIFF_FLAGS`, so `parse_diff`'s `hunk_lines` reads the tree's side
 (`saffron/agents/findings.py:159-162`). A layer whose record cannot be used
-calls `note` with its cause and keeps today's diff.
+calls `note` with its cause and keeps today's diff. Rewrite the three
+docstrings this makes false: the module's (`saffron/qualify.py:13-20`),
+`_qualify_range`'s (`saffron/qualify.py:135-138`) and `qualify`'s
+(`saffron/qualify.py:256-259`).
 
 In `saffron/cli.py`, `run_qualify` passes `out_dir=out_dir`. In
 `tests/test_qualify.py`, `_Built` gains an `out_dir` field that its `run`
@@ -222,8 +237,16 @@ passes. Write the three new tests the criteria name.
   packaged head (`saffron/qualify.py:139-140`). A REBUT shift can move the
   line anchoring reads too. Re-anchoring on the critic's tree is another
   change.
+- **Two readers that still number an in-cell line at the packaged head.**
+  The writer's prompt says each in-cell line names `packaged_head`
+  (`saffron/follow_up.py:168-170`). `finish._layer_findings` gives each
+  in-cell row its layer's `pushed_sha` (`saffron/finish.py:344-346`). Both
+  stay as they are, like anchoring.
 - **End-review and join findings.** They are read at the graded head and
   never meet this drop.
+- **A record whose hash matches but whose `tree_base` is another task's.**
+  Two tasks of one spec would need the same diff on different trees. That
+  is rare, and nothing here checks it.
 - **`SA-0375`'s record.** Its writer, its file name and its keys stay as
   that spec fixes them. `saffron/cell/**` is forbidden here.
 - **A ledger with no events sink.** `fold` and `next-id` build one
@@ -246,7 +269,9 @@ fixture for both `qualify` witnesses, in the shape of `_later_diff_fixture`
 
 - Set `GIT_CONFIG_GLOBAL` to a file holding `diff.context = 0`, as
   `_stack_mirror` does (`tests/test_qualify.py:103-105`). That kills a diff
-  read without `DIFF_FLAGS`.
+  read without `DIFF_FLAGS`. Add `apply.whitespace = fix` to it, and end
+  `T2`'s line 30 with a space. That kills an `apply` without
+  `--whitespace=nowarn`.
 - `A` seeds `src/a.py`, 60 lines with line 46 `a46 retry_budget`, and
   `src/p.py`, 12 lines. TE-1's critic tree `T1` is `A` with lines 5 and 8
   of `p.py` rewritten. Its packaged head `P` is one commit on `A`, with
@@ -254,9 +279,13 @@ fixture for both `qualify` witnesses, in the shape of `_later_diff_fixture`
   and 50 of `a.py` and line 5 of `p.py` rewritten. Give line 10 an `é`, so
   a Latin-1 hash differs. End line 50 with `retry_budget`, so its concern
   anchors by token.
-- TE-2's packaged head `H` is one commit on `P`. It rewrites line 10
-  again and inserts four lines after line 40. Its graded head `G` is a
-  commit on `H` rewriting `G`'s lines 30 and 50.
+- TE-2's packaged head `H` is one commit on `P`. Its tree is `T2` with
+  line 10 rewritten again and four lines inserted after line 40. Its graded
+  head `G` is a commit on `H` rewriting `G`'s lines 30 and 50. `P`'s tree
+  is `T1` with line 8 rewritten. Both runs' `base_sha` is `A`, which the
+  wrong version rebuilding on `base_sha` needs.
+- The outcomes hold only under that construction. Line 50 of `G` is line
+  46 of `T2`, so its hunk on the tree's side ends at line 49.
 - Each record's `raw` is `git diff` with `DIFF_FLAGS` from its tree base
   to its tree. Write `events.jsonl` through `events.EventLog`, with
   `Ceilings`, `PhaseStart` and `RecordAppend` values as production writes
@@ -269,7 +298,8 @@ fixture for both `qualify` witnesses, in the shape of `_later_diff_fixture`
 - For criterion 2, the truncated file is its first 40 characters. The
   edited `raw` and the other task's `raw` each change one added line and
   still apply. The other task's log names its own hash and its own key
-  after a second `Ceilings` line. The lost tree base is 40 hex characters
+  after a second `Ceilings` line. It then ends with a `RecordAppend` under
+  TE-2's key, as `saffron reconcile` writes one. The lost tree base is 40 hex characters
   naming no object. The diff that does not apply names `A` as its tree
   base.
 - For criterion 3, start from
@@ -295,7 +325,7 @@ module scope.
 an em dash, a semicolon, a contraction, the perfect tense or a sentence
 over 25 words.
 
-**Size.** A prototype on `SA-0375`'s diff measured 345 changed tokens with
-`size_gate`, against the `bug` ceiling of 1300. It held 1287 more under
+**Size.** A prototype on `SA-0375`'s diff measured 476 changed tokens with
+`size_gate`, against the `bug` ceiling of 1300. It held 1293 more under
 the test paths. Every test in `tests/test_qualify.py` passed on it, with
 the three witnesses here.
