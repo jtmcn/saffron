@@ -1861,6 +1861,25 @@ class Ledger:
             )
         )
 
+    def stack_batch_of(self, task_id: int) -> int | None:
+        """The batch a task's run names, only when the task also holds a
+        `spec_reviews` row (b-323c97). A stack batch reviews every task it
+        runs, the order's own and a follow-up's alike. Nothing else
+        writes that row, so a task of such a batch always carries one,
+        even one whose batch holds no layer at all. `None` for a run
+        with no batch, or a task never reviewed."""
+        row = self._db.execute(
+            """SELECT r.batch_id AS batch_id
+                 FROM tasks t
+                 JOIN runs r ON r.run_id = t.run_id
+                WHERE t.task_id = ?
+                  AND r.batch_id IS NOT NULL
+                  AND EXISTS (SELECT 1 FROM spec_reviews sr
+                               WHERE sr.task_key = t.record_key)""",
+            (task_id,),
+        ).fetchone()
+        return None if row is None else int(row["batch_id"])
+
     def record_stack_finish(
         self,
         batch_id: int,
