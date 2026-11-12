@@ -340,13 +340,9 @@ def _tracked_symlinks(mirror: Path, sha: str) -> list[str]:
 
     `git ls-tree -r -z` walks every directory so a symlink nested anywhere
     still appears. A `sha` the mirror lacks raises `GitError`."""
-    argv = ["git", "-C", str(mirror), "-c", "core.quotePath=false"]
-    argv += ["ls-tree", "-r", "-z", sha]
-    completed = _run(argv)
-    if completed.returncode != 0:
-        raise GitError(f"git ls-tree {sha[:12]}: {completed.stderr.strip()}")
+    listing = _git(mirror, "ls-tree", "-r", "-z", sha, strip=False)
     paths = []
-    for record in completed.stdout.split("\0"):
+    for record in listing.split("\0"):
         if not record:
             continue
         meta, _, path = record.partition("\t")

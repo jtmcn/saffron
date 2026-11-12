@@ -108,7 +108,7 @@ def test_the_readers_of_a_removed_entry_are_the_files_holding_its_subject_as_a_w
     assert "lib.py" not in {path for path, _ in old_name_pairs}
     assert "const.py" not in {path for path, _ in const_pairs}
 
-    # Entry order, then the path order git lists.
+    # Entry order, then sorted path order.
     assert [entry for _, entry in pairs[: len(old_name_pairs)]] == [
         "lib.py:OLD_NAME"
     ] * len(old_name_pairs)
@@ -138,7 +138,7 @@ def test_a_symlinks_resolved_content_is_checked_though_its_own_blob_never_matche
     # Entry (`path:name`): subject OLD_NAME, defined in lib.py.
     (repo / "lib.py").write_text("OLD_NAME\n")
 
-    # A plain regular-file reader, matched by raw grep as before.
+    # A plain regular-file reader, matched by raw grep.
     (repo / "plain_reader.py").write_text("reads OLD_NAME here\n")
 
     # A regular file a symlink resolves to. Its own text is the only place
@@ -163,13 +163,14 @@ def test_a_symlinks_resolved_content_is_checked_though_its_own_blob_never_matche
 
     # A grep hit whose own bytes do not decode. The raw match alone
     # must still count it as a reader.
-    undecodable_tracked = _undecodable_fails_here
-    if undecodable_tracked:
+    if _undecodable_fails_here:
         (repo / "undecodable_hit.py").write_bytes(b"OLD_NAME\xff\xfe")
 
     sha = _commit(repo, "symlinks")
     mirror = ensure_mirror(repo, tmp_path / "symlinks.git")
 
+    # No entries reads no listing, so a sha the mirror lacks is no error.
+    assert removed_name_readers(mirror, "0" * 40, []) == []
     pairs = removed_name_readers(mirror, sha, ["lib.py:OLD_NAME"])
     paths = [path for path, _ in pairs]
 
@@ -179,7 +180,7 @@ def test_a_symlinks_resolved_content_is_checked_though_its_own_blob_never_matche
         "plain_reader.py",
         "top_link",
     }
-    if undecodable_tracked:
+    if _undecodable_fails_here:
         expected.add("undecodable_hit.py")
     assert set(paths) == expected
     assert "escape_link" not in paths
