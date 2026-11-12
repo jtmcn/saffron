@@ -4,7 +4,7 @@ title: A stack batch's spec writer revises a spec the prose gate never reads, so
 status: partial
 tier: 1
 filed: 2026-10-13
-specs: [SA-0286, SA-0327]
+specs: [SA-0286, SA-0327, SA-0376]
 prs: [867, 996]
 commits: []
 cites: [§4.2, §5.4]
