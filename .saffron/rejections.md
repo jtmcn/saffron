@@ -2987,3 +2987,30 @@ critic's own, so they have no line.
 - `SA-0371` (#1158): a comment framed `_PROBE_CELL_UNENTERABLE` as the new
   fresh cell's summary alone. **Bucket 3**, conventions. **Landed:** a review
   commit on #1158.
+
+## 2026-11-11, spec loop run 64 (#1162, #1164, #1166, #1167)
+
+- `SA-0372` (#1162): the witness drove one entry order, so a reader list
+  returned out of entry order passed. **Bucket 1**. **Landed:** a review
+  commit on #1162.
+- `SA-0372` (#1162): `run_task` restated the scheduler's own
+  `_entry_subject` split. **Bucket 3**, conventions. **Landed:** a review
+  commit on #1162.
+- `SA-0372` (#1162): no assert read stdout after the `GitError` case, so a
+  refusal line printed there passed. **Bucket 1**. **Landed:** a review
+  commit on #1162.
+- `SA-0372` (#1162): docstrings called a reader outside `touches`
+  "exposed". **Bucket 3**, conventions. **Landed:** a review commit on #1162.
+- `SA-0373` (#1164): the orphan guard's witness gave the orphan task no spec
+  review row, so the guard's own branch never ran. **Bucket 1**.
+  **Landed:** a review commit on #1164.
+- `SA-0373` (#1164): three docstrings named the wrong generation, writer or
+  predecessor. **Bucket 3**, conventions. **Landed:** a review commit on
+  #1164.
+- `SA-0374` (#1166): a copied comment named the wrong command. **Bucket 3**,
+  conventions. **Landed:** a review commit on #1166.
+- `SA-0379` (#1167): no witness drove an empty entries list, so dropping its
+  guard passed. **Bucket 1**. **Landed:** a review commit on #1167.
+- `SA-0379` (#1167): `_tracked_symlinks` restated the module's own `_git`,
+  a test aliased a helper, and two comments described old behaviour.
+  **Bucket 3**, conventions. **Landed:** a review commit on #1167.

@@ -5,7 +5,7 @@ status: partial
 tier: 2
 filed: 2026-10-19
 specs: [SA-0313, SA-0374]
-prs: [961]
+prs: [961, 1166]
 commits: []
 cites: [§4.2.1]
 related: [b-dc5212, b-6b06e1]
@@ -55,3 +55,5 @@ as `regate` then `adopt`. A test drives each route and starts a child on it.
   `READY_FOR_REVIEW`. Batch 79 recorded no revised text for that layer. But
   `saffron finish 79` then refused: "batch 79 holds no layer". An adopted
   task is not a stack layer, so its end review never runs.
+- 2026-11-11: #1166 shipped `SA-0374` in the spec loop's run 64. Adopt now regates
+  a task that ran a recorded spec text. No test starts a child on each route yet.

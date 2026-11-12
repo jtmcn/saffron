@@ -58,3 +58,5 @@ gate that failed.
 - 2026-11-11: recurred in finish 81. It drafted `SA-0375` from `SA-0371`'s
   contract concern, which the spec had named out of scope. The draft failed
   `prose` and the records check, so the finding was pooled.
+- 2026-11-11: finish 82 drafted `SA-0379` from `SA-0372`'s symlink concern.
+  The follow-up ran, reached `READY_FOR_REVIEW` and opened #1167.
