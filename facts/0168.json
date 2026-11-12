@@ -1,0 +1,1 @@
+{"at": "2026-11-12T20:19:57.602801+00:00", "batch_key": "83", "kind": "stack_finish", "payload": {"branch": "saffron/batch-83-finish", "head_sha": "be5f815d22097d9def40aa9eaa9d35f2c455103e", "pr_url": null}, "repo": "saffron", "task_key": "837198a264e36cbd1ab58e81697c0301"}
