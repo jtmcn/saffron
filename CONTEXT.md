@@ -162,7 +162,8 @@ _Avoid_: "session" (that means an agent session), "cycle", "sweep", "run".
 while it is still running. An absent one means in flight, not unknown. Never a
 task's end state: these describe the night, and `DRAINED` says the queue emptied,
 not that anything in it succeeded. `INFRASTRUCTURE` is the breaker firing, a
-failed readiness probe, or a PACKAGE raise on a task in `READY_FOR_REVIEW`. It
+failed readiness probe, or a PACKAGE raise on a task in `READY_FOR_REVIEW`.
+A cell raise past an `ORPHANED` task `saffron package` would take counts too. It
 is the only one of the five that says the machine rather than the work was
 wrong. It is also the reason a night gets when a raise leaves its row open, and
 an operator's Ctrl-C or SIGTERM is such a raise. So the row alone cannot tell a
@@ -392,7 +393,9 @@ cover. It also refuses an order spec whose writer session still carries fault li
 once its send-backs run out. Before its spec review, it refuses a spec with a citation that does not resolve
 once `rewrite_moved_citations` moves what it can.
 `saffron package` refuses after the cell ended, before it reruns PACKAGE. It refuses a
-task that is not `READY_FOR_REVIEW` or already has a pull request. It also refuses a
+task that is neither `READY_FOR_REVIEW` nor `ORPHANED`, or already has a pull request.
+It refuses an `ORPHANED` task whose cell recorded no `REVIEWING` turn, or whose review
+would not end `READY_FOR_REVIEW`. It also refuses a
 missing or stale file in the task directory, a spec text it cannot find, and a damaged
 `revert-exempt.json`.
 _Avoid_: "skip" (that is a gate status), "blocked", "reject" (that is what the
@@ -846,8 +849,8 @@ A batch scan stamps a task it finds in one `ORPHANED` (§4.2.1).
 `REVIEW_INCOMPLETE`.
 Everything else is internal.
 > A state a task *ends in* is a wider set than the states that *reach you*.
-> `MERGED` ends a task and reaches nobody, and `ORPHANED` waits for `saffron gc`
-> rather than the operator. One column holds both.
+> `MERGED` ends a task and reaches nobody, and `ORPHANED` mostly waits for
+> `saffron gc` rather than the operator. One column holds both.
 
 `TerminalEvent`, the kind `events.Terminal` writes, is not a terminal state. It records why
 IMPLEMENT committed nothing, a plan rejected before any turn included. Each of its five
