@@ -1547,8 +1547,7 @@ def test_an_in_cell_concern_whose_cited_line_a_review_commit_changed_is_not_draf
 
 @dataclass
 class _ReviewedTreeFixture:
-    """`A`/`T1`/`P`/`T2`/`H`/`G`, exactly as this spec's own notes
-    describe. TE-1's critic tree `T1` is rewritten once more into its
+    """Two layers on base `A`. TE-1's critic tree `T1` is rewritten once more into its
     packaged head `P`. TE-2's critic tree `T2` is rewritten into its
     packaged head `H`, then graded at `G`. `te1_record`/`te2_record` are
     each `(tree_base, raw, sha256)`, and `te1_tree`/`te2_tree` are the
@@ -1639,6 +1638,8 @@ def _reviewed_tree_fixture(tmp_path: Path, monkeypatch) -> _ReviewedTreeFixture:
     (mirror / "src").mkdir(parents=True, exist_ok=True)
     write_a(a)
     p = [f"p{i}" for i in range(1, 13)]
+    # Line 2 anchors on TE-1's own range by this token, which `P` adds to line 8.
+    p[1] = "p2 retry_window"
     _write(mirror, "src/p.py", p)
     shas = {"A": commit("A")}
 
@@ -1648,7 +1649,7 @@ def _reviewed_tree_fixture(tmp_path: Path, monkeypatch) -> _ReviewedTreeFixture:
     shas["T1"] = commit("T1")
 
     p2 = list(p)
-    p2[7] = "p8_p"
+    p2[7] = "p8_p retry_window"
     _write(mirror, "src/p.py", p2)
     shas["P"] = commit("P")
 
@@ -1829,13 +1830,16 @@ def test_an_in_cell_concern_is_dropped_when_its_line_changed_since_the_tree_its_
     outcome, reason = pool[(te1_key, "c1-p8")]
     assert outcome == "unverified"
     assert reason == te1_reason
-    assert pool[(te1_key, "c1-p2")] == ("unanchored", "")
+    assert (te1_key, "c1-p2") not in pool
 
     groups = {
         (g.task_key, g.file): [f.finding.claim for f in g.findings]
         for g in result.groups
     }
-    assert groups == {(te2_key, "src/a.py"): ["c-a50"]}
+    assert groups == {
+        (te2_key, "src/a.py"): ["c-a50"],
+        (te1_key, "src/p.py"): ["c1-p2"],
+    }
 
     assert built.batch_id is not None
     written = finish.write_findings(
@@ -1848,7 +1852,7 @@ def test_an_in_cell_concern_is_dropped_when_its_line_changed_since_the_tree_its_
         assert by_claim[claim]["reason"] == te2_reason
     assert by_claim["c1-p8"]["outcome"] == "unverified"
     assert by_claim["c1-p8"]["reason"] == te1_reason
-    assert by_claim["c1-p2"]["outcome"] == "unanchored"
+    assert by_claim["c1-p2"]["outcome"] == "follow_up"
     assert by_claim["c-a50"]["outcome"] == "follow_up"
 
 
@@ -2002,16 +2006,20 @@ def test_a_layer_whose_record_cannot_be_used_keeps_the_packaged_heads_check(
         pool_reasons = {(q.task_key, q.finding.claim): q.reason for q in result.pool}
         assert pool[(te2_key, "c-a30")] == "unverified"
         assert pool[(te2_key, "c-a50")] == "unverified"
-        assert pool_reasons[(te2_key, "c-a30")] == (
-            f"its cited line changed between the packaged head {shas['H']} "
-            f"and the graded head {shas['G']} after it was cited"
-        )
+        for claim in ("c-a30", "c-a50"):
+            assert pool_reasons[(te2_key, claim)] == (
+                f"its cited line changed between the packaged head {shas['H']} "
+                f"and the graded head {shas['G']} after it was cited"
+            )
         assert pool[(te1_key, "c1-p8")] == "unverified"
         assert pool_reasons[(te1_key, "c1-p8")] == te1_reason
-        assert pool[(te1_key, "c1-p2")] == "unanchored"
+        assert (te1_key, "c1-p2") not in pool
 
         groups = {
             (g.task_key, g.file): sorted(f.finding.claim for f in g.findings)
             for g in result.groups
         }
-        assert groups == {(te2_key, "src/a.py"): ["c-a10", "c-a13"]}
+        assert groups == {
+            (te2_key, "src/a.py"): ["c-a10", "c-a13"],
+            (te1_key, "src/p.py"): ["c1-p2"],
+        }

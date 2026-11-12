@@ -25,7 +25,6 @@ read at the graded head, never meet this.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import subprocess
@@ -36,6 +35,7 @@ from functools import partial
 from pathlib import Path
 
 from saffron import end_review, events
+from saffron.agents import artifacts
 from saffron.agents.findings import Finding, Severity, anchor, parse_diff
 from saffron.cell import session
 from saffron.cell.worktree import DIFF_FLAGS, git_argv
@@ -170,6 +170,8 @@ def _rebuild_tree(mirror: Path, tree_base: str, raw: str) -> tuple[str | None, s
             text=True,
             env=env,
         )
+        if written.returncode != 0:
+            return None, f"its rebuilt tree on {tree_base} did not write"
         return written.stdout.strip(), ""
 
 
@@ -194,7 +196,7 @@ def _reviewed_tree(
             raise TypeError
     except (OSError, ValueError, KeyError, TypeError):
         return None, "reviewed-diff.json is unreadable"
-    if hashlib.sha256(raw.encode("utf-8")).hexdigest() != sha256:
+    if artifacts.hash_artifact(raw) != sha256:
         return None, "its sha256 does not match its diff"
     if not _binds_task(out_dir / spec_id, sha256, task_key):
         return None, "no REVIEW line binds it to this task"
@@ -362,12 +364,11 @@ def qualify(
     end-review findings and in-cell concerns, top down. Groups and pools
     the findings every range decides, so one group can span two ranges.
     A bad mirror raises out of it, and ranges walked earlier keep their
-    rows.
-
-    `fields` is the end review's own `StackReview.fields`. `out_dir` is
-    the batch tree's root, holding each task's own directory. A hunk
-    there makes a concern `unverified`. Elsewhere it stays `qualified`,
-    against the packaged head when the record cannot be used."""
+    rows. `fields` is the end review's own `StackReview.fields`, and
+    `out_dir` the batch tree's root. A concern `_decide` would file
+    `qualified` is `unverified` when its line sits in a hunk from the graded
+    head to the critic's rebuilt tree. Without a usable record, the
+    packaged head stands in for that tree."""
     groups: dict[tuple[str, str], list[Qualified]] = {}
     pool: list[Qualified] = []
 
