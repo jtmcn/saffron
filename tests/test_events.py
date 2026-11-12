@@ -2273,6 +2273,19 @@ def test_the_join_covers_every_captured_line_a_kind_renders():
             detail="conventions: 0 blocker, 0 concern, 0 note, drop rate 0% of 0, $0.00",
         )
     )
+    # The reviewed diff's own line (`SA-0375`), inline for the same reason.
+    reviewed_diff_line = describe(
+        PhaseStart(
+            timestamp=1.0,
+            spec_id="x",
+            phase="REVIEW",
+            label="REVIEW",
+            detail=(
+                "reviewed diff recorded, sha256 "
+                "73886d584add3f96214d238c9bf1452c8eb756e448be5579496fb33c1c8eca04"
+            ),
+        )
+    )
     # The failing `lint` gate's one new failure, beneath each counted line.
     beneath = describe(
         Attempt(
@@ -2294,6 +2307,7 @@ def test_the_join_covers_every_captured_line_a_kind_renders():
         and line not in per_gate
         and line != no_claude_md
         and line != conventions_line
+        and line != reviewed_diff_line
         and line != beneath
         and "<" not in line
     ]
