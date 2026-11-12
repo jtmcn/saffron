@@ -8230,21 +8230,6 @@ def test_a_stack_batch_refuses_a_spec_with_a_citation_left_after_rewriting_and_r
     assert doubles.runner_calls == []
 
 
-class _FaultyRevise:
-    """A `revise` double keyed by spec id, each given one scripted
-    `SpecWriterSession`. A second call for a spec with none left pops an
-    empty list and raises, catching a stray extra writer call."""
-
-    def __init__(self, sessions: dict):
-        self._sessions = {spec_id: list(v) for spec_id, v in sessions.items()}
-        self.calls: list[str] = []
-
-    def __call__(self, candidate, predecessor, spec_text, review_text):
-        spec_id = candidate.spec.id
-        self.calls.append(spec_id)
-        return self._sessions[spec_id].pop(0)
-
-
 def test_a_stack_batch_refuses_an_order_spec_whose_revision_still_carries_fault_lines(
     ledger, repo_id
 ):
@@ -8278,7 +8263,7 @@ def test_a_stack_batch_refuses_an_order_spec_whose_revision_still_carries_fault_
             )
         ],
     }
-    revise = _FaultyRevise(sessions)
+    revise = _RevisionWrite(ledger, lambda: None, sessions)
 
     rows = {
         "TE-591": {"route": ["revise"]},
@@ -8349,7 +8334,7 @@ def test_a_stack_batch_refuses_an_order_spec_whose_revision_still_carries_fault_
     assert f"{'TE-593':<10} revised  1" in lines
     assert f"{'TE-595':<10} revised  1" in lines
 
-    assert revise.calls == ["TE-591", "TE-593", "TE-594", "TE-595"]
+    assert [c[0] for c in revise.calls] == ["TE-591", "TE-593", "TE-594", "TE-595"]
     runner_ids = [spec_id for spec_id, _pred in doubles.runner_calls]
     assert "TE-591" not in runner_ids
     assert "TE-592" not in runner_ids
