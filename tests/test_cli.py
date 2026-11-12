@@ -12578,6 +12578,7 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
         emit,
         pooled,
         main_head=None,
+        cite=None,
     ):
         write_follow_ups_calls.append(
             {
@@ -12838,6 +12839,7 @@ def test_a_stack_batchs_follow_ups_are_qualified_and_written_from_the_pinned_bas
             emit,
             pooled,
             main_head=None,
+            cite=None,
         ):
             qualification = qualify(stack_arg.layers, stack_arg.join)
             a, b, c, d, _e = qualification.groups
@@ -13043,6 +13045,217 @@ def test_a_stack_batchs_follow_up_writer_is_seeded_at_the_top_head_the_end_revie
     assert seeds == [graded_head, "2" * 40]
     assert qualify_fields_calls == [{key: graded}, stack_ungraded.fields]
     assert qualify_fields_calls[1] is stack_ungraded.fields
+
+    ledger.close()
+
+
+def test_a_stack_batchs_qualify_reads_task_directories_under_the_batch_tree(
+    tmp_path, monkeypatch
+):
+    """`_stack_follow_ups` hands `qualify.qualify` its own `out_dir`, the
+    batch tree's root where each task keeps its own directory. Never a
+    follow-ups subdirectory, where no task directory lives."""
+    rig = _follow_ups_mirror(tmp_path)
+    mirror, base_sha = rig.mirror, rig.base_sha
+    pinned_url = "https://github.com/o/r.git"
+
+    ledger = Ledger(tmp_path / "ledger.db")
+    repo_id = ledger.upsert_repo("r", pinned_url, str(mirror), policy_sha=None)
+    pinned = task.PinnedBase(mirror=mirror, url=pinned_url, base_sha=base_sha)
+
+    run_id = ledger.create_run(repo_id, base_sha)
+    task_id = ledger.create_task(run_id, "SY-1", "s" * 64, "saffron/SY-1")
+    ledger.set_task_package(
+        task_id, "READY_FOR_REVIEW", "saffron/SY-1", "2" * 40, "https://pr/1"
+    )
+    ledger.record_stack_layer(
+        task_id, position=1, predecessor_task_id=None, generation=1
+    )
+    key = ledger.record_key(task_id)
+    assert key is not None
+
+    monkeypatch.setattr(cli.runtime, "remove_container", lambda _container: None)
+    monkeypatch.setattr(
+        cli.package_phase, "fetch_default_branch", lambda _m, _u: ("main", base_sha)
+    )
+
+    @contextmanager
+    def _fake_layer_cell(fields, **kwargs):
+        yield "fake-container"
+
+    monkeypatch.setattr(cli.end_review, "layer_cell", _fake_layer_cell)
+
+    def _fake_run_spec_writer(container, *, system_prompt, prompt, agent, faults, emit):
+        return spec_review.SpecWriterSession(
+            text="",
+            cost_usd=0.0,
+            error="stub, never written",
+            resets_at=None,
+            session_id="s",
+            num_turns=0,
+            spec_sha=None,
+        )
+
+    monkeypatch.setattr(cli.spec_review, "run_spec_writer", _fake_run_spec_writer)
+
+    qualify_out_dirs: list = []
+
+    def _fake_qualify(ledger_arg, layers, join, **kwargs):
+        qualify_out_dirs.append(kwargs["out_dir"])
+        return qualify.Qualification(groups=[], pool=[])
+
+    monkeypatch.setattr(cli.qualify, "qualify", _fake_qualify)
+
+    def _fake_write_follow_ups(ledger_arg, stack_arg, *, qualify, write, **kwargs):
+        qualify(stack_arg.layers, stack_arg.join)
+        return []
+
+    monkeypatch.setattr(cli.follow_up, "write_follow_ups", _fake_write_follow_ups)
+
+    stack = end_review.StackReview(join=None, layers=[end_review.LayerReview(key, [])])
+    out_dir = tmp_path / "out"
+    make = cli._stack_follow_ups(
+        pinned=pinned,
+        repo=Path("/repo-sentinel"),
+        ledger=ledger,
+        out_dir=out_dir,
+        cap_usd=1.0,
+        pooled=[],
+    )
+    make("7", stack)
+
+    assert qualify_out_dirs == [out_dir]
+    assert qualify_out_dirs[0] != out_dir / "follow-ups" / "7"
+
+    ledger.close()
+
+
+def test_a_stack_batchs_follow_up_cite_reads_the_head_its_batchs_own_cite_reads(
+    tmp_path, monkeypatch
+):
+    """`cli._stack_follow_ups` passes `follow_up.write_follow_ups` a `cite`
+    that fetches the top layer's branch fresh, with
+    `package_phase.fetch_parent_branch`, then reads `citation_defects` at
+    that head. Its lines must equal `cli._stack_cite`'s own defects for a
+    follow-up atop the same layer. They must never equal the lines at
+    the packaged head or at the pinned base."""
+    from saffron.spec_citations import citation_defects
+
+    remote = tmp_path / "remote"
+    remote.mkdir()
+    _git(remote, "init", "-q")
+    trunk_branch = _git(remote, "symbolic-ref", "--short", "HEAD")
+
+    (remote / ".saffron").mkdir()
+    (remote / ".saffron" / "policy.yaml").write_text(
+        "gates: {}\nintegrity:\n  test_paths: ['tests/**']\nthread_env: {}\n"
+    )
+    (remote / "lib").mkdir()
+    (remote / "lib" / "mod.py").write_text(
+        "\n".join(f"line {i}" for i in range(1, 6)) + "\n"
+    )
+    _git(remote, "add", "-A")
+    _git(remote, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "trunk")
+    base_sha = _rev_parse(remote, "HEAD")
+
+    _git(remote, "checkout", "-q", "-b", "saffron/SY-1")
+    (remote / "lib" / "mod.py").write_text(
+        "\n".join(f"line {i}" for i in range(1, 11)) + "\n"
+    )
+    _git(remote, "add", "-A")
+    _git(
+        remote, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "packaged"
+    )
+    packaged_sha = _rev_parse(remote, "HEAD")
+    _git(remote, "checkout", "-q", trunk_branch)
+
+    mirror = tmp_path / "mirror.git"
+    subprocess.run(
+        ["git", "clone", "-q", "--bare", str(remote), str(mirror)], check=True
+    )
+
+    _git(remote, "checkout", "-q", "saffron/SY-1")
+    (remote / "lib" / "mod.py").write_text(
+        "\n".join(f"line {i}" for i in range(1, 31)) + "\n"
+    )
+    _git(remote, "add", "-A")
+    _git(remote, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "review")
+    review_sha = _rev_parse(remote, "HEAD")
+    _git(remote, "checkout", "-q", trunk_branch)
+
+    ledger = Ledger(tmp_path / "ledger.db")
+    repo_id = ledger.upsert_repo("r", str(remote), str(mirror), policy_sha=None)
+    run_id = ledger.create_run(repo_id, base_sha)
+    task_id = ledger.create_task(run_id, "SY-1", "s" * 64, "saffron/SY-1")
+    ledger.set_task_package(
+        task_id, "READY_FOR_REVIEW", "saffron/SY-1", packaged_sha, "https://pr/1"
+    )
+    ledger.record_stack_layer(
+        task_id, position=1, predecessor_task_id=None, generation=1
+    )
+    key = ledger.record_key(task_id)
+    assert key is not None
+
+    pinned = task.PinnedBase(mirror=mirror, url=str(remote), base_sha=base_sha)
+
+    text = (
+        "See `lib/mod.py:7-9` and `lib/mod.py:20-25` and "
+        "`lib/mod.py:40-41` and `lib/mod.py:50-52`.\n"
+    )
+
+    cite_results: list = []
+
+    def _fake_write_follow_ups(ledger_arg, stack_arg, *, cite, **kwargs):
+        cite_results.append(cite(text))
+        return []
+
+    monkeypatch.setattr(cli.follow_up, "write_follow_ups", _fake_write_follow_ups)
+
+    stack = end_review.StackReview(join=None, layers=[end_review.LayerReview(key, [])])
+    make = cli._stack_follow_ups(
+        pinned=pinned,
+        repo=Path("/repo-sentinel"),
+        ledger=ledger,
+        out_dir=tmp_path / "out",
+        cap_usd=1.0,
+        pooled=[],
+    )
+    result = make("9", stack)
+    assert result == []
+    assert len(cite_results) == 1
+    follow_up_lines = cite_results[0]
+
+    layer_candidate = Candidate(
+        path=Path(".saffron/specs/SY-1-x.md"),
+        spec=intake.Spec(id="SY-1", title="t", type="feature"),
+        spec_sha="l" * 64,
+        task_id=task_id,
+    )
+    follow_candidate = Candidate(
+        path=Path(".saffron/specs/SA-0200-x.md"),
+        spec=intake.Spec(
+            id="SA-0200", title="f", type="feature", touches=["lib/mod.py"]
+        ),
+        spec_sha="f" * 64,
+        task_id=None,
+    )
+    _, expected_defects, _ = cli._stack_cite(pinned=pinned)(
+        follow_candidate, layer_candidate, text
+    )
+    assert follow_up_lines == [str(defect) for defect in expected_defects]
+    # Only the two citations no head could ever satisfy are left: the
+    # other two resolve once the review commit is fetched.
+    assert len(follow_up_lines) == 2
+    assert all("40-41" in line or "50-52" in line for line in follow_up_lines)
+
+    packaged_lines = [
+        str(defect) for defect in citation_defects(mirror, packaged_sha, text)
+    ]
+    base_lines = [str(defect) for defect in citation_defects(mirror, base_sha, text)]
+    assert follow_up_lines != packaged_lines
+    assert follow_up_lines != base_lines
+
+    assert _rev_parse(mirror, "saffron/SY-1") == review_sha
 
     ledger.close()
 

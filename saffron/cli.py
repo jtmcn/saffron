@@ -1818,15 +1818,14 @@ def _stack_follow_ups(
     pooled: list[follow_up.Pooled],
 ) -> Callable[[str, end_review.StackReview], list[Candidate]]:
     """`run_stack_batch`'s `follow_ups` adapter (ADR 7, `SA-0165`). Every
-    input but the judge's own is read at the pinned base, once, before
+    input but the judge's and `cite`'s is read at the pinned base, once, before
     `follow_up.write_follow_ups` runs. A broken policy costs one line and
     no cell. A raise from that call after `qualify` returns still pools
-    every unaccepted finding its walk never reached.
-
-    The top layer, the join's and each layer's end-review findings, and each
-    `write` call's origin read `stack.fields` through `qualify.graded_fields`.
-    A layer graded at a moved head reads that head. The judge's own
-    `verify` exports and loads the policy fresh for each draft it judges."""
+    every unaccepted finding its walk never reached. The top layer, the
+    findings and each `write` call's origin read `stack.fields` through
+    `qualify.graded_fields`, so a layer graded at a moved head reads that head.
+    `verify` loads the policy fresh for each draft at `top.head`. `cite`
+    fetches the top layer's branch on each call."""
 
     def run(batch_key: str, stack: end_review.StackReview) -> list[Candidate]:
         if not stack.layers:
@@ -1872,6 +1871,7 @@ def _stack_follow_ups(
                     gates=policy.gate_executables(Path(worktree.GATES_MOUNT)),
                     created=created,
                     note=note,
+                    out_dir=out_dir,
                 )
                 return kept
 
@@ -1935,6 +1935,14 @@ def _stack_follow_ups(
                     verify=judge_verify,
                 )
 
+            def cite(text: str) -> Sequence[str]:
+                branch = _branch(top.spec_id)
+                head = package_phase.fetch_parent_branch(
+                    pinned.mirror, pinned.url, branch
+                )
+                defects = citation_defects(pinned.mirror, head, text)
+                return [str(defect) for defect in defects]
+
             # A spec merged to the default branch since the batch cut its base
             # holds an id the stack top lacks (b-cbb6e7).
             try:
@@ -1951,6 +1959,7 @@ def _stack_follow_ups(
                 qualify=run_qualify,
                 write=write,
                 judge=judge,
+                cite=cite,
                 mint=mint,
                 mirror=pinned.mirror,
                 specs_dir=exported / ".saffron" / "specs",

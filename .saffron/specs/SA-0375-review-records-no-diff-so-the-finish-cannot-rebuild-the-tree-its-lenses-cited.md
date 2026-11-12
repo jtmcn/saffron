@@ -219,10 +219,14 @@ here because the second spec reads them.
   exports differ. Pass `spec=_spec(stacked_on="c" * 40)`, so `tree_base`
   differs from `base_sha` (`saffron/cell/session.py:401-410`). Pass
   `capture=` to `_drive` to read the phase lines. The lens prompts are
-  the `system_prompts` after the plan and implement turns. Give the critic
-  cell's export a character outside ASCII, such as `é` in an added line
-  of `_ANCHORING_DIFF`, so a hash over another encoding differs. Keep its
-  hunk on `src/x.py` line 1, where `_BLOCKER` anchors.
+  the `system_prompts` after the plan and implement turns. Build the
+  critic cell's export as its own local string, the way `_GROWN_PATCH`
+  (`tests/test_session.py:9848`) derives from `_ANCHORING_DIFF` without
+  changing it: add one character outside ASCII, such as `é`, to a line
+  this local copy adds, so a hash over another encoding differs. Keep
+  its hunk anchored on `src/x.py` line 1, where `_BLOCKER` anchors.
+  Leave the shared `_ANCHORING_DIFF` unedited for the many other tests
+  that still read it.
 - For criterion 2, use a generator for `turns`, as
   `test_the_lens_gate_table_is_written_before_the_first_lens_runs` does
   (`tests/test_session.py:11270-11309`). Read the file after yielding the

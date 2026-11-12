@@ -654,7 +654,9 @@ class SpecWriterSession:
     when none parsed (SA-0353). Neither turn's own `text` feeds it.
     `spec_sha` is `hash_artifact` of it, or `None` beside empty text.
     `model` is every distinct model this session's own turns named,
-    first-seen order, comma-joined (SA-0205)."""
+    first-seen order, comma-joined (SA-0205). `fault_lines` is the lines
+    `faults` last found for `text`, once the send-backs ran out or the
+    session gave up."""
 
     text: str
     cost_usd: float
@@ -664,6 +666,7 @@ class SpecWriterSession:
     num_turns: int
     spec_sha: str | None
     model: str | None = None
+    fault_lines: tuple[str, ...] = ()
 
 
 def _writer_session(
@@ -675,6 +678,7 @@ def _writer_session(
     session_id: str | None,
     turns: int,
     model: str | None = None,
+    fault_lines: tuple[str, ...] = (),
 ) -> SpecWriterSession:
     return SpecWriterSession(
         text=text,
@@ -685,6 +689,7 @@ def _writer_session(
         num_turns=turns,
         spec_sha=hash_artifact(text) if text else None,
         model=model,
+        fault_lines=fault_lines,
     )
 
 
@@ -848,12 +853,16 @@ def run_spec_writer(
         parsed, or the newest of all when none did."""
         newest_parsed: str | None = None
         newest_any = text
+        newest_parsed_lines: tuple[str, ...] = ()
+        newest_any_lines: tuple[str, ...] = ()
 
         def _record(candidate: str, outcome: DraftFaults) -> None:
-            nonlocal newest_parsed, newest_any
+            nonlocal newest_parsed, newest_any, newest_parsed_lines, newest_any_lines
             newest_any = candidate
+            newest_any_lines = tuple(outcome.lines)
             if outcome.parsed:
                 newest_parsed = candidate
+                newest_parsed_lines = tuple(outcome.lines)
 
         def _finish() -> SpecWriterSession:
             return _writer_session(
@@ -864,6 +873,11 @@ def run_spec_writer(
                 session_id=sid,
                 turns=turns,
                 model=model,
+                fault_lines=(
+                    newest_parsed_lines
+                    if newest_parsed is not None
+                    else newest_any_lines
+                ),
             )
 
         def _give_up(message: str, lines: Sequence[str]) -> SpecWriterSession:

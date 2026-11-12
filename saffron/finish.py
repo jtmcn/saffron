@@ -495,8 +495,8 @@ def publish_finish(
     """Judge `sha` with the finishing suite, then push it and open its
     draft pull request (ADR 7). Every check below runs before the one
     push, each returning one line starting `ESCALATE` on its own
-    failure. A red suite returns that line plus one more per failure, in
-    `verify`'s own order (`SA-0368`).
+    failure. A red suite names each failing gate once on that line,
+    then one more line per failure, in `verify`'s own order (`SA-0368`).
 
     A temporary ref names `sha` for `verify`'s own span, since a
     gate-only cell's seed can only fetch a branch. Each layer's head and
@@ -514,7 +514,8 @@ def publish_finish(
     finally:
         git_mirror._git(mirror, "update-ref", "-d", ref)
     if new_failures:
-        lines = [f"{ESCALATE}red suite, {_new_failures(len(new_failures))}"]
+        gates = ", ".join(dict.fromkeys(failure.gate for failure in new_failures))
+        lines = [f"{ESCALATE}red suite, {_new_failures(len(new_failures))} in {gates}"]
         lines.extend(
             "  " + _clean(render(failure), _DETAIL_BOUND) for failure in new_failures
         )

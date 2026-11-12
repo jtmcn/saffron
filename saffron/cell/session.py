@@ -3375,6 +3375,24 @@ def _drive_cell(
                         reviewed_diff = worktree.export_patch(
                             critic_container, spec.tree_base
                         )
+                        # Kept so a later finish can rebuild this tree from
+                        # `tree_base` plus this diff (`SA-0375`).
+                        reviewed_diff_sha256 = artifacts.hash_artifact(reviewed_diff)
+                        (task_dir / "reviewed-diff.json").write_text(
+                            json.dumps(
+                                {
+                                    "tree_base": spec.tree_base,
+                                    "raw": reviewed_diff,
+                                    "sha256": reviewed_diff_sha256,
+                                },
+                                indent=2,
+                            )
+                        )
+                        _phase_start(
+                            "REVIEW",
+                            "REVIEW",
+                            f"reviewed diff recorded, sha256 {reviewed_diff_sha256}",
+                        )
                         # A witnessed spec's claims live only in frontmatter
                         # (§3.2); append them so the critic sees what a
                         # markdown spec already gives.

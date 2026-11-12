@@ -2316,6 +2316,7 @@ def test_a_failed_send_back_keeps_the_last_draft_that_parsed_and_says_why(
                 session_id=session_id,
                 num_turns=7 + 7 + tail_turns,
                 spec_sha=hash_artifact(_WRITE_SPEC),
+                fault_lines=("line one", "line two"),
             )
 
     # Bound patched to 2: a first send-back whose text parses with faults,
@@ -2357,8 +2358,121 @@ def test_a_failed_send_back_keeps_the_last_draft_that_parsed_and_says_why(
         resets_at=None,
         session_id="s-6",
         num_turns=7 + 7 + 3 + 2 + 1,
+        fault_lines=("line three", "line four"),
         spec_sha=hash_artifact(_SECOND_SPEC),
     )
+
+
+def test_a_writer_session_names_the_fault_lines_its_returned_text_still_carries():
+    from saffron.spec_review import DraftFaults, SpecWriterSession
+
+    # The field itself defaults to empty, with no `fault_lines` given.
+    bare = SpecWriterSession(
+        text="t",
+        cost_usd=0.0,
+        error=None,
+        resets_at=None,
+        session_id=None,
+        num_turns=0,
+        spec_sha=None,
+    )
+    assert bare.fault_lines == ()
+
+    # A clean first draft opens no send-back and carries no fault line.
+    clean_double = _Agent(
+        [_draft(cost=0.5, session_id="s-1", num_turns=7), _write_extract()]
+    )
+    clean_result = _run_writer(clean_double, faults=_no_faults)
+    assert clean_result.fault_lines == ()
+
+    def _send_back_script():
+        return [
+            _draft(cost=0.5, session_id="s-1", num_turns=7),
+            _write_extract(session_id="s-2", cost=0.25, num_turns=7),
+            _attempt(session_id="s-3", cost=0.1, num_turns=3),
+            _write_extract(
+                session_id="s-4", cost=0.2, num_turns=2, structured_output=_SECOND_V
+            ),
+        ]
+
+    # A send-back that comes back clean carries no fault line either.
+    clean_back_faults = _faults_double(
+        [
+            DraftFaults(parsed=True, lines=("line one", "line two")),
+            DraftFaults(parsed=True, lines=()),
+        ],
+        [],
+    )
+    clean_back_result = _run_writer(
+        _Agent(_send_back_script()), faults=clean_back_faults, emit=lambda line: None
+    )
+    assert clean_back_result.text == _SECOND_SPEC
+    assert clean_back_result.fault_lines == ()
+
+    # A send-back still faulted carries the second judgement's lines, not
+    # the first's.
+    still_faulted = _faults_double(
+        [
+            DraftFaults(parsed=True, lines=("line one", "line two")),
+            DraftFaults(parsed=True, lines=("line three", "line four")),
+        ],
+        [],
+    )
+    still_faulted_result = _run_writer(
+        _Agent(_send_back_script()), faults=still_faulted, emit=lambda line: None
+    )
+    assert still_faulted_result.text == _SECOND_SPEC
+    assert still_faulted_result.fault_lines == ("line three", "line four")
+
+    # A send-back whose own text does not parse leaves the first text
+    # standing, with the first judgement's lines, not the send-back's own.
+    unparsed_send_back = _faults_double(
+        [
+            DraftFaults(parsed=True, lines=("line one", "line two")),
+            DraftFaults(parsed=False, lines=("line five", "line six")),
+        ],
+        [],
+    )
+    unparsed_send_back_result = _run_writer(
+        _Agent(_send_back_script()),
+        faults=unparsed_send_back,
+        emit=lambda line: None,
+    )
+    assert unparsed_send_back_result.text == _WRITE_SPEC
+    assert unparsed_send_back_result.fault_lines == ("line one", "line two")
+
+    # Neither text parses: the newest text carries its own lines, not the
+    # first's.
+    neither_parsed = _faults_double(
+        [
+            DraftFaults(parsed=False, lines=("line one",)),
+            DraftFaults(parsed=False, lines=("line two",)),
+        ],
+        [],
+    )
+    neither_parsed_result = _run_writer(
+        _Agent(_send_back_script()), faults=neither_parsed, emit=lambda line: None
+    )
+    assert neither_parsed_result.text == _SECOND_SPEC
+    assert neither_parsed_result.fault_lines == ("line two",)
+
+    # A send-back whose work turn raises ends in `_give_up`, which hands
+    # back the lines of the text it returns.
+    raised_script = [
+        _draft(cost=0.5, session_id="s-1", num_turns=7),
+        _write_extract(session_id="s-2", cost=0.25, num_turns=7),
+        implement.AgentFailed(
+            "boom", _attempt(session_id="s-3", cost=0.1, num_turns=3)
+        ),
+    ]
+    gave_up_faults = _faults_double(
+        [DraftFaults(parsed=True, lines=("line one", "line two"))], []
+    )
+    gave_up_result = _run_writer(
+        _Agent(raised_script), faults=gave_up_faults, emit=lambda line: None
+    )
+    assert gave_up_result.text == _WRITE_SPEC
+    assert gave_up_result.fault_lines == ("line one", "line two")
 
 
 def test_a_draft_intake_refuses_is_named_by_intakes_own_error_and_reaches_no_gate():

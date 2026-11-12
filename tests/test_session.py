@@ -11309,6 +11309,116 @@ def test_the_lens_gate_table_is_written_before_the_first_lens_runs(
     assert tests_result == honest[0].model_dump()
 
 
+def test_the_lenses_diff_is_recorded_before_the_first_lens_session(
+    monkeypatch, tmp_path
+):
+    """Criterion 2 (`SA-0375`). The record is written as the critic cell's own
+    export returns, before the first lens session is asked. A lens turn that
+    raises still leaves behind what every other lens would read. The same
+    generator trick as the gate-table test above reads `reviewed-diff.json`
+    from inside `turns`, at the exact moment the first lens turn is
+    requested."""
+    cell = _stub_the_runtime(monkeypatch)
+    task_dir = tmp_path / "out" / "SY-1"
+    seen_before_first_lens: list[dict] = []
+
+    def _turns():
+        yield _turn(_block(_PLAN))
+        yield _turn()
+        # The implement turn above is the last non-lens turn. The record
+        # must already exist once the first lens turn is requested.
+        seen_before_first_lens.append(
+            json.loads((task_dir / "reviewed-diff.json").read_text())
+        )
+        yield implement.AgentFailed("the lens session failed")
+
+    outcome, _ledger = _drive(monkeypatch, tmp_path, cell=cell, turns=_turns())
+    assert outcome.state == "REVIEW_INCOMPLETE"
+    assert len(seen_before_first_lens) == 1
+    assert seen_before_first_lens[0]["raw"] == _DIFF
+
+
+def test_a_task_whose_lenses_are_handed_no_diff_records_none(monkeypatch, tmp_path):
+    """Criterion 3 (`SA-0375`). A task that leaves REVIEW before the critic
+    cell's own export writes no `reviewed-diff.json`. A clean REVIEW, driven
+    first under its own `tmp_path`, proves the same helpers write the file
+    through the ordinary path. The other three never reach that export.
+    One is a plan turn the provider never served. One is an aborted
+    Gate-only suite. One is a critic cell that refuses the patch the
+    Gate-only cell already applied."""
+    # Not the default base, so a `tree_base` read from anywhere but this spec fails.
+    clean_base_sha = "b" * 20 + "c" * 20
+    clean_dir = tmp_path / "clean"
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        clean_dir,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        spec=_spec(base_sha=clean_base_sha),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    clean_recorded = json.loads(
+        (clean_dir / "out" / "SY-1" / "reviewed-diff.json").read_text()
+    )
+    assert clean_recorded["tree_base"] == clean_base_sha
+
+    unreachable_dir = tmp_path / "unreachable"
+    cell_unreachable = _stub_the_runtime(monkeypatch)
+    outcome_unreachable, _ledger = _drive(
+        monkeypatch,
+        unreachable_dir,
+        cell=cell_unreachable,
+        turns=[implement.AgentFailed("api_error", attempt=_served_nothing())],
+    )
+    assert outcome_unreachable.state == "PROVIDER_UNREACHABLE"
+    assert not (unreachable_dir / "out" / "SY-1" / "reviewed-diff.json").exists()
+
+    gate_error_dir = tmp_path / "gate_error"
+    cell_gate_error = _stub_the_runtime(
+        monkeypatch,
+        gate_cell_suite=[
+            GateResult(
+                gate="tests", status="error", tool="pytest 9.1.1", summary="boom"
+            )
+        ],
+    )
+    outcome_gate_error, _ledger = _drive(
+        monkeypatch,
+        gate_error_dir,
+        cell=cell_gate_error,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        policy="gates:\n  tests: {}\n",
+        gates=("tests",),
+    )
+    assert outcome_gate_error.state == "GATE_ERROR"
+    assert not (gate_error_dir / "out" / "SY-1" / "reviewed-diff.json").exists()
+
+    # Keyed by container, not `_stub_critic_apply`, which refuses every
+    # container and would end the task at the Gate-only cell first.
+    refused_dir = tmp_path / "refused_critic"
+    cell_refused = _stub_the_runtime(monkeypatch)
+
+    def _exec_stream(container, command, *, stdin_data="", on_line=None, **k):
+        cell_refused.execs.append((container, tuple(command), stdin_data))
+        if container == _CRITIC_CONTAINER:
+            return runtime.Completed(1, "", "error: patch does not apply")
+        return runtime.Completed(0, "", "")
+
+    monkeypatch.setattr("saffron.cell.runtime.exec_stream", _exec_stream)
+    outcome_refused, _ledger = _drive(
+        monkeypatch,
+        refused_dir,
+        cell=cell_refused,
+        turns=[_turn(_block(_PLAN)), _turn()],
+    )
+    assert outcome_refused.state == "EXHAUSTED"
+    assert any(
+        container == _GATE_CONTAINER for container, _cmd, _stdin in cell_refused.execs
+    )
+    assert not (refused_dir / "out" / "SY-1" / "reviewed-diff.json").exists()
+
+
 def test_the_lens_gate_suite_runs_inside_the_one_cell_lifecycle(monkeypatch, tmp_path):
     """The claim backlog item 140 makes is that one lifecycle serves both
     callers: patch `critic_cell` itself and show the gate suite ran against
@@ -12414,6 +12524,88 @@ def test_the_verdict_prompt_carries_the_diff_the_lenses_were_shown(
         in verdict_prompt
     )
     assert f"## The diff, after the rebuttal\n\n{after_rebuttal}" in verdict_prompt
+
+
+def test_review_records_the_diff_its_lenses_read_with_its_hash_and_tree_base(
+    monkeypatch, tmp_path
+):
+    """`SA-0375`. Three diffs differ across one task: the implementer's own
+    export, the critic cell's own reading of its tree, and the diff after
+    the rebuttal moves HEAD. Only the critic cell's is the one the lenses
+    read, so only that one belongs in `reviewed-diff.json`."""
+    cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    _rebuttable(monkeypatch, cell, rebut_commits=1)
+
+    # A local copy, grown from `_ANCHORING_DIFF` the way `_GROWN_PATCH`
+    # grows it. It carries a character outside ASCII, so its hash depends on encoding.
+    critic_export = _ANCHORING_DIFF + "# café\n"
+
+    after_rebuttal = (
+        "diff --git a/src/y.py b/src/y.py\n"
+        "--- a/src/y.py\n+++ b/src/y.py\n@@ -1 +1 @@\n-old\n+the rebuttal's own fix\n"
+    )
+
+    implementer_diff = (
+        "diff --git a/src/z.py b/src/z.py\n"
+        "--- a/src/z.py\n+++ b/src/z.py\n@@ -1 +1 @@\n-old\n+the implementer's git\n"
+    )
+
+    def _export_patch(container, sha):
+        cell.export_calls.append((container, sha))
+        if _rebuttal_turn_has_run(cell):
+            return after_rebuttal
+        return critic_export if container == _CRITIC_CONTAINER else implementer_diff
+
+    monkeypatch.setattr("saffron.cell.worktree.export_patch", _export_patch)
+
+    spec = _spec(stacked_on="c" * 40)
+    task_dir = tmp_path / "out" / spec.spec_id
+    capture: list = []
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        spec=spec,
+        capture=capture,
+        turns=_through_rebut(
+            _turn("Fixed."),
+            _turn(
+                structured_output={
+                    "rebuttals": [
+                        {"finding": 1, "action": "fixed", "argument": "committed"}
+                    ]
+                }
+            ),
+            _turn(
+                structured_output={
+                    "verdicts": [
+                        {"finding": 1, "verdict": "withdrawn", "reason": "fixed"}
+                    ]
+                }
+            ),
+        ),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+
+    recorded = json.loads((task_dir / "reviewed-diff.json").read_text())
+    assert set(recorded) == {"tree_base", "raw", "sha256"}
+    assert recorded["raw"] == critic_export
+    assert recorded["tree_base"] == "c" * 40
+    expected_sha256 = artifacts.hash_artifact(critic_export)
+    assert recorded["sha256"] == expected_sha256
+
+    review_lines = [
+        e.detail for e in capture if isinstance(e, PhaseStart) and e.phase == "REVIEW"
+    ]
+    assert any(expected_sha256 in line for line in review_lines)
+
+    # REBUT moves HEAD: `patch.diff` ends up holding the post-rebuttal
+    # export, while the record above still holds what the lenses read.
+    assert (task_dir / "patch.diff").read_text() == after_rebuttal
+
+    lens_prompts = cell.system_prompts[2 : 2 + len(review.LENSES)]
+    assert len(lens_prompts) == len(review.LENSES)
+    assert all(critic_export in prompt for prompt in lens_prompts)
 
 
 def test_a_rebuttal_numbered_badly_records_the_answer_that_was_asked_for(
