@@ -43,3 +43,5 @@ push on an unchanged branch.
 - 2026-11-11: four hits in one day, in `test_qualify` and `test_batch`,
   across the full suites of the spec loop's runs 62 and 63. Each test passed
   alone.
+- 2026-11-11: a fifth hit, in `test_batch` during the spec loop's run 64.
+  The test passed alone.

@@ -1,14 +1,15 @@
 ---
 id: b-323c97
 title: An adopted task holds no stack layer, so its batch's finish refuses and no end review reads it
-status: open
+status: done
 tier: 2
 filed: 2026-10-29
 specs: [SA-0373]
-prs: []
+prs: [1164]
 commits: []
 cites: [§5.7]
 related: [b-8826cf]
+closed: 2026-11-11
 ---
 
 ## Problem
@@ -37,3 +38,5 @@ its finish reads it. Or `adopt` says the task will get no end review.
 - 2026-11-11: recurred in the spec loop's run 61. `SA-0368` ended
   `EXHAUSTED` and was adopted on #1145. `saffron finish 79` refused with
   "batch 79 holds no layer", and its $30 reserve went unspent.
+- 2026-11-11: #1164 shipped `SA-0373` in the spec loop's run 64. An adopted task
+  now holds a stack layer, so its batch's finish reads it.

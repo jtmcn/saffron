@@ -56,3 +56,6 @@ before the finish commits it.
   into the tree (`saffron/finish.py`). So a revision's `prose` hits can still
   turn re-verification red.
 - 2026-11-09: recurred in the spec loop's run 56, finish 73. The writer's drafts for `SA-0357`, `SA-0358` and `SA-0359` failed `prose` at re-verification four times before one held.
+- 2026-11-11: recurred in finish 82. Its finishing commit wrote revised spec texts
+  and went red on `census`. `test_dead_gate.py` named each case by the spec's
+  whole text, so any revision renamed a test. Step 5 of run 64 gave the cases ids.

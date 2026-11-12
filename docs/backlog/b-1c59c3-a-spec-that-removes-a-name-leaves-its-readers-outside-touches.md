@@ -1,14 +1,15 @@
 ---
 id: b-1c59c3
 title: A spec that removes a name can leave a reader of it outside its touches, so its cell ends EXHAUSTED
-status: open
+status: done
 tier: 1
 filed: 2026-10-12
 specs: [SA-0269, SA-0372]
-prs: [853]
+prs: [853, 1162]
 commits: []
 cites: [§4.3, §5.4]
 related: [b-e773d9]
+closed: 2026-11-11
 ---
 
 ## Problem
@@ -40,3 +41,5 @@ model call decides it.
 - 2026-10-12: filed from the spec loop's run 36. #853 fixed `SA-0269` by hand.
 - 2026-11-11: specced as `SA-0372`, a refusal in `run_task` before the cell. The
   queue scan stays as it is, since it never reads the mirror.
+- 2026-11-11: #1162 shipped `SA-0372` in the spec loop's run 64. `run_task` refuses
+  a task whose `removes` name has a reader outside `touches`, before the cell.

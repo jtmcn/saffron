@@ -40,3 +40,5 @@ the declared pairs. An undeclared disappearance still fails.
   The spec told the cell to drop two parametrised cases, and neither the spec
   review nor the spec named `census`.
 - 2026-11-09: recurred in the spec loop's run 56. `SA-0353`'s notes asked for a rename of `test_a_sub_cap_of_18_dollars_writes_none_and_37_writes_two`. `census` refused it, and `revert` refused the ratio form the notes asked for, so the name stays false (#1099). Neither the spec writer nor its reviewer named `census`.
+- 2026-11-11: recurred in finish 82. A parametrize with no `ids=` named two
+  cases by spec text, so a revised spec read as a removed test.

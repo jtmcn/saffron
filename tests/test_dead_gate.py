@@ -106,10 +106,15 @@ AGREEMENT = [
 ]
 
 
+QUEUED = sorted((REPO / ".saffron" / "specs").glob("*.md"))
+
+
+# Named by file, so a revised spec text renames no case (b-703e64).
 @pytest.mark.parametrize(
     "text",
-    AGREEMENT
-    + [p.read_text() for p in sorted((REPO / ".saffron" / "specs").glob("*.md"))],
+    AGREEMENT + [p.read_text() for p in QUEUED],
+    ids=[f"agreement-{n}" for n in range(len(AGREEMENT))]
+    + [p.stem[:7] for p in QUEUED],
 )
 def test_the_gate_reads_the_same_entries_intake_does(text):
     assert _dead().entries(text) == parse_spec(text).pending_symbols
