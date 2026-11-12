@@ -263,8 +263,9 @@ group, and every other outcome goes to the backlog pool.
 **Follow-up spec**: A spec a spec writer session writes from one follow-up group, after
 the end review. It is a `bug` or `feature` spec with no `depends_on` and no inline
 mutant. Its budget is no higher than its origin's, and it touches only its group's file
-and test paths the stack changed. A draft that fails to parse, or that fails the
-finishing suite atop the top head, goes back to the writer once. A passing one is minted on the same batch, and its
+and test paths the stack changed. A draft that fails to parse, or fails the
+finishing suite atop the top head, goes back to the writer once. So does a draft with
+a citation that does not resolve at the top layer's branch. A passing one is minted on the same batch, and its
 text is recorded with origin `follow_up`. It runs only when the order stopped
 `DRAINED`.
 
@@ -276,7 +277,8 @@ group left joins the backlog pool.
 **Backlog pool**: The end-review findings no follow-up spec took, each with its reason.
 It holds every `unverified`, `unanchored` or `note` finding. It also holds each
 qualified group that became no follow-up. A spent writer sub-cap, a provider limit, a
-stale probe, an untrusted draft or a judge that raised each sends a group there. It is
+stale probe, an untrusted draft or a judge that raised each sends a group there. So
+does a citation check that raised. It is
 written to `findings.json`. No code reads it, and the delegate files backlog items
 from it by hand.
 
