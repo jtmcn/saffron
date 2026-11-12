@@ -4,7 +4,7 @@ title: "A finish drafts a follow-up its own batch refuses for citations, and its
 status: open
 tier: 2
 filed: 2026-11-02
-specs: []
+specs: [SA-0377]
 prs: []
 commits: []
 cites: [§5.7]

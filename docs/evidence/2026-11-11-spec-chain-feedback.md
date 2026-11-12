@@ -248,3 +248,39 @@ concern and two notes by hand.
 36. A claim about a value that differs between stacked and unstacked specs
     names both, and a witness drives each. Round 1 found `tree_base`
     driven stacked only.
+
+## SA-0377 (b-4a9207), after spec loop run 63
+
+A finish's follow-up drafts are judged by the finishing suite, but the batch
+later refuses them for unresolved citations. This spec checks each draft's
+citations at the top layer's branch before the mint. It also names each
+failing gate on the finish's escalation line. The one-line fix in the
+finishing layer stays open on b-4a9207.
+
+The writer drafted in 28 minutes, in parallel with `SA-0376`'s writer. It
+killed 22 wrong versions on a prototype that measured 128 changed tokens.
+
+**Review 1: 0 blockers, 4 concerns, 4 notes.** The delegate applied every
+concern by hand.
+
+- The witness did not fix its call order. `_stack_cite` fetches and moves
+  the mirror's ref, so called first it let the no-fetch version pass. No
+  pre-flight check reads call order.
+- A raising `cite` was not required to charge its session. Pre-flight 4
+  missed it: the writer's spend is a value the change writes.
+- The writer reads a different head than `cite` does. Out of scope now says
+  so.
+- Two `CONTEXT.md` entries list what sends a draft back. They gain one
+  sentence each in this pull request.
+
+**Review 2: 0 blockers, 3 concerns, 2 notes.** Round 1's charge fix named a
+wrong version that no witness observed. One hand-edited sentence misnamed
+the head, and one `CONTEXT.md` sentence was narrower than the check. The
+delegate applied all three.
+
+## Checks to build (SA-0377)
+
+37. A witness that compares two readers of one ref says which runs first,
+    when either one moves the ref.
+38. A wrong version added in a hand edit names the assertion that sees it.
+    Round 2 found one with no observation.
