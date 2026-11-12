@@ -1774,8 +1774,7 @@ def _adopt_recorded_text_case(
     assert repo_id is not None
     ledger.close()
 
-    # Adopt writes its own facts before the regate clones the mirror: create
-    # it first, or the prototype's own `RecordError` recurs (item 170).
+    # Create the mirror before adopt writes its facts (item 170).
     git_mirror.ensure_mirror(work, mirror_path)
 
     pr_url = "https://github.com/o/r/pull/9"
