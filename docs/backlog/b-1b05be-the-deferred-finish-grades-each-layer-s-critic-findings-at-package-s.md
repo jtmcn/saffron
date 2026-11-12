@@ -5,7 +5,7 @@ status: partial
 tier: 2
 filed: 2026-10-25
 closed:
-specs: [SA-0320, SA-0375]
+specs: [SA-0320, SA-0375, SA-0378]
 prs: [976]
 commits: []
 cites: [§5.7]
