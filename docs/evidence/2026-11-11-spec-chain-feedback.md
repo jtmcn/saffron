@@ -284,3 +284,33 @@ delegate applied all three.
     when either one moves the ref.
 38. A wrong version added in a hand edit names the assertion that sees it.
     Round 2 found one with no observation.
+
+## SA-0376 (b-703e64), after spec loop run 63
+
+The first design judged each revision with the finishing suite in two
+gate-only cells, about 10.5 minutes each. The delegate changed one arm
+before review: a revision that fails twice refuses its spec rather than
+running an older text, as `CONTEXT.md`'s Escalation entry implies.
+
+**Review 1: 1 blocker, 6 concerns, 4 notes.** The decisive finding was
+that `SA-0353` (#1099) already judges each writer draft with the form gates
+inside its own session. The item's last recurrence ran an engine from before
+#1099. So the spec was rewritten to the gap left: a session whose send-backs
+run out still returns a faulted text. The batch now refuses that order
+spec, with no new cells. The blocker named protected sentences the change
+makes false. The delegate landed three `CONTEXT.md` sentences by hand.
+
+**Review 2: 0 blockers, 2 concerns, 4 notes.** A session that gives up still
+returned its faulted text clean, so the three new sentences read false for
+it. `_give_up` now hands over the returned text's lines. No witness pinned
+the refusal after the writer's attempt closes, so a refusal could drop the
+writer's spend. The delegate applied both by hand and checked the first on
+the prototype.
+
+## Checks to build (SA-0376)
+
+39. Before a spec adds a check, the writer searches for one that already
+    runs on the same text. Review 1 found `SA-0353`'s in-session judge, and
+    the first design would have spent two cells per revision on top of it.
+40. A spec that adds a refusal lists the protected sentences that enumerate
+    refusals. Review 1 found five.
