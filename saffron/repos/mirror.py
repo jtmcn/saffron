@@ -335,43 +335,67 @@ def unresolved_consumes(mirror: Path, sha: str, entries: list[str]) -> list[str]
     return unresolved
 
 
+def _tracked_symlinks(mirror: Path, sha: str) -> list[str]:
+    """Every symlink's path in `sha`'s tree, found with one recursive listing.
+
+    `git ls-tree -r -z` walks every directory so a symlink nested anywhere
+    still appears. A `sha` the mirror lacks raises `GitError`."""
+    argv = ["git", "-C", str(mirror), "-c", "core.quotePath=false"]
+    argv += ["ls-tree", "-r", "-z", sha]
+    completed = _run(argv)
+    if completed.returncode != 0:
+        raise GitError(f"git ls-tree {sha[:12]}: {completed.stderr.strip()}")
+    paths = []
+    for record in completed.stdout.split("\0"):
+        if not record:
+            continue
+        meta, _, path = record.partition("\t")
+        mode = meta.split(None, 1)[0]
+        if mode == _SYMLINK_MODE:
+            paths.append(path)
+    return paths
+
+
 def removed_name_readers(
     mirror: Path, sha: str, entries: list[str]
 ) -> list[tuple[str, str]]:
     """Which tracked files at `sha` read one of `entries`, a spec's own `removes` list.
 
     Each entry is a repo-relative `path`, split at the first colon. The subject is a
-    `path:name` entry's name, or a bare entry's whole path. One `git grep -l -z -F` per
-    entry over the tree-ish names its candidates. A candidate counts as a reader when
-    its text holds the subject as a whole word, by `_word_pattern`. It counts as one too
-    when `file_at` cannot read it as text at all. The file at the entry's own path is
-    never a reader. Pairs come back in entry order, then in the path order git lists. A
-    `sha` the mirror lacks raises `GitError`."""
+    `path:name` entry's name, or a bare entry's whole path. Each entry's candidates are
+    its raw `git grep -l -z -F` hits plus every tracked symlink's path, walked sorted.
+    A candidate is a reader when `file_at` finds the subject as a whole word, by
+    `_word_pattern`. That text can come from a symlink's resolved target, or from the
+    regular file itself. An unreadable candidate counts as a reader only when grep
+    itself named it. The entry's own path is never a reader. Pairs come in entry
+    order, then path order. A `sha` the mirror lacks raises `GitError`."""
     pairs: list[tuple[str, str]] = []
+    symlinks = _tracked_symlinks(mirror, sha) if entries else []
     for entry in entries:
         path, sep, name = entry.partition(":")
         subject = name if sep else path
         argv = ["git", "-C", str(mirror), "-c", "core.quotePath=false"]
         argv += ["grep", "-l", "-z", "-F", "-e", subject, sha]
         completed = _run(argv)
-        if completed.returncode == 1:
-            continue
-        if completed.returncode != 0:
+        if completed.returncode not in (0, 1):
             raise GitError(
                 f"git grep {subject!r} {sha[:12]}: {completed.stderr.strip()}"
             )
         prefix = f"{sha}:"
+        grep_hits: set[str] = set()
+        if completed.returncode == 0:
+            for candidate in completed.stdout.split("\0"):
+                if candidate:
+                    grep_hits.add(candidate.removeprefix(prefix))
         pattern = _word_pattern(subject)
-        for candidate in completed.stdout.split("\0"):
-            if not candidate:
-                continue
-            candidate = candidate.removeprefix(prefix)
+        for candidate in sorted(grep_hits | set(symlinks)):
             if candidate == path:
                 continue
             try:
                 text = file_at(mirror, sha, candidate)
             except (UnreadablePath, UnicodeDecodeError):
-                pairs.append((candidate, entry))
+                if candidate in grep_hits:
+                    pairs.append((candidate, entry))
                 continue
             if text is not None and pattern.search(text) is not None:
                 pairs.append((candidate, entry))
