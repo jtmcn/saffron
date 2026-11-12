@@ -3014,3 +3014,33 @@ critic's own, so they have no line.
 - `SA-0379` (#1167): `_tracked_symlinks` restated the module's own `_git`,
   a test aliased a helper, and two comments described old behaviour.
   **Bucket 3**, conventions. **Landed:** a review commit on #1167.
+
+## 2026-11-12, spec loop run 65 (#1169, #1170, #1171, #1172)
+
+- `SA-0375` (#1169): a comment said `finish` rebuilds the tree, though
+  nothing read the record yet. **Bucket 3**, conventions. **Landed:** a
+  review commit on #1169.
+- `SA-0375` (#1169): a comment justified a test value by a reversal no wrong
+  version tests. **Bucket 3**, conventions. **Landed:** a review commit on
+  #1169.
+- `SA-0376` (#1170): the refusal witness restated the file's own
+  `_RevisionWrite` double. **Bucket 3**, conventions. **Landed:** a review
+  commit on #1170.
+- `SA-0377` (#1171): no witness drove the one-failure `prose` suite the
+  criterion named, so a hard-coded gate passed the whole file. **Bucket 1**.
+  **Landed:** a review commit on #1171.
+- `SA-0377` (#1171): two docstrings misnamed which head each reader reads,
+  and one dropped two true facts. **Bucket 3**, conventions. **Landed:** a
+  review commit on #1171.
+- `SA-0377` (#1171): an assert that could never fail alone followed its
+  positive form. **Bucket 3**, conventions. **Landed:** a review commit on
+  #1171.
+- `SA-0378` (#1172): the unstacked layer's control concern never anchored,
+  so a drop on every line of its file passed. **Bucket 1**. **Landed:** a
+  review commit on #1172.
+- `SA-0378` (#1172): a failed `write-tree` returned an empty tree, so the
+  next diff read the mirror's `HEAD` silently. **Bucket 1**. **Landed:** a
+  review commit on #1172.
+- `SA-0378` (#1172): the hash check and a docstring restated or misstated
+  what the code does. **Bucket 3**, conventions. **Landed:** a review commit
+  on #1172. **Open:** b-19f43a for the phase line spelled twice.

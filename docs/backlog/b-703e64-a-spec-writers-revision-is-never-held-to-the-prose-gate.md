@@ -5,7 +5,7 @@ status: partial
 tier: 1
 filed: 2026-10-13
 specs: [SA-0286, SA-0327, SA-0376]
-prs: [867, 996]
+prs: [867, 996, 1170]
 commits: []
 cites: [§4.2, §5.4]
 related: []
@@ -59,3 +59,6 @@ before the finish commits it.
 - 2026-11-11: recurred in finish 82. Its finishing commit wrote revised spec texts
   and went red on `census`. `test_dead_gate.py` named each case by the spec's
   whole text, so any revision renamed a test. Step 5 of run 64 gave the cases ids.
+- 2026-11-12: #1170 shipped `SA-0376` in the spec loop's run 65. A stack batch
+  refuses an order spec whose revision session ends with fault lines. Gates that
+  are not form gates, such as `census`, can still turn a finish red.

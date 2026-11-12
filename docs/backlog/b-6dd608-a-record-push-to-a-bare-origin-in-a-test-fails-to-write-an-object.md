@@ -45,3 +45,5 @@ push on an unchanged branch.
   alone.
 - 2026-11-11: a fifth hit, in `test_batch` during the spec loop's run 64.
   The test passed alone.
+- 2026-11-12: a sixth hit, in `test_qualify` during the spec loop's run 65.
+  The test passed alone.

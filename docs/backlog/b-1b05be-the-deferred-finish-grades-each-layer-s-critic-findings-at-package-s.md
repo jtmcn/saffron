@@ -1,12 +1,12 @@
 ---
 id: b-1b05be
 title: "The deferred finish grades each layer's critic findings at PACKAGE's head, so it re-raises what review commits fixed"
-status: partial
+status: done
 tier: 2
 filed: 2026-10-25
-closed:
+closed: 2026-11-12
 specs: [SA-0320, SA-0375, SA-0378]
-prs: [976]
+prs: [976, 1169, 1172]
 commits: []
 cites: [§5.7]
 related: [b-781ea4, b-cc87b1]
@@ -45,3 +45,7 @@ that a later commit on the layer changed before the writer sees it.
   below it, and no change touched the cited line itself. Nothing records the
   tree the critic read. So a fix first records REVIEW's diff, then diffs from
   that tree on the critic's side.
+- 2026-11-12: #1169 shipped `SA-0375` and #1172 shipped `SA-0378` in the spec loop's
+  run 65. REVIEW records the diff its lenses read, and the finish rebuilds that tree
+  to drop a concern whose line changed since. Finish 83 still pooled three fixed
+  hash concerns, since it ran main's code without `SA-0378`.
