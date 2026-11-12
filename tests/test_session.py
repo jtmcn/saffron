@@ -11346,8 +11346,7 @@ def test_a_task_whose_lenses_are_handed_no_diff_records_none(monkeypatch, tmp_pa
     One is a plan turn the provider never served. One is an aborted
     Gate-only suite. One is a critic cell that refuses the patch the
     Gate-only cell already applied."""
-    # Not a repeated character, unlike "b" * 40: this one reads differently
-    # reversed, so a `tree_base` that silently reversed it still fails below.
+    # Not the default base, so a `tree_base` read from anywhere but this spec fails.
     clean_base_sha = "b" * 20 + "c" * 20
     clean_dir = tmp_path / "clean"
     cell = _stub_the_runtime(monkeypatch)

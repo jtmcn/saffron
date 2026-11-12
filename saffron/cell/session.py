@@ -3375,8 +3375,8 @@ def _drive_cell(
                         reviewed_diff = worktree.export_patch(
                             critic_container, spec.tree_base
                         )
-                        # `finish` rebuilds this tree later from `tree_base`
-                        # plus this diff, once the critic cell is gone (`SA-0375`).
+                        # Kept so a later finish can rebuild this tree from
+                        # `tree_base` plus this diff (`SA-0375`).
                         reviewed_diff_sha256 = artifacts.hash_artifact(reviewed_diff)
                         (task_dir / "reviewed-diff.json").write_text(
                             json.dumps(
