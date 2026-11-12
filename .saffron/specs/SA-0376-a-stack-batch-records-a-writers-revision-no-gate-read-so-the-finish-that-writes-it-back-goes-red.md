@@ -56,19 +56,19 @@ acceptance:
       `SpecWriterSession` gains a field `fault_lines`, a tuple of strings
       that defaults to empty. `run_spec_writer` sets it to the lines
       `faults` last returned for the session's own `text`, once the
-      send-backs ran out. The witness drives six sessions. A clean first
+      send-backs ran out or the session gave up. The witness drives six sessions. A clean first
       draft and a send-back that comes back clean leave it empty. A
       send-back still faulted carries the second judgement's lines, which
       differ from the first's. A send-back that does not parse leaves the
       first text standing, with the first judgement's lines. When neither
       text parses, the newest text carries its own lines. A send-back
-      whose work turn raises ends in `_give_up` and leaves it empty, as
-      today.
+      whose work turn raises ends in `_give_up`, and its session carries
+      the lines of the text it returns.
     witness: tests/test_spec_review.py::test_a_writer_session_names_the_fault_lines_its_returned_text_still_carries
     wrong_versions:
       - The lines of the first judgement kept, so a send-back that comes back clean still carries them.
       - The newest judgement's lines used whatever text the session returns, so the first text standing carries the unparsed send-back's line.
-      - The lines kept on a failed send-back, so the session that gave up carries them.
+      - "`_give_up` hands over no lines, so the session that gave up returns its faulted text clean."
       - An unparsed text left with no lines, so the session where neither text parses carries none.
       - The field never set, so a send-back still faulted carries none.
   - claim: >-
@@ -94,6 +94,7 @@ acceptance:
       - The refusal line naming the last fault line in place of the first.
       - The text sent back to the writer once more before the refusal.
       - No refusal at all, so the faulted text is recorded and run as today.
+      - The refusal made before the writer session's attempt is closed, so the batch's spend omits the session.
 ---
 
 ## Context
@@ -153,7 +154,7 @@ session say so, and refuse such a spec of the order for this batch.
    with an empty default, and pass it through `_writer_session`. In
    `_settle`, keep the lines of the newest parsed text and of the newest
    text beside each text. `_finish` hands over the lines of the text it
-   returns. `_give_up` hands over none.
+   returns, and so does `_give_up`.
 2. In `saffron/batch.py`, after the error check at line 918 and before
    line 927, refuse a spec of the order whose session carries
    `fault_lines`. Emit the refusal line and each fault line. Mark the
@@ -166,8 +167,6 @@ session say so, and refuse such a spec of the order for this batch.
 - **A follow-up's revision.** Its text goes to `ran_dir`, never into the
   finishing commit (`saffron/finish.py:179-182`), so refusing it protects
   no finish. It is recorded as today.
-- **A session that ends in `_give_up`.** It returns its text with no
-  fault lines, as today. Its message and lines are emitted already.
 - **A judge that raises inside `faults`.** `draft_faults` emits it and
   returns no fault line, so the text is recorded as today.
 - **Gates that are not form gates.** The session's judge narrows the
@@ -205,15 +204,19 @@ second judgement's lines to differ from the first's, so a version that
 keeps the first lines fails. For the failed send-back, script an
 `implement.AgentFailed` as the work turn. The existing
 `test_a_failed_send_back_keeps_the_last_draft_that_parsed_and_says_why`
-compares whole sessions, so it already pins `_give_up` to empty lines.
+compares whole sessions and pins `_give_up` to empty lines. It and the
+case near `tests/test_spec_review.py:2353` change to expect the returned
+text's lines.
 
 **Doubles for `tests/test_batch.py`.** Subclass `StackDoubles`
 (`tests/test_batch.py:5548`) with a writer that returns scripted sessions
 by spec id, built with `dataclasses.replace` on `_written`. Keep the
 latest recorded text each runner call sees. Read a task's rows with a
 query over `spec_texts` ordered by `n`, and compare whole lists, so a
-negative check has its positive case. Give the faulted spec one route,
-`revise`, so a second review raises. Give it one scripted session, so a
+negative check has its positive case. Give the faulted spec a one-element
+route list, `["revise"]`, so a second review raises. A string route repeats
+forever. Assert the faulted task's SPEC_WRITING attempt row, so a refusal
+before the attempt closes fails. Give it one scripted session, so a
 second writer call raises.
 
 **At base each witness fails in its body.** `SpecWriterSession` has no

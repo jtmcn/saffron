@@ -223,7 +223,7 @@ at `base_sha` with no predecessor. Its attempt is labelled SPEC_WRITING. Its rep
 becomes a recorded spec text, which the spec review then reads. In a stack batch, an
 order spec's reply that still carries fault lines once its send-backs run out is
 refused instead. Under `saffron draft`
-it also writes the first text, from the item (§3.4).
+the session also writes the first text, from the item (§3.4).
 
 **Revision**: One spec writer session and the spec review of the text it returned. A
 stack batch runs at most three per spec, then escalates the spec. `saffron draft` runs
