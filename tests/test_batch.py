@@ -8230,6 +8230,154 @@ def test_a_stack_batch_refuses_a_spec_with_a_citation_left_after_rewriting_and_r
     assert doubles.runner_calls == []
 
 
+class _FaultyRevise:
+    """A `revise` double keyed by spec id, each given one scripted
+    `SpecWriterSession`. A second call for a spec with none left pops an
+    empty list and raises, catching a stray extra writer call."""
+
+    def __init__(self, sessions: dict):
+        self._sessions = {spec_id: list(v) for spec_id, v in sessions.items()}
+        self.calls: list[str] = []
+
+    def __call__(self, candidate, predecessor, spec_text, review_text):
+        spec_id = candidate.spec.id
+        self.calls.append(spec_id)
+        return self._sessions[spec_id].pop(0)
+
+
+def test_a_stack_batch_refuses_an_order_spec_whose_revision_still_carries_fault_lines(
+    ledger, repo_id
+):
+    """A revision whose session names `fault_lines` is refused before its
+    text is recorded or reviewed again, and never handed to the runner.
+    That holds for one fault line or several. Its dependent is refused
+    too. A clean order spec's revision, and a follow-up's faulted one,
+    are recorded and run as today."""
+    from saffron.batch import run_stack_batch
+
+    text_593 = _spec_text("TE-593")
+    text_595 = _spec_text("TE-595")
+    sessions = {
+        "TE-591": [
+            dataclasses.replace(
+                _written(_spec_text("TE-591"), session_id="w-591"),
+                fault_lines=("prose: trailing dash", "prose: a contraction"),
+            )
+        ],
+        "TE-593": [_written(text_593, session_id="w-593")],
+        "TE-594": [
+            dataclasses.replace(
+                _written(_spec_text("TE-594"), session_id="w-594"),
+                fault_lines=("prose: a single fault",),
+            )
+        ],
+        "TE-595": [
+            dataclasses.replace(
+                _written(text_595, session_id="w-595"),
+                fault_lines=("prose: a semicolon",),
+            )
+        ],
+    }
+    revise = _FaultyRevise(sessions)
+
+    rows = {
+        "TE-591": {"route": ["revise"]},
+        "TE-593": {"route": ["revise", "run"]},
+        "TE-594": {"route": ["revise"]},
+        "TE-595": {"route": ["revise", "run"]},
+        "__follow_ups__": [{"id": "TE-595", "budget_usd": 1.0}],
+    }
+    doubles = StackDoubles(ledger, repo_id, rows)
+    task_id_by_spec: dict[str, int] = {}
+
+    def mint(candidate):
+        task_id = doubles.mint(candidate)
+        task_id_by_spec[candidate.spec.id] = task_id
+        return task_id
+
+    def follow_ups(batch_key, stack_review):
+        candidates = doubles.follow_ups(batch_key, stack_review)
+        for candidate in candidates:
+            assert candidate.task_id is not None
+            task_id_by_spec[candidate.spec.id] = candidate.task_id
+        return candidates
+
+    order = [
+        _candidate("TE-591", budget_usd=1.0),
+        _candidate("TE-592", budget_usd=1.0, depends_on=["TE-591"]),
+        _candidate("TE-593", budget_usd=1.0),
+        _candidate("TE-594", budget_usd=1.0),
+    ]
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        order,
+        ledger,
+        300.0,
+        None,
+        doubles.runner,
+        readiness_check=_ready,
+        reserve_usd=6.0,
+        writer_usd=20.0,
+        review=doubles.review,
+        mint=mint,
+        revise=revise,
+        end_review=doubles.end_review,
+        follow_ups=follow_ups,
+        sleep=lambda _seconds: None,
+        emit=lines.append,
+    )
+
+    assert reason == "DRAINED"
+    refused = [line for line in lines if "refused" in line]
+    assert refused == [
+        f"{'TE-591':<10} refused  2 fault line(s) left after the writer's "
+        "send-backs, first: prose: trailing dash",
+        f"{'TE-592':<10} refused  reaches TE-591",
+        f"{'TE-594':<10} refused  1 fault line(s) left after the writer's "
+        "send-backs, first: prose: a single fault",
+    ]
+    fault_lines_emitted = [
+        line for line in lines if line.startswith(f"{'TE-591':<10}   ")
+    ]
+    assert fault_lines_emitted == [
+        f"{'TE-591':<10}   prose: trailing dash",
+        f"{'TE-591':<10}   prose: a contraction",
+    ]
+    fault_lines_594 = [line for line in lines if line.startswith(f"{'TE-594':<10}   ")]
+    assert fault_lines_594 == [f"{'TE-594':<10}   prose: a single fault"]
+    assert f"{'TE-593':<10} revised  1" in lines
+    assert f"{'TE-595':<10} revised  1" in lines
+
+    assert revise.calls == ["TE-591", "TE-593", "TE-594", "TE-595"]
+    runner_ids = [spec_id for spec_id, _pred in doubles.runner_calls]
+    assert "TE-591" not in runner_ids
+    assert "TE-592" not in runner_ids
+    assert "TE-593" in runner_ids
+    assert "TE-594" not in runner_ids
+    assert "TE-595" in runner_ids
+
+    assert ledger.spec_texts(task_id_by_spec["TE-591"]) == []
+    assert ledger.spec_texts(task_id_by_spec["TE-594"]) == []
+
+    texts_593 = ledger.spec_texts(task_id_by_spec["TE-593"])
+    assert [t["origin"] for t in texts_593] == ["revision"]
+    assert texts_593[0]["text"] == text_593
+
+    texts_595 = ledger.spec_texts(task_id_by_spec["TE-595"])
+    assert [t["origin"] for t in texts_595] == ["follow_up", "revision"]
+    assert texts_595[-1]["text"] == text_595
+
+    writing_attempts = [
+        a
+        for a in ledger.attempts(task_id_by_spec["TE-591"])
+        if a["phase"] == "SPEC_WRITING"
+    ]
+    assert len(writing_attempts) == 1
+    assert writing_attempts[0]["ended_at"] is not None
+    assert writing_attempts[0]["subtype"] == "success"
+
+
 # backlog item b-8a0c9a: a closed stack batch's own tail, resumable
 # through `StackResume` (SA-0301's notes, step 4).
 

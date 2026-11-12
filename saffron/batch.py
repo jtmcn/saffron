@@ -924,6 +924,19 @@ def run_stack_batch(
                     raise RuntimeError(
                         f"spec writer for {candidate.spec.id} returned an error"
                     )
+                # Still faulted once send-backs ran out: refuse it before its
+                # text is ever recorded, never a follow-up's own (b-703e64).
+                if not is_follow_up and turn.fault_lines:
+                    reason = (
+                        f"{len(turn.fault_lines)} fault line(s) left after the "
+                        f"writer's send-backs, first: {turn.fault_lines[0]}"
+                    )
+                    emit(f"{candidate.spec.id:<10} refused  {reason}")
+                    for line in turn.fault_lines:
+                        emit(f"{candidate.spec.id:<10}   {line}")
+                    missed[candidate.spec.id] = frozenset({candidate.spec.id})
+                    remaining.remove(original)
+                    return Refused(reason=reason)
                 rounds[candidate.spec.id] = rounds.get(candidate.spec.id, 0) + 1
                 ledger.record_spec_text(
                     task_id,
