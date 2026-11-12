@@ -162,7 +162,8 @@ _Avoid_: "session" (that means an agent session), "cycle", "sweep", "run".
 while it is still running. An absent one means in flight, not unknown. Never a
 task's end state: these describe the night, and `DRAINED` says the queue emptied,
 not that anything in it succeeded. `INFRASTRUCTURE` is the breaker firing, a
-failed readiness probe, or a PACKAGE raise on a task in `READY_FOR_REVIEW`. It
+failed readiness probe, or a PACKAGE raise on a task in `READY_FOR_REVIEW`.
+A cell raise past an `ORPHANED` task `saffron package` would take counts too. It
 is the only one of the five that says the machine rather than the work was
 wrong. It is also the reason a night gets when a raise leaves its row open, and
 an operator's Ctrl-C or SIGTERM is such a raise. So the row alone cannot tell a

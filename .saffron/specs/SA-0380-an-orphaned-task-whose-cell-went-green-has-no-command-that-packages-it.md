@@ -3,11 +3,12 @@ id: SA-0380
 title: An `ORPHANED` task whose cell went green and was reviewed has no command that packages its patch, and its line names none
 type: feature
 priority: 2
-estimated_lines: 295
+estimated_lines: 380
 estimate_measured: true
 touches:
   - saffron/task.py
   - saffron/cli.py
+  - saffron/batch.py
   - tests/test_task.py
   - README.md
   - CLAUDE.md
@@ -27,7 +28,6 @@ forbidden:
   - hooks/**
   - saffron/cell/**
   - saffron/phases/**
-  - saffron/batch.py
   - saffron/ledger.py
   - saffron/record/**
   - saffron/scheduler.py
@@ -41,9 +41,9 @@ forbidden:
   - tests/test_queued_specs.py
   - tests/conftest.py
   - tests/fixtures/**
-budget_usd: 36
+budget_usd: 50
 max_attempts: 3
-max_turns: 180
+max_turns: 245
 risk: standard
 acceptance:
   - claim: >-
@@ -76,16 +76,24 @@ acceptance:
       - An `ORPHANED` task is admitted with no check of its turns.
   - claim: >-
       `ready_task` refuses an `ORPHANED` task whose review would not end
-      `READY_FOR_REVIEW`, as `review.review_state` reads its
-      `findings.json`. A lens that errored is refused with a reason naming
-      `ORPHANED` and that lens. An anchored blocker is refused, naming
-      `ORPHANED` and `REBUT`, unless a `rebuttal.json` no older than
-      `baseline.json` records the state `READY_FOR_REVIEW`. The witness
-      drives an errored lens, then one blocker with no rebuttal, a stale
-      `READY_FOR_REVIEW` one, a fresh `EXHAUSTED` one and a fresh
-      `REBUTTAL_UNJUDGED` one. The same blocker with a fresh
-      `READY_FOR_REVIEW` rebuttal is admitted, and its outcome carries that
-      rebuttal.
+      `READY_FOR_REVIEW`. A lens that errored in `findings.json` is refused
+      with a reason naming `ORPHANED` and that lens. A blocker
+      `review.anchored_blockers` selects is refused, naming `ORPHANED` and
+      `REBUT`, unless a `rebuttal.json` no older than `baseline.json`
+      records the state `READY_FOR_REVIEW`. So is an entry of a
+      `criterion-probes.json` or `wrong-versions.json` no older than
+      `baseline.json` whose `error` is the text `review._review_pool_cut`
+      writes, with a reason naming `ORPHANED` and that entry's witness.
+      The witness drives an errored lens. It drives an anchored blocker with
+      no rebuttal, a stale `READY_FOR_REVIEW` one, a fresh `EXHAUSTED` one
+      and a fresh `REBUTTAL_UNJUDGED` one, and an unanchored `HOST_FILED`
+      survivor with no rebuttal. In each of the two probe files it drives a
+      fresh cut entry, a stale cut entry and a fresh entry whose `error` is
+      another failure. The anchored blocker with a fresh `READY_FOR_REVIEW`
+      rebuttal is admitted, and its outcome carries that rebuttal. So are
+      the stale cut and the other failure. The errored lens, the survivor
+      and the fresh cut in `wrong-versions.json` are each rebuilt once the
+      row reads `READY_FOR_REVIEW`.
     witness: tests/test_task.py::test_ready_task_refuses_an_orphaned_task_whose_review_would_not_end_ready
     wrong_versions:
       - An `ORPHANED` task's review is not read at all.
@@ -93,10 +101,15 @@ acceptance:
       - Any `rebuttal.json` on disk is read, so a stale one admits the task.
       - Any fresh rebuttal admits the task, whatever its state.
       - Only an `EXHAUSTED` rebuttal is refused, so `REBUTTAL_UNJUDGED` is admitted.
+      - Only anchored blockers are read, so an unanchored `HOST_FILED` survivor is admitted.
+      - The probe files are not read, so a pool cut there is admitted.
+      - A pool cut is read from a probe file older than `baseline.json`.
+      - Any entry with an `error` refuses the task.
+      - Only `criterion-probes.json` is read for a pool cut.
+      - The review checks also run for a `READY_FOR_REVIEW` task.
   - claim: >-
-      A `READY_FOR_REVIEW` task is rebuilt as at base, an errored lens and
-      an `EXHAUSTED` rebuttal included. The review checks read only an
-      `ORPHANED` task.
+      A `READY_FOR_REVIEW` task whose `findings.json` carries an errored
+      lens is rebuilt as at base.
     witness: tests/test_task.py::test_ready_task_rebuilds_every_field_package_reads_from_the_cells_record
     preserves: true
     wrong_versions:
@@ -177,6 +190,21 @@ advisory (`saffron/ledger.py:189-205`, `saffron/ledger.py:2294-2295`).
 `size` is advisory at `standard` (§5.6). A green suite can carry either
 failure.
 
+**A REVIEW its pool cut leaves its mark in three records.** A lens the
+pool cannot cover is filed as an errored `LensReview`
+(`saffron/phases/review.py:425`). A criterion probe or a wrong-version
+session is filed as an entry whose `error` is `_review_pool_cut`'s text
+(`saffron/phases/review.py:576-581`, `saffron/phases/review.py:795-801`).
+That text begins `REVIEW's pool held ` and ends `— <witness> never
+started` (`saffron/phases/review.py:386-393`). `pool.cut` then ends a live
+cell `REVIEW_INCOMPLETE` (`saffron/cell/session.py:3591`,
+`saffron/phases/review.py:1084-1088`). Neither probe file records
+`pool.cut` itself.
+
+**`anchored_blockers` takes a host-filed survivor unanchored.** A blocker
+whose claim begins `HOST_FILED` is selected whatever its anchor
+(`saffron/phases/review.py:975-990`).
+
 **The review's verdict lives in two records.** `findings.json` is written
 at REVIEW's end (`saffron/cell/session.py:3576-3578`), and
 `review.review_state` reads the task's state from it
@@ -230,9 +258,15 @@ re-verifies the patch. It writes the task's state through
 `SA-0161`'s shape. `ready_task` keeps refusing it on the missing file,
 since packaging it opens a pull request no lens read.
 
-**A REVIEW its pool cut.** `findings.json` does not record the cut, so
-criterion 3 reads only an errored lens as incomplete. PACKAGE's
-re-verification is the backstop there.
+**A task whose newest row is not this cell's.** A cell that raises
+before `create_task` leaves an older task newest. `ready_task` then
+judges that older task, and the line names `saffron package` only when
+the older task is admitted too. With `repo_id` `None`, as on a repo's
+first cell, `ready_task` refuses and nothing is named.
+
+**The double line in a batch log.** A batch prints `run_task`'s line,
+then its own `unpackaged` line for the same marked raise. Both name
+`saffron package <spec id>`.
 
 **A later scan.** `ORPHANED` is in `REQUEUE_STATES`
 (`saffron/scheduler.py:156-165`), so a later batch starts a new cell on
@@ -258,8 +292,10 @@ produces. Expect `witness` to report `skip` for criteria 1, 2, 3 and 6.
 at the state check. Keep the state named in the refusal for every other
 state. Check the `REVIEWING` turn right after `this_cells` is built, so
 the cutoff decides it. Check the review once `reviews` and `rebut_result`
-exist. Import `review_state` from `saffron.phases.review`. A
-`READY_FOR_REVIEW` task skips both new checks. Update the docstring's
+exist. Read the two probe files only when fresh, by the rebuild's own
+`_fresh`, and match an entry's `error` on both ends of
+`_review_pool_cut`'s text. Import `review_state` from
+`saffron.phases.review`. A `READY_FOR_REVIEW` task skips every new check. Update the docstring's
 refusal list, and keep it within ten lines.
 
 **Where `run_task` changes.** In the `except` around `run_one_cell`, after
@@ -271,6 +307,26 @@ then call `mark_raised_in_package`. The success line at
 `saffron/task.py:1032` and the batch's line at `saffron/batch.py:349-352`
 show the shape. Widen `mark_raised_in_package`'s docstring to name this
 second case.
+
+**Criterion 4 is narrowed.** Its existing witness reaches the errored
+lens and never a blocker, so the claim names only the lens. Criterion 3
+drives the other checks against a `READY_FOR_REVIEW` row.
+
+**`saffron/batch.py` is in `touches` for two docstrings only.** No batch
+behaviour changes, and `tests/test_batch.py` stays forbidden.
+
+**Sentences that become false.** Correct each, keeping its length:
+
+- `CLAUDE.md:65` and `CLAUDE.md:160-161` describe `saffron package` as
+  for a task whose PACKAGE raised.
+- `saffron/task.py:1142-1143`, the `ReadyTask` docstring, says the same.
+- `saffron/task.py:628-634`, `mark_raised_in_package`'s docstring, names
+  one marked case.
+- `saffron/batch.py:29-32`, the module docstring, and
+  `saffron/batch.py:445-447`, `_is_layer`'s docstring, give the mark that
+  one meaning.
+- `tests/test_task.py:2370-2373` says a `run_one_cell` raise reads as
+  unmarked. Its case has no task, so say so.
 
 **The existing test that changes.**
 `test_ready_task_refuses_with_a_reason_and_writes_nothing` loops over
@@ -293,7 +349,9 @@ criteria 2 and 3 drive it. Rename no test, since `census` compares names.
   `READY_FOR_REVIEW` and build it again. Compare the two `ReadyTask`s with
   `==`, and the `tasks` rows before and after with `_rt_tasks_snapshot`.
 - Criterion 3: write `rebuttal.json` from `RebutResult.as_dict`, as the
-  rebuild test does (`tests/test_task.py:2973-2983`).
+  rebuild test does (`tests/test_task.py:2973-2983`). Build a cut entry's
+  `error` with `review._review_pool_cut` over a `ReviewPool` under its
+  floor, and a survivor's claim from `review.HOST_FILED`.
 - Criterion 6: drive `run_task` as `tests/test_task.py:2504-2523` does.
   The `run_one_cell` double writes the task through the `ledger` it is
   handed, then raises. `upsert_repo` on that empty ledger returns 1, the
@@ -305,6 +363,6 @@ criteria 2 and 3 drive it. Rename no test, since `census` compares names.
 **Documents.** Update the `package` subcommand's help
 (`saffron/cli.py:247-251`), `README.md`'s sentence before the `saffron
 package` example (`README.md:178-179`) and `CLAUDE.md`'s command comment
-(`CLAUDE.md:65`). `CONTEXT.md`'s **Refusal** entry and `DESIGN.md` §4.2.1
-are protected. Their sentences on `saffron package` are the operator's to
-amend, so leave them.
+(`CLAUDE.md:65`). `CONTEXT.md` and `DESIGN.md` are protected. The
+operator amends their sentences on `saffron package` and the mark, so
+leave them.
