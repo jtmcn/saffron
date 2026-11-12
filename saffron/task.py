@@ -23,9 +23,8 @@ What stays outside, deliberately, except the refusals named below:
 - **The one exception.** An unresolved `consumes` entry needs the tree base
   it must resolve against. Neither caller knows that base until
   `_resolve_stacked_on` has run, so this refusal returns `Refused` from here
-  instead.
-- **A removed name's reader.** A file outside `touches` that still reads a
-  name `removes` drops gets the same pre-cell refusal (`b-1c59c3`).
+  instead. A file outside `touches` that still reads a name `removes` drops
+  needs that base too, and is refused here the same way (`b-1c59c3`).
 - **The other exception.** A stack batch's recorded spec text (ADR 7) is not
   at `base_sha`. The scan never reads it, so `run_task` re-runs the gate 0
   refusals that need no GitHub against it, keyed on `task_id`. The open-PR
@@ -111,6 +110,7 @@ from saffron.scheduler import (
     DEPENDENCY_WAITING_STATES,
     _branch,
     _deepest_open_parent,
+    _entry_subject,
     _retired_ids,
     _stale_rebuttal_unjudged,
     _unmatched_criterion_path,
@@ -763,8 +763,8 @@ def run_task(
     rebinds `spec`, `spec_sha` and `ceilings` to the recorded text (ADR 7).
     `state` on the outcome is PACKAGE's own. `Refused` comes before any cell: an
     unresolved `consumes`, a refused recorded text, open parents on no one chain,
-    or a stale `REBUTTAL_UNJUDGED` parent (`SA-0330`). So does an exposed
-    `removes` reader, or a mutant that is inline, disclosed or unreadable on the
+    or a stale `REBUTTAL_UNJUDGED` parent (`SA-0330`). So does a `removes`
+    reader outside `touches`, or a mutant that is inline, disclosed or unreadable on the
     ref (`SA-0338`). A base the mirror lacks raises `GitError`."""
     if task_id is not None:
         recorded = _recorded_spec_text(ledger, task_id, spec, base)
@@ -918,7 +918,7 @@ def run_task(
         ]
         if readers:
             described = ", ".join(
-                f"{reader_path} reads {entry.partition(':')[2] or entry}"
+                f"{reader_path} reads {_entry_subject(entry)[1]}"
                 for reader_path, entry in readers
             )
             reason = f"{tree_base[:12]} holds readers outside touches: {described}"

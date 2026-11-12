@@ -115,6 +115,13 @@ def test_the_readers_of_a_removed_entry_are_the_files_holding_its_subject_as_a_w
     paths_in_order = [path for path, entry in pairs if entry == "lib.py:OLD_NAME"]
     assert paths_in_order == sorted(paths_in_order)
 
+    # A bare entry first keeps its place ahead of a `path:name` one.
+    flipped = removed_name_readers(mirror, sha, ["const.py", "lib.py:OLD_NAME"])
+    assert flipped[0] == ("other.py", "const.py")
+    assert [entry for _, entry in flipped] == ["const.py"] + ["lib.py:OLD_NAME"] * len(
+        old_name_pairs
+    )
+
     with pytest.raises(GitError):
         removed_name_readers(mirror, "0" * 40, ["lib.py:OLD_NAME"])
 
@@ -230,7 +237,7 @@ def test_run_task_refuses_a_removed_name_read_outside_touches_before_the_cell(
 
 
 def test_readers_are_read_at_the_tasks_tree_base_with_its_own_policy(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, capsys
 ):
     repo = _plain_repo(tmp_path, "tree-base")
 
@@ -429,6 +436,7 @@ def test_readers_are_read_at_the_tasks_tree_base_with_its_own_policy(
         assert "protected_dir/reader.py reads OLD_NAME" in result5.reason
 
     # A tree base the mirror lacks is an error, not a refusal.
+    capsys.readouterr()
     monkeypatch.setattr(real_task_module, "_resolve_stacked_on", _stack(None, None))
     with pytest.raises(GitError):
         task_module.run_task(
@@ -444,6 +452,7 @@ def test_readers_are_read_at_the_tasks_tree_base_with_its_own_policy(
             out_dir=tmp_path / "out6",
             token=None,
         )
+    assert "refused" not in capsys.readouterr().out
 
 
 # --------------------------------------------------------- no-op cases
