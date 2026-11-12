@@ -106,8 +106,8 @@ acceptance:
       mirror lacks its tree base <sha>` and `its diff does not apply to
       <sha>`. In the other task's case, a `RecordAppend` under the layer's
       own key ends the log, as `saffron reconcile` writes one long after
-      the task. In each case two concerns are `unverified` with the packaged
-      head's reason, two stay `qualified`, and the only note is the stacked
+      the task. In each case two of the stacked layer's concerns are `unverified`
+      with the packaged head's reason, two stay `qualified`, and the only note is the stacked
       layer's.
     witness: tests/test_qualify.py::test_a_layer_whose_record_cannot_be_used_keeps_the_packaged_heads_check
     wrong_versions:
@@ -211,7 +211,8 @@ In `saffron/qualify.py`, `qualify` gains a required `out_dir: Path`. In the
 layer's concerns block, read and check the record, then rebuild the tree.
 Rebuild it in the mirror under a temporary `GIT_INDEX_FILE`, with
 `read-tree` of `tree_base`, `apply --cached` with `raw` on stdin, and
-`write-tree`. Use `worktree.git_argv` for those three calls, the pins the
+`write-tree`. Name that index a path that does not exist yet, inside a
+temporary directory. Use `worktree.git_argv` for those three calls, the pins the
 critic cell's own `git apply` ran under (`saffron/cell/session.py:1471`).
 Pass `--whitespace=nowarn` to `apply`, since `git_argv` pins no
 `apply.whitespace`.
