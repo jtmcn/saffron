@@ -194,7 +194,7 @@ def test_an_adopted_follow_up_becomes_a_layer_at_generation_one(
     tmp_path, monkeypatch, capsys
 ):
     """A follow-up `Ledger.batch_follow_ups` names is placed at generation
-    1, the pass it ran in, never the order layer's own 0."""
+    1, the generation it ran in, never the order layer's own 0."""
     repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
     home = tmp_path / "home"
     home.mkdir()
@@ -337,8 +337,11 @@ def test_adopt_outside_a_stack_batch_or_of_a_layer_records_nothing_and_prints_no
     )
     ledger.set_task_state(plain_task, "EXHAUSTED")
 
-    # A task whose run names no batch at all.
+    # A reviewed task whose run names no batch, the shape `saffron draft` leaves.
     orphan_task = _seed_task(ledger, repo_id, spec_id="SY-ORPHAN", state="EXHAUSTED")
+    ledger.record_spec_review(
+        orphan_task, route="run", block=None, block_sha256=None, error=None, findings=[]
+    )
 
     # A task already a layer of its own stack batch, seeded `EXHAUSTED`
     # to reach the already-a-layer check through the re-gate path.

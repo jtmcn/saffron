@@ -1864,9 +1864,9 @@ class Ledger:
     def stack_batch_of(self, task_id: int) -> int | None:
         """The batch a task's run names, only when the task also holds a
         `spec_reviews` row (b-323c97). A stack batch reviews every task it
-        runs, the order's own and a follow-up's alike. Nothing else
-        writes that row, so a task of such a batch always carries one,
-        even one whose batch holds no layer at all. `None` for a run
+        runs, the order's own and a follow-up's alike. So a task of such a
+        batch always carries one, even one whose batch holds no layer.
+        `saffron draft` also writes the row, on a run with no batch. `None` for a run
         with no batch, or a task never reviewed."""
         row = self._db.execute(
             """SELECT r.batch_id AS batch_id

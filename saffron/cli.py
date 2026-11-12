@@ -3158,8 +3158,8 @@ def _adopted_stack_layer(ledger: Ledger, task_id: int) -> str | None:
     """Place an adopted task as its stack batch's own top layer, where
     that is safe (b-323c97). Returns `None` when nothing is recorded: no
     stack batch, or an existing layer already. A layer that ran after it
-    also records nothing, but still returns a line, since grading that
-    layer's diff again would be stale."""
+    also records nothing, but still returns a line. A layer cut from an
+    older head would be graded against the wrong predecessor."""
     batch_id = ledger.stack_batch_of(task_id)
     if batch_id is None:
         return None
