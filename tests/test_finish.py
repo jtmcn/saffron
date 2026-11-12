@@ -2701,6 +2701,24 @@ def test_a_red_finishs_escalation_line_names_each_failing_gate_once(
     )
 
     assert lines[0] == "escalate: red suite, 4 new failures in tests, prose, census"
+    assert len(lines) == 1 + len(failures)
+    assert len(gh.calls) == 0
+
+    # A one-failure suite names its own gate, never a default one.
+    one = (failures[1],)
+    lines = publish_finish(
+        s.ledger,
+        s.batch_id,
+        sha,
+        mirror=s.mirror,
+        url=s.url,
+        slug=s.slug,
+        verify=lambda sha_arg, base_arg: one,
+        gh=gh,
+        workdir=tmp_path / "gates-push-one",
+    )
+    assert lines[0] == "escalate: red suite, 1 new failure in prose"
+    assert len(lines) == 2
     assert len(gh.calls) == 0
 
 

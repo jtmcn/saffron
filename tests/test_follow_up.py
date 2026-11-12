@@ -1910,11 +1910,9 @@ def test_a_draft_whose_citations_do_not_resolve_is_sent_back_once_then_minted_or
     # The two lines join with "; ", never ", ".
     assert reason_c1_first.replace("; src", ", src") not in g1_prompts[1]
 
-    # group_c2 was sent a second draft, read before the check that it
-    # never reached a third.
+    # group_c2 was sent exactly one second draft.
     g2_prompts = [p for g, p in write_calls if g == group_c2]
     assert len(g2_prompts) == 2
-    assert len(g2_prompts) != 3
 
     reason_c2_first = (
         "1 citation(s) do not resolve: src/b.py:20-25: cite two; "

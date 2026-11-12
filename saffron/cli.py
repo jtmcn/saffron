@@ -1818,15 +1818,14 @@ def _stack_follow_ups(
     pooled: list[follow_up.Pooled],
 ) -> Callable[[str, end_review.StackReview], list[Candidate]]:
     """`run_stack_batch`'s `follow_ups` adapter (ADR 7, `SA-0165`). Every
-    input but the judge's own is read at the pinned base, once, before
+    input but the judge's and `cite`'s is read at the pinned base, once, before
     `follow_up.write_follow_ups` runs. A broken policy costs one line and
     no cell. A raise from that call after `qualify` returns still pools
-    every unaccepted finding its walk never reached.
-
-    The top layer, the join's and each layer's end-review findings, and each
-    `write` call's origin read `stack.fields` through `qualify.graded_fields`,
-    falling back to a moved head. `verify` and `cite` each read the top
-    layer's branch fresh, the first loading the policy, the second fetching."""
+    every unaccepted finding its walk never reached. The top layer, the
+    findings and each `write` call's origin read `stack.fields` through
+    `qualify.graded_fields`, so a layer graded at a moved head reads that head.
+    `verify` loads the policy fresh for each draft at `top.head`. `cite`
+    fetches the top layer's branch on each call."""
 
     def run(batch_key: str, stack: end_review.StackReview) -> list[Candidate]:
         if not stack.layers:

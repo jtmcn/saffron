@@ -266,9 +266,9 @@ def write_follow_ups(
     `judge` call once it parses and validates. A parse failure, an
     unresolved citation or a red judgement goes back to the writer once,
     through `send_back`. A second failure, or a `cite` or `judge` that
-    raises, pools the group instead. Opens no cell. `write`, `cite`,
-    `judge` and `mint` are the caller's own adapters, and a head with
-    none in `stack.fields` falls back to the packaged head."""
+    raises, pools the group instead. A green draft is minted. `write`,
+    `cite`, `judge` and `mint` are the caller's own adapters. A head or
+    range with none in `stack.fields` falls back to `end_review.layer_fields`."""
     qualification = qualify(stack.layers, stack.join)
     emit(f"{len(qualification.pool)} qualified findings joined no group")
     if not stack.layers:
