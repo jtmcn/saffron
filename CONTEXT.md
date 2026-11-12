@@ -220,8 +220,10 @@ offered again after a wait, and a `PROVIDER_UNREACHABLE` or `PREFLIGHT_FAILED` o
 **Spec writer session**: A host-invoked session that revises one spec after its spec
 review routes it to `revise`. It runs in a critic cell at the predecessor's head, or
 at `base_sha` with no predecessor. Its attempt is labelled SPEC_WRITING. Its reply
-becomes a recorded spec text, which the spec review then reads. Under `saffron draft`
-it also writes the first text, from the item (§3.4).
+becomes a recorded spec text, which the spec review then reads. In a stack batch, an
+order spec's reply that still carries fault lines once its send-backs run out is
+refused instead. Under `saffron draft`
+the session also writes the first text, from the item (§3.4).
 
 **Revision**: One spec writer session and the spec review of the text it returned. A
 stack batch runs at most three per spec, then escalates the spec. `saffron draft` runs
@@ -242,7 +244,8 @@ _Avoid_: "rejected", "blocked".
 `base_sha`. It is a `spec_texts` row and a `spec_text` fact, hashed when recorded.
 Before the cell, `run_task` re-runs the gate 0 refusals that need no GitHub against
 the latest one. A revision, a follow-up, a draft and a stack batch's citation
-rewrite each write one. A citation rewrite is recorded under origin `revision`,
+rewrite each write one. A stack batch writes none for an order spec's revision that
+still carries fault lines. A citation rewrite is recorded under origin `revision`,
 but it is not a Revision.
 
 **Qualification**: The host's decision on each end-review finding, made in host code and
@@ -260,8 +263,9 @@ group, and every other outcome goes to the backlog pool.
 **Follow-up spec**: A spec a spec writer session writes from one follow-up group, after
 the end review. It is a `bug` or `feature` spec with no `depends_on` and no inline
 mutant. Its budget is no higher than its origin's, and it touches only its group's file
-and test paths the stack changed. A draft that fails to parse, or that fails the
-finishing suite atop the top head, goes back to the writer once. A passing one is minted on the same batch, and its
+and test paths the stack changed. A draft that fails to parse, or fails the
+finishing suite atop the top head, goes back to the writer once. So does a draft with
+a citation that does not resolve at the top layer's branch. A passing one is minted on the same batch, and its
 text is recorded with origin `follow_up`. It runs only when the order stopped
 `DRAINED`.
 
@@ -273,7 +277,8 @@ group left joins the backlog pool.
 **Backlog pool**: The end-review findings no follow-up spec took, each with its reason.
 It holds every `unverified`, `unanchored` or `note` finding. It also holds each
 qualified group that became no follow-up. A spent writer sub-cap, a provider limit, a
-stale probe, an untrusted draft or a judge that raised each sends a group there. It is
+stale probe, an untrusted draft or a judge that raised each sends a group there. So
+does a citation check that raised. It is
 written to `findings.json`. No code reads it, and the delegate files backlog items
 from it by hand.
 
@@ -383,7 +388,8 @@ cannot be read, at the tree base. That refusal prints one line and writes no que
 row. A stack batch also refuses a spec its stack order never takes, and every spec
 whose `depends_on` reaches a missed task. A spec of its order that its budget passed
 over counts as missed. It refuses a revision the budget left cannot
-cover. Before its spec review, it refuses a spec with a citation that does not resolve
+cover. It also refuses an order spec whose writer session still carries fault lines
+once its send-backs run out. Before its spec review, it refuses a spec with a citation that does not resolve
 once `rewrite_moved_citations` moves what it can.
 `saffron package` refuses after the cell ended, before it reruns PACKAGE. It refuses a
 task that is not `READY_FOR_REVIEW` or already has a pull request. It also refuses a

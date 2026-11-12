@@ -248,3 +248,97 @@ concern and two notes by hand.
 36. A claim about a value that differs between stacked and unstacked specs
     names both, and a witness drives each. Round 1 found `tree_base`
     driven stacked only.
+
+## SA-0377 (b-4a9207), after spec loop run 63
+
+A finish's follow-up drafts are judged by the finishing suite, but the batch
+later refuses them for unresolved citations. This spec checks each draft's
+citations at the top layer's branch before the mint. It also names each
+failing gate on the finish's escalation line. The one-line fix in the
+finishing layer stays open on b-4a9207.
+
+The writer drafted in 28 minutes, in parallel with `SA-0376`'s writer. It
+killed 22 wrong versions on a prototype that measured 128 changed tokens.
+
+**Review 1: 0 blockers, 4 concerns, 4 notes.** The delegate applied every
+concern by hand.
+
+- The witness did not fix its call order. `_stack_cite` fetches and moves
+  the mirror's ref, so called first it let the no-fetch version pass. No
+  pre-flight check reads call order.
+- A raising `cite` was not required to charge its session. Pre-flight 4
+  missed it: the writer's spend is a value the change writes.
+- The writer reads a different head than `cite` does. Out of scope now says
+  so.
+- Two `CONTEXT.md` entries list what sends a draft back. They gain one
+  sentence each in this pull request.
+
+**Review 2: 0 blockers, 3 concerns, 2 notes.** Round 1's charge fix named a
+wrong version that no witness observed. One hand-edited sentence misnamed
+the head, and one `CONTEXT.md` sentence was narrower than the check. The
+delegate applied all three.
+
+## Checks to build (SA-0377)
+
+37. A witness that compares two readers of one ref says which runs first,
+    when either one moves the ref.
+38. A wrong version added in a hand edit names the assertion that sees it.
+    Round 2 found one with no observation.
+
+## SA-0376 (b-703e64), after spec loop run 63
+
+The first design judged each revision with the finishing suite in two
+gate-only cells, about 10.5 minutes each. The delegate changed one arm
+before review: a revision that fails twice refuses its spec rather than
+running an older text, as `CONTEXT.md`'s Escalation entry implies.
+
+**Review 1: 1 blocker, 6 concerns, 4 notes.** The decisive finding was
+that `SA-0353` (#1099) already judges each writer draft with the form gates
+inside its own session. The item's last recurrence ran an engine from before
+#1099. So the spec was rewritten to the gap left: a session whose send-backs
+run out still returns a faulted text. The batch now refuses that order
+spec, with no new cells. The blocker named protected sentences the change
+makes false. The delegate landed three `CONTEXT.md` sentences by hand.
+
+**Review 2: 0 blockers, 2 concerns, 4 notes.** A session that gives up still
+returned its faulted text clean, so the three new sentences read false for
+it. `_give_up` now hands over the returned text's lines. No witness pinned
+the refusal after the writer's attempt closes, so a refusal could drop the
+writer's spend. The delegate applied both by hand and checked the first on
+the prototype.
+
+## Checks to build (SA-0376)
+
+39. Before a spec adds a check, the writer searches for one that already
+    runs on the same text. Review 1 found `SA-0353`'s in-session judge, and
+    the first design would have spent two cells per revision on top of it.
+40. A spec that adds a refusal lists the protected sentences that enumerate
+    refusals. Review 1 found five.
+
+## SA-0378 (b-1b05be), after spec loop run 63
+
+The second spec for b-1b05be. `qualify` rebuilds the tree an in-cell
+concern's lenses read from `SA-0375`'s recorded diff, and reads the drop on
+that tree's side. A record it cannot bind or apply falls back to `SA-0320`'s
+check with a note. The writer measured that 114 of 158 stacked task
+directories keep their tree base in the mirror, and the other 44 lack their
+packaged head too.
+
+**Review 1: 1 blocker, 3 concerns, 4 notes.** The writer revised.
+
+- The binding rule passed a looser version, because no seed wrote a fact
+  under the layer's key after another task's lines. `saffron reconcile`
+  writes that shape. No pre-flight check asks which shapes a later process
+  appends.
+- The notes left two seeded trees ambiguous, so a correct build could fail
+  its own witness. Pre-flight 1 missed it.
+- Three docstrings in `touches` would become false.
+
+**Review 2: 0 blockers, 0 concerns, 2 notes.** One count covered a single
+layer, and one index path would make `read-tree` refuse. The delegate
+applied both by hand.
+
+## Checks to build (SA-0378)
+
+41. A spec that reads a task directory's log lists every process that
+    appends to it after the task ends, and seeds the latest one.
