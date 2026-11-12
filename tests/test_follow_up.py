@@ -1786,6 +1786,170 @@ def test_a_draft_the_finishing_suite_fails_twice_pools_with_its_second_failures_
     assert "p1-red" in pooled_d[0].reason
 
 
+def test_a_draft_whose_citations_do_not_resolve_is_sent_back_once_then_minted_or_pooled(
+    tmp_path, monkeypatch
+):
+    from saffron import follow_up, spec_review
+
+    monkeypatch.setattr(spec_review, "SPEC_WRITER_SESSION_USD", 1.0)
+
+    built = _build(tmp_path)
+    stack = _stack(built)
+    key_102 = built.ledger.record_key(built.task_102)
+
+    group_c1 = _concern_group(key_102, "src/b.py", "claim-c1")
+    group_c2 = _concern_group(key_102, "src/b.py", "claim-c2")
+    group_c3 = _concern_group(key_102, "src/b.py", "claim-c3")
+    group_c4 = _concern_group(key_102, "src/b.py", "claim-c4")
+    group_c5 = _concern_group(key_102, "src/b.py", "claim-c5")
+    group_c6 = _concern_group(key_102, "src/b.py", "claim-c6")
+    groups = [group_c1, group_c2, group_c3, group_c4, group_c5, group_c6]
+
+    write_calls: list = []
+
+    def write(group, prompt):
+        write_calls.append((group, prompt))
+        i = len(write_calls) - 1
+        match = re.search(r"^id: (\S+)$", prompt, re.MULTILINE)
+        assert match is not None
+        candidate_id = match.group(1)
+        if i == 4:  # group_c3's first draft never parses.
+            text = _NO_FRONTMATTER
+        elif i == 6:  # group_c4's only draft declares a refused type.
+            text = _candidate(candidate_id, type_="refactor", claims=("claim-c4-try1",))
+        else:
+            claim = {
+                0: "claim-c1-try1",  # group_c1 call 1: cited red, judged green
+                1: "claim-c1-try2",  # group_c1 call 2 (resend): green, minted
+                2: "claim-c2-try1",  # group_c2 call 1: cited red, judged red
+                3: "claim-c2-try2",  # group_c2 call 2 (resend): cited red again
+                5: "claim-c3-try2",  # group_c3 call 2 (resend): cited red
+                7: "claim-c5-try1",  # group_c5 call 1: cite raises
+            }[i]
+            text = _candidate(candidate_id, claims=(claim,))
+        return spec_review.SpecWriterSession(
+            text=text,
+            cost_usd=0.5,
+            error=None,
+            resets_at=None,
+            session_id=f"s{i + 1}",
+            num_turns=2,
+            spec_sha=hash_artifact(text),
+        )
+
+    cite_calls: list = []
+
+    def cite(text: str) -> list[str]:
+        cite_calls.append(text)
+        if "claim-c1-try1" in text:
+            return ["src/b.py:7-9: cite one", "src/b.py:9-10: cite one-b"]
+        if "claim-c2-try1" in text:
+            return ["src/b.py:20-25: cite two"]
+        if "claim-c2-try2" in text:
+            return ["src/b.py:20-25: cite two again"]
+        if "claim-c3-try2" in text:
+            return ["src/b.py:40-41: cite three"]
+        if "claim-c5-try1" in text:
+            raise RuntimeError("cite cell gone")
+        return []
+
+    judge_calls: list = []
+
+    def judge(path: str, text: str) -> list[str]:
+        judge_calls.append((path, text))
+        if "claim-c2-try1" in text:
+            return ["[tests] a.py:1 E1: c2-first"]
+        return []
+
+    emitted: list = []
+    mint_calls: list = []
+    pooled: list = []
+
+    candidates = follow_up.write_follow_ups(
+        built.ledger,
+        stack,
+        batch_key=str(built.batch_id),
+        qualify=_qualify_stub([], groups, []),
+        write=write,
+        judge=judge,
+        cite=cite,
+        mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], mint_calls),
+        mirror=built.mirror,
+        specs_dir=built.specs_dir,
+        repo_id=built.repo_id,
+        test_paths=["tests/**"],
+        cap_usd=50.0,
+        emit=emitted.append,
+        pooled=pooled,
+    )
+
+    assert len(write_calls) == 8
+    assert len(candidates) == 1
+    assert len(pooled) == 5
+
+    # group_c1's own drafts were judged, read before the check that
+    # group_c5's draft never reached a judge call.
+    judged_texts = [t for _, t in judge_calls]
+    assert any("claim-c1-try1" in t for t in judged_texts)
+    assert any("claim-c1-try2" in t for t in judged_texts)
+    assert not any("claim-c5-try1" in t for t in judged_texts)
+
+    # groups one through three were each cited, read before the check
+    # that group_c4's refused draft never reached a cite call.
+    assert any("claim-c1-try1" in t for t in cite_calls)
+    assert any("claim-c2-try1" in t for t in cite_calls)
+    assert any("claim-c3-try2" in t for t in cite_calls)
+    assert not any("claim-c4-try1" in t for t in cite_calls)
+
+    reason_c1_first = (
+        "2 citation(s) do not resolve: src/b.py:7-9: cite one; "
+        "src/b.py:9-10: cite one-b"
+    )
+    g1_prompts = [p for g, p in write_calls if g == group_c1]
+    assert reason_c1_first in g1_prompts[1]
+    # The two lines join with "; ", never ", ".
+    assert reason_c1_first.replace("; src", ", src") not in g1_prompts[1]
+
+    # group_c2 was sent a second draft, read before the check that it
+    # never reached a third.
+    g2_prompts = [p for g, p in write_calls if g == group_c2]
+    assert len(g2_prompts) == 2
+    assert len(g2_prompts) != 3
+
+    reason_c2_first = (
+        "1 citation(s) do not resolve: src/b.py:20-25: cite two; "
+        "the finishing suite failed it: [tests] a.py:1 E1: c2-first"
+    )
+    assert reason_c2_first in g2_prompts[1]
+    # The two parts join with "; ", never ", ".
+    assert reason_c2_first.replace("; the", ", the") not in g2_prompts[1]
+
+    assert pooled[0].group == group_c2
+    assert (
+        pooled[0].reason
+        == "1 citation(s) do not resolve: src/b.py:20-25: cite two again"
+    )
+    assert pooled[1].group == group_c3
+    assert (
+        pooled[1].reason == "1 citation(s) do not resolve: src/b.py:40-41: cite three"
+    )
+    assert pooled[2].group == group_c4
+    assert "neither bug nor feature" in pooled[2].reason
+    assert pooled[3].group == group_c5
+    assert pooled[3].reason == "cite raised RuntimeError: cite cell gone"
+    assert pooled[4].group == group_c6
+    assert pooled[4].reason == pooled[3].reason
+
+    writing = [
+        a["session_id"]
+        for a in built.ledger.attempts(built.task_102)
+        if a["phase"] == spec_review.WRITING_PHASE
+    ]
+    # group_c1's resend minted under a new task, so only sessions charged
+    # against the origin appear here, including group_c5's raising draft.
+    assert writing == ["s1", "s3", "s4", "s5", "s6", "s7", "s8"]
+
+
 def test_the_writers_prompt_names_bug_and_feature_as_the_only_types(tmp_path):
     from saffron import follow_up, intake
 

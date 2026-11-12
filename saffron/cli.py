@@ -1824,9 +1824,9 @@ def _stack_follow_ups(
     every unaccepted finding its walk never reached.
 
     The top layer, the join's and each layer's end-review findings, and each
-    `write` call's origin read `stack.fields` through `qualify.graded_fields`.
-    A layer graded at a moved head reads that head. The judge's own
-    `verify` exports and loads the policy fresh for each draft it judges."""
+    `write` call's origin read `stack.fields` through `qualify.graded_fields`,
+    falling back to a moved head. `verify` and `cite` each read the top
+    layer's branch fresh, the first loading the policy, the second fetching."""
 
     def run(batch_key: str, stack: end_review.StackReview) -> list[Candidate]:
         if not stack.layers:
@@ -1935,6 +1935,14 @@ def _stack_follow_ups(
                     verify=judge_verify,
                 )
 
+            def cite(text: str) -> Sequence[str]:
+                branch = _branch(top.spec_id)
+                head = package_phase.fetch_parent_branch(
+                    pinned.mirror, pinned.url, branch
+                )
+                defects = citation_defects(pinned.mirror, head, text)
+                return [str(defect) for defect in defects]
+
             # A spec merged to the default branch since the batch cut its base
             # holds an id the stack top lacks (b-cbb6e7).
             try:
@@ -1951,6 +1959,7 @@ def _stack_follow_ups(
                 qualify=run_qualify,
                 write=write,
                 judge=judge,
+                cite=cite,
                 mint=mint,
                 mirror=pinned.mirror,
                 specs_dir=exported / ".saffron" / "specs",

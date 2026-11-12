@@ -2467,7 +2467,9 @@ def test_each_escalation_leaves_the_stack_unpushed(tmp_path, monkeypatch):
         expected_prefix_fn=lambda s, branch: "escalate: red suite, 2 new failure",
         # The exact word, plural at 2: pins the suffix `_new_failures` picks, not
         # the prefix the two counts share.
-        expected_line_fn=lambda s, branch: "escalate: red suite, 2 new failures",
+        expected_line_fn=lambda s, branch: (
+            "escalate: red suite, 2 new failures in tests"
+        ),
         expected_pr_view_count=0,
         expected_extra_lines=2,
     )
@@ -2475,7 +2477,9 @@ def test_each_escalation_leaves_the_stack_unpushed(tmp_path, monkeypatch):
         "red-one",
         verify=lambda sha_arg, base_arg: _failures(1),
         expected_prefix_fn=lambda s, branch: "escalate: red suite, 1 new failure",
-        expected_line_fn=lambda s, branch: "escalate: red suite, 1 new failure",
+        expected_line_fn=lambda s, branch: (
+            "escalate: red suite, 1 new failure in tests"
+        ),
         expected_pr_view_count=0,
         expected_extra_lines=1,
     )
@@ -2603,9 +2607,11 @@ def test_each_escalation_leaves_the_stack_unpushed(tmp_path, monkeypatch):
 def test_a_red_finish_names_each_new_failure_it_counts(tmp_path, monkeypatch):
     """`publish_finish`'s `verify` returns the new failures themselves. On
     a red suite its first line is still the escalation line it prints at
-    base, `escalate: red suite, N new failures`. One line follows per new
-    failure, in the order `verify` returned them, cleaned and clipped the
-    way `events._clean` and `events._DETAIL_BOUND` already do (`SA-0368`)."""
+    base. `escalate: red suite, N new failures in <gates>` names each
+    gate once, in the order `verify` first returned it. One line follows
+    per new failure, in the order `verify` returned them, cleaned and
+    clipped the way `events._clean` and `events._DETAIL_BOUND` already
+    do (`SA-0368`)."""
     from saffron.events import _DETAIL_BOUND, _clean
     from saffron.finish import publish_finish
     from saffron.gates.baseline import NewFailure, render
@@ -2645,8 +2651,56 @@ def test_a_red_finish_names_each_new_failure_it_counts(tmp_path, monkeypatch):
         workdir=tmp_path / "red-push",
     )
 
-    assert lines[0] == "escalate: red suite, 3 new failures"
+    assert lines[0] == "escalate: red suite, 3 new failures in zebra, apple, mango"
     assert lines[1:] == ["  " + _clean(render(f), _DETAIL_BOUND) for f in failures]
+    assert len(gh.calls) == 0
+
+
+def test_a_red_finishs_escalation_line_names_each_failing_gate_once(
+    tmp_path, monkeypatch
+):
+    """`publish_finish`'s escalation line ends with ` in ` and each gate
+    its new failures name. Each gate reads once, in the order `verify`
+    first returned it, joined by `, `, even when more than one failure
+    names it."""
+    from saffron.finish import publish_finish
+    from saffron.gates.baseline import NewFailure
+    from saffron.gates.contract import Failure
+
+    _isolate_git(tmp_path, monkeypatch)
+    s = _stack(tmp_path / "gates", 3)
+    top = s.layers[-1]
+    sha = _finishing_commit(s.mirror, top["head"])
+
+    failures = (
+        NewFailure(
+            gate="tests", failure=Failure(file="a.py", line=1, code="T1", message="a")
+        ),
+        NewFailure(
+            gate="prose", failure=Failure(file="b.md", line=2, code="P1", message="b")
+        ),
+        NewFailure(
+            gate="tests", failure=Failure(file="c.py", line=3, code="T2", message="c")
+        ),
+        NewFailure(
+            gate="census", failure=Failure(file="d.py", line=4, code="C1", message="d")
+        ),
+    )
+
+    gh = _FakeGh(_bases(s.layers))
+    lines = publish_finish(
+        s.ledger,
+        s.batch_id,
+        sha,
+        mirror=s.mirror,
+        url=s.url,
+        slug=s.slug,
+        verify=lambda sha_arg, base_arg: failures,
+        gh=gh,
+        workdir=tmp_path / "gates-push",
+    )
+
+    assert lines[0] == "escalate: red suite, 4 new failures in tests, prose, census"
     assert len(gh.calls) == 0
 
 
