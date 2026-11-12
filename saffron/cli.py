@@ -3154,6 +3154,37 @@ def _adopted_pull_request(
     return url, head_sha, head_branch
 
 
+def _adopted_stack_layer(ledger: Ledger, task_id: int) -> str | None:
+    """Place an adopted task as its stack batch's own top layer, where
+    that is safe (b-323c97). Returns `None` when nothing is recorded: no
+    stack batch, or an existing layer already. A layer that ran after it
+    also records nothing, but still returns a line. A layer cut from an
+    older head would be graded against the wrong predecessor."""
+    batch_id = ledger.stack_batch_of(task_id)
+    if batch_id is None:
+        return None
+    layers = ledger.stack_layers(batch_id)
+    if any(layer["task_id"] == task_id for layer in layers):
+        return None
+    order = [row["task_id"] for row in ledger.batch_tasks(batch_id)]
+    task_index = order.index(task_id)
+    for layer in layers:
+        if order.index(layer["task_id"]) > task_index:
+            return f"no end review, batch {batch_id}"
+    top = layers[-1] if layers else None
+    position = top["position"] + 1 if top is not None else 1
+    predecessor_task_id = top["task_id"] if top is not None else None
+    follow_up_ids = {row["task_id"] for row in ledger.batch_follow_ups(batch_id)}
+    generation = 1 if task_id in follow_up_ids else 0
+    ledger.record_stack_layer(
+        task_id,
+        position=position,
+        predecessor_task_id=predecessor_task_id,
+        generation=generation,
+    )
+    return f"layer {position} of batch {batch_id}"
+
+
 def _adopt(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     """`saffron adopt <spec id> <pr> --repo .`: name a pull request opened
     or fixed by hand as the spec's newest task's own (b-619b7d).
@@ -3244,6 +3275,9 @@ def _adopt(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         print(
             f"adopt: task {task_id} ({args.spec_id}) → {adopted_url}, READY_FOR_REVIEW"
         )
+        layer_line = _adopted_stack_layer(ledger, task_id)
+        if layer_line is not None:
+            print(f"adopt: task {task_id} ({args.spec_id}) {layer_line}")
         return 0
 
     if regated is None:
