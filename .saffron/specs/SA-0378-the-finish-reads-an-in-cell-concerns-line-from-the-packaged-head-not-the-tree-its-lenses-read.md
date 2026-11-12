@@ -275,18 +275,21 @@ fixture for both `qualify` witnesses, in the shape of `_later_diff_fixture`
   `--whitespace=nowarn`.
 - `A` seeds `src/a.py`, 60 lines with line 46 `a46 retry_budget`, and
   `src/p.py`, 12 lines. TE-1's critic tree `T1` is `A` with lines 5 and 8
-  of `p.py` rewritten. Its packaged head `P` is one commit on `A`, with
-  line 8 rewritten again. TE-2's critic tree `T2` is `P` with lines 10, 30
+  of `p.py` rewritten. Its packaged head `P` is one commit on `T1`, with
+  line 8 rewritten again. `P` keeps `T1`'s line 5, so only line 8
+  moves past it. TE-2's critic tree `T2` is `P` with lines 10, 30
   and 50 of `a.py` and line 5 of `p.py` rewritten. Give line 10 an `é`, so
   a Latin-1 hash differs. End line 50 with `retry_budget`, so its concern
   anchors by token.
 - TE-2's packaged head `H` is one commit on `P`. Its tree is `T2` with
   line 10 rewritten again and four lines inserted after line 40. Its graded
-  head `G` is a commit on `H` rewriting `G`'s lines 30 and 50. `P`'s tree
-  is `T1` with line 8 rewritten. Both runs' `base_sha` is `A`, which the
-  wrong version rebuilding on `base_sha` needs.
+  head `G` is a commit on `H` rewriting `G`'s lines 30 and 50. Both runs'
+  `base_sha` is `A`, which the wrong version rebuilding on `base_sha`
+  needs.
 - The outcomes hold only under that construction. Line 50 of `G` is line
-  46 of `T2`, so its hunk on the tree's side ends at line 49.
+  46 of `T2`, so its hunk on the tree's side ends at line 49. The diff
+  from `T1` to `P` touches only line 8. Its hunk, under `--unified=3`,
+  spans lines 5 to 11 and never reaches the concern on line 2.
 - Each record's `raw` is `git diff` with `DIFF_FLAGS` from its tree base
   to its tree. Write `events.jsonl` through `events.EventLog`, with
   `Ceilings`, `PhaseStart` and `RecordAppend` values as production writes
@@ -305,7 +308,7 @@ fixture for both `qualify` witnesses, in the shape of `_later_diff_fixture`
   base.
 - For criterion 3, start from
   `test_a_stack_batchs_follow_up_writer_is_seeded_at_the_top_head_the_end_review_graded`
-  (`tests/test_cli.py:12942-13047`). Patch `fetch_default_branch`, so no
+  (`tests/test_cli.py:12944-13049`). Patch `fetch_default_branch`, so no
   fetch reaches GitHub.
 
 **What the witnesses leave.** Criterion 2 drives a truncated file. A JSON
@@ -326,7 +329,7 @@ module scope.
 an em dash, a semicolon, a contraction, the perfect tense or a sentence
 over 25 words.
 
-**Size.** A prototype on `SA-0375`'s diff measured 476 changed tokens with
-`size_gate`, against the `bug` ceiling of 1300. It held 1293 more under
-the test paths. Every test in `tests/test_qualify.py` passed on it, with
-the three witnesses here.
+**Size.** A prototype of this spec's diff, applied atop `SA-0375`'s landed
+diff, measured 476 changed tokens with `size_gate`, against the `bug`
+ceiling of 1300. It held 1293 more under the test paths. Every test in
+`tests/test_qualify.py` passed on it, with the three witnesses here.
