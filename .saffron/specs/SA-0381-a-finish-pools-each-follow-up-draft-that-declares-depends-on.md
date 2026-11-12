@@ -3,7 +3,7 @@ id: SA-0381
 title: "A finish pools each follow-up draft that declares `depends_on`, so finish 83 paid for six drafts and minted none"
 type: bug
 priority: 2
-estimated_lines: 40
+estimated_lines: 44
 estimate_measured: true
 touches:
   - saffron/follow_up.py
@@ -47,20 +47,25 @@ max_turns: 200
 acceptance:
   - claim: >-
       `follow_up.write_follow_ups` cuts the lines of each top-level
-      `depends_on` and `consumes` key from a parsed draft's frontmatter
-      before `_validate` reads it, when the draft declares a `depends_on`
-      entry. Every other line stays as the writer sent it, the body and
-      block scalars included. `_validate`, `cite`, `judge`, the minted
-      `Candidate`'s `spec` and `spec_sha`, the returned candidate's
-      `spec_sha` and the recorded `follow_up` text all read the cut text. A
-      cut text that does not parse leaves the draft as the writer sent it,
-      so `_validate` pools it with `declares a depends_on entry`. The
-      witness drives six groups. The first declares both keys in the flow
-      form, and the second both in the indented block form. Both drafts
-      of the third declare the indentless block form, and its first is
-      judged red. The fourth also declares a budget above its origin's. The
-      fifth reads its `depends_on` value again through a YAML alias. The
-      sixth declares an empty list, which names no entry.
+      `depends_on` and `consumes` key spelled bare at the start of its line
+      from a parsed draft's frontmatter, before `_validate` reads it, when
+      the draft declares a `depends_on` entry. Every other line stays as the
+      writer sent it, the body and block scalars included. The cut holds
+      only when the cut text parses to the draft's own spec with
+      `depends_on` and `consumes` emptied. `_validate`, `cite`, `judge`,
+      `send_back`'s quoted draft, the minted and the returned `Candidate`'s
+      `spec` and `spec_sha`, and the recorded `follow_up` text all read the
+      cut text. A cut that does not hold leaves the draft as the writer
+      sent it, so `_validate` pools it with `declares a depends_on entry`.
+      The witness drives seven groups. The first declares both keys in the
+      flow form, and the second both in the indented block form. Both
+      drafts of the third declare the indentless block form, and its first
+      is judged red and sent back. The fourth also declares a budget above
+      its origin's. The fifth reads its `depends_on` value again through a
+      YAML alias, so its cut text does not parse. The sixth declares an
+      empty list, which names no entry. The seventh puts a column-0 comment
+      inside its `depends_on` list, so the cut would move its entry into
+      `forbidden`.
     witness: tests/test_follow_up.py::test_a_draft_declaring_depends_on_is_judged_minted_and_recorded_with_those_lines_cut
     wrong_versions:
       - The lines are cut after `_validate`, so the flow-form draft is still pooled.
@@ -68,6 +73,8 @@ acceptance:
       - "The frontmatter is rendered again with `yaml.safe_dump`, so lines outside the two keys change."
       - The minted candidate keeps the session's own `spec_sha`.
       - The returned candidate keeps the session's own `spec_sha` while the minted one hashes the cut text.
+      - The minted candidate carries the cut spec, and the returned one carries the uncut spec.
+      - "`send_back` quotes the session's own text, so the writer reads a draft other than the one judged."
       - "`judge` reads the session's own text."
       - "`cite` reads the session's own text."
       - Only the `depends_on:` key line is cut, and its block entries stay.
@@ -81,6 +88,8 @@ acceptance:
       - Every draft is cut, so the empty list's line is dropped from its text.
       - "`_validate` drops its `depends_on` check, so the alias draft is minted."
       - Only the flow form is cut.
+      - Any cut text that parses is kept, so the comment draft is minted with its entry moved into `forbidden`.
+      - The cut is kept whenever the cut text declares no `depends_on`, whatever else moved.
 ---
 
 ## Context
@@ -112,8 +121,10 @@ text is `session.text` (`saffron/follow_up.py:488-511`).
 records (`saffron/ledger.py:2089`). Before the cell, `_recorded_spec_text`
 refuses a text that does not hash to its `spec_sha`
 (`saffron/task.py:665-666`). It also refuses a text whose `depends_on`
-differs from the handed spec's (`saffron/task.py:678-681`). So the minted
-spec, its `spec_sha` and the recorded text must all be the same cut text.
+differs from the handed spec's (`saffron/task.py:678-681`). The batch
+drives the returned candidates, not the minted ones
+(`saffron/batch.py:1036-1048`). So both candidates' `spec`, their
+`spec_sha` and the recorded text must all be the same cut text.
 
 **Why `consumes` goes too.** `Spec` refuses a `consumes` entry with no
 `depends_on` (`saffron/intake.py:345-352`). A draft that copied both keys
@@ -164,10 +175,14 @@ says nothing the stack does not already hold.
    They end at the next top-level line or the closing `---`.
    In `write_follow_ups`, after the parse and before `_validate`, a draft
    whose parsed `depends_on` is not empty is parsed again from its cut text.
-   When that parses, the cut text and its spec replace the draft's for
-   everything after. When it does not, the draft stays as the writer sent
-   it. Pass the cut text to `cite` and `judge`. Set both candidates'
-   `spec_sha` to `hash_artifact` of it, and record it. Add one sentence to
+   The cut holds when that parses and equals the draft's spec with
+   `depends_on` and `consumes` emptied, as `model_copy(update=...)` builds
+   it. The cut text and its spec then replace the draft's for everything
+   after. Otherwise the draft stays as the writer sent it. Pass the cut text
+   to `cite` and `judge`, and have `send_back` quote it in place of
+   `session.text` (`saffron/follow_up.py:319-325`). Bind the text before the
+   parse, so a parse failure's send-back quotes the draft itself. Set both
+   candidates' `spec_sha` to `hash_artifact` of the cut text, and record it. Add one sentence to
    the module docstring. Leave the function docstring at its ten lines.
 2. **`tests/test_follow_up.py`.** Two tests pin the old refusal. Each keeps
    its counts once its draft carries a second refusal. In `_eighteen_turns`,
@@ -187,15 +202,12 @@ says nothing the stack does not already hold.
 - **A quoted key.** The cut reads a key spelled bare at the start of its
   line. A draft spelling `"depends_on":` keeps its line, parses with the
   entry, and `_validate` pools it as at base.
-- **The send-back's quoted draft.** `send_back` quotes `session.text` to the
-  writer (`saffron/follow_up.py:319-325`). It keeps quoting the writer's own
-  text.
 - **A log line naming the cut.** The writer's events log keeps the draft as
   sent, and the recorded text holds the cut one.
 - **`removes` and `retired_first`.** Neither needs a `depends_on`, and both
   stay as the writer declared them.
-- **`_validate`'s own check.** It stays, and pools a draft whose cut text
-  does not parse.
+- **`_validate`'s own check.** It stays, and pools a draft whose cut does
+  not hold.
 
 ## Notes for the agent
 
@@ -207,31 +219,38 @@ must still catch.
 pooled, so the minted list is short. Import nothing the change adds at
 module scope.
 
-**Seeding the witness.** The prototype drove all six groups through one
+**Seeding the witness.** The prototype drove all seven groups through one
 `write_follow_ups` call with a `cite` double and a `judge` double. It read
 each draft's id from the prompt's `id:` line, as
 `test_a_draft_the_finishing_suite_fails_is_sent_back_once_with_its_failures_and_then_minted`
-does. It wrote the flow, block, budget, alias and empty drafts by hand.
+does. It wrote the flow, block, budget, alias, empty and comment drafts by
+hand.
 Each carried a body line starting with `depends_on:` and a folded claim
 with an indented `depends_on:` line. The flow draft added
 `consumes: [src/a.py:alpha]`, and the block draft added `consumes:` with
 `  - src/a.py:alpha`. The alias draft added
-`forbidden: *parents` after `depends_on: &parents [SA-0378]`. The third
+`forbidden: *parents` after `depends_on: &parents [SA-0378]`. The comment
+draft added `forbidden:` with `  - docs/**`, then `depends_on:`, a line
+`# top layer` at column 0, and `  - SA-0378`. Its cut text parses with
+`SA-0378` under `forbidden` (measured with PyYAML). The third
 group used `_candidate(..., depends_on=("SA-0378",))`, which writes the
 indentless form, and its expected text is `_candidate` without it. Build
 each expected text by hand as the draft with only those lines removed.
 Compare it by `==` with the recorded text and with each text `cite` and
 `judge` received. Compare `hash_artifact` of it with both candidates'
-`spec_sha`.
+`spec_sha`, and `intake.parse_spec` of it with both candidates' `spec`.
+The third group's resend prompt ends with its cut first draft and holds
+no copy of the draft as the writer sent it.
 
 **What the witness leaves undriven.** `consumes` in the indentless form,
 since `_candidate` writes no `consumes`. The same key rule cuts it.
 
 **Assert the positive half of each absence.** The cited list and the
 judged list each equal five texts in order. They are the four cut texts of
-groups one to three, then the sixth draft. That comes before the check that groups four and five were never
-cited or judged. The fourth group's reason names its budget and not
-`depends_on`. The fifth's reason equals `declares a depends_on entry`.
+groups one to three, then the sixth draft. That comes before the check
+that groups four, five and seven were never cited or judged. The fourth
+group's reason names its budget and not `depends_on`. The fifth's and the
+seventh's reasons each equal `declares a depends_on entry`.
 
 **No refusal of a queued spec.** This change pools fewer drafts and refuses
 nothing new, so no `retired_first` entry applies.
@@ -243,8 +262,9 @@ over 25 words.
 **No `depends_on`.** No queued spec touches `saffron/follow_up.py` or
 `tests/test_follow_up.py`.
 
-**Size.** A prototype measured 158 changed tokens with `size_gate`, against
-the `bug` ceiling of 1300, with 520 more under the test paths. It held the
-helper, the cut, the witness and both updated pins. Every test in
+**Size.** A prototype measured 177 changed tokens with `size_gate`, against
+the `bug` ceiling of 1300, with 580 more under the test paths. It held the
+helper, the guarded cut, the send-back quote, the witness and both updated
+pins. Every test in
 `tests/test_follow_up.py` passed on it, with `tests/test_cli.py`'s follow-up
 tests.
