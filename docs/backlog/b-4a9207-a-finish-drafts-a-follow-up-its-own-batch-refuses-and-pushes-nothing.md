@@ -4,7 +4,7 @@ title: "A finish drafts a follow-up its own batch refuses for citations, and its
 status: partial
 tier: 2
 filed: 2026-11-02
-specs: [SA-0377]
+specs: [SA-0377, SA-0381]
 prs: [1171]
 commits: []
 cites: [§5.7]
@@ -66,3 +66,7 @@ gate that failed.
 - 2026-11-12: finish 83 pooled all three follow-up groups with "declares a
   depends_on entry". The origin spec `SA-0378` declares `depends_on`, and each draft
   copied it, twice per group.
+- 2026-11-12: correction to the line above, found writing `SA-0381`. The drafts
+  did not copy their origin's `depends_on`. All six declared `[SA-0378]`, the top
+  layer each writer sat on, and one origin (`SA-0375`) declares none. 55 findings
+  in 16 of 67 finishes were pooled this way.
