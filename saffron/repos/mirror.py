@@ -335,6 +335,49 @@ def unresolved_consumes(mirror: Path, sha: str, entries: list[str]) -> list[str]
     return unresolved
 
 
+def removed_name_readers(
+    mirror: Path, sha: str, entries: list[str]
+) -> list[tuple[str, str]]:
+    """Which tracked files at `sha` read one of `entries`, a spec's own `removes` list.
+
+    Each entry is a repo-relative `path`, split at the first colon. The subject is a
+    `path:name` entry's name, or a bare entry's whole path. One `git grep -l -z -F` per
+    entry over the tree-ish names its candidates. A candidate counts as a reader when
+    its text holds the subject as a whole word, by `_word_pattern`. It counts as one too
+    when `file_at` cannot read it as text at all. The file at the entry's own path is
+    never a reader. Pairs come back in entry order, then in the path order git lists. A
+    `sha` the mirror lacks raises `GitError`."""
+    pairs: list[tuple[str, str]] = []
+    for entry in entries:
+        path, sep, name = entry.partition(":")
+        subject = name if sep else path
+        argv = ["git", "-C", str(mirror), "-c", "core.quotePath=false"]
+        argv += ["grep", "-l", "-z", "-F", "-e", subject, sha]
+        completed = _run(argv)
+        if completed.returncode == 1:
+            continue
+        if completed.returncode != 0:
+            raise GitError(
+                f"git grep {subject!r} {sha[:12]}: {completed.stderr.strip()}"
+            )
+        prefix = f"{sha}:"
+        pattern = _word_pattern(subject)
+        for candidate in completed.stdout.split("\0"):
+            if not candidate:
+                continue
+            candidate = candidate.removeprefix(prefix)
+            if candidate == path:
+                continue
+            try:
+                text = file_at(mirror, sha, candidate)
+            except (UnreadablePath, UnicodeDecodeError):
+                pairs.append((candidate, entry))
+                continue
+            if text is not None and pattern.search(text) is not None:
+                pairs.append((candidate, entry))
+    return pairs
+
+
 def retirement_markers(mirror: Path, sha: str) -> list[tuple[str, str]]:
     """Every `saffron:retired-by <SPEC-ID>` marker at `sha`, read straight
     from the bare mirror — no export, no checkout, no working tree.
