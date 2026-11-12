@@ -156,8 +156,8 @@ factory:RATE_LIMITED a factory:TerminalState . factory:SPEC_WITHHELD a factory:T
 factory:PROVIDER_UNREACHABLE a factory:TerminalState . factory:SPEC_DRAFTED a factory:TerminalState .
 factory:REBUTTAL_UNJUDGED a factory:TerminalState . factory:REVIEW_INCOMPLETE a factory:TerminalState .
 
-# What the operator's decision produces, plus the state a crash produces. None of
-# these reaches the operator — they are downstream of a judgement they already made.
+# What the operator's decision produces, plus the state a crash produces. These
+# rarely reach the operator. `saffron package` takes a green `ORPHANED` task (SA-0380).
 factory:APPROVED a factory:EndState . factory:CHANGES_REQUESTED a factory:EndState .
 factory:REJECTED a factory:EndState . factory:MERGED a factory:EndState .
 factory:ORPHANED a factory:EndState .

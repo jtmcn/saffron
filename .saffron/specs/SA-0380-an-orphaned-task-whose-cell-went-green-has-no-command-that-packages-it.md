@@ -41,7 +41,7 @@ forbidden:
   - tests/test_queued_specs.py
   - tests/conftest.py
   - tests/fixtures/**
-budget_usd: 50
+budget_usd: 52
 max_attempts: 3
 max_turns: 245
 risk: standard
@@ -86,7 +86,8 @@ acceptance:
       writes, with a reason naming `ORPHANED` and that entry's witness.
       The witness drives an errored lens. It drives an anchored blocker with
       no rebuttal, a stale `READY_FOR_REVIEW` one, a fresh `EXHAUSTED` one
-      and a fresh `REBUTTAL_UNJUDGED` one, and an unanchored `HOST_FILED`
+      a fresh `REBUTTAL_UNJUDGED` one and a fresh `GATE_ERROR` one, and an
+      unanchored `HOST_FILED`
       survivor with no rebuttal. In each of the two probe files it drives a
       fresh cut entry, a stale cut entry and a fresh entry whose `error` is
       another failure. The anchored blocker with a fresh `READY_FOR_REVIEW`
@@ -101,6 +102,7 @@ acceptance:
       - Any `rebuttal.json` on disk is read, so a stale one admits the task.
       - Any fresh rebuttal admits the task, whatever its state.
       - Only an `EXHAUSTED` rebuttal is refused, so `REBUTTAL_UNJUDGED` is admitted.
+      - Only `EXHAUSTED` and `REBUTTAL_UNJUDGED` rebuttals are refused, so `GATE_ERROR` is admitted.
       - Only anchored blockers are read, so an unanchored `HOST_FILED` survivor is admitted.
       - The probe files are not read, so a pool cut there is admitted.
       - A pool cut is read from a probe file older than `baseline.json`.
@@ -130,7 +132,8 @@ acceptance:
       and the cell's own exception re-raises unmarked. The witness drives a
       `CellRuntimeError` and a `RuntimeError` past an admitted task, a
       `CellRuntimeError` past a task with no `REVIEWING` turn, and a
-      `CellRuntimeError` while `ready_task` raises `GitError`. No live row
+      `CellRuntimeError` while `ready_task` raises `GitError`, and one while
+      it raises `KeyError`. No live row
       is written in any of them.
     witness: tests/test_task.py::test_a_raising_cell_whose_orphaned_task_is_green_names_saffron_package
     wrong_versions:
@@ -138,6 +141,7 @@ acceptance:
       - The exception is marked and no line is printed.
       - Every raise names `saffron package`, whatever `ready_task` answers.
       - A raise from `ready_task` replaces the cell's own exception.
+      - Only `GitError` and `OSError` from `ready_task` are caught, so a `KeyError` replaces the cell's own exception.
       - Only a `CellRuntimeError` is checked.
       - The check runs only when a live row was written.
 ---
@@ -250,6 +254,16 @@ re-verifies the patch. It writes the task's state through
   at once, and that cell stales the patch.
 
 ## Out of scope
+
+**A raise from `_drive_cell`'s own `finally`.** Its export or teardown
+can raise after a green return (`saffron/cell/session.py:4077-4095`). The
+row then reads `REVIEWING` or `REBUTTING`, not `ORPHANED`, so `run_task`
+names nothing. A later `saffron reconcile` stamps it `ORPHANED`, and then
+`saffron package` takes it.
+
+**A probe entry with no `error` key.** Older fixtures write entries
+without one. The cell reads the key with `.get`, so such an entry is no
+pool cut.
 
 **A runtime death read as `EXHAUSTED`** (b-f582ee, the spec loop's run
 61). That task already reaches PACKAGE in its exhausted mode.

@@ -849,8 +849,8 @@ A batch scan stamps a task it finds in one `ORPHANED` (§4.2.1).
 `REVIEW_INCOMPLETE`.
 Everything else is internal.
 > A state a task *ends in* is a wider set than the states that *reach you*.
-> `MERGED` ends a task and reaches nobody, and `ORPHANED` waits for `saffron gc`
-> rather than the operator. One column holds both.
+> `MERGED` ends a task and reaches nobody, and `ORPHANED` mostly waits for
+> `saffron gc` rather than the operator. One column holds both.
 
 `TerminalEvent`, the kind `events.Terminal` writes, is not a terminal state. It records why
 IMPLEMENT committed nothing, a plan rejected before any turn included. Each of its five
