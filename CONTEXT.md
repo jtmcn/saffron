@@ -220,7 +220,9 @@ offered again after a wait, and a `PROVIDER_UNREACHABLE` or `PREFLIGHT_FAILED` o
 **Spec writer session**: A host-invoked session that revises one spec after its spec
 review routes it to `revise`. It runs in a critic cell at the predecessor's head, or
 at `base_sha` with no predecessor. Its attempt is labelled SPEC_WRITING. Its reply
-becomes a recorded spec text, which the spec review then reads. Under `saffron draft`
+becomes a recorded spec text, which the spec review then reads. In a stack batch, an
+order spec's reply that still carries fault lines once its send-backs run out is
+refused instead. Under `saffron draft`
 it also writes the first text, from the item (§3.4).
 
 **Revision**: One spec writer session and the spec review of the text it returned. A
@@ -242,7 +244,8 @@ _Avoid_: "rejected", "blocked".
 `base_sha`. It is a `spec_texts` row and a `spec_text` fact, hashed when recorded.
 Before the cell, `run_task` re-runs the gate 0 refusals that need no GitHub against
 the latest one. A revision, a follow-up, a draft and a stack batch's citation
-rewrite each write one. A citation rewrite is recorded under origin `revision`,
+rewrite each write one. A stack batch writes none for an order spec's revision that
+still carries fault lines. A citation rewrite is recorded under origin `revision`,
 but it is not a Revision.
 
 **Qualification**: The host's decision on each end-review finding, made in host code and
@@ -383,7 +386,8 @@ cannot be read, at the tree base. That refusal prints one line and writes no que
 row. A stack batch also refuses a spec its stack order never takes, and every spec
 whose `depends_on` reaches a missed task. A spec of its order that its budget passed
 over counts as missed. It refuses a revision the budget left cannot
-cover. Before its spec review, it refuses a spec with a citation that does not resolve
+cover. It also refuses an order spec whose writer session still carries fault lines
+once its send-backs run out. Before its spec review, it refuses a spec with a citation that does not resolve
 once `rewrite_moved_citations` moves what it can.
 `saffron package` refuses after the cell ended, before it reruns PACKAGE. It refuses a
 task that is not `READY_FOR_REVIEW` or already has a pull request. It also refuses a
