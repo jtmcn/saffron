@@ -314,3 +314,31 @@ the prototype.
     the first design would have spent two cells per revision on top of it.
 40. A spec that adds a refusal lists the protected sentences that enumerate
     refusals. Review 1 found five.
+
+## SA-0378 (b-1b05be), after spec loop run 63
+
+The second spec for b-1b05be. `qualify` rebuilds the tree an in-cell
+concern's lenses read from `SA-0375`'s recorded diff, and reads the drop on
+that tree's side. A record it cannot bind or apply falls back to `SA-0320`'s
+check with a note. The writer measured that 114 of 158 stacked task
+directories keep their tree base in the mirror, and the other 44 lack their
+packaged head too.
+
+**Review 1: 1 blocker, 3 concerns, 4 notes.** The writer revised.
+
+- The binding rule passed a looser version, because no seed wrote a fact
+  under the layer's key after another task's lines. `saffron reconcile`
+  writes that shape. No pre-flight check asks which shapes a later process
+  appends.
+- The notes left two seeded trees ambiguous, so a correct build could fail
+  its own witness. Pre-flight 1 missed it.
+- Three docstrings in `touches` would become false.
+
+**Review 2: 0 blockers, 0 concerns, 2 notes.** One count covered a single
+layer, and one index path would make `read-tree` refuse. The delegate
+applied both by hand.
+
+## Checks to build (SA-0378)
+
+41. A spec that reads a task directory's log lists every process that
+    appends to it after the task ends, and seeds the latest one.
