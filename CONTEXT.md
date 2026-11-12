@@ -392,7 +392,9 @@ cover. It also refuses an order spec whose writer session still carries fault li
 once its send-backs run out. Before its spec review, it refuses a spec with a citation that does not resolve
 once `rewrite_moved_citations` moves what it can.
 `saffron package` refuses after the cell ended, before it reruns PACKAGE. It refuses a
-task that is not `READY_FOR_REVIEW` or already has a pull request. It also refuses a
+task that is neither `READY_FOR_REVIEW` nor `ORPHANED`, or already has a pull request.
+It refuses an `ORPHANED` task whose cell recorded no `REVIEWING` turn, or whose review
+would not end `READY_FOR_REVIEW`. It also refuses a
 missing or stale file in the task directory, a spec text it cannot find, and a damaged
 `revert-exempt.json`.
 _Avoid_: "skip" (that is a gate status), "blocked", "reject" (that is what the

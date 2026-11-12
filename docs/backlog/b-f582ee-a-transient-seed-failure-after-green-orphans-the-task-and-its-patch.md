@@ -4,7 +4,7 @@ title: A transient seed failure after green records `ORPHANED`, and nothing resu
 status: partial
 tier: 1
 filed: 2026-09-30
-specs: [SA-0161, SA-0232, SA-0369]
+specs: [SA-0161, SA-0232, SA-0369, SA-0380]
 prs: [779]
 commits: []
 cites: [§5.1]
