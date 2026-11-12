@@ -1,11 +1,11 @@
 ---
 id: b-4a9207
 title: "A finish drafts a follow-up its own batch refuses for citations, and its finishing layer stays red, so nothing pushes"
-status: open
+status: partial
 tier: 2
 filed: 2026-11-02
 specs: [SA-0377]
-prs: []
+prs: [1171]
 commits: []
 cites: [§5.7]
 related: [b-e0044f, b-549012]
@@ -60,3 +60,9 @@ gate that failed.
   `prose` and the records check, so the finding was pooled.
 - 2026-11-11: finish 82 drafted `SA-0379` from `SA-0372`'s symlink concern.
   The follow-up ran, reached `READY_FOR_REVIEW` and opened #1167.
+- 2026-11-12: #1171 shipped `SA-0377` in the spec loop's run 65. A follow-up's
+  citations are checked before the batch runs it, and the escalation names its gates.
+  Fixing a one-line finding in the finishing layer stays open.
+- 2026-11-12: finish 83 pooled all three follow-up groups with "declares a
+  depends_on entry". The origin spec `SA-0378` declares `depends_on`, and each draft
+  copied it, twice per group.
