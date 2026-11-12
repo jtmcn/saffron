@@ -108,7 +108,7 @@ def test_the_readers_of_a_removed_entry_are_the_files_holding_its_subject_as_a_w
     assert "lib.py" not in {path for path, _ in old_name_pairs}
     assert "const.py" not in {path for path, _ in const_pairs}
 
-    # Entry order, then the path order git lists.
+    # Entry order, then sorted path order.
     assert [entry for _, entry in pairs[: len(old_name_pairs)]] == [
         "lib.py:OLD_NAME"
     ] * len(old_name_pairs)
@@ -124,6 +124,69 @@ def test_the_readers_of_a_removed_entry_are_the_files_holding_its_subject_as_a_w
 
     with pytest.raises(GitError):
         removed_name_readers(mirror, "0" * 40, ["lib.py:OLD_NAME"])
+
+
+def test_a_symlinks_resolved_content_is_checked_though_its_own_blob_never_matches(
+    tmp_path,
+):
+    from saffron.repos.mirror import removed_name_readers
+
+    repo = _plain_repo(tmp_path, "symlinks")
+    (repo / "dir").mkdir()
+    (repo / "dir2").mkdir()
+
+    # Entry (`path:name`): subject OLD_NAME, defined in lib.py.
+    (repo / "lib.py").write_text("OLD_NAME\n")
+
+    # A plain regular-file reader, matched by raw grep.
+    (repo / "plain_reader.py").write_text("reads OLD_NAME here\n")
+
+    # A regular file a symlink resolves to. Its own text is the only place
+    # OLD_NAME appears, so raw grep finds it directly too.
+    (repo / "dir" / "real_target.py").write_text("uses OLD_NAME indeed\n")
+
+    # A top-level symlink whose target string never names OLD_NAME, so git
+    # grep never matches its own blob, but whose resolved text does.
+    os.symlink("dir/real_target.py", repo / "top_link")
+
+    # A symlink nested one directory deep, exercising the recursive ls-tree.
+    os.symlink("../dir/real_target.py", repo / "dir2" / "nested_link")
+
+    # A symlink leaving the tree: no raw grep hit and file_at cannot read it,
+    # so it must name no reader at all.
+    os.symlink("../outside.py", repo / "escape_link")
+
+    # A readable symlink resolving to text with no mention of OLD_NAME.
+    # It must stay out of the reader set, proving the word is checked.
+    (repo / "miss_target.py").write_text("no mention here\n")
+    os.symlink("miss_target.py", repo / "miss_link")
+
+    # A grep hit whose own bytes do not decode. The raw match alone
+    # must still count it as a reader.
+    if _undecodable_fails_here:
+        (repo / "undecodable_hit.py").write_bytes(b"OLD_NAME\xff\xfe")
+
+    sha = _commit(repo, "symlinks")
+    mirror = ensure_mirror(repo, tmp_path / "symlinks.git")
+
+    # No entries reads no listing, so a sha the mirror lacks is no error.
+    assert removed_name_readers(mirror, "0" * 40, []) == []
+    pairs = removed_name_readers(mirror, sha, ["lib.py:OLD_NAME"])
+    paths = [path for path, _ in pairs]
+
+    expected = {
+        "dir/real_target.py",
+        "dir2/nested_link",
+        "plain_reader.py",
+        "top_link",
+    }
+    if _undecodable_fails_here:
+        expected.add("undecodable_hit.py")
+    assert set(paths) == expected
+    assert "escape_link" not in paths
+    assert "miss_link" not in paths
+    assert paths == sorted(paths)
+    assert all(entry == "lib.py:OLD_NAME" for _, entry in pairs)
 
 
 # --------------------------------------------------------- run_task's refusal
