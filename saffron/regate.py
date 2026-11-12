@@ -14,7 +14,7 @@ from pathlib import Path
 
 from saffron import mutants, preflight
 from saffron.cell import runtime
-from saffron.intake import SpecError, load_spec
+from saffron.intake import SpecError, load_spec, parse_spec
 from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
 from saffron.repos import image as repo_image
@@ -52,10 +52,6 @@ def _task_and_run(ledger: Ledger, task_id: int, repo, url: str):
         raise _Declined(f"task {task_id} names no task")
     if not row["pr_url"]:
         raise _Declined(f"task {task_id} carries no pull request")
-    if ledger.spec_text(task_id) is not None:
-        raise _Declined(
-            f"task {task_id} ran a recorded spec text, not a file at base_sha"
-        )
     wanted = ledger.resolve_repo_id(url)
     if wanted is None or wanted != row["repo_id"]:
         raise _Declined(f"task {task_id} belongs to another repo than {repo}")
@@ -152,7 +148,17 @@ def run_regate(
         exported = git_mirror.export_saffron_dir(
             mirror, row["base_sha"], out_dir / "regate" / str(task_id) / "gates"
         )
-        spec = _spec_at_base(exported, row["spec_id"], row["spec_sha"])
+        text_row = ledger.spec_text(task_id)
+        if text_row is None:
+            spec = _spec_at_base(exported, row["spec_id"], row["spec_sha"])
+        else:
+            try:
+                spec = parse_spec(text_row["text"])
+            except SpecError as exc:
+                raise _Declined(
+                    f"task {task_id}'s text {text_row['n']} does not parse: "
+                    + " ".join(str(exc).split())
+                ) from exc
         try:
             spec = mutants.attach_mutants_at(
                 mirror, ledger.task_mutants_commit(task_id), spec

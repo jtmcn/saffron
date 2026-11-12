@@ -940,7 +940,7 @@ def test_regate_refuses_each_task_it_cannot_judge_before_any_cell_and_exits_one(
     reasons = [
         f"task {unknown_task_id} names no task",
         f"task {task_no_pr} carries no pull request",
-        f"task {task_recorded_text} ran a recorded spec text",
+        f"task {task_recorded_text}'s text 1 does not parse",
         f"task {task_foreign_repo} belongs to another repo",
         f"{pr_merged} is MERGED, not OPEN",
         f"{pr_closed} is CLOSED, not OPEN",
@@ -1450,6 +1450,390 @@ def test_adopt_moves_a_task_whose_witness_its_cell_set_aside_to_ready_for_review
     row = next(r for r in ledger.tasks_by_repo(repo_id) if r["task_id"] == task_id)
     assert row["state"] == "READY_FOR_REVIEW"
     ledger.close()
+
+
+def test_regate_judges_a_task_that_ran_a_recorded_spec_text_against_its_latest_row(
+    monkeypatch, tmp_path, capsys
+):
+    """`saffron regate` reads `ledger.spec_text(task_id)` before falling back
+    to `_spec_at_base`, and judges the task against its latest row. A
+    `follow_up` task's rows share one origin. A `draft` task's rows mix
+    `draft` then `revision`, the shape `saffron draft` writes, so reading by
+    origin alone would miss one of the two. A task with no row is still
+    judged against its file at `base_sha`."""
+    witness = "tests/test_regate_text.py::test_guard"
+    fixture = _build_fixture(tmp_path)
+    home = tmp_path / "home"
+    work = fixture.work.resolve()
+    mirror_path = cli._mirror_path(work, home)
+
+    mutants_sha = _mutants_commit(
+        work,
+        parent=None,
+        spec_id=SPEC_ID,
+        yaml_text=_mutants_yaml(witness, file="src/witness-target.py", find="marker"),
+    )
+    _set_mutants_ref(work, mutants_sha)
+
+    revision_path = f".saffron/specs/{SPEC_FILENAME}"
+    minted_path = f".saffron/specs/{SPEC_ID}-minted.md"
+    first_text = _spec_text("first revision", witness=witness)
+    second_text = _spec_text("second revision", witness=witness)
+    first_sha = hashlib.sha256(first_text.encode()).hexdigest()
+
+    ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
+
+    task_revision = _seed_task(
+        ledger,
+        origin_url=fixture.origin_url,
+        mirror_path=mirror_path,
+        base_sha=fixture.base_sha,
+        spec_sha=fixture.spec_sha,
+        branch="saffron/SA-0005",
+        pr_url="https://github.com/o/r/pull/101",
+        pushed_sha=fixture.packaged_sha,
+        mutants_commit=mutants_sha,
+    )
+    ledger.record_spec_text(
+        task_revision,
+        origin="revision",
+        spec_id=SPEC_ID,
+        path=revision_path,
+        text=first_text,
+    )
+    ledger.record_spec_text(
+        task_revision,
+        origin="revision",
+        spec_id=SPEC_ID,
+        path=revision_path,
+        text=second_text,
+    )
+
+    task_follow_up = _seed_task(
+        ledger,
+        origin_url=fixture.origin_url,
+        mirror_path=mirror_path,
+        base_sha=fixture.base_sha,
+        spec_sha=first_sha,
+        branch="saffron/SA-0005",
+        pr_url="https://github.com/o/r/pull/102",
+        pushed_sha=fixture.packaged_sha,
+        mutants_commit=mutants_sha,
+    )
+    ledger.record_spec_text(
+        task_follow_up,
+        origin="follow_up",
+        spec_id=SPEC_ID,
+        path=minted_path,
+        text=first_text,
+    )
+    ledger.record_spec_text(
+        task_follow_up,
+        origin="follow_up",
+        spec_id=SPEC_ID,
+        path=minted_path,
+        text=second_text,
+    )
+
+    task_draft = _seed_task(
+        ledger,
+        origin_url=fixture.origin_url,
+        mirror_path=mirror_path,
+        base_sha=fixture.base_sha,
+        spec_sha=first_sha,
+        branch="saffron/SA-0005",
+        pr_url="https://github.com/o/r/pull/103",
+        pushed_sha=fixture.packaged_sha,
+        mutants_commit=mutants_sha,
+    )
+    ledger.record_spec_text(
+        task_draft,
+        origin="draft",
+        spec_id=SPEC_ID,
+        path=minted_path,
+        text=first_text,
+    )
+    ledger.record_spec_text(
+        task_draft,
+        origin="revision",
+        spec_id=SPEC_ID,
+        path=minted_path,
+        text=second_text,
+    )
+
+    task_no_row = _seed_task(
+        ledger,
+        origin_url=fixture.origin_url,
+        mirror_path=mirror_path,
+        base_sha=fixture.base_sha,
+        spec_sha=fixture.spec_sha,
+        branch="saffron/SA-0005",
+        pr_url="https://github.com/o/r/pull/104",
+        pushed_sha=fixture.packaged_sha,
+    )
+    ledger.close()
+
+    def _gh(argv: list[str]):
+        payload = json.dumps({"state": "OPEN", "baseRefName": "main"})
+        return subprocess.CompletedProcess(argv, 0, payload, "")
+
+    monkeypatch.setattr(cli, "run_gh", _gh)
+    monkeypatch.setattr(repo_image, "build_cell_image", lambda repo: "fake-image:tag")
+    monkeypatch.chdir(work)
+
+    cases = [
+        (task_revision, "second revision"),
+        (task_follow_up, "second revision"),
+        (task_draft, "second revision"),
+        (task_no_row, "v1"),
+    ]
+    for task_id, expected_title in cases:
+        _install_probe_fakes(monkeypatch, [])
+        reverify_calls: list = []
+        monkeypatch.setattr(package_phase, "reverify", _fake_reverify(reverify_calls))
+        result = cli.main(["--home", str(home), "regate", str(task_id), "--repo", "."])
+        capsys.readouterr()
+        assert result == 0, task_id
+
+        assert len(reverify_calls) == 1
+        call = reverify_calls[0]
+        assert call["spec"].title == expected_title
+        if task_id == task_no_row:
+            assert call["spec"].acceptance == []
+        else:
+            assert call["spec"].acceptance[0].mutant.file == "src/witness-target.py"
+
+        ledger = Ledger(home / "ledger.db")
+        row = ledger.regate(task_id)
+        assert row is not None
+        assert row["head_sha"] == fixture.review_sha
+        assert row["baseline_sha"] == fixture.main_moved_sha
+        assert row["new_failures"] == 0
+        ledger.close()
+
+
+def test_regate_declines_a_latest_recorded_text_that_does_not_parse_and_names_its_row(
+    monkeypatch, tmp_path, capsys
+):
+    """A latest row that does not parse declines with exit 1 and a line
+    naming the row's own number. No image build, probe or `reverify` runs,
+    and nothing is recorded, though the task's file at `base_sha` hashes to
+    its `spec_sha`. Recording a parseable row 2 over the bad one then
+    re-gates green through the same spies."""
+    fixture = _build_fixture(tmp_path)
+    home = tmp_path / "home"
+    work = fixture.work.resolve()
+    mirror_path = cli._mirror_path(work, home)
+    revision_path = f".saffron/specs/{SPEC_FILENAME}"
+
+    bad_text = "not a spec at all\n"
+    good_text = _spec_text("first revision")
+
+    ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
+    task_only_bad = _seed_task(
+        ledger,
+        origin_url=fixture.origin_url,
+        mirror_path=mirror_path,
+        base_sha=fixture.base_sha,
+        spec_sha=fixture.spec_sha,
+        branch="saffron/SA-0005",
+        pr_url="https://github.com/o/r/pull/201",
+        pushed_sha=fixture.packaged_sha,
+    )
+    ledger.record_spec_text(
+        task_only_bad,
+        origin="revision",
+        spec_id=SPEC_ID,
+        path=revision_path,
+        text=bad_text,
+    )
+
+    task_second_bad = _seed_task(
+        ledger,
+        origin_url=fixture.origin_url,
+        mirror_path=mirror_path,
+        base_sha=fixture.base_sha,
+        spec_sha=fixture.spec_sha,
+        branch="saffron/SA-0005",
+        pr_url="https://github.com/o/r/pull/202",
+        pushed_sha=fixture.packaged_sha,
+    )
+    ledger.record_spec_text(
+        task_second_bad,
+        origin="revision",
+        spec_id=SPEC_ID,
+        path=revision_path,
+        text=good_text,
+    )
+    ledger.record_spec_text(
+        task_second_bad,
+        origin="revision",
+        spec_id=SPEC_ID,
+        path=revision_path,
+        text=bad_text,
+    )
+    ledger.close()
+
+    monkeypatch.setattr(cli, "run_gh", _gh_pr_view("unused", "OPEN", "main", []))
+    build_calls: list = []
+    monkeypatch.setattr(
+        repo_image,
+        "build_cell_image",
+        lambda repo: build_calls.append(repo) or "fake-image:tag",
+    )
+    order: list = []
+    _install_probe_fakes(monkeypatch, order)
+    reverify_calls: list = []
+    monkeypatch.setattr(package_phase, "reverify", _fake_reverify(reverify_calls))
+    monkeypatch.chdir(work)
+
+    for task_id, n in ((task_only_bad, 1), (task_second_bad, 2)):
+        result = cli.main(["--home", str(home), "regate", str(task_id), "--repo", "."])
+        out = capsys.readouterr().out
+        assert result == 1
+        assert out.count("regate:") == 1
+        assert f"task {task_id}'s text {n} does not parse" in out
+        ledger = Ledger(home / "ledger.db")
+        assert ledger.regate(task_id) is None
+        ledger.close()
+
+    assert build_calls == []
+    assert order == []
+    assert reverify_calls == []
+
+    ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
+    ledger.record_spec_text(
+        task_only_bad,
+        origin="revision",
+        spec_id=SPEC_ID,
+        path=revision_path,
+        text=good_text,
+    )
+    ledger.close()
+
+    result = cli.main(
+        ["--home", str(home), "regate", str(task_only_bad), "--repo", "."]
+    )
+    out = capsys.readouterr().out
+    assert result == 0, out
+    assert build_calls == [work]
+    assert len(reverify_calls) == 1
+
+    ledger = Ledger(home / "ledger.db")
+    row = ledger.regate(task_only_bad)
+    assert row is not None
+    assert row["new_failures"] == 0
+    ledger.close()
+
+
+def _adopt_recorded_text_case(
+    case_root, monkeypatch, capsys, *, state: str, has_text: bool
+) -> str:
+    """One `saffron adopt` run on its own fixture, seeded with a task in
+    `state`, holding a recorded text when `has_text`. Returns the task's
+    state after adopt runs."""
+    witness = "tests/test_elsewhere.py::test_guard"
+    fixture = _build_fixture(case_root)
+    home = case_root / "home"
+    work = fixture.work.resolve()
+    mirror_path = cli._mirror_path(work, home)
+
+    outside_sha = _mutants_commit(
+        work,
+        parent=None,
+        spec_id=SPEC_ID,
+        yaml_text=_mutants_yaml(
+            witness, file="src/elsewhere.py", find="outside-diff-marker"
+        ),
+    )
+    _set_mutants_ref(work, outside_sha)
+
+    ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
+    task_id = _seed_task(
+        ledger,
+        origin_url=fixture.origin_url,
+        mirror_path=mirror_path,
+        base_sha=fixture.base_sha,
+        spec_sha=fixture.spec_sha,
+        branch="saffron/SA-0005",
+        pr_url=None,
+        mutants_commit=outside_sha,
+    )
+    if has_text:
+        ledger.record_spec_text(
+            task_id,
+            origin="revision",
+            spec_id=SPEC_ID,
+            path=f".saffron/specs/{SPEC_FILENAME}",
+            text=_spec_text("revised spec", witness=witness),
+        )
+    ledger.set_task_package(
+        task_id, state, branch="saffron/SA-0005", pushed_sha="", pr_url=""
+    )
+    repo_id = ledger.resolve_repo_id(fixture.origin_url)
+    assert repo_id is not None
+    ledger.close()
+
+    # Create the mirror before adopt writes its facts (item 170).
+    git_mirror.ensure_mirror(work, mirror_path)
+
+    pr_url = "https://github.com/o/r/pull/9"
+
+    def _gh(argv: list[str]):
+        if argv[2] == "view" and len(argv) > 4 and argv[4] == "--repo":
+            payload = json.dumps(
+                {
+                    "url": pr_url,
+                    "headRefOid": fixture.review_sha,
+                    "headRefName": "saffron/SA-0005",
+                }
+            )
+            return subprocess.CompletedProcess(argv, 0, payload, "")
+        payload = json.dumps({"state": "OPEN", "baseRefName": "main"})
+        return subprocess.CompletedProcess(argv, 0, payload, "")
+
+    monkeypatch.setattr(cli, "run_gh", _gh)
+    monkeypatch.setattr(package_phase, "github_slug", lambda _url: "o/r")
+    monkeypatch.setattr(repo_image, "build_cell_image", lambda repo: "fake-image:tag")
+    _install_probe_fakes(monkeypatch, [])
+    monkeypatch.setattr(
+        package_phase, "reverify", _fake_reverify_through_revert_gate([])
+    )
+
+    monkeypatch.chdir(work)
+    result = cli.main(["--home", str(home), "adopt", SPEC_ID, "9", "--repo", "."])
+    assert result == 0, capsys.readouterr().out
+
+    ledger = Ledger(home / "ledger.db")
+    row = next(r for r in ledger.tasks_by_repo(repo_id) if r["task_id"] == task_id)
+    final_state = row["state"]
+    ledger.close()
+    return final_state
+
+
+def test_adopt_moves_a_task_that_ran_a_recorded_spec_text_to_ready_for_review(
+    monkeypatch, tmp_path, capsys
+):
+    """`saffron adopt` moves an `EXHAUSTED` task and a `MERGE_FAILED` task
+    that each hold a recorded spec text to `READY_FOR_REVIEW`, through
+    `regate.run_regate` with no fake. The text declares a witness whose
+    pinned mutant lies outside the diff. The file at `base_sha` declares no
+    witness at all, so a sibling task on the same fixture shape with no
+    recorded text stays `EXHAUSTED`."""
+    for n, state in enumerate(("EXHAUSTED", "MERGE_FAILED")):
+        case_root = tmp_path / f"case-{n}"
+        case_root.mkdir()
+        final_state = _adopt_recorded_text_case(
+            case_root, monkeypatch, capsys, state=state, has_text=True
+        )
+        assert final_state == "READY_FOR_REVIEW", state
+
+    case_root = tmp_path / "case-no-text"
+    case_root.mkdir()
+    final_state = _adopt_recorded_text_case(
+        case_root, monkeypatch, capsys, state="EXHAUSTED", has_text=False
+    )
+    assert final_state == "EXHAUSTED"
 
 
 def test_regate_stopped_by_sigterm_exits_143(monkeypatch, tmp_path):
