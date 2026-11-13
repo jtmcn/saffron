@@ -4,7 +4,7 @@ title: "A citation that names one construct beside another's lines passes until 
 status: open
 tier: 2
 filed: 2026-11-02
-specs: []
+specs: [SA-0384]
 prs: []
 commits: []
 cites: [§4.2.1]
@@ -44,3 +44,6 @@ changes is flagged or moved before the spec review reads it.
   `saffron/cli.py` by one line, and batch 84 refused `SA-0381` with
   `1 citation(s) do not resolve`. Its `cli.py:1878-1913` named `write`, which
   then matched two places. `driver.py check` again passed at `origin/main`.
+- 2026-11-13: specced as `SA-0384`. `cite` refuses, at its base, a citation
+  whose names open a construct when no single name holds it. The second
+  "Done looks like" sentence stays open here.
