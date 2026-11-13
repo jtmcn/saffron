@@ -2566,7 +2566,6 @@ def test_a_draft_declaring_depends_on_is_judged_minted_and_recorded_with_those_l
     all read the cut text (b-4a9207).
     """
     from saffron import follow_up, intake, spec_review
-    from saffron.agents.artifacts import hash_artifact
 
     monkeypatch.setattr(spec_review, "SPEC_WRITER_SESSION_USD", 1.0)
 
