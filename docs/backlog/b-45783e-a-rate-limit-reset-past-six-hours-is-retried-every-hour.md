@@ -5,7 +5,7 @@ status: open
 tier: 3
 filed: 2026-11-13
 closed:
-specs: []
+specs: [SA-0385]
 prs: []
 commits: []
 cites: [§5.1]
@@ -33,3 +33,5 @@ emitted line names the provider's own reset beside the hour it will retry.
 ## Record
 
 - 2026-11-13: filed from the spec loop's run 66.
+- 2026-11-13: specced as `SA-0385`. A reset past the cap waits six hours.
+  A missing reset, or one at or before the clock, keeps the hour.
