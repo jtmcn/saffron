@@ -1,6 +1,6 @@
 ---
 id: SA-0384
-title: "A citation that no single construct it names holds passes `cite` at its base, so a parent's move stops the stack batch"
+title: "A citation that no single construct it names holds passes `cite` at its base, so a predecessor's move stops the stack batch"
 type: bug
 priority: 2
 estimated_lines: 57
@@ -159,7 +159,7 @@ same clause, or by giving the citation a clause of its own. The queued
 
 ## Out of scope
 
-- **The item's second sentence.** A bare citation into a file a parent
+- **The item's second sentence.** A bare citation into a file a predecessor
   layer changes still goes unchecked. Following it needs the layer's diff at
   the batch, in `saffron/cli.py` and `saffron/batch.py`. It stays on
   b-b664d1.
