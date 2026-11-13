@@ -5153,3 +5153,21 @@ def test_package_refuses_a_mutants_commit_it_cannot_read_before_the_image(
     assert "\n" not in result.reason
     assert build_calls == []
     assert package_calls == []
+
+
+def test_claude_md_command_table_names_the_cells_raise_not_just_its_green_review():
+    repo_root = Path(__file__).resolve().parents[1]
+    text = (repo_root / "CLAUDE.md").read_text()
+
+    table_anchor = "run PACKAGE alone on a task whose own PACKAGE raised"
+    table_line_start = text.index(table_anchor)
+    table_line_end = text.index("\n", table_line_start)
+    table_line = text[table_line_start:table_line_end]
+    assert "whose cell raised but rebuilds green" in table_line
+    assert "went green" not in table_line
+
+    bullet_anchor = "- `saffron/task.py` — `run_task` drives one task end to end"
+    bullet_start = text.index(bullet_anchor)
+    next_bullet_start = text.index("- `saffron/agents/`", bullet_start)
+    bullet_text = text[bullet_start:next_bullet_start]
+    assert "whose cell raised but rebuilds green" in bullet_text

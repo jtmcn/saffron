@@ -62,7 +62,7 @@ uv run saffron queue --repo .              # v0.5: what a batch would run; recon
 uv run saffron reconcile --repo .          # ask GitHub what happened to open pull requests
 uv run saffron regate <task id> --repo .   # judge a pull request's current head with the task's own gates
 uv run saffron review <task id> --repo .   # read a pull request's review commits with the end review's own lenses
-uv run saffron package SA-NNNN --repo .    # run PACKAGE alone on a task whose own PACKAGE raised, or whose cell went green
+uv run saffron package SA-NNNN --repo .    # run PACKAGE alone on a task whose own PACKAGE raised, or whose cell raised but rebuilds green
 uv run saffron finish <batch id> --repo .  # run a deferred stack batch's own end review, follow-ups and finish
 uv run saffron adopt SA-NNNN 502 --repo .  # name a by-hand pull request as a task's own
 uv run saffron watch SA-NNNN               # follow a task's event log; --no-follow for a finished one
