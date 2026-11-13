@@ -12,6 +12,11 @@ other group that cannot become a follow-up joins the caller-owned
 untrusted spec, or a `cite` or `judge` that raised. This module opens no
 cell and calls no model of its own. `write`, `cite`, `judge` and `mint`
 are the caller's own adapters.
+
+A draft that declares a `depends_on` entry has those lines cut from
+its frontmatter before `_validate` reads it. Any paired `consumes`
+lines are cut too. The cut holds only where the result still parses to
+the draft's own spec with both keys emptied.
 """
 
 from __future__ import annotations
@@ -23,6 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from saffron import end_review, intake, spec_review
+from saffron.agents.artifacts import hash_artifact
 from saffron.cell.worktree import DIFF_FLAGS, git_argv
 from saffron.gates.core.scope import matches
 from saffron.ledger import Ledger
@@ -37,6 +43,35 @@ WRITER_SHARE = 0.25
 
 _SPEC_ID = re.compile(r"^([A-Za-z0-9]+)-([0-9]+)$")
 _SLUG_WORD = re.compile(r"[a-z0-9]+")
+_DEPENDS_OR_CONSUMES = re.compile(r"^(?:depends_on|consumes):")
+
+
+def _cut_depends_on_and_consumes(text: str) -> str:
+    """`text` with each top-level `depends_on:` and `consumes:` key cut
+    from its frontmatter.
+
+    A key's lines are its own line, plus every following line that
+    starts with whitespace or `- `. The cut for that key stops at the
+    next top-level line, or the closing fence. Every other frontmatter
+    line, and the whole body, stay exactly as `text` carries them.
+    Returns `text` unchanged where it carries no frontmatter block, the
+    same fence `intake.parse_spec` itself reads.
+    """
+    match = intake._FRONTMATTER.match(text)
+    if match is None:
+        return text
+    kept: list[str] = []
+    skipping = False
+    for line in match.group(1).split("\n"):
+        if _DEPENDS_OR_CONSUMES.match(line):
+            skipping = True
+            continue
+        if skipping and (line.startswith((" ", "\t", "- "))):
+            continue
+        skipping = False
+        kept.append(line)
+    cut_raw = "\n".join(kept)
+    return text[: match.start(1)] + cut_raw + text[match.end(1) :]
 
 
 @dataclass(frozen=True)
@@ -321,7 +356,7 @@ def write_follow_ups(
             "The reply above was refused. Fix it and resend "
             "the whole spec text.\n"
             f"{reason}\n"
-            f"{session.text}"
+            f"{draft_text}"
         )
         try:
             return write(group, resend_prompt)
@@ -428,14 +463,27 @@ def write_follow_ups(
                 )
                 break
 
+            draft_text = session.text
             try:
-                candidate_spec = intake.parse_spec(session.text)
+                candidate_spec = intake.parse_spec(draft_text)
             except intake.SpecError as exc:
                 resent = send_back(f"follow-up text did not parse: {exc}")
                 if resent is None:
                     break
                 session = resent
                 continue
+
+            if candidate_spec.depends_on:
+                cut_text = _cut_depends_on_and_consumes(draft_text)
+                try:
+                    cut_spec: intake.Spec | None = intake.parse_spec(cut_text)
+                except intake.SpecError:
+                    cut_spec = None
+                if cut_spec is not None and cut_spec == candidate_spec.model_copy(
+                    update={"depends_on": [], "consumes": []}
+                ):
+                    draft_text = cut_text
+                    candidate_spec = cut_spec
 
             reason = _validate(
                 candidate_spec,
@@ -449,12 +497,12 @@ def write_follow_ups(
                 break
 
             path = f".saffron/specs/{candidate_id}-{_slug(candidate_spec.title)}.md"
-            assert session.spec_sha is not None  # non-empty text always hashes
+            spec_sha = hash_artifact(draft_text)
 
             cite_lines: Sequence[str] = ()
             if cite is not None:
                 try:
-                    cite_lines = cite(session.text)
+                    cite_lines = cite(draft_text)
                 except Exception as exc:
                     _charge(origin_task_id, session)
                     halt_reason = f"cite raised {type(exc).__name__}: {exc}"
@@ -462,7 +510,7 @@ def write_follow_ups(
                     break
 
             try:
-                judged = judge(path, session.text)
+                judged = judge(path, draft_text)
             except Exception as exc:
                 _charge(origin_task_id, session)
                 halt_reason = f"judge raised {type(exc).__name__}: {exc}"
@@ -488,7 +536,7 @@ def write_follow_ups(
             candidate = Candidate(
                 path=Path(path),
                 spec=candidate_spec,
-                spec_sha=session.spec_sha,
+                spec_sha=spec_sha,
                 task_id=None,
             )
             task_id = mint(candidate)
@@ -499,13 +547,13 @@ def write_follow_ups(
                 origin="follow_up",
                 spec_id=candidate_spec.id,
                 path=path,
-                text=session.text,
+                text=draft_text,
             )
             candidates.append(
                 Candidate(
                     path=Path(path),
                     spec=candidate_spec,
-                    spec_sha=session.spec_sha,
+                    spec_sha=spec_sha,
                     task_id=task_id,
                 )
             )
