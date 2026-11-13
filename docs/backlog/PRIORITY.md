@@ -469,6 +469,8 @@ Each line keeps the order it was filed in.
   changes more than the version names.
 - From run 65's review of #1172: **b-19f43a**, the reviewed-diff phase line
   spelled in two modules.
+- From run 66's batch 84: **b-45783e**, a rate-limit reset past six hours
+  retried every hour.
 - From the 2026-09-27 size pricing and spec loop run 32: **b-41664e**, **b-4b386f**,
   ~~**b-d96f14**~~, ~~**b-9b94c9**~~, **b-ff3141**, ~~**b-a99c76**~~, **b-3a8504**,
   ~~**b-7f105f**~~ and ~~**b-8c17dc**~~.

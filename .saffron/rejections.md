@@ -3044,3 +3044,15 @@ critic's own, so they have no line.
 - `SA-0378` (#1172): the hash check and a docstring restated or misstated
   what the code does. **Bucket 3**, conventions. **Landed:** a review commit
   on #1172. **Open:** b-19f43a for the phase line spelled twice.
+- `SA-0380` (#1178): the pool-cut match tests both ends of the cut text, and
+  dropping either end passed, since no entry shared one end only. **Bucket
+  1**. **Landed:** a review commit on #1178.
+- `SA-0380` (#1178): an interrupt past a green task went undriven, so
+  `Exception` widened to `BaseException` passed. **Bucket 1**. **Landed:** a
+  review commit on #1178.
+- `SA-0380` (#1178): a refusal still named only `READY_FOR_REVIEW`, and two
+  lines said `ready_task` admits a raise. **Bucket 3**, conventions.
+  **Landed:** a review commit on #1178.
+- `SA-0380` (#1178): three witness docstrings said "Criteria" and labelled
+  one criterion wrongly. **Bucket 3**, conventions. **Landed:** a review
+  commit on #1178.
