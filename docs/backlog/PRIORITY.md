@@ -471,6 +471,8 @@ Each line keeps the order it was filed in.
   spelled in two modules.
 - From run 66's batch 84: **b-45783e**, a rate-limit reset past six hours
   retried every hour.
+- From run 67's review of #1183: **b-7f6ce2**, a REBUT withdrawal won by
+  tuning the witness to one probe.
 - From the 2026-09-27 size pricing and spec loop run 32: **b-41664e**, **b-4b386f**,
   ~~**b-d96f14**~~, ~~**b-9b94c9**~~, **b-ff3141**, ~~**b-a99c76**~~, **b-3a8504**,
   ~~**b-7f105f**~~ and ~~**b-8c17dc**~~.

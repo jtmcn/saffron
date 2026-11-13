@@ -3056,3 +3056,12 @@ critic's own, so they have no line.
 - `SA-0380` (#1178): three witness docstrings said "Criteria" and labelled
   one criterion wrongly. **Bucket 3**, conventions. **Landed:** a review
   commit on #1178.
+- `SA-0381` (#1183): a cut skipped for any draft holding `#` or `*` kept the
+  witness green, since no minted draft carried either outside the cut keys.
+  **Bucket 1**. **Landed:** a review commit on #1183.
+- `SA-0381` (#1183): a test comment named the mutant it kills, which is
+  rationale for the PR body. **Bucket 3**, conventions. **Landed:** a review
+  commit on #1183.
+- `SA-0381` (#1183): the witness imported `hash_artifact` in its body,
+  beside the module's own import. **Bucket 3**, conventions. **Landed:** a
+  review commit on #1183.
