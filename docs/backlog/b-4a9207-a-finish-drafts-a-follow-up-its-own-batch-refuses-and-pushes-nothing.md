@@ -5,7 +5,7 @@ status: partial
 tier: 2
 filed: 2026-11-02
 specs: [SA-0377, SA-0381]
-prs: [1171]
+prs: [1171, 1183]
 commits: []
 cites: [§5.7]
 related: [b-e0044f, b-549012]
@@ -70,3 +70,8 @@ gate that failed.
   did not copy their origin's `depends_on`. All six declared `[SA-0378]`, the top
   layer each writer sat on, and one origin (`SA-0375`) declares none. 55 findings
   in 16 of 67 finishes were pooled this way.
+- 2026-11-13: `SA-0381` (#1183) landed in the spec loop's run 67. A draft
+  that declares a `depends_on` entry now has its `depends_on` and `consumes`
+  lines cut before `_validate` reads it, so it is no longer pooled. Finish 85
+  wrote no follow-up, so the cut met no live draft. Fixing a one-line
+  finding in the finishing layer stays open.

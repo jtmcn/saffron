@@ -103,3 +103,7 @@ that must never reach a cell and must be handed to every cloud host.
 - 2026-11-08: `SA-0338` (#1055) moved each criterion's mutant out of the
   spec a cell reads. `SA-0339` (#1068) wrote the command that puts them on
   the ref intake reads. Both landed in the spec loop's run 55.
+- 2026-11-13: found in the spec loop's run 67. `git ls-remote origin
+  'refs/saffron/mutants*'` prints nothing, so no spec carries a mutant on the
+  ref. Three spec reviews that day asked for one. `SA-0385` and `SA-0386`
+  each name a candidate in their notes for `saffron mutant` to write.
