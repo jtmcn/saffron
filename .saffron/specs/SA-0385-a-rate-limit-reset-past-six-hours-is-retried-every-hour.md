@@ -56,7 +56,7 @@ acceptance:
       04:39, so the first two lie past the cap and the third inside it.
       Its other past-cap resets are six hours and one second on, seven
       hours on, `10**12`, `10**20` and `10**400`. It then meets a missing
-      reset and one 60 seconds before the clock.
+      reset, one equal to the clock and one 60 seconds before it.
     witness: tests/test_batch.py::test_a_stack_batch_waits_six_hours_for_a_reset_past_the_cap
     wrong_versions:
       - A reset past the cap still sleeps one hour, as at base.
@@ -64,6 +64,7 @@ acceptance:
       - A reset past the cap sleeps the cap only when it renders as a date, so `10**12`, `10**20` and `10**400` sleep one hour.
       - Every reset the wait cannot read sleeps the cap, so the missing reset sleeps six hours.
       - A reset at or before the clock sleeps the cap.
+      - A reset equal to the clock counts as ahead of it and sleeps the cap.
       - A reset past the cap sleeps its own distance, so `10**400` raises in the subtraction.
   - claim: >-
       The capped wait meets `--until` the way any wait meets it at base.
@@ -89,12 +90,13 @@ acceptance:
       before the clock, and one no date can hold. The witness drives a
       naive clock and aware clocks at minus seven hours and plus five hours
       45 minutes. Under each it drives a reset past the cap, one inside it,
-      a missing one, one 60 seconds before the clock, and `10**12`, `10**20`
-      and `10**400`.
+      a missing one, one equal to the clock, one 60 seconds before it, and
+      `10**12`, `10**20` and `10**400`.
     witness: tests/test_batch.py::test_a_rate_limit_wait_line_names_the_providers_reset_beside_the_retry_hour
     wrong_versions:
       - The reset is rendered in the host's zone, so an aware clock's line names another hour.
       - A reset before the clock is named as its own date rather than `unknown`.
+      - A reset equal to the clock is named as its own date, while the wait still reads it as not ahead.
       - "The reset carries `events.when`'s ` local` suffix."
       - The reset part repeats the retry hour.
       - The line drops the retry hour.
@@ -161,7 +163,8 @@ the provider's.
    drop the four past-cap steps. Its counts become six calls, the sleeps
    `[3600.0] * 4 + [21600.0]`, and five lines. Its docstring's first
    sentence then says that a missing reset, or one at or before now, waits
-   an hour. Add the three witnesses.
+   an hour. Its second reads "Only a value strictly after now and no more
+   than six hours on is waited in full." Add the three witnesses.
 
 ## Out of scope
 
@@ -181,7 +184,11 @@ the provider's.
 **The criteria are new behaviour on edited code.** None declares a mutant,
 because the head spelling of the cap branch is the cell's to choose.
 `witness` will report `skip`. The wrong versions under each criterion name
-what its witness must still catch.
+what its witness must still catch. `refs/saffron/mutants` is absent from
+origin today. Criterion 2's code is the one an operator could pin with
+`saffron mutant`, as the `until` comparison at `saffron/batch.py:431`
+turned strict. This spec quotes no text of it, since intake refuses a
+mutant whose text the body spells.
 
 **At base each witness fails in its body.** The first sees one-hour sleeps.
 The second sees a sleep under the six-hour deadline. The third sees the old
@@ -194,8 +201,8 @@ the clock at 2030-01-01 16:39. Build the 13-hour reset as
 `datetime(2030, 1, 2, 6, 0).timestamp()` in the clock's own zone.
 
 - **Criterion 1.** Pass the steps in the claim's order, then
-  `READY_FOR_REVIEW`. The prototype saw eleven calls and the sleeps
-  `[21600.0, 21600.0, 4860.0] + [21600.0] * 5 + [3600.0] * 2`. The third
+  `READY_FOR_REVIEW`. The prototype saw twelve calls and the sleeps
+  `[21600.0, 21600.0, 4860.0] + [21600.0] * 5 + [3600.0] * 3`. The third
   13-hour step meets the clock at 04:39, so its reset lies inside the cap.
 - **Criterion 2.** Queue three 13-hour steps. Wrap the runner so each call
   records the clock. With `until` six hours on, expect one start, no sleep
@@ -206,7 +213,13 @@ the clock at 2030-01-01 16:39. Build the 13-hour reset as
   Compare the `rate limited` lines with `==` against the whole list. The
   prototype's list read `Wed 02 Jan 06:00, retrying 22:39`, then `Wed 02
   Jan 00:00, retrying 00:00`, then `unknown` with `01:00`, `02:00`,
-  `08:00`, `14:00` and `20:00`.
+  `03:00`, `09:00`, `15:00` and `21:00`. The step equal to the clock is
+  `{"offset": 0}`, because every wait ends on a whole minute.
+
+**Where the render raises.** `datetime.fromtimestamp` raised `ValueError`
+for `10**12` and `OverflowError` for `10**20` and `10**400`. That held on
+macOS with Python 3.14 and on Linux glibc 2.41 with Python 3.12, naive and
+aware alike (measured). All three types sit in the caught set.
 
 **Each negative clause has its positive case in the same instrument.** The
 first witness's one sleep list holds the six-hour sleeps and the one-hour
@@ -223,6 +236,6 @@ an em dash, a semicolon, a contraction, the perfect tense or a sentence over
 nothing new, so no `retired_first` entry applies.
 
 **Size.** A prototype measured 53 changed tokens with `size_gate`, against
-the `bug` ceiling of 1300, with 558 more under the test paths. It held the
+the `bug` ceiling of 1300, with 589 more under the test paths. It held the
 cap, the line, the docstring sentence, the three witnesses and the trimmed
 pin. Every test in `tests/test_batch.py` passed on it.
