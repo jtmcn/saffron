@@ -445,8 +445,11 @@ def _eighteen_turns() -> list:
         _candidate("SA-0999", claims=("claim-concern-b",)),  # 3 id
         _candidate("SA-0110", type_="refactor", claims=("claim-concern-b",)),  # 4 type
         _candidate(
-            "SA-0110", depends_on=("SA-0001",), claims=("claim-concern-b",)
-        ),  # 5 depends_on
+            "SA-0110",
+            depends_on=("SA-0001",),
+            budget=11.0,
+            claims=("claim-concern-b",),
+        ),  # 5 budget (depends_on alone would now be cut and let through)
         _candidate("SA-0110", budget=11.0, claims=("claim-concern-b",)),  # 6 budget
         _candidate(
             "SA-0110", touches=("src/**",), claims=("claim-concern-b",)
@@ -569,7 +572,7 @@ def test_a_group_the_host_refuses_or_the_sub_cap_cannot_cover_goes_to_the_pool(
         (pooled[0].reason, "probe"),
         (pooled[1].reason, "id"),
         (pooled[2].reason, "type"),
-        (pooled[3].reason, "depends_on"),
+        (pooled[3].reason, "budget"),
         (pooled[4].reason, "budget"),
         (pooled[5].reason, "touches"),
         (pooled[6].reason, "touches"),
@@ -1212,7 +1215,7 @@ def test_a_draft_sent_back_once_pools_on_its_second_refusal_and_never_past_the_s
     wrong_id_draft = _candidate("SA-0999", claims=("claim-a5",))
     type_refusal_draft = _candidate("SA-0108", type_="refactor", claims=("claim-a6",))
     depends_on_draft = _candidate(
-        "SA-0108", depends_on=("SA-0001",), claims=("claim-a7",)
+        "SA-0108", depends_on=("SA-0001",), budget=999.0, claims=("claim-a7",)
     )
     budget_draft = _candidate("SA-0108", budget=999.0, claims=("claim-a8",))
     touches_draft = _candidate(
@@ -1247,7 +1250,7 @@ def test_a_draft_sent_back_once_pools_on_its_second_refusal_and_never_past_the_s
         RuntimeError("cell gone"),  # g4 call2 - raise -> pooled
         wrong_id_draft,  # g5 call1 - id refusal -> pooled
         type_refusal_draft,  # g6 call1 - type refusal -> pooled
-        depends_on_draft,  # g7 call1 - depends_on refusal -> pooled
+        depends_on_draft,  # g7 call1 - cut depends_on, budget refusal -> pooled
         budget_draft,  # g8 call1 - budget refusal -> pooled
         touches_draft,  # g9 call1 - touches refusal -> pooled
         reset_session,  # g10 call1 - reset -> pooled, propagates to g11
@@ -2512,3 +2515,271 @@ def test_a_follow_up_declaring_any_mutant_inline_is_refused():
 
     prompt = (context.PROMPTS_DIR / "spec-writer.md").read_text()
     assert "Declare no mutant in the spec" in " ".join(prompt.split())
+
+
+_FOLDED_CLAIM = (
+    "  - claim: >\n"
+    "      This claim folds across two lines, and one of them reads\n"
+    "      depends_on:\n"
+    "        as folded prose inside the claim, never a real key.\n"
+    "    witness: tests/test_b.py::test_w0\n"
+)
+_BODY_WITH_KEY_LOOKALIKE = (
+    "Prose about the change.\n"
+    "\n"
+    "depends_on: this paragraph starts like a key, and must stay as body text.\n"
+)
+
+
+def _hand_draft(*, title: str, extra: str, budget: float = 9.0) -> str:
+    """A hand-written draft, sharing one shape.
+
+    It carries an `ID_PLACEHOLDER` id and the allowed touches. A folded
+    claim names `depends_on:` indented inside its own text. A body
+    paragraph starts with the same bare word. `extra` is the
+    frontmatter between `touches:` and `acceptance:`.
+    """
+    return (
+        "---\n"
+        "id: ID_PLACEHOLDER\n"
+        f"title: {title}\n"
+        "type: feature\n"
+        f"budget_usd: {budget}\n"
+        "touches:\n"
+        "  - src/b.py\n"
+        "  - tests/test_b.py\n"
+        f"{extra}"
+        "acceptance:\n"
+        f"{_FOLDED_CLAIM}"
+        "---\n"
+        f"{_BODY_WITH_KEY_LOOKALIKE}"
+    )
+
+
+def test_a_draft_declaring_depends_on_is_judged_minted_and_recorded_with_those_lines_cut(
+    tmp_path, monkeypatch
+):
+    """`write_follow_ups` cuts a draft's `depends_on` and `consumes`
+    lines from its frontmatter. It keeps the cut only where the result
+    round trips to the draft's own spec with both keys emptied.
+    `_validate`, `cite`, `judge`, a resend and the recorded text then
+    all read the cut text (b-4a9207).
+    """
+    from saffron import follow_up, intake, spec_review
+    from saffron.agents.artifacts import hash_artifact
+
+    monkeypatch.setattr(spec_review, "SPEC_WRITER_SESSION_USD", 1.0)
+
+    built = _build(tmp_path)
+    stack = _stack(built)
+    key_102 = built.ledger.record_key(built.task_102)
+
+    group_flow = _concern_group(key_102, "src/b.py", "claim-flow")
+    group_block = _concern_group(key_102, "src/b.py", "claim-block")
+    group_indentless = _concern_group(key_102, "src/b.py", "claim-indentless")
+    group_budget = _concern_group(key_102, "src/b.py", "claim-budget")
+    group_alias = _concern_group(key_102, "src/b.py", "claim-alias")
+    group_empty = _concern_group(key_102, "src/b.py", "claim-empty")
+    group_comment = _concern_group(key_102, "src/b.py", "claim-comment")
+    groups = [
+        group_flow,
+        group_block,
+        group_indentless,
+        group_budget,
+        group_alias,
+        group_empty,
+        group_comment,
+    ]
+
+    # This anchor matches no alias, so cutting it loses nothing: a cut
+    # that skipped the key whenever an `&` appeared would mint nothing here.
+    draft_flow = _hand_draft(
+        title="Flow form follow-up",
+        extra="depends_on: &flow_deps [SA-0378]\nconsumes: [src/a.py:alpha]\n",
+    )
+    cut_flow = _hand_draft(title="Flow form follow-up", extra="")
+
+    draft_block = _hand_draft(
+        title="Block form follow-up",
+        extra="depends_on:\n  - SA-0378\nconsumes:\n  - src/a.py:alpha\n",
+    )
+    cut_block = _hand_draft(title="Block form follow-up", extra="")
+
+    draft_budget = _hand_draft(
+        title="Budget over origin follow-up",
+        extra="depends_on: [SA-0378]\n",
+        budget=11.0,
+    )
+
+    draft_alias = _hand_draft(
+        title="Alias follow-up",
+        extra="depends_on: &parents [SA-0378]\nforbidden: *parents\n",
+    )
+
+    draft_empty = _hand_draft(
+        title="Empty list follow-up",
+        extra="depends_on: []\n",
+    )
+
+    draft_comment = _hand_draft(
+        title="Comment follow-up",
+        extra="forbidden:\n  - docs/**\ndepends_on:\n# top layer\n  - SA-0378\n",
+    )
+
+    indentless_try1 = _candidate(
+        "ID_PLACEHOLDER", depends_on=("SA-0378",), claims=("claim-indentless-try1",)
+    )
+    indentless_try2 = _candidate(
+        "ID_PLACEHOLDER", depends_on=("SA-0378",), claims=("claim-indentless-try2",)
+    )
+    cut_indentless_try1 = _candidate(
+        "ID_PLACEHOLDER", claims=("claim-indentless-try1",)
+    )
+    cut_indentless_try2 = _candidate(
+        "ID_PLACEHOLDER", claims=("claim-indentless-try2",)
+    )
+
+    templates = [
+        draft_flow,
+        draft_block,
+        indentless_try1,
+        indentless_try2,
+        draft_budget,
+        draft_alias,
+        draft_empty,
+        draft_comment,
+    ]
+
+    write_calls: list = []
+
+    def write(group, prompt):
+        write_calls.append((group, prompt))
+        i = len(write_calls) - 1
+        match = re.search(r"^id: (\S+)$", prompt, re.MULTILINE)
+        assert match is not None
+        text = templates[i].replace("ID_PLACEHOLDER", match.group(1))
+        return spec_review.SpecWriterSession(
+            text=text,
+            cost_usd=0.5,
+            error=None,
+            resets_at=None,
+            session_id=f"s{i + 1}",
+            num_turns=2,
+            spec_sha=hash_artifact(text),
+        )
+
+    cite_calls: list = []
+
+    def cite(text: str) -> list[str]:
+        cite_calls.append(text)
+        return []
+
+    judge_calls: list = []
+
+    def judge(path: str, text: str) -> list[str]:
+        judge_calls.append((path, text))
+        if "claim-indentless-try1" in text:
+            return ["[tests] a.py:1 E1: indentless-red"]
+        return []
+
+    emitted: list = []
+    mint_calls: list = []
+    pooled: list = []
+
+    candidates = follow_up.write_follow_ups(
+        built.ledger,
+        stack,
+        batch_key=str(built.batch_id),
+        qualify=_qualify_stub([], groups, []),
+        write=write,
+        judge=judge,
+        cite=cite,
+        mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], mint_calls),
+        mirror=built.mirror,
+        specs_dir=built.specs_dir,
+        repo_id=built.repo_id,
+        test_paths=["tests/**"],
+        cap_usd=50.0,
+        emit=emitted.append,
+        pooled=pooled,
+    )
+
+    assert len(write_calls) == 8
+    assert len(candidates) == 4
+
+    ids = []
+    for _group, call_prompt in write_calls:
+        match = re.search(r"^id: (\S+)$", call_prompt, re.MULTILINE)
+        assert match is not None
+        ids.append(match.group(1))
+    id_flow, id_block, id_indentless, _, id_budget, id_alias, id_empty, id_comment = ids
+
+    expected_flow = cut_flow.replace("ID_PLACEHOLDER", id_flow)
+    expected_block = cut_block.replace("ID_PLACEHOLDER", id_block)
+    expected_indentless_try1 = cut_indentless_try1.replace(
+        "ID_PLACEHOLDER", id_indentless
+    )
+    expected_indentless_try2 = cut_indentless_try2.replace(
+        "ID_PLACEHOLDER", id_indentless
+    )
+    expected_empty = draft_empty.replace("ID_PLACEHOLDER", id_empty)
+
+    # The positive half: groups one through three's four cut texts, then
+    # the sixth (empty-list) draft, read exactly as the writer sent it.
+    expected_seen = [
+        expected_flow,
+        expected_block,
+        expected_indentless_try1,
+        expected_indentless_try2,
+        expected_empty,
+    ]
+    assert cite_calls == expected_seen
+    assert [t for _p, t in judge_calls] == expected_seen
+
+    # The negative half: groups four, five and seven, each refused before
+    # a citation or a judgement was ever requested.
+    assert not any("Budget over origin" in t for t in cite_calls)
+    assert not any("Alias follow-up" in t for t in cite_calls)
+    assert not any("Comment follow-up" in t for t in cite_calls)
+
+    assert [c.spec.id for c in candidates] == [
+        id_flow,
+        id_block,
+        id_indentless,
+        id_empty,
+    ]
+    for candidate, expected_text in zip(
+        candidates,
+        [expected_flow, expected_block, expected_indentless_try2, expected_empty],
+        strict=True,
+    ):
+        assert candidate.spec == intake.parse_spec(expected_text)
+        assert candidate.spec_sha == hash_artifact(expected_text)
+        row = built.ledger.spec_text(candidate.task_id)
+        assert row["text"] == expected_text
+        assert row["spec_sha"] == hash_artifact(expected_text)
+
+    for mint_call, expected_text in zip(
+        mint_calls,
+        [expected_flow, expected_block, expected_indentless_try2, expected_empty],
+        strict=True,
+    ):
+        assert mint_call.spec == intake.parse_spec(expected_text)
+        assert mint_call.spec_sha == hash_artifact(expected_text)
+
+    assert len(pooled) == 3
+    budget_pooled, alias_pooled, comment_pooled = pooled
+    assert budget_pooled.group == group_budget
+    assert "budget" in budget_pooled.reason
+    assert "depends_on" not in budget_pooled.reason
+    assert alias_pooled.group == group_alias
+    assert alias_pooled.reason == "declares a depends_on entry"
+    assert comment_pooled.group == group_comment
+    assert comment_pooled.reason == "declares a depends_on entry"
+
+    # The resend for the indentless group quotes its own cut first draft,
+    # never the uncut text the writer sent.
+    resend_prompt = write_calls[3][1]
+    assert expected_indentless_try1 in resend_prompt
+    appended = resend_prompt.split("The reply above was refused.", 1)[1]
+    assert "SA-0378" not in appended
