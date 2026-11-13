@@ -2365,12 +2365,14 @@ def test_a_raise_that_escapes_run_task_from_package_is_marked_and_kept(
     tmp_path, monkeypatch
 ):
     """`run_task` marks every exception that escapes it from its own
-    `package_phase.package` call for a `READY_FOR_REVIEW` cell. The mark is
+    `package_phase.package` call for a `READY_FOR_REVIEW` cell, or a
+    `run_one_cell` raise `ready_task` would admit. The mark is
     `saffron.task.mark_raised_in_package`, and the same object re-raises
     with its type unchanged. `saffron.task.raised_in_package(exc)` reads
-    the mark. An exhausted-mode raise, a `run_one_cell` raise, a
-    `GATE_ERROR` cell's own `append_queue_line` raise, and a fresh,
-    never-raised exception, all read as unmarked (`b-066901`)."""
+    the mark. An exhausted-mode raise, a `GATE_ERROR` cell's own
+    `append_queue_line` raise, and a fresh, never-raised exception, all
+    read as unmarked. So does a `run_one_cell` raise here, since this case
+    mints no task for `ready_task` to admit (`b-066901`)."""
     # Imported here, not at module scope, or the reverted run collects as
     # an error, which `revert` reads as `skip` rather than `fail`.
     from saffron.cell.runtime import CellRuntimeError
@@ -3644,7 +3646,11 @@ def test_ready_task_refuses_with_a_reason_and_writes_nothing(tmp_path):
     assert _rt_tasks_snapshot(ledger) == before
     assert not mirror_path.exists()
 
-    other_states = [s for s in get_args(TaskState) if s != "READY_FOR_REVIEW"]
+    # `ORPHANED` is left out: criteria 2 and 3 drive it, with no state
+    # named for a task missing `baseline.json`.
+    other_states = [
+        s for s in get_args(TaskState) if s not in ("READY_FOR_REVIEW", "ORPHANED")
+    ]
     for n, state in enumerate(other_states):
         spec_id = f"RS-{n}"
         older = _rt_task(ledger, repo_id, spec_id=spec_id, spec_sha="a" * 64)
@@ -3768,6 +3774,511 @@ def test_ready_task_refuses_with_a_reason_and_writes_nothing(tmp_path):
     assert not mirror_path.exists()
 
     ledger.close()
+
+
+# --- b-f582ee: `ready_task` and `run_task` over an `ORPHANED` task ------
+
+
+def _rt_orphaned_task(
+    ledger: Ledger,
+    repo_id: int,
+    out_dir: Path,
+    *,
+    spec_id: str,
+    reviews: Sequence[LensReview] = (),
+    rebuttal: RebutResult | None = None,
+    rebuttal_fresh: bool = True,
+    criterion_probes: Sequence[dict] | None = None,
+    criterion_probes_fresh: bool = True,
+    wrong_versions: Sequence[dict] | None = None,
+    wrong_versions_fresh: bool = True,
+    with_turn: bool = True,
+) -> int:
+    """An `ORPHANED` task with a patch, a baseline, and `findings.json`
+    holding `reviews`. Each of `rebuttal.json`, `criterion-probes.json`
+    and `wrong-versions.json` the caller names lands at the baseline's own
+    mtime. It lands ten seconds before that instead when its own `fresh`
+    flag is false. A `REVIEWING` turn lands after the baseline unless
+    `with_turn` is false."""
+    spec_sha = hashlib.sha256(_RT_TEXT.encode()).hexdigest()
+    task_id = _rt_task(ledger, repo_id, spec_id=spec_id, spec_sha=spec_sha)
+    ledger.record_spec_text(
+        task_id,
+        origin="revision",
+        spec_id=spec_id,
+        path=f".saffron/specs/{spec_id}.md",
+        text=_RT_TEXT,
+    )
+    ledger.set_task_state(task_id, "ORPHANED")
+
+    task_dir = out_dir / spec_id
+    _rt_write_patch(task_dir, base_sha="a" * 40, tree_base="a" * 40, head_sha="c" * 40)
+    _rt_seed_records(task_dir, when=time.time() - 5)
+    baseline_mtime = (task_dir / "baseline.json").stat().st_mtime
+
+    findings_path = task_dir / "findings.json"
+    findings_path.write_text(json.dumps([r.as_dict() for r in reviews]))
+    _rt_set_mtime(findings_path, baseline_mtime)
+
+    if with_turn:
+        _rt_attempt(ledger, task_id, phase="REVIEWING", cost=0.1)
+
+    for name, payload, fresh in (
+        (
+            "rebuttal.json",
+            rebuttal.as_dict(blockers=[]) if rebuttal else None,
+            rebuttal_fresh,
+        ),
+        ("criterion-probes.json", criterion_probes, criterion_probes_fresh),
+        ("wrong-versions.json", wrong_versions, wrong_versions_fresh),
+    ):
+        if payload is None:
+            continue
+        path = task_dir / name
+        path.write_text(json.dumps(payload))
+        _rt_set_mtime(path, baseline_mtime + (1.0 if fresh else -10.0))
+
+    return task_id
+
+
+def _rt_pool_cut_entry(witness: str) -> dict:
+    """A probe-file entry REVIEW's pool cut. Its `error` is built by
+    calling `review._review_pool_cut` itself, not a copy of its wording,
+    so a wording change there is never silently missed here."""
+    from saffron.phases.review import ReviewPool, _review_pool_cut
+
+    pool = ReviewPool(remaining=0.10, floor=1.00)
+    return {
+        "witness": witness,
+        "claim": "c",
+        "cost_usd": 0.0,
+        "error": _review_pool_cut(pool, witness),
+        "probes": [],
+    }
+
+
+def test_ready_task_rebuilds_an_orphaned_task_whose_cell_went_green(tmp_path):
+    """Criteria 1: an `ORPHANED` task whose cell reached REVIEW, with one
+    anchored concern, rebuilds the same `ReadyTask` its `READY_FOR_REVIEW`
+    twin does. Neither rebuild writes a `tasks` row of its own."""
+    ledger, repo_id = _rt_ledger(tmp_path)
+    out_dir = tmp_path / "out"
+    repo = tmp_path / "target-repo"
+    mirror_path = tmp_path / "mirror-unused.git"
+
+    concern = Finding(
+        lens="correctness",
+        severity="concern",
+        file="src/x.py",
+        line=1,
+        claim="a concern",
+        anchored=True,
+    )
+    review_ok = LensReview(lens="correctness", findings=[concern], cost_usd=0.0)
+    task_id = _rt_orphaned_task(
+        ledger, repo_id, out_dir, spec_id="RT-GREEN", reviews=[review_ok]
+    )
+
+    before_orphaned = _rt_tasks_snapshot(ledger)
+    orphaned_result = task_module.ready_task(
+        "RT-GREEN",
+        repo=repo,
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir,
+        mirror_path=mirror_path,
+    )
+    assert isinstance(orphaned_result, task_module.ReadyTask)
+    assert orphaned_result.outcome.state == "READY_FOR_REVIEW"
+    # The `REVIEWING` turn `_rt_orphaned_task` records is this cell's own,
+    # so the rebuilt spend counts it rather than dropping it.
+    assert orphaned_result.outcome.spent_usd == pytest.approx(0.1)
+    assert _rt_tasks_snapshot(ledger) == before_orphaned
+
+    ledger.set_task_state(task_id, "READY_FOR_REVIEW")
+    before = _rt_tasks_snapshot(ledger)
+    ready_result = task_module.ready_task(
+        "RT-GREEN",
+        repo=repo,
+        repo_id=repo_id,
+        ledger=ledger,
+        out_dir=out_dir,
+        mirror_path=mirror_path,
+    )
+    assert isinstance(ready_result, task_module.ReadyTask)
+    assert orphaned_result == ready_result
+    assert _rt_tasks_snapshot(ledger) == before
+    ledger.close()
+
+
+def test_ready_task_refuses_an_orphaned_task_whose_cell_recorded_no_review_turn(
+    tmp_path,
+):
+    """Criteria 2: an `ORPHANED` task is refused when this cell holds no
+    `REVIEWING` turn. Suite turns with gate results do not count, and
+    neither does a `REVIEWING` turn only before the cutoff. The same
+    task admits once a `REVIEWING` turn lands after it."""
+    ledger, repo_id = _rt_ledger(tmp_path)
+    out_dir = tmp_path / "out"
+    repo = tmp_path / "target-repo"
+    mirror_path = tmp_path / "mirror-unused.git"
+
+    def _ready(spec_id: str):
+        return task_module.ready_task(
+            spec_id,
+            repo=repo,
+            repo_id=repo_id,
+            ledger=ledger,
+            out_dir=out_dir,
+            mirror_path=mirror_path,
+        )
+
+    task_a = _rt_orphaned_task(
+        ledger, repo_id, out_dir, spec_id="RT-NOTURN", with_turn=False
+    )
+    _rt_attempt(ledger, task_a, phase="IMPLEMENTING", cost=1.0, with_gate=True)
+    _rt_attempt(ledger, task_a, phase="REPAIRING", cost=1.0, with_gate=True)
+    result_a = _ready("RT-NOTURN")
+    assert isinstance(result_a, Refused)
+    assert str(task_a) in result_a.reason
+    assert "ORPHANED" in result_a.reason
+    assert "REVIEWING" in result_a.reason
+
+    task_b = _rt_orphaned_task(
+        ledger, repo_id, out_dir, spec_id="RT-OLDTURN", with_turn=False
+    )
+    old_turn = _rt_attempt(ledger, task_b, phase="REVIEWING", cost=0.1)
+    _rt_backdate(ledger, [old_turn], "2000-01-01 00:00:00")
+    result_b = _ready("RT-OLDTURN")
+    assert isinstance(result_b, Refused)
+    assert str(task_b) in result_b.reason
+    assert "ORPHANED" in result_b.reason
+    assert "REVIEWING" in result_b.reason
+
+    _rt_attempt(ledger, task_b, phase="REVIEWING", cost=0.1)
+    result_b2 = _ready("RT-OLDTURN")
+    assert isinstance(result_b2, task_module.ReadyTask)
+
+    # A turn started in the same second as `baseline.json`'s own mtime is
+    # still this cell's: the cutoff is inclusive, not strictly-after.
+    task_c = _rt_orphaned_task(
+        ledger, repo_id, out_dir, spec_id="RT-ATCUTOFF", with_turn=False
+    )
+    cutoff = task_module._cell_cutoff(out_dir / "RT-ATCUTOFF" / "baseline.json")
+    at_cutoff_turn = _rt_attempt(ledger, task_c, phase="REVIEWING", cost=0.1)
+    _rt_backdate(ledger, [at_cutoff_turn], cutoff)
+    result_c = _ready("RT-ATCUTOFF")
+    assert isinstance(result_c, task_module.ReadyTask)
+
+    ledger.close()
+
+
+def test_ready_task_refuses_an_orphaned_task_whose_review_would_not_end_ready(
+    tmp_path,
+):
+    """Criteria 2 and 3: an `ORPHANED` task is refused whenever its rebuilt
+    review would not end `READY_FOR_REVIEW`. That covers an errored lens
+    and an anchored blocker with no covering fresh `READY_FOR_REVIEW`
+    rebuttal, a `HOST_FILED` survivor included. It also covers a fresh
+    pool-cut entry in either probe file. A stale cut, another failure
+    there, and a covering rebuttal are each admitted, and the rebuttal is
+    carried onto the outcome. Flipping the row to `READY_FOR_REVIEW`
+    admits the errored lens, the survivor and the fresh cut again."""
+    from saffron.phases import review
+
+    ledger, repo_id = _rt_ledger(tmp_path)
+    out_dir = tmp_path / "out"
+    repo = tmp_path / "target-repo"
+    mirror_path = tmp_path / "mirror-unused.git"
+
+    def _ready(spec_id: str):
+        return task_module.ready_task(
+            spec_id,
+            repo=repo,
+            repo_id=repo_id,
+            ledger=ledger,
+            out_dir=out_dir,
+            mirror_path=mirror_path,
+        )
+
+    blocker = Finding(
+        lens="correctness",
+        severity="blocker",
+        file="x",
+        line=1,
+        claim="broken",
+        anchored=True,
+    )
+    survivor = Finding(
+        lens="correctness",
+        severity="blocker",
+        file="x",
+        line=1,
+        claim=f"{review.HOST_FILED}stayed green",
+        anchored=False,
+    )
+    errored_review = [
+        LensReview(lens="adequacy", findings=[], cost_usd=0.0, error="the turn failed")
+    ]
+    blocker_review = [LensReview(lens="correctness", findings=[blocker])]
+    survivor_review = [LensReview(lens="correctness", findings=[survivor])]
+
+    def _rebuttal(state: str) -> RebutResult:
+        return RebutResult(
+            state=state,
+            why="x",
+            rebuttal=RebuttalTurn(
+                rebuttals=[Rebuttal(finding=1, action="argued", argument="a")]
+            ),
+            verdicts=[
+                LensVerdicts(
+                    lens="correctness",
+                    verdicts=[Verdict(finding=1, verdict="withdrawn", reason="r")],
+                    cost_usd=0.0,
+                )
+            ],
+            moved=True,
+            cost_usd=0.1,
+        )
+
+    # A: an errored lens.
+    task_a = _rt_orphaned_task(
+        ledger, repo_id, out_dir, spec_id="RT-A", reviews=errored_review
+    )
+    result_a = _ready("RT-A")
+    assert isinstance(result_a, Refused)
+    assert "ORPHANED" in result_a.reason and "adequacy" in result_a.reason
+
+    # B: an anchored blocker, no rebuttal at all.
+    _rt_orphaned_task(ledger, repo_id, out_dir, spec_id="RT-B", reviews=blocker_review)
+    result_b = _ready("RT-B")
+    assert isinstance(result_b, Refused)
+    assert "ORPHANED" in result_b.reason and "REBUT" in result_b.reason
+
+    # C: an anchored blocker, a stale READY_FOR_REVIEW rebuttal.
+    _rt_orphaned_task(
+        ledger,
+        repo_id,
+        out_dir,
+        spec_id="RT-C",
+        reviews=blocker_review,
+        rebuttal=_rebuttal("READY_FOR_REVIEW"),
+        rebuttal_fresh=False,
+    )
+    result_c = _ready("RT-C")
+    assert isinstance(result_c, Refused)
+    assert "ORPHANED" in result_c.reason and "REBUT" in result_c.reason
+
+    # D/E/F: a fresh rebuttal in each non-READY_FOR_REVIEW state.
+    for n, state in enumerate(("EXHAUSTED", "REBUTTAL_UNJUDGED", "GATE_ERROR")):
+        spec_id = f"RT-DEF{n}"
+        _rt_orphaned_task(
+            ledger,
+            repo_id,
+            out_dir,
+            spec_id=spec_id,
+            reviews=blocker_review,
+            rebuttal=_rebuttal(state),
+        )
+        result = _ready(spec_id)
+        assert isinstance(result, Refused)
+        assert "ORPHANED" in result.reason and "REBUT" in result.reason
+
+    # G: an unanchored HOST_FILED survivor, no rebuttal.
+    task_g = _rt_orphaned_task(
+        ledger, repo_id, out_dir, spec_id="RT-G", reviews=survivor_review
+    )
+    result_g = _ready("RT-G")
+    assert isinstance(result_g, Refused)
+    assert "ORPHANED" in result_g.reason and "REBUT" in result_g.reason
+
+    # H: an anchored blocker with a fresh READY_FOR_REVIEW rebuttal, admitted.
+    readable = _rebuttal("READY_FOR_REVIEW")
+    _rt_orphaned_task(
+        ledger,
+        repo_id,
+        out_dir,
+        spec_id="RT-H",
+        reviews=blocker_review,
+        rebuttal=readable,
+    )
+    result_h = _ready("RT-H")
+    assert isinstance(result_h, task_module.ReadyTask)
+    assert result_h.outcome.rebut_result == readable
+
+    cut = _rt_pool_cut_entry("tests/x.py::test_w")
+    other = {
+        "witness": "tests/x.py::test_w",
+        "claim": "c",
+        "cost_usd": 0.0,
+        "error": "the turn failed",
+        "probes": [],
+    }
+
+    # I/J/K: in criterion-probes.json, a fresh cut, a stale cut, another error.
+    _rt_orphaned_task(ledger, repo_id, out_dir, spec_id="RT-I", criterion_probes=[cut])
+    result_i = _ready("RT-I")
+    assert isinstance(result_i, Refused)
+    assert "ORPHANED" in result_i.reason and "tests/x.py::test_w" in result_i.reason
+
+    _rt_orphaned_task(
+        ledger,
+        repo_id,
+        out_dir,
+        spec_id="RT-J",
+        criterion_probes=[cut],
+        criterion_probes_fresh=False,
+    )
+    assert isinstance(_ready("RT-J"), task_module.ReadyTask)
+
+    _rt_orphaned_task(
+        ledger, repo_id, out_dir, spec_id="RT-K", criterion_probes=[other]
+    )
+    assert isinstance(_ready("RT-K"), task_module.ReadyTask)
+
+    # L/M/N: the same three shapes, in wrong-versions.json instead.
+    task_l = _rt_orphaned_task(
+        ledger, repo_id, out_dir, spec_id="RT-L", wrong_versions=[cut]
+    )
+    result_l = _ready("RT-L")
+    assert isinstance(result_l, Refused)
+    assert "ORPHANED" in result_l.reason and "tests/x.py::test_w" in result_l.reason
+
+    _rt_orphaned_task(
+        ledger,
+        repo_id,
+        out_dir,
+        spec_id="RT-M",
+        wrong_versions=[cut],
+        wrong_versions_fresh=False,
+    )
+    assert isinstance(_ready("RT-M"), task_module.ReadyTask)
+
+    _rt_orphaned_task(ledger, repo_id, out_dir, spec_id="RT-N", wrong_versions=[other])
+    assert isinstance(_ready("RT-N"), task_module.ReadyTask)
+
+    # Flipping the row to READY_FOR_REVIEW rebuilds each refused case.
+    for task_id, spec_id in ((task_a, "RT-A"), (task_g, "RT-G"), (task_l, "RT-L")):
+        ledger.set_task_state(task_id, "READY_FOR_REVIEW")
+        assert isinstance(_ready(spec_id), task_module.ReadyTask)
+
+    ledger.close()
+
+
+def test_a_raising_cell_whose_orphaned_task_is_green_names_saffron_package(
+    tmp_path, monkeypatch, capsys
+):
+    """Criterion 6: `run_task` prints `saffron package <spec id>` and marks
+    the raise with `mark_raised_in_package` whenever `ready_task` would
+    admit the task its own `run_one_cell` call wrote. That holds for a
+    `CellRuntimeError` and for a bare `RuntimeError` alike. It holds for
+    neither a task with no `REVIEWING` turn, nor while `ready_task`
+    itself raises a `GitError` or a `KeyError`. No live row is written in
+    any case."""
+    from saffron.cell.runtime import CellRuntimeError
+    from saffron.task import raised_in_package
+
+    out_dir = tmp_path / "out"
+
+    def _seed(ledger: Ledger, task_id: int, spec_id: str, *, with_turn: bool) -> None:
+        repo_id = ledger.upsert_repo(spec_id, f"o-{spec_id}", f"m-{spec_id}", None)
+        run_id = ledger.create_run(repo_id, "a" * 40)
+        ledger._db.execute(
+            "INSERT INTO tasks "
+            "(task_id, run_id, spec_id, spec_sha, state, branch, record_key) "
+            "VALUES (?, ?, ?, ?, 'ORPHANED', ?, ?)",
+            (
+                task_id,
+                run_id,
+                spec_id,
+                "a" * 64,
+                f"saffron/{spec_id}",
+                f"seed-{spec_id}",
+            ),
+        )
+        ledger._db.commit()
+        ledger.record_spec_text(
+            task_id,
+            origin="revision",
+            spec_id=spec_id,
+            path=f".saffron/specs/{spec_id}.md",
+            text=_RT_TEXT,
+        )
+        task_dir = out_dir / spec_id
+        _rt_write_patch(
+            task_dir, base_sha="a" * 40, tree_base="a" * 40, head_sha="c" * 40
+        )
+        _rt_seed_records(task_dir, when=time.time() - 5)
+        if with_turn:
+            _rt_attempt(ledger, task_id, phase="REVIEWING", cost=0.1)
+
+    def _run(
+        spec_id: str, task_id: int, exc: BaseException, *, with_turn: bool
+    ) -> None:
+        def _run_one_cell(*a, **k):
+            _seed(k["ledger"], task_id, spec_id, with_turn=with_turn)
+            raise exc
+
+        monkeypatch.setattr(task_module, "run_one_cell", _run_one_cell)
+        with pytest.raises(type(exc)) as excinfo:
+            task_module.run_task(
+                _one_spec(spec_id),
+                "s" * 40,
+                ceilings=_ceilings(),
+                base=_pinned(tmp_path),
+                repo_id=1,
+                repo=tmp_path / "target-repo",
+                ledger=Ledger(tmp_path / f"{spec_id}.db"),
+                out_dir=out_dir,
+                token=None,
+            )
+        assert excinfo.value is exc
+
+    # 1) A CellRuntimeError past an admitted, green task.
+    err1 = CellRuntimeError("the proxy died")
+    _run("MK-301", 301, err1, with_turn=True)
+    printed = capsys.readouterr().out
+    assert "ORPHANED" in printed
+    assert "saffron package MK-301" in printed
+    assert raised_in_package(err1)
+
+    # 2) A bare RuntimeError past an admitted, green task.
+    err2 = RuntimeError("something else broke")
+    _run("MK-302", 302, err2, with_turn=True)
+    printed = capsys.readouterr().out
+    assert "saffron package MK-302" in printed
+    assert raised_in_package(err2)
+
+    # 3) A CellRuntimeError past a task with no REVIEWING turn.
+    err3 = CellRuntimeError("missed review entirely")
+    _run("MK-303", 303, err3, with_turn=False)
+    printed = capsys.readouterr().out
+    assert "saffron package" not in printed
+    assert not raised_in_package(err3)
+
+    # 4) A CellRuntimeError while `ready_task` itself raises `GitError`.
+    def _ready_raises_git(*a, **k):
+        raise GitError("the mirror is unreadable")
+
+    monkeypatch.setattr(task_module, "ready_task", _ready_raises_git)
+    err4 = CellRuntimeError("during a GitError from ready_task")
+    _run("MK-304", 304, err4, with_turn=True)
+    printed = capsys.readouterr().out
+    assert "saffron package" not in printed
+    assert not raised_in_package(err4)
+
+    # 5) A CellRuntimeError while `ready_task` itself raises `KeyError`.
+    def _ready_raises_key(*a, **k):
+        raise KeyError("state")
+
+    monkeypatch.setattr(task_module, "ready_task", _ready_raises_key)
+    err5 = CellRuntimeError("during a KeyError from ready_task")
+    _run("MK-305", 305, err5, with_turn=True)
+    printed = capsys.readouterr().out
+    assert "saffron package" not in printed
+    assert not raised_in_package(err5)
+
+    assert _rows(out_dir) == []
 
 
 # --- SA-0315: `ready_task`'s `tree_base` fallback reads the mirror -----
