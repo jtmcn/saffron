@@ -4180,6 +4180,79 @@ def test_ready_task_refuses_an_orphaned_task_whose_review_would_not_end_ready(
     ledger.close()
 
 
+def test_ready_task_refuses_an_orphaned_task_on_a_cut_pool_before_an_errored_lens_or_a_blocker(
+    tmp_path,
+):
+    """A fresh pool-cut entry reaches `review_state`'s own `cut` branch
+    first, ahead of its errored-lens branch and its blocker branch.
+    That is the order the live cell's own call gives it
+    (`saffron/cell/session.py:3591`). The refusal names the cut witness
+    with `review_state`'s own cut-branch wording, not the errored lens
+    and not `REBUT`."""
+    from saffron.phases import review
+
+    ledger, repo_id = _rt_ledger(tmp_path)
+    out_dir = tmp_path / "out"
+    repo = tmp_path / "target-repo"
+    mirror_path = tmp_path / "mirror-unused.git"
+
+    def _ready(spec_id: str):
+        return task_module.ready_task(
+            spec_id,
+            repo=repo,
+            repo_id=repo_id,
+            ledger=ledger,
+            out_dir=out_dir,
+            mirror_path=mirror_path,
+        )
+
+    cut = _rt_pool_cut_entry("tests/x.py::test_w")
+    expected_why = review.review_state([], cut="tests/x.py::test_w")[1]
+
+    errored_review = [
+        LensReview(lens="adequacy", findings=[], cost_usd=0.0, error="the turn failed")
+    ]
+    blocker = Finding(
+        lens="correctness",
+        severity="blocker",
+        file="x",
+        line=1,
+        claim="broken",
+        anchored=True,
+    )
+    blocker_review = [LensReview(lens="correctness", findings=[blocker])]
+
+    _rt_orphaned_task(
+        ledger,
+        repo_id,
+        out_dir,
+        spec_id="RT-CUT-ERRORED",
+        reviews=errored_review,
+        criterion_probes=[cut],
+    )
+    result_errored = _ready("RT-CUT-ERRORED")
+    assert isinstance(result_errored, Refused)
+    assert "ORPHANED" in result_errored.reason
+    assert expected_why in result_errored.reason
+    assert "adequacy" not in result_errored.reason
+
+    _rt_orphaned_task(
+        ledger,
+        repo_id,
+        out_dir,
+        spec_id="RT-CUT-BLOCKER",
+        reviews=blocker_review,
+        wrong_versions=[cut],
+    )
+    result_blocker = _ready("RT-CUT-BLOCKER")
+    assert isinstance(result_blocker, Refused)
+    assert "ORPHANED" in result_blocker.reason
+    assert expected_why in result_blocker.reason
+    assert "REBUT" not in result_blocker.reason
+
+    ledger.close()
+
+
 def test_a_raising_cell_whose_orphaned_task_is_green_names_saffron_package(
     tmp_path, monkeypatch, capsys
 ):
