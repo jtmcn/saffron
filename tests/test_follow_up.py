@@ -2591,19 +2591,20 @@ def test_a_draft_declaring_depends_on_is_judged_minted_and_recorded_with_those_l
         group_comment,
     ]
 
-    # This anchor matches no alias, so cutting it loses nothing: a cut
-    # that skipped the key whenever an `&` appeared would mint nothing here.
+    # This anchor matches no alias, so cutting it loses nothing.
     draft_flow = _hand_draft(
         title="Flow form follow-up",
         extra="depends_on: &flow_deps [SA-0378]\nconsumes: [src/a.py:alpha]\n",
     )
     cut_flow = _hand_draft(title="Flow form follow-up", extra="")
 
+    # A comment and a glob outside the cut keys stay, so the cut still holds.
+    kept = "# kept note\nforbidden:\n  - docs/**\n"
     draft_block = _hand_draft(
         title="Block form follow-up",
-        extra="depends_on:\n  - SA-0378\nconsumes:\n  - src/a.py:alpha\n",
+        extra=f"{kept}depends_on:\n  - SA-0378\nconsumes:\n  - src/a.py:alpha\n",
     )
-    cut_block = _hand_draft(title="Block form follow-up", extra="")
+    cut_block = _hand_draft(title="Block form follow-up", extra=kept)
 
     draft_budget = _hand_draft(
         title="Budget over origin follow-up",
