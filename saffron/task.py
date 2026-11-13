@@ -1463,7 +1463,10 @@ def ready_task(
     )
 
     if orphaned:
-        review_outcome, review_why = review_state(reviews)
+        cut_witness = _pool_cut_witness(criterion_probes) or _pool_cut_witness(
+            wrong_versions
+        )
+        review_outcome, review_why = review_state(reviews, cut=cut_witness)
         if review_outcome == "REVIEW_INCOMPLETE":
             return Refused(reason=f"task {task_id} is ORPHANED, and {review_why}")
         if review_outcome == "REBUTTING" and (
@@ -1473,16 +1476,6 @@ def ready_task(
                 reason=(
                     f"task {task_id} is ORPHANED, and its review routes to "
                     "REBUT with no READY_FOR_REVIEW rebuttal on record"
-                )
-            )
-        cut_witness = _pool_cut_witness(criterion_probes) or _pool_cut_witness(
-            wrong_versions
-        )
-        if cut_witness is not None:
-            return Refused(
-                reason=(
-                    f"task {task_id} is ORPHANED, and REVIEW's pool was cut "
-                    f"before {cut_witness} started"
                 )
             )
 
