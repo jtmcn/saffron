@@ -247,7 +247,8 @@ def main(argv: list[str] | None = None) -> int:
     package_parser = subcommands.add_parser(
         "package",
         help="run PACKAGE alone on a READY_FOR_REVIEW task whose own "
-        "PACKAGE raised, no agent and no cell but re-verification's own",
+        "PACKAGE raised, or an ORPHANED one whose cell went green, no "
+        "agent and no cell but re-verification's own",
     )
     package_parser.add_argument(
         "spec_id", help="the spec id whose newest task PACKAGE runs against"

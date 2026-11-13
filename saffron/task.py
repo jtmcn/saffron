@@ -88,7 +88,12 @@ from saffron.phases.rebut import (
     unkept_fixes,
     unread_blockers,
 )
-from saffron.phases.review import LensReview, anchored_blockers, anchored_concerns
+from saffron.phases.review import (
+    LensReview,
+    anchored_blockers,
+    anchored_concerns,
+    review_state,
+)
 from saffron.reconcile import GhRunner, reconcile
 from saffron.record.contract import RecordError
 from saffron.report import index as index_report
@@ -625,13 +630,14 @@ _RAISED_IN_PACKAGE = "_saffron_raised_in_package"
 
 
 def mark_raised_in_package(exc: BaseException) -> None:
-    """Mark `exc` as having escaped `run_task`'s own `package_phase.package`
-    call for a `READY_FOR_REVIEW` cell. The mark lives on the object itself.
-    A bare re-raise of the same instance still carries it wherever a batch
-    next catches it. `run_task` never marks an exhausted-mode raise:
-    `saffron package` refuses a task that is not `READY_FOR_REVIEW`, so
-    naming that command for one would send the operator to a refusal
-    (`b-066901`)."""
+    """Mark `exc` as a raise `saffron package` can still recover from:
+    one that escaped `run_task`'s own `package_phase.package` call for a
+    `READY_FOR_REVIEW` cell, or one from `run_one_cell` whose task
+    `ready_task` would admit. The mark lives on the object itself. A bare
+    re-raise of the same instance still carries it wherever a batch next
+    catches it. `run_task` never marks an exhausted-mode raise, or one
+    `ready_task` refuses: naming `saffron package` for either would send
+    the operator to a second refusal (`b-066901`)."""
     setattr(exc, _RAISED_IN_PACKAGE, True)
 
 
@@ -966,7 +972,7 @@ def run_task(
             emit=emit,
             on_state=_write_live,
         )
-    except BaseException:
+    except BaseException as cell_exc:
         if written:
             try:
                 index_report.append_queue_line(
@@ -978,6 +984,23 @@ def run_task(
                 print(
                     f"{spec.id}: the live row for ORPHANED could not be written: {exc}"
                 )
+        # b-f582ee: a packageable patch can outlive this raise, so a raise
+        # `ready_task` admits names `saffron package` rather than stranding it.
+        if isinstance(cell_exc, Exception):
+            try:
+                ready = ready_task(
+                    spec.id,
+                    repo=repo,
+                    repo_id=repo_id,
+                    ledger=ledger,
+                    out_dir=out_dir,
+                    mirror_path=base.mirror,
+                )
+            except Exception:
+                ready = None
+            if isinstance(ready, ReadyTask):
+                print(f"{spec.id:<10} ORPHANED  saffron package {spec.id}")
+                mark_raised_in_package(cell_exc)
         raise
     # Everything below runs only when `run_one_cell` returned, never
     # when it raised: that path above already re-raised past this point.
@@ -1139,9 +1162,10 @@ _SUITE_PHASES = frozenset({"IMPLEMENTING", "REPAIRING"})
 
 @dataclass(frozen=True, kw_only=True)
 class ReadyTask:
-    """What `ready_task` rebuilds for a `READY_FOR_REVIEW` task whose
-    `package()` raised. Carries a live-shaped `outcome`, the `spec` the
-    task ran, and the `parent_branch` it stacked on, or `None` unstacked."""
+    """What `ready_task` rebuilds for a `READY_FOR_REVIEW` task, or for an
+    `ORPHANED` one whose cell went green and whose review would still end
+    there. Carries a live-shaped `outcome`, the `spec` the task ran, and
+    the `parent_branch` it stacked on, or `None` unstacked."""
 
     outcome: CellOutcome
     spec: Spec
@@ -1162,6 +1186,29 @@ def _cell_cutoff(baseline_path: Path) -> str:
     text comparison, never a parsed one, decides which turns are this cell's."""
     floored = int(baseline_path.stat().st_mtime)
     return _ledger_time(datetime.fromtimestamp(floored, tz=UTC).isoformat())
+
+
+# The fixed ends of `review._review_pool_cut`'s text, since its own
+# `remaining`/`floor` numbers never reach disk.
+_POOL_CUT_PREFIX = "REVIEW's pool held $"
+
+
+def _pool_cut_witness(entries: list[dict]) -> str | None:
+    """The witness named by the first entry whose `error` matches both
+    ends of `review._review_pool_cut`'s text for that entry's own
+    `witness`: the prefix every cut shares, and the suffix built from the
+    entry's own name. `None` when no entry's `error` matches."""
+    for entry in entries:
+        error = entry.get("error")
+        witness = entry.get("witness")
+        if (
+            isinstance(error, str)
+            and isinstance(witness, str)
+            and error.startswith(_POOL_CUT_PREFIX)
+            and error.endswith(f"— {witness} never started")
+        ):
+            return witness
+    return None
 
 
 def _spec_for_task(
@@ -1308,14 +1355,14 @@ def ready_task(
     mirror_path: Path,
 ) -> ReadyTask | Refused:
     """Rebuilds what `package()` needs for `spec_id`'s newest task in this
-    repo, with no live `CellOutcome`, from the ledger and the task
-    directory alone. Nothing writes ledger or disk, except the `tree_base`
-    fallback, which touches `mirror_path` when no `pushed_sha` matches it.
+    repo, admitting `READY_FOR_REVIEW` or `ORPHANED`, from the ledger and task
+    directory alone. Nothing writes ledger or disk except the `tree_base`
+    fallback, touching `mirror_path` when no `pushed_sha` matches it.
 
-    Refuses by name: the spec id, the state, the pull request url, the
-    missing, stale or unmatched file or sha, and a damaged current
-    exemption. A git failure in the fallback, or a host failure reading
-    the exemption, raises instead.
+    Refuses by name: the spec id, the state, the pull request url, a missing,
+    stale or unmatched file or sha, and a damaged exemption. An `ORPHANED`
+    task also needs a `REVIEWING` turn and a passing review. Raises on a git
+    failure in the fallback, or a host failure reading the exemption.
     """
     if repo_id is None:
         return Refused(reason=f"{spec_id} has no task in this repo")
@@ -1323,10 +1370,11 @@ def ready_task(
     if newest is None:
         return Refused(reason=f"{spec_id} has no task in this repo")
     task_id = newest["task_id"]
-    if newest["state"] != "READY_FOR_REVIEW":
+    if newest["state"] not in ("READY_FOR_REVIEW", "ORPHANED"):
         return Refused(
-            reason=f"task {task_id} is {newest['state']}, not READY_FOR_REVIEW"
+            reason=f"task {task_id} is {newest['state']}, not READY_FOR_REVIEW or ORPHANED"
         )
+    orphaned = newest["state"] == "ORPHANED"
     if newest["pr_url"]:
         return Refused(
             reason=f"task {task_id} already carries a pull request: {newest['pr_url']}"
@@ -1357,6 +1405,15 @@ def ready_task(
 
     cutoff = _cell_cutoff(baseline_path)
     this_cells = [a for a in ledger.attempts(task_id) if a["started_at"] >= cutoff]
+
+    # `REVIEWING` is the ledger's own record that a suite went green
+    # (`_drive_cell` sets it on no other decision).
+    if orphaned and not any(a["phase"] == "REVIEWING" for a in this_cells):
+        return Refused(
+            reason=(
+                f"task {task_id} is ORPHANED, and this cell recorded no REVIEWING turn"
+            )
+        )
 
     spent_usd = sum(
         (a["cost_usd_est"] or 0.0)
@@ -1399,6 +1456,35 @@ def ready_task(
         if _fresh("notes.json")
         else ""
     )
+    criterion_probes = (
+        json.loads((task_dir / "criterion-probes.json").read_text())
+        if _fresh("criterion-probes.json")
+        else []
+    )
+
+    if orphaned:
+        review_outcome, review_why = review_state(reviews)
+        if review_outcome == "REVIEW_INCOMPLETE":
+            return Refused(reason=f"task {task_id} is ORPHANED, and {review_why}")
+        if review_outcome == "REBUTTING" and (
+            rebut_result is None or rebut_result.state != "READY_FOR_REVIEW"
+        ):
+            return Refused(
+                reason=(
+                    f"task {task_id} is ORPHANED, and its review routes to "
+                    "REBUT with no READY_FOR_REVIEW rebuttal on record"
+                )
+            )
+        cut_witness = _pool_cut_witness(criterion_probes) or _pool_cut_witness(
+            wrong_versions
+        )
+        if cut_witness is not None:
+            return Refused(
+                reason=(
+                    f"task {task_id} is ORPHANED, and REVIEW's pool was cut "
+                    f"before {cut_witness} started"
+                )
+            )
 
     try:
         revert_exempt = package_phase.read_revert_exempt(task_dir)

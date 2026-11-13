@@ -27,9 +27,9 @@ type is not importing the driver that builds it. `raised_in_package` is
 imported too. It reads a mark on an exception and drives nothing, so it
 tells a raise `run_task` marked from any other.
 That mark names a raise escaping `run_task`'s own PACKAGE call for a
-`READY_FOR_REVIEW` cell. A marked raise is never offered again, and it
-closes the batch row `INFRASTRUCTURE` no matter what else the night did
-(`b-066901`).
+`READY_FOR_REVIEW` cell, or a raise whose task `ready_task` would still admit. A
+marked raise is never offered again, and it closes the batch row
+`INFRASTRUCTURE` no matter what else the night did (`b-066901`).
 """
 
 from __future__ import annotations
@@ -443,8 +443,9 @@ def _is_layer(result: CellOutcome | Refused) -> bool:
     `RATE_LIMITED`, `PROVIDER_UNREACHABLE`, `PREFLIGHT_FAILED` and an
     unmarked `CellRuntimeError` queued rather than record a miss. A
     `CellRuntimeError` `raised_in_package` marks is a miss like any other
-    raise. PACKAGE already ran its cell, so queuing it again would waste
-    that (`b-066901`)."""
+    raise, whether the mark came from PACKAGE itself or from `ready_task`
+    admitting the raised cell. Either way the cell already ran, so
+    queuing it again would waste that (`b-066901`)."""
     return isinstance(result, CellOutcome) and result.state == "READY_FOR_REVIEW"
 
 

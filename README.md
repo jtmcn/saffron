@@ -175,8 +175,9 @@ git failure:
 uv run saffron mutant <spec id> --from <file.yaml> --repo .
 ```
 
-Run PACKAGE alone on a `READY_FOR_REVIEW` task whose own PACKAGE raised. No agent
-runs, and the token is scoped the same way:
+Run PACKAGE alone on a `READY_FOR_REVIEW` task whose own PACKAGE raised, or on an
+`ORPHANED` task whose cell went green. No agent runs, and the token is scoped the
+same way:
 
 ```sh
 CLAUDE_CODE_OAUTH_TOKEN=... uv run saffron package <spec id> --repo .
