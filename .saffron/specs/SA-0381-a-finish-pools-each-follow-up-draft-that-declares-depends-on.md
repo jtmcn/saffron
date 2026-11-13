@@ -120,10 +120,10 @@ text is `session.text` (`saffron/follow_up.py:488-511`).
 **What reads the minted text later.** `record_spec_text` hashes the text it
 records (`saffron/ledger.py:2089`). Before the cell, `_recorded_spec_text`
 refuses a text that does not hash to its `spec_sha`
-(`saffron/task.py:665-666`). It also refuses a text whose `depends_on`
-differs from the handed spec's (`saffron/task.py:678-681`). The batch
+(`saffron/task.py:671-672`). It also refuses a text whose `depends_on`
+differs from the handed spec's (`saffron/task.py:684-687`). The batch
 drives the returned candidates, not the minted ones
-(`saffron/batch.py:1036-1048`). So both candidates' `spec`, their
+(`saffron/batch.py:1037-1049`). So both candidates' `spec`, their
 `spec_sha` and the recorded text must all be the same cut text.
 
 **Why `consumes` goes too.** `Spec` refuses a `consumes` entry with no
@@ -137,12 +137,12 @@ pays for the whole draft first.
 
 Finish 83 wrote three follow-up groups. Each became one `write` call, and
 each call is one spec writer session in a critic cell
-(`saffron/cli.py:1878-1913`). Each session made four agent calls: the
+(`saffron/cli.py:1879-1914`). Each session made four agent calls: the
 draft turn, its extraction turn, one in-session send-back and that
 send-back's extraction turn. `SPEC_WRITER_SEND_BACKS` is 1
 (`saffron/spec_review.py:580`). The session's own `faults` judged both
 drafts with the policy's form gates (`saffron/spec_review.py:889`,
-`saffron/cli.py:1176-1211`). Each judgement was a baseline suite and a head
+`saffron/cli.py:1177-1212`). Each judgement was a baseline suite and a head
 suite. The finish log measured the three sessions as follows, with the SDK
 turns of their four calls summed.
 
