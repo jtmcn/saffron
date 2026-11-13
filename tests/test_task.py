@@ -2366,7 +2366,7 @@ def test_a_raise_that_escapes_run_task_from_package_is_marked_and_kept(
 ):
     """`run_task` marks every exception that escapes it from its own
     `package_phase.package` call for a `READY_FOR_REVIEW` cell, or a
-    `run_one_cell` raise `ready_task` would admit. The mark is
+    `run_one_cell` raise whose task `ready_task` would admit. The mark is
     `saffron.task.mark_raised_in_package`, and the same object re-raises
     with its type unchanged. `saffron.task.raised_in_package(exc)` reads
     the mark. An exhausted-mode raise, a `GATE_ERROR` cell's own
@@ -3858,7 +3858,7 @@ def _rt_pool_cut_entry(witness: str) -> dict:
 
 
 def test_ready_task_rebuilds_an_orphaned_task_whose_cell_went_green(tmp_path):
-    """Criteria 1: an `ORPHANED` task whose cell reached REVIEW, with one
+    """Criterion 1: an `ORPHANED` task whose cell reached REVIEW, with one
     anchored concern, rebuilds the same `ReadyTask` its `READY_FOR_REVIEW`
     twin does. Neither rebuild writes a `tasks` row of its own."""
     ledger, repo_id = _rt_ledger(tmp_path)
@@ -3914,7 +3914,7 @@ def test_ready_task_rebuilds_an_orphaned_task_whose_cell_went_green(tmp_path):
 def test_ready_task_refuses_an_orphaned_task_whose_cell_recorded_no_review_turn(
     tmp_path,
 ):
-    """Criteria 2: an `ORPHANED` task is refused when this cell holds no
+    """Criterion 2: an `ORPHANED` task is refused when this cell holds no
     `REVIEWING` turn. Suite turns with gate results do not count, and
     neither does a `REVIEWING` turn only before the cutoff. The same
     task admits once a `REVIEWING` turn lands after it."""
@@ -3976,7 +3976,7 @@ def test_ready_task_refuses_an_orphaned_task_whose_cell_recorded_no_review_turn(
 def test_ready_task_refuses_an_orphaned_task_whose_review_would_not_end_ready(
     tmp_path,
 ):
-    """Criteria 2 and 3: an `ORPHANED` task is refused whenever its rebuilt
+    """Criterion 3: an `ORPHANED` task is refused whenever its rebuilt
     review would not end `READY_FOR_REVIEW`. That covers an errored lens
     and an anchored blocker with no covering fresh `READY_FOR_REVIEW`
     rebuttal, a `HOST_FILED` survivor included. It also covers a fresh
@@ -4157,6 +4157,21 @@ def test_ready_task_refuses_an_orphaned_task_whose_review_would_not_end_ready(
     _rt_orphaned_task(ledger, repo_id, out_dir, spec_id="RT-N", wrong_versions=[other])
     assert isinstance(_ready("RT-N"), task_module.ReadyTask)
 
+    # O/P: an error sharing one end of the cut text only, admitted.
+    prefix_only = {
+        **_rt_pool_cut_entry("tests/x.py::other"),
+        "witness": "tests/x.py::test_w",
+    }
+    suffix_only = {**other, "error": "x — tests/x.py::test_w never started"}
+    _rt_orphaned_task(
+        ledger, repo_id, out_dir, spec_id="RT-O", criterion_probes=[prefix_only]
+    )
+    assert isinstance(_ready("RT-O"), task_module.ReadyTask)
+    _rt_orphaned_task(
+        ledger, repo_id, out_dir, spec_id="RT-P", wrong_versions=[suffix_only]
+    )
+    assert isinstance(_ready("RT-P"), task_module.ReadyTask)
+
     # Flipping the row to READY_FOR_REVIEW rebuilds each refused case.
     for task_id, spec_id in ((task_a, "RT-A"), (task_g, "RT-G"), (task_l, "RT-L")):
         ledger.set_task_state(task_id, "READY_FOR_REVIEW")
@@ -4172,7 +4187,7 @@ def test_a_raising_cell_whose_orphaned_task_is_green_names_saffron_package(
     the raise with `mark_raised_in_package` whenever `ready_task` would
     admit the task its own `run_one_cell` call wrote. That holds for a
     `CellRuntimeError` and for a bare `RuntimeError` alike. It holds for
-    neither a task with no `REVIEWING` turn, nor while `ready_task`
+    neither an interrupt, a task with no `REVIEWING` turn, nor while `ready_task`
     itself raises a `GitError` or a `KeyError`. No live row is written in
     any case."""
     from saffron.cell.runtime import CellRuntimeError
@@ -4255,6 +4270,13 @@ def test_a_raising_cell_whose_orphaned_task_is_green_names_saffron_package(
     printed = capsys.readouterr().out
     assert "saffron package" not in printed
     assert not raised_in_package(err3)
+
+    # 3b) An interrupt past an admitted, green task asks nothing.
+    err3b = KeyboardInterrupt()
+    _run("MK-306", 306, err3b, with_turn=True)
+    printed = capsys.readouterr().out
+    assert "saffron package" not in printed
+    assert not raised_in_package(err3b)
 
     # 4) A CellRuntimeError while `ready_task` itself raises `GitError`.
     def _ready_raises_git(*a, **k):

@@ -1360,9 +1360,9 @@ def ready_task(
     fallback, touching `mirror_path` when no `pushed_sha` matches it.
 
     Refuses by name: the spec id, the state, the pull request url, a missing,
-    stale or unmatched file or sha, and a damaged exemption. For `ORPHANED`
-    alone it also refuses a missing `REVIEWING` turn or a failing review. A
-    git failure in the fallback, or a host failure reading it, raises instead.
+    stale or unmatched file or sha, and a damaged exemption. An `ORPHANED`
+    task also needs a `REVIEWING` turn and a passing review. Raises on a git
+    failure in the fallback, or a host failure reading the exemption.
     """
     if repo_id is None:
         return Refused(reason=f"{spec_id} has no task in this repo")
@@ -1372,7 +1372,7 @@ def ready_task(
     task_id = newest["task_id"]
     if newest["state"] not in ("READY_FOR_REVIEW", "ORPHANED"):
         return Refused(
-            reason=f"task {task_id} is {newest['state']}, not READY_FOR_REVIEW"
+            reason=f"task {task_id} is {newest['state']}, not READY_FOR_REVIEW or ORPHANED"
         )
     orphaned = newest["state"] == "ORPHANED"
     if newest["pr_url"]:

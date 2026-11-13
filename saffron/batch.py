@@ -27,7 +27,7 @@ type is not importing the driver that builds it. `raised_in_package` is
 imported too. It reads a mark on an exception and drives nothing, so it
 tells a raise `run_task` marked from any other.
 That mark names a raise escaping `run_task`'s own PACKAGE call for a
-`READY_FOR_REVIEW` cell, or a raise `ready_task` would still admit. A
+`READY_FOR_REVIEW` cell, or a raise whose task `ready_task` would still admit. A
 marked raise is never offered again, and it closes the batch row
 `INFRASTRUCTURE` no matter what else the night did (`b-066901`).
 """
