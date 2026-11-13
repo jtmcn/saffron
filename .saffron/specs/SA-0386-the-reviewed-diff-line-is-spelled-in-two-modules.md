@@ -3,7 +3,7 @@ id: SA-0386
 title: "REVIEW's reviewed-diff line is spelled once in `session.py` and again in `qualify.py`, so a wording change to either unbinds every record"
 type: refactor
 priority: 3
-estimated_lines: 78
+estimated_lines: 87
 estimate_measured: true
 touches:
   - saffron/cell/session.py
@@ -66,15 +66,19 @@ acceptance:
       - "`session.py` declares the constant but keeps its f-string literal at the `_phase_start` call."
       - "The constant drops its trailing space, and both sides join it to the hash with a space of their own."
       - "The constant's wording changes, for example to `sha-256`, on both sides at once."
+      - "`_write_review_log` builds its line from the constant, and the constant's wording changes."
   - claim: >-
-      `qualify._binds_task` builds the detail it matches from
-      `session.REVIEWED_DIFF_DETAIL` followed by the hash, read through
-      `qualify.py`'s existing `from saffron.cell import session` at call
-      time, and still compares the whole detail for equality. The witness
-      writes two `events.jsonl` logs, each a REVIEW `PhaseStart` followed by
-      one `RecordAppend`. As shipped, the log carrying today's full text
-      binds. With `session.REVIEWED_DIFF_DETAIL` replaced by a sentinel, that
-      same log no longer binds and the log carrying the sentinel does.
+      `qualify._binds_task` matches a REVIEW detail only when it equals the
+      value `session.REVIEWED_DIFF_DETAIL` holds at the moment of the call,
+      followed by the hash it was handed. A replacement of the constant
+      reaches it. The witness writes four `events.jsonl` logs, each a REVIEW
+      `PhaseStart` followed by one `RecordAppend`. Two carry today's text
+      and two a sentinel, each with the hash asked about or another hash.
+      As shipped, the log carrying today's text and the asked hash binds,
+      and the one with the other hash does not. With
+      `session.REVIEWED_DIFF_DETAIL` replaced by the sentinel, the log with
+      today's text no longer binds. The sentinel log with the asked hash
+      binds, and the sentinel log with the other hash does not.
     witness: tests/test_qualify.py::test_binds_task_reads_the_reviewed_diff_line_from_the_shared_constant
     wrong_versions:
       - "`qualify.py` keeps its own f-string literal in `_binds_task`."
@@ -82,6 +86,8 @@ acceptance:
       - "`qualify.py` copies `session.REVIEWED_DIFF_DETAIL` into a module-scope name of its own and matches against that."
       - "`_binds_task` matches any REVIEW detail that contains the hash."
       - "`_binds_task` matches any REVIEW detail that ends with the hash."
+      - "`_binds_task` matches the constant as a prefix and ignores the hash."
+      - "`_write_review_log` builds its line from the constant, and the constant's wording changes."
   - claim: >-
       A layer whose `events.jsonl` carries today's full line, followed by its
       own task's `RecordAppend`, still has its record bound. Its in-cell
@@ -131,10 +137,11 @@ line, with no import cycle.
 2. Build the REVIEW line at `saffron/cell/session.py:3394` from the constant
    and the hash.
 3. Build `_binds_task`'s target at `saffron/qualify.py:122` from
-   `session.REVIEWED_DIFF_DETAIL` and the hash. Read it as an attribute of
-   `session`, the way `qualify.py` reads that module's other names. A name
-   imported from `session` binds a copy at import, so a test that replaces
-   the constant no longer reaches `qualify`.
+   `session.REVIEWED_DIFF_DETAIL` and the hash. Read the constant on each
+   call. An attribute read through `session` does that, the way
+   `qualify.py` reads that module's other names. A module-scope import of
+   the name binds a copy at import, so a test that replaces the constant no
+   longer reaches `qualify`.
 4. Add criterion 1's witness to `tests/test_session.py` and criterion 2's to
    `tests/test_qualify.py`.
 
@@ -159,6 +166,20 @@ a constant that does not exist at base. So they declare no mutant, and
 `witness` reports `skip` for them. The wrong versions under each criterion
 are what its witness must kill. Do not run them yourself.
 
+**Criterion 3 declares no mutant.** `refs/saffron/mutants` does not exist
+on origin at this base, so no spec carries one. The operator can add one
+with `saffron mutant`. The candidate is `saffron/qualify.py`'s
+`event.label == "REVIEW"`, replaced with `"PLAN"`.
+
+**Two hand-written lines stay as written.** `_write_review_log` writes
+today's full line as a literal (`tests/test_qualify.py:1596`), and so does
+the unbound case of
+`test_a_layer_whose_record_cannot_be_used_keeps_the_packaged_heads_check`
+(`tests/test_qualify.py:1906`). Criterion 3's witness writes its logs
+through `_write_review_log`. Built from the constant, that line moves with
+any wording change, and criterion 3 would pass it. Criteria 1 and 2 pin
+the wording through their own literals.
+
 **Criterion 1's witness.** Drive a clean REVIEW the way
 `test_a_task_whose_lenses_are_handed_no_diff_records_none` drives its clean
 case: `_stub_the_runtime`, then `_drive` with a plan turn and one implement
@@ -173,8 +194,9 @@ so the claim's last half can see a literal left behind.
 
 **Criterion 2's witness.** Import `_binds_task` inside the test. Write each
 log with `events.EventLog`, as `_write_review_log` does
-(`tests/test_qualify.py:1573`), but with the detail as a parameter. Assert
-the shipped log binds before you replace the constant. That positive case,
+(`tests/test_qualify.py:1573`), but with the detail as a parameter. Ask
+every log about the same hash. Assert the shipped log binds before you
+replace the constant. That positive case,
 through the same call, is what makes the later "no longer binds" assertion
 mean something.
 
