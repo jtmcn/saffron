@@ -5,7 +5,7 @@ status: partial
 tier: 1
 filed: 2026-09-30
 specs: [SA-0161, SA-0232, SA-0369, SA-0380]
-prs: [779]
+prs: [779, 1178, 1179, 1180]
 commits: []
 cites: [§5.1]
 related: [b-8170eb, 45]
@@ -70,3 +70,8 @@ command can package it, and says which command does.
   read from the worktree volume by a read-only container. Resuming an
   `ORPHANED` task's patch is still open, and so is a runtime death read as
   `EXHAUSTED`.
+- 2026-11-13: `SA-0380` (#1178) landed in the spec loop's run 66, with its
+  follow-ups `SA-0382` (#1179) and `SA-0383` (#1180). `saffron package`
+  now packages an `ORPHANED` task whose cell went green and reviewed clean,
+  and `run_task` names that command. A runtime death read as `EXHAUSTED` is
+  still open.
