@@ -77,7 +77,7 @@ acceptance:
       As shipped, the log carrying today's text and the asked hash binds,
       and the one with the other hash does not. With
       `session.REVIEWED_DIFF_DETAIL` replaced by the sentinel, the log with
-      today's text no longer binds. The sentinel log with the asked hash
+      today's text and the asked hash no longer binds. The sentinel log with the asked hash
       binds, and the sentinel log with the other hash does not.
     witness: tests/test_qualify.py::test_binds_task_reads_the_reviewed_diff_line_from_the_shared_constant
     wrong_versions:
@@ -194,7 +194,8 @@ so the claim's last half can see a literal left behind.
 
 **Criterion 2's witness.** Import `_binds_task` inside the test. Write each
 log with `events.EventLog`, as `_write_review_log` does
-(`tests/test_qualify.py:1573`), but with the detail as a parameter. Ask
+(`tests/test_qualify.py:1573`), but with the detail as a parameter.
+Write today's text as a literal, never from the constant. Ask
 every log about the same hash. Assert the shipped log binds before you
 replace the constant. That positive case,
 through the same call, is what makes the later "no longer binds" assertion
