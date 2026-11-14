@@ -46,7 +46,7 @@ max_attempts: 3
 max_turns: 180
 acceptance:
   - claim: >-
-      `events.when` takes a keyword-only `now`, a `datetime` that defaults to
+      `events.when` takes a `now`, a `datetime` that defaults to
       `None`. Called without it, `when` renders a stamp as base did: the
       host's zone, the day dropped when it is today, and a trailing ` local`.
       Called with it, `when` renders the stamp as `_wait_out_rate_limit`
@@ -60,12 +60,14 @@ acceptance:
       stamps are `1755800000`, `1755800000.0`, `10**12`, `None`, `True`,
       `False`, `"soon"`, `[1]`, NaN, `10**17`, `10**20` and `10**400`. Every
       one but the first three renders `unknown` in all four forms. The
-      witness also renders noon today with no `now` as `12:00 local`.
+      witness also renders noon today with no `now` as `12:00 local`, and
+      with a naive `now` at noon today as its weekday form.
     witness: tests/test_events.py::test_when_renders_each_reset_stamp_in_both_forms
     wrong_versions:
       - "The `now` form renders in the host's zone, ignoring `now.tzinfo`."
       - "The `now` form ends with ` local`."
       - "The `now` form drops the day when the stamp falls on `now`'s own day."
+      - "The `now` form drops the day when the stamp falls on the host's today."
       - "The `now` form converts with `time.localtime`, so `10**12` renders a date."
       - "The form without `now` converts with `datetime.fromtimestamp`, so `10**12` renders `unknown`."
       - "The form without `now` always names the day, so noon today reads with its weekday."
@@ -75,7 +77,7 @@ acceptance:
       - "Only `OverflowError` and `ValueError` are caught, so `10**17` raises `OSError`."
   - claim: >-
       `_wait_out_rate_limit` takes its reset text from `events.when`, handing
-      it the very object its one clock read returned. It calls
+      it the clock's own `now` by identity. It calls
       `when` only for a reset after the clock. A missing reset, one equal to
       the clock, one before it, NaN and `True` read `unknown` with no call.
       The witness replaces `when` with a spy that records each call and
@@ -94,7 +96,6 @@ acceptance:
       - "`_wait_out_rate_limit` hands `when` the clock's `now` converted to UTC."
       - "`_wait_out_rate_limit` hands `when` a copy of `now` with its microseconds cleared."
       - "`_wait_out_rate_limit` hands `when` a new `datetime` built from `now`'s timestamp in `now`'s own zone."
-      - "`_wait_out_rate_limit` reads the clock a second time for `when`."
       - "`_wait_out_rate_limit` calls `when` for every reset and drops its own `unknown`."
   - claim: >-
       Each line a stack batch's wait prints is byte-identical to base. The
@@ -171,7 +172,8 @@ which `when` prints as `Fri 27 Sep 10:46 local`. `datetime.fromtimestamp`
 raises `ValueError` for it, so the batch prints `unknown`. On every other
 number the criteria name, both conversions succeed or both raise.
 `10**17` raises `OSError` on macOS in `time.localtime` and in the
-timestamp constructor, naive or aware. `10**20`, `10**400` and NaN raise
+timestamp constructor, naive or aware. It raises `OSError` on Linux glibc
+too (`docs/evidence/2026-11-13-spec-chain-feedback.md`). `10**20`, `10**400` and NaN raise
 too.
 
 ## Problem
@@ -246,7 +248,9 @@ the stamp's own day in its zone. For `1755800000` and `1755800000.0` the
 four texts are `Fri 22 Aug 03:13 local`, `Fri 22 Aug 03:13`,
 `Thu 21 Aug 11:13` and `Thu 21 Aug 23:58`. For `10**12` they are
 `Fri 27 Sep 10:46 local` and three `unknown`. Build noon today from
-`time.localtime()` with `time.mktime`. Import `datetime` inside the test.
+`time.localtime()` with `time.mktime`, and render it once more with a naive
+`now` at that same noon, expecting `%a %d %b 12:00`. Import `datetime`
+inside the test.
 
 **Criterion 2's witness.** Drive `run_stack_batch` with `AdvancingClock`,
 `RateLimitScript` and `_raise_on_real_sleep`, as
@@ -262,7 +266,8 @@ against a fresh read of `clock()`. A read of `AdvancingClock` returns the
 object it holds, and only a sleep or an advance of it replaces that
 (`tests/test_batch.py:237-253`). So a copy fails, though it compares
 equal: one with its microseconds cleared, one rebuilt in the same zone, or
-one converted to UTC.
+one converted to UTC. A second clock read returns the same object, so the
+witness cannot tell it apart, and the claim does not forbid it.
 
 **Docstrings and comments.** The `prose` gate reads each one. `when`'s
 docstring at base runs past ten lines, and every line past ten in a
