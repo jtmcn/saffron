@@ -304,6 +304,54 @@ def _construct_defect(
     )
 
 
+def _held_name(
+    by_name: dict[str, list[tuple[int, int]]], start: int, end: int
+) -> str | None:
+    """Among `by_name`, the one name that alone holds a citation spanning
+    `start` to `end`: it opens exactly one construct, and that construct
+    holds the range. Of several such names, `_sole_holder` picks the one
+    nested inside every other and strictly shorter. `None` when no name
+    qualifies, or qualifies without a sole winner."""
+    holders = [
+        (name, spans[0])
+        for name, spans in by_name.items()
+        if len(spans) == 1 and _holds(spans[0], start, end)
+    ]
+    if len(holders) == 1:
+        return holders[0][0]
+    if len(holders) > 1:
+        return _sole_holder(holders)
+    return None
+
+
+def _moved_defect(
+    cite: _Citation, lines: list[str], patterns: list[str]
+) -> CitationDefect | None:
+    """`None` when `cite`'s clause names open no construct, or one of them
+    alone holds its range by `_held_name`'s rule. Otherwise the names open
+    a construct and none holds it, so the citation moved since it was
+    written. The defect carries no `replace` or `spans`, since there is no
+    single construct to rewrite it onto."""
+    by_name = _name_spans_by_name(cite.names, lines, patterns)
+    spans = sorted({span for found in by_name.values() for span in found})
+    if not spans:
+        return None
+    if _held_name(by_name, cite.start, cite.end) is not None:
+        return None
+    where = ", ".join(_range(s, e) for s, e in spans)
+    line = (
+        f"{cite.path}:{_range(cite.start, cite.end)}: no single construct it names "
+        f"holds it (they sit at {cite.path}:{where})"
+    )
+    return CitationDefect(
+        line=line,
+        path=cite.path,
+        offset=cite.offset,
+        replace=None,
+        spans=None,
+    )
+
+
 def _citation_patterns(mirror: Path, commit: str, names_in_tree: set[str]) -> list[str]:
     """The `citations.definitions` patterns `.saffron/policy.yaml` declares
     at `commit`, or none when `commit`'s tree holds no such file."""
@@ -335,17 +383,17 @@ def _lines_reader(mirror: Path, commit: str, names_in_tree: set[str]):
 
 
 def citation_count_and_defects(
-    mirror: Path, commit: str, text: str
+    mirror: Path, commit: str, text: str, *, movable: bool = True
 ) -> tuple[int, list[CitationDefect]]:
     """How many `file:line` citations `text` makes, and the defects among
     them, in text order. `mirror` is any git repository holding `commit`,
     bare or not. A range's shape is checked before any file: no path, then
     a start below line 1, then an end before its start. A citation that
-    passes those is then refused for a missing file or a range past its
-    end. Otherwise it is judged against the constructs its own clause's
-    names open, read from `.saffron/policy.yaml` at `commit`. A commit
-    `mirror` lacks raises `GitError`. An invalid policy at `commit` raises
-    `PolicyError`.
+    passes those is refused for a missing file or a range past its end.
+    It is then refused for a construct its own clause's names open
+    elsewhere, or, with `movable` true, for one with no single holder.
+    A commit `mirror` lacks raises `GitError`. An invalid policy at
+    `commit` raises `PolicyError`.
     """
     names_in_tree = _tree_names(mirror, commit)
     suffixes = {Path(n).suffix for n in names_in_tree if Path(n).suffix}
@@ -413,15 +461,17 @@ def citation_count_and_defects(
             )
         else:
             defect = _construct_defect(cite, lines, patterns)
+            if defect is None and movable:
+                defect = _moved_defect(cite, lines, patterns)
             if defect:
                 defects.append(defect)
     return len(citations), defects
 
 
 def citation_defects(mirror: Path, commit: str, text: str) -> list[CitationDefect]:
-    """`citation_count_and_defects`'s defects half, which judges each
-    citation by the construct its clause names."""
-    return citation_count_and_defects(mirror, commit, text)[1]
+    """`citation_count_and_defects`'s defects half, with `movable` false,
+    judging each citation by the construct its clause names alone."""
+    return citation_count_and_defects(mirror, commit, text, movable=False)[1]
 
 
 def _holds(span: tuple[int, int], start: int, end: int) -> bool:
@@ -473,17 +523,9 @@ def citations_held_at(
         if lines is None or cite.end > len(lines):
             continue
         by_name = _name_spans_by_name(cite.names, lines, patterns)
-        holders = [
-            (name, spans[0])
-            for name, spans in by_name.items()
-            if len(spans) == 1 and _holds(spans[0], cite.start, cite.end)
-        ]
-        if len(holders) == 1:
-            held[cite.offset] = holders[0][0]
-        elif len(holders) > 1:
-            name = _sole_holder(holders)
-            if name is not None:
-                held[cite.offset] = name
+        name = _held_name(by_name, cite.start, cite.end)
+        if name is not None:
+            held[cite.offset] = name
     return held
 
 

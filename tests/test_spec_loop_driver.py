@@ -3348,6 +3348,36 @@ def test_cite_and_check_report_what_the_batchs_citation_check_reports(
     assert "blocker: 5 of 6 citation(s) do not resolve at origin/main" in out
 
 
+def test_cite_and_check_block_a_citation_no_single_construct_it_names_holds(
+    empty_repo, monkeypatch, capsys
+):
+    """`cite` and `check` take the new rule through the core call they
+    already make, with no change to the driver itself (b-b664d1)."""
+    spec = _cite_tree(monkeypatch, empty_repo)
+    (empty_repo / "mod.py").write_text(
+        'def _finish():\n    return None\n\n\ndef _state():\n    return "EXHAUSTED"\n'
+    )
+    (empty_repo / ".saffron" / "policy.yaml").write_text(
+        "citations:\n  definitions:\n    - '\\s*def\\s+{name}\\b'\n"
+    )
+    _git(empty_repo, "add", "mod.py", ".saffron/policy.yaml")
+    _git(empty_repo, "commit", "-qm", "trunk")
+    _git(empty_repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    spec.write_text(
+        "The helper `_finish` and the word `EXHAUSTED` sit at `mod.py:5-6`.\n"
+    )
+
+    line = "mod.py:5-6: no single construct it names holds it (they sit at mod.py:1-2)"
+    args = SimpleNamespace(spec_path=str(spec), base="origin/main")
+    assert driver.cmd_cite(args) == 1
+    assert capsys.readouterr().out.splitlines() == [line, "1 citation(s) checked"]
+
+    assert driver.cmd_check(argparse.Namespace(spec=None, spec_id="SA-0001")) == 1
+    out = capsys.readouterr().out.splitlines()
+    assert [x for x in out if x.startswith("cite: ")] == [f"cite: {line}"]
+    assert "blocker: 1 of 1 citation(s) do not resolve at origin/main" in out
+
+
 def test_cite_and_check_print_what_the_core_check_returns_or_raises(
     tmp_path, monkeypatch, capsys
 ):

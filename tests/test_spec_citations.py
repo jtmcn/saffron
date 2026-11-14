@@ -834,3 +834,106 @@ def test_a_bare_citation_is_held_by_its_file_when_a_suffix_leaves_the_tree(
     new_text, rewrites, left = rewrite_moved_citations(text, defects, held)
     assert new_text == text.replace(":1-2", ":3-4")
     assert left == []
+
+
+# `mod/order.py`, 1-based, built on `cite_repo`: a nested `_state` quoted
+# past its own def, a `twin` opening twice, and disjoint `alpha`/`beta`.
+_ORDER = [
+    "def package():",
+    "    def _state():",
+    '        return "EXHAUSTED"',
+    "    return _state()",
+    "",
+    "",
+    "def _finish():",
+    "    return None",
+    "",
+    "",
+    "def record_stack_finish():",
+    '    return "stack_finish"',
+    "",
+    "",
+    "def stack_finish():",
+    "    return 1",
+    "",
+    "",
+    "def twin():",
+    "    return 1",
+    "",
+    "",
+    "def twin():",
+    "    return 2",
+    "",
+    "",
+    "def alpha():",
+    "    return 1",
+    "def beta():",
+    "    return 2",
+    "",
+    "",
+    'EXHAUSTED = "done"',
+]
+
+
+def test_a_citation_no_single_construct_it_names_holds_is_refused_at_its_own_commit(
+    cite_repo,
+):
+    from saffron.spec_citations import (
+        citation_count_and_defects,
+        citation_defects,
+        citations_held_at,
+    )
+
+    repo, base = cite_repo
+    (repo / "mod" / "order.py").write_text("\n".join(_ORDER) + "\n")
+    _git(repo, "add", "mod/order.py")
+    _git(repo, "commit", "-qm", "order")
+    base = _git(repo, "rev-parse", "HEAD")
+
+    paragraphs = [
+        "The helper `_finish` and the word `EXHAUSTED` sit at `mod/order.py:2-3`.",
+        "The function `stack_finish` is quoted early at `mod/order.py:11-12`.",
+        "The module `mod/order.py` names `stack_finish` at `:11-12`.",
+        "The helper `twin` is defined twice in the module at `mod/order.py:19-20`.",
+        "Both `alpha` and `beta` sit adjacent in the file at `mod/order.py:27-30`.",
+        "The helper `_finish` returns nothing special at `mod/order.py:8`.",
+        "Both `package` and `_state` sit nested together at `mod/order.py:2-3`.",
+        "The constant `EXHAUSTED` sits plainly at `mod/order.py:33`.",
+        "The helper `package` builds the whole flow at `mod/order.py:1-4`.",
+        "The helper `_finish` builds the row elsewhere at `mod/order.py:11`.",
+    ]
+    text = "\n\n".join(paragraphs)
+
+    held_defect = "mod/order.py:11: the construct it names sits at mod/order.py:7-8"
+    new_lines = [
+        "mod/order.py:2-3: no single construct it names holds it "
+        "(they sit at mod/order.py:7-8)",
+        "mod/order.py:11-12: no single construct it names holds it "
+        "(they sit at mod/order.py:15-16)",
+        "mod/order.py:11-12: no single construct it names holds it "
+        "(they sit at mod/order.py:15-16)",
+        "mod/order.py:19-20: no single construct it names holds it "
+        "(they sit at mod/order.py:19-20, 23-24)",
+        "mod/order.py:27-30: no single construct it names holds it "
+        "(they sit at mod/order.py:27-28, 29-30)",
+        held_defect,
+    ]
+
+    count, defects = citation_count_and_defects(repo, base, text)
+    assert count == 10
+    assert [str(d) for d in defects] == new_lines
+
+    count_old, defects_old = citation_count_and_defects(repo, base, text, movable=False)
+    assert count_old == 10
+    assert [str(d) for d in defects_old] == [held_defect]
+    assert [str(d) for d in citation_defects(repo, base, text)] == [held_defect]
+
+    # A sole construct, the nested pair's inner one, no construct at all,
+    # and a construct's own whole span each hold one unflagged citation.
+    nested_first = text.index("mod/order.py:2-3")
+    nested_second = text.index("mod/order.py:2-3", nested_first + 1)
+    held = citations_held_at(repo, base, text)
+    assert held[text.index("mod/order.py:8")] == "_finish"
+    assert held[nested_second] == "_state"
+    assert text.index("mod/order.py:33") not in held
+    assert held[text.index("mod/order.py:1-4")] == "package"
