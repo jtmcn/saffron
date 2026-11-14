@@ -680,3 +680,26 @@ def test_the_suite_hands_revert_the_specs_own_renames():
     assert result.status == "fail"
     assert [f.file for f in result.failures] == [new_name]
     assert result.failures[0].code == "passed-without-source"
+
+
+def test_cellspecs_renames_comment_names_both_its_readers():
+    """Pin the comment above `CellSpec.renames` to both its readers.
+
+    `SA-0389` gave `revert_gate` the same field `census_gate` already
+    read. A comment naming only one reader again fails this test.
+    """
+    import saffron.cell.session as session_module
+
+    source = Path(session_module.__file__).read_text()
+    marker = "renames: dict[str, str] = field(default_factory=dict)"
+    lines = source.splitlines()
+    field_index = next(i for i, line in enumerate(lines) if line.strip() == marker)
+    comment_lines = []
+    for line in reversed(lines[:field_index]):
+        if line.strip().startswith("#"):
+            comment_lines.append(line)
+        else:
+            break
+    comment = "\n".join(reversed(comment_lines))
+    assert "census_gate" in comment
+    assert "revert_gate" in comment
