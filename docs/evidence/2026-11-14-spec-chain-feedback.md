@@ -57,3 +57,66 @@ that test, for `cite`'s rule from `SA-0384`.
     members, so a list cut to three dies.
 51. A claim that names are compared whole drives a prefix and a substring
     case, beside the short-name case.
+
+## SA-0393 (b-249808)
+
+The `integrity` gate fails an added line that cites a spec id of the
+task's prefix, unless the id is the task's own or a spec file's.
+
+**Review 1: 0 blockers, 4 concerns, 5 notes.** The writer revised.
+
+- The bounds left alone the commonest citation form, `"""SA-NNNN`, and
+  every id after the first in a slash list. Pre-flight 1 missed the forms
+  the bounds treat as fixtures.
+- The spec read ids from file names. `_retired_ids` reads them from
+  frontmatter, and its comment says why. Pre-flight 3 missed a rule the
+  base states in a comment.
+- No judged id sat at a line's start.
+
+**Review 2: 0 blockers, 3 concerns, 4 notes.** Applied by hand. Each
+concern was an undriven member: the listing's exit codes, the slash
+rule's left side and a nested file under `done/`.
+
+## SA-0394, SA-0395 and SA-0396 (b-7fc792)
+
+The writer split the item twice. `driver.py check` priced each draft
+over 80% of the size ceiling. It counts test lines in `estimated_lines`
+and applies the 1.78 overrun to them, though the `size` gate counts no
+test path. SA-0394 adds `mirror.files_after`. SA-0395 adds
+`probe.inert_edit`. SA-0396 wires it into REVIEW.
+
+**SA-0394, review 1: 0 blockers, 3 concerns.** The writer revised. A
+`GitError` collapsed into `None`, the move had no witness, and the spec
+named a "probe cell". **Review 2: 1 concern**, applied by hand: the
+empty-dict calls passed no paths, so a build mapping each path to `None`
+passed.
+
+**SA-0395, review 1: 2 blockers.** The rule parsed Python with `ast`
+inside `saffron/`, against §2.1. The operator's delegate moved it behind
+repo-declared line patterns, the `witness:` precedent. The `probes:`
+block landed by hand, since `Policy` refuses unknown keys and the setup
+template sits under `.claude/`. **Review 2: 1 blocker, 3 concerns.** The
+writer revised once more. No witness pattern held a quantifier brace, so
+`str.format` passed. An added `def` mid-block took over the lines below
+it, and a language-free indent guard closed that.
+
+**SA-0396, review 1: 1 blocker, 3 concerns.** The writer revised. The
+witness drove an unstacked spec, where `tree_base` equals `base_sha`. A
+read at the wrong base passed it, and refused nothing in every stacked
+cell. **Review 2: 2 blockers, 1 concern.** Applied by hand. No witness
+sent a pair with no edit through the read, so a read over every pair
+raised and orphaned the task. A placement the claim named was undriven,
+and it moved to Out of scope. The Notes now name the `mirror_ops` alias,
+since the function's own `mirror` parameter would be shadowed.
+
+## Checks to build
+
+52. A rule placed in `saffron/` is read against §2.1 before the draft.
+    One that names a language, a file suffix or a parser is the repo's.
+53. A witness of a read keyed by a base drives a stacked spec, so
+    `tree_base` and `base_sha` differ.
+54. A pattern a repo declares carries every metacharacter its loader must
+    survive, a quantifier's braces among them.
+55. `driver.py check` prices only the lines the `size` gate counts.
+56. A read over a list whose entries may lack a field drives an entry
+    without it.

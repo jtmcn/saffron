@@ -60,10 +60,10 @@ acceptance:
       criterion probe and a wrong version alike. `_apply_criterion_probes`
       takes the repo's declared inert patterns, which `_drive_cell` passes
       from `policy.probes.inert`. With a pattern declared, it reads the
-      edited files with one `files_after` call, before its check for a
-      `tests` gate. The call names the mirror, the spec's `tree_base`, the
+      edited files with one `files_after` call. The call names the mirror, the spec's `tree_base`, the
       patch the critic cell applies and the set of files the edits name,
-      criterion probes' and wrong versions' alike. A pair whose file reads as text, and whose
+      criterion probes' and wrong versions' alike. A pair that names no
+      edit is recorded `unproven` as at base, and its file is not read. A pair whose file reads as text, and whose
       edit `inert_edit` refuses under those patterns, is recorded `unproven`.
       Its reason is its `summary` and sits under `refusal`. It never reaches
       the mutator or a witness, so it is never `survived` and files no
@@ -74,12 +74,14 @@ acceptance:
       policy declaring two inert patterns. Its `tree_base` differs from its
       `base_sha`. Its criterion-probe session names one inert edit on a
       third file the stubbed read returns as text. Its wrong-version session
-      names five edits. They are an inert edit, an
+      names five edits and one version it cannot express. They are an inert edit, an
       edit that keeps its find and adds a top-level statement that executes,
       and an inert-shaped edit on a file the stubbed read returns as `None`.
       The last two are inert-shaped edits whose find is absent from the text
       and whose find occurs in it twice. It asserts the read's arguments,
-      the `tree_base` and all three files among them. It asserts that only
+      the `tree_base` and exactly three files among them. It asserts the
+      unexpressed version is recorded `unproven` with "this session named no
+      edit". It asserts that only
       the last four reach the mutator. It asserts both inert
       edits' records and the outcomes `unproven`, `survived`, then `killed`
       three times. It asserts that only the survivor reaches
@@ -98,6 +100,7 @@ acceptance:
       - The read built at `base_sha` rather than `tree_base`, so a stacked spec's edits are judged against the wrong tree.
       - The read's paths collected only from wrong versions, so the criterion probe's file is never read and its inert edit reaches the mutator.
       - The read's paths collected only from pairs carrying `version`, with the same effect.
+      - The read's paths collected over every pair, so a pair that names no edit raises `TypeError` and orphans the task.
       - The call site passing an empty list rather than `policy.probes.inert`, so nothing is ever refused.
   - claim: >-
       A repo that declares no inert pattern refuses no edit as inert. No
@@ -216,9 +219,11 @@ In `_apply_criterion_probes`, after the existing refusal loop, read every
 remaining pair's file with one `files_after` call when `inert_patterns`
 holds a pattern. Put the read and the inert refusal before the check for a
 `tests` gate (`saffron/cell/session.py:2124-2130`). An inert edit is then
-refused even where nothing could answer it. Make no read when it holds none. Import
-`saffron.repos.mirror` inside the function, as its other imports are, and
-call it through the module, so a test's stub reaches it. Ask
+refused even where nothing could answer it. Make no read when it holds none.
+Collect the read's paths from the pairs that name an edit only. Import
+the mirror module inside the function as `from saffron.repos import mirror
+as mirror_ops`, as `_drive_cell` does (`saffron/cell/session.py:2298`),
+since the function's own `mirror` parameter would be shadowed. Call it through the module, so a test's stub reaches it. Ask
 `probe.inert_edit` of each pair whose file came back as text, with
 `inert_patterns`. A pair whose file reads `None`, or is missing from the
 result, is never refused. A refused pair gets the `unproven` outcome, the
@@ -236,6 +241,9 @@ source of a refusal. They are `describe_criterion_probes`'s and
 
 ## Out of scope
 
+- **The placement before the `tests`-gate check**. The Problem asks for
+  it, and no witness drives a repo that declares patterns and no `tests`
+  gate. Such a repo is a stated limit here.
 - **The rule and the read themselves**. `inert_edit`, `ProbePatterns` and
   `files_after` are the parents' work, and this spec forbids their files.
 - **This repo's own patterns**. `.saffron/policy.yaml` is `protected`. Its
