@@ -3243,9 +3243,10 @@ def test_a_rate_limit_wait_line_reads_its_reset_through_events_when(
         f"{prefix} rate limited, window reopens unknown, retrying 04:00",
         f"{prefix} rate limited, window reopens unknown, retrying 05:00",
     ]
-    assert len(calls) == 2
-    assert calls[0] == (reset_1800, calls[0][1], True)
-    assert calls[1] == (10**12, calls[1][1], True)
+    assert [(stamp, ident) for stamp, _, ident in calls] == [
+        (reset_1800, True),
+        (10**12, True),
+    ]
 
 
 def _review_session(

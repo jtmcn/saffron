@@ -759,9 +759,9 @@ def when(stamp: object, *, now: datetime | None = None) -> str:
     with no suffix: `_wait_out_rate_limit` calls this form with the wait's
     clock.
 
-    `stamp` arrives from an untrusted cell's `resets_at`. Both forms render
-    `"unknown"` rather than raise, on a bool, a non-number, an unreadable
-    number, or `None`, though every caller already guards against `None`."""
+    `stamp` arrives from an untrusted cell's `resets_at` (measured,
+    `SA-0070`). Both forms render `"unknown"` rather than raise, on a bool,
+    a non-number, an unreadable number, or `None`."""
     import time
 
     if isinstance(stamp, bool) or not isinstance(stamp, (int, float)):
