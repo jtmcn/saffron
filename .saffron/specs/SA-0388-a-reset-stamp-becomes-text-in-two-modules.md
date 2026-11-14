@@ -75,7 +75,7 @@ acceptance:
       - "Only `OverflowError` and `ValueError` are caught, so `10**17` raises `OSError`."
   - claim: >-
       `_wait_out_rate_limit` takes its reset text from `events.when`, handing
-      it the clock's own `now`, the same object in the same zone. It calls
+      it the very object its one clock read returned. It calls
       `when` only for a reset after the clock. A missing reset, one equal to
       the clock, one before it, NaN and `True` read `unknown` with no call.
       The witness replaces `when` with a spy that records each call and
@@ -85,13 +85,16 @@ acceptance:
       hours, from 16:39 on 1 January 2030. The resets are 18:00 that day,
       `10**12`, a missing one, one equal to the clock, one 60 seconds before
       it, NaN and `True`. It asserts each wait line exactly. It also asserts
-      the spy saw two calls, each with its reset, the clock's `now` and that
-      `now`'s own `tzinfo`.
+      the spy saw two calls, each with its reset and a `now` that equals the
+      clock's and is that object by identity.
     witness: tests/test_batch.py::test_a_rate_limit_wait_line_reads_its_reset_through_events_when
     wrong_versions:
       - "`_wait_out_rate_limit` keeps its own `datetime.fromtimestamp` render."
       - "`_wait_out_rate_limit` calls `when` without `now`, so its line gains ` local`."
       - "`_wait_out_rate_limit` hands `when` the clock's `now` converted to UTC."
+      - "`_wait_out_rate_limit` hands `when` a copy of `now` with its microseconds cleared."
+      - "`_wait_out_rate_limit` hands `when` a new `datetime` built from `now`'s timestamp in `now`'s own zone."
+      - "`_wait_out_rate_limit` reads the clock a second time for `when`."
       - "`_wait_out_rate_limit` calls `when` for every reset and drops its own `unknown`."
   - claim: >-
       Each line a stack batch's wait prints is byte-identical to base. The
@@ -107,9 +110,11 @@ acceptance:
       - "The batch's reset carries ` local`."
       - "A reset that raises `OSError` ends the batch."
   - claim: >-
-      The wait's own bounds do not move. A reset after the clock and at most
-      six hours on is waited in full, a later one waits the six-hour cap, and
-      any other waits one hour, as at base.
+      The wait's own bounds do not move, for the resets the existing witness
+      drives. A reset six hours and one second or more after the clock waits
+      the six-hour cap, `10**12`, `10**20`, `10**17` and `10**400` included.
+      A reset inside the cap, 4860 seconds on, is waited in full. A missing
+      reset, one equal to the clock and one before it each wait one hour.
     witness: tests/test_batch.py::test_a_stack_batch_waits_six_hours_for_a_reset_past_the_cap
     preserves: true
     wrong_versions:
@@ -164,8 +169,10 @@ Python and with Python 3.12.15 in `saffron/cell-base:python`, and both
 printed the same. `time.localtime(10**12)` gives a date in the year 33658,
 which `when` prints as `Fri 27 Sep 10:46 local`. `datetime.fromtimestamp`
 raises `ValueError` for it, so the batch prints `unknown`. On every other
-number the criteria name, both conversions succeed or both raise. `10**17`
-raises `OSError`, and `10**20`, `10**400` and NaN raise too.
+number the criteria name, both conversions succeed or both raise.
+`10**17` raises `OSError` on macOS in `time.localtime` and in the
+timestamp constructor, naive or aware. `10**20`, `10**400` and NaN raise
+too.
 
 ## Problem
 
@@ -174,17 +181,20 @@ three exceptions, and `when`'s docstring names a caller list that is no
 longer whole.
 
 1. **`saffron/events.py`, `when`.** Add a keyword-only `now`, a `datetime`
-   defaulting to `None`. Widen `stamp`'s annotation to `object`, since a cell
-   sends any JSON value. Keep the type refusal first, for both forms. With
-   `now` set, convert with `datetime.fromtimestamp(stamp, now.tzinfo)` and
-   format `%a %d %b %H:%M`, inside the same `try` and the same three
-   exceptions. Without `now`, the body stays as it is. Rewrite the
+   defaulting to `None`. `saffron/events.py` imports no `datetime` at base,
+   so the annotation needs one, at runtime or under `TYPE_CHECKING`. The
+   `now` form converts at runtime, so it needs the real import. Widen
+   `stamp`'s annotation to `object`, since a cell sends any JSON value. Keep
+   the type refusal first, for both forms. With `now` set, convert through
+   `datetime`'s own timestamp constructor in `now`'s zone and format
+   `%a %d %b %H:%M`, inside the same `try` and the same three exceptions.
+   Without `now`, the body stays as it is. Rewrite the
    docstring to name both callers and both forms, within the `prose` gate's
    ten lines.
 2. **`saffron/batch.py`, `_wait_out_rate_limit`.** Replace the render at
    `saffron/batch.py:436-444` with a call to `events.when` for a reset after
-   the clock, passing `now=now`. The `after_clock`, cap and `until` lines
-   above it stay exactly as they are, and so does the `unknown` for any
+   the clock. Hand it the clock read the function already holds. The
+   `after_clock`, cap and `until` lines above it stay exactly as they are, and so does the `unknown` for any
    other reset.
 3. **`tests/test_events.py`, `tests/test_batch.py`.** Add the two new
    witnesses. Leave every existing test unedited.
@@ -246,8 +256,13 @@ does. Give the spy the signature `(stamp, *, now=None)`. Set it with
 `monkeypatch.setattr(batch, "when", spy, raising=False)`, both modules
 imported inside the test. The lines retry at 18:00, 00:00, 01:00, 02:00,
 03:00, 04:00 and 05:00. The first two read the sentinel and the rest read
-`unknown`. Record each call as its stamp, its `now` and `now.tzinfo`. Then
-a `now` converted to UTC fails, though it compares equal to the clock's.
+`unknown`. Record each call as its stamp, its `now`, and whether that `now`
+is the clock's own object by identity. Inside the spy, compare with `is`
+against a fresh read of `clock()`. A read of `AdvancingClock` returns the
+object it holds, and only a sleep or an advance of it replaces that
+(`tests/test_batch.py:237-253`). So a copy fails, though it compares
+equal: one with its microseconds cleared, one rebuilt in the same zone, or
+one converted to UTC.
 
 **Docstrings and comments.** The `prose` gate reads each one. `when`'s
 docstring at base runs past ten lines, and every line past ten in a
