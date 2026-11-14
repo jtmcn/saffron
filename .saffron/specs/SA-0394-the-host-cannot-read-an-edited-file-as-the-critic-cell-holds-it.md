@@ -103,8 +103,8 @@ below was read at `dffa5474`.
 wrong versions into an edit that kept its whole `find`. It appended an
 unused function after it. The edit changed no behaviour, so the witness
 passed. The host then filed the version `survived` as an adequacy blocker.
-`SA-0395`, this spec's child, refuses such an edit host-side before any
-cell applies it. To judge it the host must read the edited file as the
+`SA-0395` and `SA-0396` refuse such an edit host-side before any cell
+applies it. To judge it the host must read the edited file as the
 critic cell holds it. This spec gives the host that read and nothing more.
 
 **What the critic cell holds**. A wrong version's edit is applied in a
@@ -162,13 +162,14 @@ Its docstring says the tree it reads is the one a critic cell holds. It
 also says an empty dict comes back both for a tree that cannot be built
 and for empty `paths`, so a caller tests `if not result`.
 
-Nothing in `saffron/` calls `files_after` yet, and `SA-0395` adds its
+Nothing in `saffron/` calls `files_after` yet, and `SA-0396` adds its
 caller. So this spec lists it under `pending_symbols`.
 
 ## Out of scope
 
 - **The refusal itself**. `inert_edit` in `saffron/probe.py` and its call
-  in `_apply_criterion_probes` are `SA-0395`'s, which depends on this spec.
+  in `_apply_criterion_probes` are `SA-0395`'s and `SA-0396`'s. `SA-0396`
+  depends on this spec.
 - **Any change to what `rebuild_tree` does**. Its three causes keep their
   words, and `qualify` keeps reading them as before.
 - **A `retired_first`**. This spec adds no refusal.
