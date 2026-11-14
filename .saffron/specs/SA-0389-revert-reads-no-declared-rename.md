@@ -1,10 +1,10 @@
 ---
 id: SA-0389
 title: "`revert` reads no declared rename, so a renamed test that passes without the source is refused as new"
-type: bug
+type: feature
 priority: 3
 risk: elevated
-estimated_lines: 143
+estimated_lines: 146
 estimate_measured: true
 touches:
   - saffron/gates/core/revert.py
@@ -71,15 +71,16 @@ acceptance:
       matches a base name only after the last `::`, one whose old name is a
       prefix of a base name and of no head name, one whose new name is a
       prefix of a head name only, and one accepted whose new name is
-      exempt. One undeclared new test sits beside them. It asserts the
+      exempt. Two undeclared new tests sit beside them: one added on its
+      own, and the head name the new-name prefix pair leaves. It asserts the
       exact subset handed to `run_tests`, which new names the summary
       holds, and that no exempt clause appears. Over two accepted renames,
       one a criterion's witness, both passing with the source reverted, it
       asserts a `fail` naming the witness alone, whose summary names the
       other. With the keyword omitted, the same input fails both names.
-      With the non-witness pair alone, its new name collected twice at
-      head, the gate skips as a diff that adds no new test, and its
-      summary names that new name exactly once.
+      With four accepted non-witness pairs alone, one new name collected
+      twice at head, the gate skips as a diff that adds no new test, and its
+      summary names each of the four new names exactly once.
     witness: tests/test_revert.py::test_revert_leaves_out_exactly_the_declared_renames_census_accepts
     wrong_versions:
       - Every declared new name left out, whatever base and head collected.
@@ -94,6 +95,7 @@ acceptance:
       - A summary that names every accepted new name, a criterion's witness and a `preserves` witness included.
       - A summary built without the new-name checks, so it names a pair whose new name was already collected at base, or one head does not collect.
       - A clause built from the collected list rather than a set, so a name collected twice is named twice.
+      - A clause that names only the first three left-out names, as the dropped and passed lists at `saffron/gates/core/revert.py:206` and `:276` do.
       - A summary that names no left-out pair.
       - A skip that reports every new test as exempt when only renames remained.
   - claim: >-
@@ -257,8 +259,9 @@ receives, and compare the recorded subset against a literal list. Put the
 suffix pair's old name in a second file, such as `u.py::test_india`, with
 `t.py::test_india` collected at base and absent at head. For the two
 theater calls, hand `run_tests` a fake that passes every name. Hand the
-lone-pair call `_refuse` and `_refuse_run` (`tests/test_revert.py:62`,
-`:68`), and two `tests` results that each collect its new name. Assert the
+four-pair call `_refuse` and `_refuse_run` (`tests/test_revert.py:62`,
+`:68`), and two `tests` results that each collect the first pair's new
+name. Assert the
 `fail` call's failures as `(file, code)` pairs. In the summary checks,
 assert that each left-out name is in the summary, and that each judged
 or never-new pair's new name is not.
@@ -283,5 +286,7 @@ counted. A line over 88 characters counts as two. So reflow the skip
 list inside the existing lines, and add none.
 
 **Size**. A prototype of this change measured 110 counted tokens outside
-`tests/` and 460 under it, against the 1300-token `bug` ceiling. That is
-143 changed lines in all.
+`tests/` and 460 under it, about 143 changed lines. The second review's
+four-pair call adds about three, so the estimate is 146. That prices at the
+`bug` threshold, so the spec is typed `feature`, whose ceiling is 3000
+tokens.
