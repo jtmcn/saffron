@@ -43,7 +43,7 @@ forbidden:
   - saffron/scheduler.py
   - tests/test_queued_specs.py
   - tests/test_scheduler.py
-budget_usd: 44
+budget_usd: 48
 max_attempts: 3
 max_turns: 200
 acceptance:
@@ -82,7 +82,8 @@ acceptance:
       and whose new name is added, a pair whose new name only matches a
       collected name from another file after the last `::`, and one
       undeclared disappearance. It asserts the exact set of `file` and
-      `code` pairs. A second call with only the carried-out pair is a
+      `code` pairs, and that each `rename-not-collected` message contains
+      its pair's old name. A second call with only the carried-out pair is a
       `pass` with no failures. A third call holds only a pair whose old
       name stays and whose new name is absent, so nothing is removed. It
       is a `fail` with exactly one failure, the new name's
@@ -252,7 +253,12 @@ pair's collected name in a second file, such as `other.py`. In the pair
 whose new name was already collected at base, drop the old name from
 head. With the old name still collected, that member tells no build
 apart. The third call holds no removed name at all, so a build that
-returns `pass` whenever nothing was removed fails it.
+returns `pass` whenever nothing was removed fails it. Also assert that
+each `rename-not-collected` failure's `message` contains its pair's old
+name, in the first call and the third. One member keeps its old name and
+adds its new one. It emits no failure under any build the spec names,
+since an old name still collected was never removed. It pins that no
+extra failure appears, and it tells no build apart.
 
 **The suite witness** needs a tree whose `tests` gate collects one list
 on its full suite and echoes the subset `revert` hands it. Subclass
