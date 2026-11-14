@@ -4,7 +4,7 @@ title: "No gate checks the spec ids a diff cites, so a cell can cite a spec that
 type: feature
 priority: 3
 risk: elevated
-estimated_lines: 294
+estimated_lines: 306
 estimate_measured: true
 touches:
   - saffron/gates/core/integrity.py
@@ -56,96 +56,110 @@ max_attempts: 3
 max_turns: 200
 acceptance:
   - claim: >-
-      `integrity_gate` takes the task's spec id and the paths of its spec
-      files as two keywords. It fails each id an added line cites that is
-      neither the task's own id nor the id of a spec file it was handed. Each
-      such id is its own failure. It carries the diff's file and the line's
-      number in the post-image, and its message names the id. A spec file is
-      a path whose name ends `.md` and starts with the task's prefix, `-`
-      and digits, and its id is that start with the digits taken whole. The
-      witness drives one diff with two hunks. It cites the own id, a queued
-      spec's id and a retired spec's id, which pass. It cites an unknown id,
-      a short id that a spec file's name starts with, the id of a `.txt`
-      file in the list, and two unknown ids on one line, which fail. A
-      context line and a removed line each carry an unknown id, and neither
-      fails. A `README.md` and a `done` entry in the list name no id. It
-      asserts the exact list of file, line and ids-named triples.
+      `integrity_gate` takes the task's spec id and the ids of its spec files
+      as two keywords. It fails each id an added line cites that is neither
+      the task's own id nor one of the ids it was handed, compared as whole
+      strings. Each such id is its own failure. It carries the diff's file
+      and the line's number in the post-image, and its message names the id.
+      The witness drives one diff with two hunks. It cites the own id, a
+      queued spec's id and a retired spec's id, which pass. It cites an
+      unknown id, a short id that a known id starts with, and two unknown ids
+      on one line, which fail. A context line and a removed line each carry
+      an unknown id, and neither fails. It asserts the exact list of file,
+      line and ids-named triples. The same diff with no spec id passes.
     witness: tests/test_integrity.py::test_an_added_line_citing_an_id_no_spec_file_holds_fails_at_its_file_and_line
     wrong_versions:
       - A scan that also reads context lines, so an id the diff left alone fails.
       - A scan that also reads removed lines, so an id the diff took out fails.
-      - A spec file's id matched by prefix or substring of its name, so a short id such as `SA-000` resolves against `SA-0005-queued.md`.
-      - A spec file counted whatever its extension, so an id whose only file is `.txt` resolves.
+      - An id matched by prefix or substring of a known id, so a short id such as `SA-000` resolves against `SA-0005`.
       - The task's own id left out of the known set, so the task citing itself fails.
       - One failure per line rather than per id, so the second unknown id on a line goes unreported.
       - The failure's line taken from the hunk header rather than counted, so the second hunk's line is wrong.
       - A failure whose message omits the id.
   - claim: >-
-      A cited id is the task's prefix, `-` and a string of digits taken whole,
-      matched case-sensitively. It is judged unless the character before it
-      is a letter, a digit, `_`, `-`, a double or single quote, or `/`. It
-      is also not judged when the text after it starts with a letter, a
-      digit, `_`, `-`, or a `.` followed by a letter, a digit or `_`. So a
-      quoted fixture value and a file name are not citations. The witness
-      drives seven judged spellings and twelve left alone, one per line,
-      with one spec file `SA-0398` known. Judged, each failing: `SA-03981`,
-      the unpadded `SA-398`, and `SA-0399` in parentheses, in backticks, at
-      a sentence's end before `.`, before `:`, and in a list beside the
-      known `SA-0398`. Left alone: `SA-0399` after a letter, a digit, `_`,
-      `-`, a double quote, a single quote and `/`, then before `-slug.md`,
-      `.yaml`, a letter and `_`, and the lowercase `sa-0399`. It asserts
-      the exact list of failing lines and the id each names.
+      A cited id is the task's prefix, `-` and a string of digits taken
+      whole, matched case-sensitively. It is not judged when the text after
+      it starts with a letter, a digit, `_`, `-`, or a `.` followed by a
+      letter, a digit or `_`. It is judged at the start of a line, and after
+      any character but a letter, a digit, `_`, `-`, a double or single
+      quote, or `/`. It is also judged right after three double quotes, the
+      opening of a docstring. And it is judged right after a `/` that
+      directly follows an id of the prefix, itself not preceded by a letter,
+      a digit, `_` or `-`. So every id in a slash list of ids is judged,
+      while a quoted fixture value, a path and a file name are not. The witness drives ten judged lines and
+      fifteen left alone, one per line, with `SA-0398` known. Judged, each
+      failing: `SA-03981` and the unpadded `SA-398` at the start of their
+      lines, then `SA-0399` in parentheses, in backticks, before a
+      sentence-ending `.`, before `:`, in a list beside the known `SA-0398`,
+      and after three double quotes. A slash list of three unknown ids fails
+      all three, and the known id followed by `/` and an unknown id fails the
+      second. Left alone: `SA-0399` after a letter, a digit, `_`, `-`, a
+      double quote, a single quote, three single quotes, `specs/` and
+      `done/x/`, then before `-slug.md`, `.yaml`, `.5`, a letter and `_`, and
+      the lowercase `sa-0399`. It asserts the exact list of failing lines and
+      the id each names.
     witness: tests/test_integrity.py::test_a_cited_id_is_bounded_so_fixture_values_and_file_names_are_not_citations
     wrong_versions:
       - A match bounded by the regex word boundary alone, so `"SA-0399"`, `SA-0399.yaml` and `SA-0399-slug.md` fail.
       - A match taking exactly four digits, so `SA-03981` is read as `SA-0398` and passes.
       - A right bound that refuses only a following digit, so `SA-0399x` and `SA-0399_` fail.
       - A right bound that refuses any following `.`, so `SA-0399.` at a sentence's end passes.
-      - A left bound that refuses only a letter, so `9SA-0399`, `_SA-0399` and `/SA-0399` fail.
+      - A right bound that refuses `.` only before a letter, so `SA-0399.5` fails.
+      - A left bound that refuses only a letter, so `9SA-0399`, `_SA-0399` and `specs/SA-0399` fail.
+      - A left bound that requires a preceding character, so an id at the start of a line passes.
       - A case-insensitive match, so `sa-0399` fails.
       - Ids compared after stripping leading zeros, so `SA-398` resolves against `SA-0398`.
+      - Three double quotes treated as any other quote, so `"""SA-0399` passes.
+      - Any double quote opening a citation, so `"SA-0399"` fails.
+      - Three single quotes judged as well, so `'''SA-0399` fails.
+      - A slash list read by the quote and slash rule alone, so only its first id fails.
+      - Every `/` opening a citation, so `specs/SA-0399` fails.
   - claim: >-
       Only ids of the task's own prefix are judged, the prefix being the
       part of its spec id before the last `-`. One diff is judged three
-      times, with spec files `SY-2` and `B2-10` known. Task `SY-7` fails only
-      `SY-9` and leaves `SY-2`, `SA-0398`, the lowercase `sy-9` and the `B2`
-      ids alone. Task `B2-3` fails only `B2-11`, a prefix holding a digit.
-      Task `SA-0007` fails only `SA-0398` and leaves every `SY` and `B2` id
-      alone.
+      times, with `SY-2` and `B2-10` known. Task `SY-7` fails only `SY-9` and
+      leaves `SY-2`, `SA-0398`, the lowercase `sy-9` and the `B2` ids alone.
+      Task `B2-3` fails only `B2-11`, a prefix holding a digit. Task
+      `SA-0007` fails only `SA-0398` and leaves every `SY` and `B2` id alone.
     witness: tests/test_integrity.py::test_only_ids_of_the_tasks_own_prefix_are_judged
     wrong_versions:
       - A prefix fixed to `SA`, so task `SY-7` passes `SY-9`.
       - A prefix pattern of letters only, so task `B2-3` judges nothing.
       - Every prefix judged, so task `SA-0007` fails `SY-9`.
   - claim: >-
-      The gate suite hands `integrity_gate` the spec's own id and the paths
-      `CellTree` lists directly in `.saffron/specs/` and in
-      `.saffron/specs/done/` at the worktree's HEAD. The witness drives a
-      real git repo through `CellTree`, with baselines taken at the base
-      commit. Its head commit adds one spec file, deletes another, and adds
-      lines citing seven ids. A `CellSpec` and an `intake.Spec`, both
-      `SA-0007`, each yield exactly three new `integrity` failures. They
-      fall on the deleted spec's id, on an id whose file lies in a nested
-      directory under `.saffron/specs/`, and on one whose file lies outside
-      it. The retired, queued, added and own ids pass.
+      The gate suite hands `integrity_gate` the spec's own id and the
+      frontmatter `id` of each `.md` file directly in `.saffron/specs/` and
+      in `.saffron/specs/done/` at the worktree's HEAD, read through
+      `CellTree`. The witness drives a real git repo through `CellTree`, with
+      baselines taken at the base commit. Its head commit adds one spec file,
+      deletes another, and adds lines citing ten ids. One spec file is named
+      `SA-0021-renamed.md` and declares `id: SA-0023`. A `CellSpec` and an
+      `intake.Spec`, both `SA-0007`, each yield exactly five new `integrity`
+      failures. They fall on the deleted spec's id, on an id whose file lies
+      in a nested directory under `.saffron/specs/`, on one whose file lies
+      outside it, on the renamed file's name prefix `SA-0021`, and on the id
+      a `.txt` file in `.saffron/specs/` declares. The retired, queued, added
+      and own ids pass, and so does the renamed file's declared `SA-0023`.
     witness: tests/test_worktree.py::test_the_suite_judges_cited_ids_against_the_spec_files_at_head
     wrong_versions:
       - The listing read at the diff base rather than HEAD, so the added spec's id fails and the deleted one's passes.
       - A recursive listing of `.saffron/specs/`, so the nested file's id resolves.
       - A listing of `.saffron/specs/` alone, so the retired spec's id fails.
+      - A listing of every file whatever its extension, so the `.txt` file's id resolves.
+      - Ids read from file names rather than frontmatter, so `SA-0021` resolves and `SA-0023` fails.
       - The suite passing no spec id, so `integrity` judges nothing.
       - The suite reading `intake.Spec`'s `id` and `CellSpec`'s `spec_id` by two paths, so one spec type passes no id.
 ---
 
 ## Context
 
-Backlog item **b-249808**, filed from the spec loop's run 53. It cites
+Backlog item **b-249808**, filed from spec loop run 53. It cites
 `DESIGN.md` §5.4. Every line number below was read at `dffa5474`.
 
-**Twice so far**. In the spec loop's run 53, `SA-0330`'s cell cited `SA-0332` at 20
+**Twice so far**. In spec loop run 53, `SA-0330`'s cell cited `SA-0332` at 20
 sites in seven files, and `SA-0330` at none. `SA-0332` was a different
 draft. Every gate passed it, and a review commit on its pull request
-fixed it. In the spec loop's run 70 on 2026-11-14, `SA-0389`'s cell wrote `SA-0398` in a
+fixed it. In spec loop run 70 on 2026-11-14, `SA-0389`'s cell wrote `SA-0398` in a
 witness docstring in `tests/test_revert.py`. No spec `SA-0398` exists.
 Both review seats found it, and a review commit on that pull request fixed
 it.
@@ -159,6 +173,14 @@ beside its defect. The second criterion's bounds were applied to the same
 added lines in all 80. They hit nothing but `SA-0389`'s one site and
 `SA-0330`'s 20. The known set was today's spec files, so an id
 cited before its spec was filed is undercounted.
+
+**Two citing forms that sit beside a quote or a slash**. A docstring opens
+with three double quotes and then an id at 47 sites at base, outside
+`docs/` and `.saffron/specs/`. One is the
+docstring of `test_a_plan_carries_its_test_lines_within_its_whole_estimate`
+(`tests/test_artifacts.py:213`). The comment above `NOTES_PROMPT` cites a slash
+list, `SA-0058/SA-0061/SA-0062` (`saffron/agents/artifacts.py:223`). Both
+forms are citations, so the second criterion judges them.
 
 **Where it lives: `integrity`, not a new gate**. `integrity_gate`
 (`saffron/gates/core/integrity.py:201`) already walks every added line
@@ -191,10 +213,12 @@ cell and raises `CellRuntimeError` on a non-zero exit
 `base..HEAD`, so HEAD is the tree it ends at
 (`saffron/cell/worktree.py:344-374`).
 
-**How a spec file's id is read elsewhere**. `next_spec_id` reads each
-`*.md` name in `.saffron/specs/` and its `done/` against
-`^{prefix}-([0-9]+)` (`saffron/follow_up.py:109-118`). `done` is
-`RETIRED_DIRNAME` (`saffron/scheduler.py:628`).
+**How a spec file's id is read elsewhere**. `_retired_ids` reads each
+retired spec's id from its frontmatter, never its file name, since a file
+renamed on retirement would credit the wrong spec
+(`saffron/scheduler.py:640-641`). `done` is `RETIRED_DIRNAME`
+(`saffron/scheduler.py:628`). Every spec file at `dffa5474` declares its id
+as a bare `id: SA-NNNN` line, measured with `git grep -m1 '^id:'`.
 
 **The finishing layer**. Its suite runs under the spec `FINISH-0`
 (`saffron/finish.py:110-115`). Its prefix is `FINISH`, so no `SA-` id in a
@@ -203,37 +227,40 @@ finishing commit is judged.
 ## Problem
 
 Give `integrity_gate` two keyword-only parameters: the task's spec id,
-defaulting to none, and the paths of its spec files, defaulting to empty.
+defaulting to none, and the ids of its spec files, defaulting to empty.
 With no spec id the gate behaves as at base. With one, it reads every added
 line for ids of the task's prefix. It fails each that is neither the task's
-id nor a spec file's id. A failure carries the file and the post-image line
+id nor one of the ids handed in, compared as whole strings. A failure carries the file and the post-image line
 number, and its message names the id. Leave the early skip
 (`saffron/gates/core/integrity.py:211`) as it is.
 
 Bound a match as the second criterion says. A quote or `/` before an id,
 or a `-` or a file extension after it, marks a fixture value or a file
 name. A backtick, a parenthesis, a space or a line's start marks a
-citation.
-
-Read each spec file's id from its name as `next_spec_id` does, with the
-digits taken whole, so `SA-0398-x.md` is `SA-0398` and never `SA-039`.
-Compare ids as whole strings.
+citation. So do a docstring's opening quotes and an earlier id in a slash
+list.
 
 Add `spec_id` to `SuiteSpec`, and give `intake.Spec` a `spec_id`
 property returning its `id`, beside `spec_type`. Add a method to `Tree`
-listing the paths directly in `.saffron/specs/` and `.saffron/specs/done/`
-at HEAD. `CellTree` answers it through a new function in
-`saffron/cell/worktree.py`. It runs `git ls-tree` over HEAD in the cell, and
-raises `CellRuntimeError` on a non-zero exit as `changed_files` does. Hand
+returning the frontmatter `id` of each `.md` file directly in
+`.saffron/specs/` and `.saffron/specs/done/` at HEAD, as `_retired_ids`
+reads ids. `CellTree` answers it through a new function in
+`saffron/cell/worktree.py`, in one git call over HEAD in the cell. A
+prototype used `git grep -z -m1 -e '^id:' HEAD` with a `:(glob)` pathspec
+for each directory, since a plain `*` there also matches `/`. `git grep`
+exits 1 when nothing matches, so read that as no ids. Raise
+`CellRuntimeError` on any other non-zero exit, as `changed_files` does. Hand
 both to `integrity_gate` from `GateSuite._run`. The baseline call hands them
 too, and at the base the diff is empty, so it fails nothing.
 
 Update `integrity.py`'s module docstring and `integrity_gate`'s docstring
-to name the third question. Give the test trees the listing method. They are
+to name the third question. The `pass` summary names only suppressions and
+gate-config edits (`saffron/gates/core/integrity.py:282`), so make it name
+the new check too. Give the test trees the listing method. They are
 `_Tree` (`tests/test_suite.py:21`) and `_GitTree`
 (`tests/test_constant_mutants.py:54`). Give each file's `_Spec` a
 `spec_id` (`tests/test_suite.py:101`, `tests/test_constant_mutants.py:90`).
-An empty listing and the id `SA-0001` keep every existing verdict there.
+An empty list of ids and the id `SA-0001` keep every existing verdict there.
 
 Stub the new `worktree` function beside `dirty_paths` wherever a test
 stubs that one and still drives a `CellTree`. Otherwise the listing
@@ -251,13 +278,16 @@ whose exact list of gate-cell commands gains the listing.
 
 ## Out of scope
 
-- **A citation the bounds leave alone**. An id right after a quote is not
-  judged, so a docstring that opens `"""SA-0398` passes.
+- **A citation the bounds leave alone**. An id right after one double or
+  single quote, or after three single quotes, is not judged. Nor is one
+  after a `/` that follows anything but an id, such as a path.
 - **A fixture the bounds judge**. An id in a YAML fixture inside a string,
   such as `id: SA-9001`, is judged and fails. A cell repairs that by quoting
   the value or by using a spec that exists.
 - **A repo that declares no integrity patterns**. The gate still skips
-  there, so its cited ids are not judged. A prototype that applied the check
+  there, so its cited ids are not judged. `DESIGN.md` §5.4 now bounds the
+  check the same way. It says the check applies where the repo declares
+  integrity patterns. A prototype that applied the check
   past the skip turned eight more tests in `tests/test_session.py` red. Each
   pins `integrity`'s `skip` under a policy with no patterns. This repo declares
   both lists.
@@ -267,9 +297,9 @@ whose exact list of gate-cell commands gains the listing.
   follow-up's. It fails, as the item asks.
 - **Hand edits, made in the spec's own pull request**. `DESIGN.md` §2.1's
   table row for `integrity` names the third question. §5.4's `integrity`
-  paragraph says it fails an added line citing an unknown spec id. Such an
-  id has the task's prefix, and is neither the task's own nor a spec file's
-  at head.
+  paragraph says that, where the repo declares integrity patterns, it fails
+  an added line citing an unknown spec id. Such an id has the task's
+  prefix, and is neither the task's own nor a spec file's at head.
 
 ## Notes for the agent
 
@@ -302,12 +332,18 @@ Use `gates={}` and a `Policy` declaring one suppression token, since a
 policy with none skips `integrity`. Pick a token no line in the diff holds.
 Avoid this repo's own tokens too, since its `integrity` scan reads the
 test file. Import `CellSpec`, `CellTree`, `GateSuite` and `parse_spec` inside the
-test.
+test. The spec files the head commit adds are added lines too, so
+`integrity` judges their text. Give each only its own `id:` and ids that
+resolve, or it fails beside the five the criterion names.
+
+**Why `SA-0399.5` is left alone**. A `.` and a digit after an id reads as
+a version or a decimal, the same shape as `SA-0399.yaml`. A sentence that
+ends on an id is followed by a space or the line's end, and is judged.
 
 **The `prose` gate** counts each new comment and docstring. Write none
 with an em dash, a semicolon, a contraction, the perfect tense or a
 sentence over 25 words. A docstring stays within ten lines.
 
-**Size**. A prototype measured 294 changed lines, its docstring updates
-and test stubs included. `size_gate` counted 352 tokens outside `tests/`
-against the `feature` ceiling of 3000, with 589 more under the test paths.
+**Size**. A prototype measured 306 changed lines, its docstring updates
+and test stubs included. `size_gate` counted 384 tokens outside `tests/`
+against the `feature` ceiling of 3000, with 640 more under the test paths.
