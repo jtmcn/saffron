@@ -83,15 +83,12 @@ from saffron.phases.rebut import (
     Rebuttal,
     RebuttalTurn,
     Verdict,
-    sustained_blockers,
     unanswered_blockers,
-    unkept_fixes,
     unread_blockers,
 )
 from saffron.phases.review import (
     LensReview,
     anchored_blockers,
-    anchored_concerns,
     review_state,
 )
 from saffron.reconcile import GhRunner, reconcile
@@ -1076,22 +1073,12 @@ def run_task(
                 # upserts on `(repo, spec_id)`. A raised PACKAGE wrote none.
                 index_report.append_queue_line(
                     out_dir,
-                    index_report.QueueLine(
-                        repo=repo.name,
+                    package_phase.queue_line(
+                        outcome,
+                        repo_name=repo.name,
                         spec_id=spec.id,
                         state="EXHAUSTED",
-                        attempts=outcome.attempts,
-                        cost_usd_est=outcome.spent_usd,
-                        concerns=anchored_concerns(outcome.reviews),
-                        added=0,
-                        removed=0,
-                        link="",
                         note=combined_note,
-                        risk=outcome.effective_risk,
-                        sustained=sustained_blockers(outcome.rebut_result),
-                        unkept=unkept_fixes(outcome.rebut_result),
-                        unread=outcome.unread,
-                        unanswered=outcome.unanswered,
                     ),
                     header=index_report.accept_rate_header(ledger),
                 )
@@ -1117,22 +1104,12 @@ def run_task(
             # carries a pull request. A pushed branch is already in `note`.
             index_report.append_queue_line(
                 out_dir,
-                index_report.QueueLine(
-                    repo=repo.name,
+                package_phase.queue_line(
+                    outcome,
+                    repo_name=repo.name,
                     spec_id=spec.id,
                     state=outcome.state,
-                    attempts=outcome.attempts,
-                    cost_usd_est=outcome.spent_usd,
-                    concerns=anchored_concerns(outcome.reviews),
-                    added=0,
-                    removed=0,
-                    link="",
                     note=pushed.note,
-                    risk=outcome.effective_risk,
-                    sustained=sustained_blockers(outcome.rebut_result),
-                    unkept=unkept_fixes(outcome.rebut_result),
-                    unread=outcome.unread,
-                    unanswered=outcome.unanswered,
                 ),
                 header=index_report.accept_rate_header(ledger),
             )

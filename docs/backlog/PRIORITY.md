@@ -452,7 +452,7 @@ Each line keeps the order it was filed in.
   ~~**77**~~, **90**, **92**, **96**, ~~**100**~~, **101** and **108**.
 - Filed 2026-09-12 to 2026-09-19: ~~**116**~~, **121**, ~~**122**~~, **130**, **134**,
   ~~**150**~~, ~~**151**~~, **155**, **156**, **174** and **b-d6bff7**.
-- From spec loop runs 7 to 10: **b-990bd9**, **b-7431a2**, **b-9eceda**, **b-bc9951**,
+- From spec loop runs 7 to 10: ~~**b-990bd9**~~, **b-7431a2**, **b-9eceda**, **b-bc9951**,
   **b-0281e4**, **b-e9db0e**, **b-397edd**, **b-0e20e9**, ~~**b-98dc4d**~~,
   ~~**b-27b9db**~~, ~~**b-bbf663**~~ and ~~**b-6a9707**~~.
 - From the reviews of #393 and `SA-0120`, and spec loop runs 13 and 14: **b-d5d290**,
@@ -480,6 +480,8 @@ Each line keeps the order it was filed in.
   beside `events.when`.
 - From run 69's `SA-0387` (#1196): **b-d2b6b3**, `revert` reads no declared
   rename.
+- From run 70's review of #1203: **b-7fc792**, a wrong version's edit that
+  removes nothing.
 - From the 2026-09-27 size pricing and spec loop run 32: **b-41664e**, **b-4b386f**,
   ~~**b-d96f14**~~, ~~**b-9b94c9**~~, **b-ff3141**, ~~**b-a99c76**~~, **b-3a8504**,
   ~~**b-7f105f**~~ and ~~**b-8c17dc**~~.

@@ -37,3 +37,7 @@ survives blocks the attempt, and the result names the parent and the version.
 
 - 2026-10-12: filed from the spec loop's run 36. A review commit on #856 put
   the seeding back, and the sweep probe then failed the test.
+- 2026-11-14: the same hole opened from a review commit in the spec loop's
+  run 70. A review commit on #1202 rewrote `SA-0389`'s clause, and the
+  spec's wrong version 8 then passed the witness. Finish 88's end review
+  found it, and `SA-0391` (#1204) pinned it.

@@ -199,6 +199,7 @@ class GateSuite:
                     ),
                     exempt=exempt,
                     diff=diff,
+                    renames=spec.renames,
                 )
             ]
             if "tests" in self.gates

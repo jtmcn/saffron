@@ -612,3 +612,94 @@ def test_the_suite_hands_census_the_specs_own_renames():
     assert result.status == "fail"
     assert [f.file for f in result.failures] == [old_name]
     assert result.failures[0].code == "removed-test"
+
+
+class _RenameRevertTree(_Tree):
+    """A `tests` gate whose full run collects one name, and which echoes
+    back whatever subset `revert` hands it (backlog item b-d2b6b3)."""
+
+    def __init__(self, *args, collects, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.collects = collects
+
+    def run(self, argv, cwd, timeout_s):
+        if Path(argv[0]).name != "tests":
+            return super().run(argv, cwd, timeout_s)
+        self.calls.append("run tests")
+        subset = argv[1:]
+        payload = {
+            "gate": "tests",
+            "status": "pass",
+            "tool": "tests 1.0",
+            "collected": subset or [self.collects],
+        }
+        return Completed(0, json.dumps(payload), "")
+
+
+def test_the_suite_hands_revert_the_specs_own_renames():
+    from saffron.cell.session import CellSpec
+    from saffron.intake import parse_spec
+
+    old_name = "tests/test_a.py::test_old"
+    new_name = "tests/test_a.py::test_new"
+    policy = Policy(
+        gates={"tests": GateDeclaration()},
+        integrity=IntegrityPatterns(test_paths=["tests/**"]),
+    )
+
+    def _run(spec):
+        suite = _suite(("tests",), policy=policy, spec=spec)
+        baseline = suite.baseline(_RenameRevertTree(collects=old_name))
+        comparison = suite.against(
+            _RenameRevertTree(changed=["src/a.py"], collects=new_name), baseline
+        )
+        return next(r for r in comparison.run.results if r.gate == "revert")
+
+    cell_spec = CellSpec(
+        spec_id="TE-1",
+        spec_sha="sha",
+        branch="b",
+        base_sha="base",
+        touches=["src/**", "tests/**"],
+        spec_type="feature",
+        body="",
+        renames={old_name: new_name},
+    )
+    assert _run(cell_spec).status == "skip"
+
+    intake_spec = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: feature\ntouches: ['src/**', 'tests/**']\n"
+        f"renames:\n  {old_name}: {new_name}\n---\n"
+    )
+    assert _run(intake_spec).status == "skip"
+
+    no_renames = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: feature\ntouches: ['src/**', 'tests/**']\n---\n"
+    )
+    result = _run(no_renames)
+    assert result.status == "fail"
+    assert [f.file for f in result.failures] == [new_name]
+    assert result.failures[0].code == "passed-without-source"
+
+
+def test_cellspecs_renames_comment_names_both_its_readers():
+    """Pin the comment above `CellSpec.renames` to both its readers.
+
+    `SA-0389` gave `revert_gate` the same field `census_gate` already
+    read. A comment naming only one reader again fails this test.
+    """
+    import saffron.cell.session as session_module
+
+    source = Path(session_module.__file__).read_text()
+    marker = "renames: dict[str, str] = field(default_factory=dict)"
+    lines = source.splitlines()
+    field_index = next(i for i, line in enumerate(lines) if line.strip() == marker)
+    comment_lines = []
+    for line in reversed(lines[:field_index]):
+        if line.strip().startswith("#"):
+            comment_lines.append(line)
+        else:
+            break
+    comment = "\n".join(reversed(comment_lines))
+    assert "census_gate" in comment
+    assert "revert_gate" in comment
