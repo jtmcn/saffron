@@ -1,10 +1,10 @@
 ---
 id: SA-0394
-title: "The host cannot read an edited file as the probe cell holds it, so no host-side check can judge what a wrong version's edit leaves"
+title: "The host cannot read an edited file as the critic cell holds it, so no host-side check can judge what a wrong version's edit leaves"
 type: feature
 priority: 3
 risk: standard
-estimated_lines: 165
+estimated_lines: 192
 estimate_measured: true
 touches:
   - saffron/repos/mirror.py
@@ -43,7 +43,7 @@ forbidden:
   - tests/test_scheduler.py
 budget_usd: 36
 max_attempts: 3
-max_turns: 230
+max_turns: 240
 acceptance:
   - claim: >-
       `saffron/repos/mirror.py` gains `files_after(mirror, tree_base, patch,
@@ -52,23 +52,35 @@ acceptance:
       path the patch changes or adds reads as the patch leaves it. A path
       it leaves alone reads as `tree_base` holds it. A path the built tree
       lacks reads `None`, a path the patch deletes among them. A path
-      `file_at` refuses to read also reads `None`. A `tree_base` the mirror
+      where `file_at` raises `UnreadablePath` also reads `None`. Any other
+      `GitError` from `file_at` reaches the caller. A `tree_base` the mirror
       lacks, or a patch that does not apply, returns an empty dict. The
-      witness builds a real mirror whose base holds three files, a file
-      under a directory, a symlink that leaves the tree and a symlink to
-      that symlink. Its patch changes one file, adds one and deletes one.
-      One call over eight paths is compared with a literal dict. They are
-      the changed, added, untouched, deleted and absent files, both
-      symlinks and the directory. A spy on `rebuild_tree` records exactly
-      one build, at that base. The witness then asserts an empty dict for a
-      base of forty zeros and for a patch whose hunk no longer matches.
+      build runs under `worktree.git_argv`'s pins and its own index, and
+      leaves the mirror's index alone. `saffron.qualify` no longer defines
+      `_rebuild_tree`. The witness asserts that first. It builds a real
+      mirror whose base holds three files, a file under a directory, a
+      symlink that leaves the tree and a symlink to that symlink. Its patch
+      changes one file, adds one and deletes one. In the mirror a replace
+      ref swaps the base commit for one with an empty tree, and the
+      mirror's own index is written. One call over eight paths is compared
+      with a literal dict. They are the changed, added, untouched, deleted
+      and absent files, both symlinks and the directory. A spy on
+      `rebuild_tree` records exactly one build, at that base. The mirror's
+      index bytes are unchanged after it. The witness then asserts an
+      empty dict for a base of forty zeros and for a patch whose hunk no
+      longer matches. Last, a `file_at` stub raising a plain `GitError`
+      after a good build makes `files_after` raise it.
     witness: tests/test_mirror.py::test_files_after_reads_each_path_from_the_base_tree_with_the_patch_applied
     wrong_versions:
       - Each path read at `tree_base`, never at the tree the patch builds.
       - A tree that cannot be built returns every path as `None`, not an empty dict.
-      - A `file_at` refusal raised to the caller, not read as `None`.
+      - An `UnreadablePath` from `file_at` raised to the caller, not read as `None`.
+      - Every `GitError` from `file_at` mapped to `None`, so a broken git read looks like an absent file.
       - A path that reads `None` left out of the dict rather than mapped to `None`.
       - The tree built again for each path.
+      - The build run with the mirror's own index, so `GIT_INDEX_FILE` is never set.
+      - The build's git argv written without `worktree.git_argv`, so a replace ref in the mirror moves the base it reads.
+      - A `_rebuild_tree` left in `saffron/qualify.py` beside the moved one.
   - claim: >-
       `qualify` still rebuilds the tree a critic read from SA-0375's record
       once the rebuild lives in `saffron/repos/mirror.py` as `rebuild_tree`.
@@ -93,10 +105,12 @@ unused function after it. The edit changed no behaviour, so the witness
 passed. The host then filed the version `survived` as an adequacy blocker.
 `SA-0395`, this spec's child, refuses such an edit host-side before any
 cell applies it. To judge it the host must read the edited file as the
-probe cell holds it. This spec gives the host that read and nothing more.
+critic cell holds it. This spec gives the host that read and nothing more.
 
-**What the probe cell holds**. `critic_cell` seeds a worktree at the
-spec's tree base (`saffron/cell/session.py:1601-1604`). Then `critic_cell`
+**What the critic cell holds**. A wrong version's edit is applied in a
+critic cell (`CONTEXT.md` "Critic cell"). `_apply_criterion_probes` opens
+one through `critic_cell` (`saffron/cell/session.py:2248`). `critic_cell`
+seeds a worktree at the spec's tree base (`saffron/cell/session.py:1601-1604`). Then `critic_cell`
 applies the exported patch with the cell's own git
 (`saffron/cell/session.py:1615`).
 `_apply_criterion_probes` receives that same `patch` and the `mirror`
@@ -138,8 +152,15 @@ no longer uses.
 Add `files_after(mirror, tree_base, patch, paths) -> dict[str, str | None]`
 to the same module. It calls `rebuild_tree` once. When that returns no
 tree, it returns an empty dict. Otherwise it reads each path with
-`file_at` at the tree id it built, and maps a `GitError` to `None`. The
-rule is criterion 1's claim.
+`file_at` at the tree id it built. It maps `UnreadablePath` to `None` and
+lets any other `GitError` raise. That keeps `file_at`'s own split, where
+absent is an answer and unreadable is not, and a broken git read is
+neither (`saffron/repos/mirror.py:270-271`). The rule is criterion 1's
+claim.
+
+Its docstring says the tree it reads is the one a critic cell holds. It
+also says an empty dict comes back both for a tree that cannot be built
+and for empty `paths`, so a caller tests `if not result`.
 
 Nothing in `saffron/` calls `files_after` yet, and `SA-0395` adds its
 caller. So this spec lists it under `pending_symbols`.
@@ -153,6 +174,11 @@ caller. So this spec lists it under `pending_symbols`.
 - **A `retired_first`**. This spec adds no refusal.
 - **A submodule path**. `file_at` refuses one as it refuses a directory,
   and the witness drives the directory alone.
+- **Each of `git_argv`'s pins on its own**. The replace ref pins
+  `core.useReplaceRefs=false`, and so pins a build that drops `git_argv`
+  whole. A build that keeps that one pin and drops another passes. Each
+  other pin needs its own hostile mirror config, and the rebuild's body
+  moves unchanged, so the move cannot drop one by accident.
 
 ## Notes for the agent
 
@@ -178,15 +204,30 @@ assert the rewrite changed the patch. Spy on `rebuild_tree` with
 `monkeypatch.setattr` on the `saffron.repos.mirror` module, wrapping the
 real function, so the spy sees the build that produced the dict.
 
+**The replace ref and the index**. After `ensure_mirror`, write an empty
+tree with `git hash-object -t tree -w /dev/null`, and a decoy commit over
+it with `git commit-tree`. Run `git replace <base> <decoy>` in the mirror.
+An unpinned `read-tree` then reads the empty tree, and the patch does not
+apply. Then run `git read-tree <decoy>` in the mirror, which writes its own
+`index` file, and keep its bytes. The prototype measured on the host's git
+that a build without `GIT_INDEX_FILE` rewrites those bytes.
+
+**The broken read** comes last. Stub `file_at` on the
+`saffron.repos.mirror` module with a function raising a plain `GitError`,
+and assert `files_after` raises it over one path the tree holds.
+
+**The move's own check**. Import `saffron.qualify` inside the witness and
+assert it has no `_rebuild_tree`. A module-scope import would break
+`revert` as the comment at `tests/test_mirror.py:19` says.
+
 **The `dead` gate** reads `pending_symbols` from this spec while it is
 open, so `files_after` with no caller passes it. `rebuild_tree` has
 `qualify` as its caller.
 
 **The `prose` gate** reads the moved docstring as new text in
-`saffron/repos/mirror.py`. Keep it as it stands, since it carries no
-em dash, semicolon or contraction. Give `files_after` a short docstring
+`saffron/repos/mirror.py`. Keep it as it stands. The prototype's
+`hooks/prose_limit.py --file` counted no new hit in that file. Give `files_after` a short docstring
 held to the same rules.
 
-**Size**. A prototype measured 442 counted tokens outside `tests/` and 216
-under it, about 165 changed lines. The move is about half of the counted
-tokens.
+**Size**. A prototype measured 460 counted tokens outside `tests/` and 309
+under it, about 192 changed lines. The move is about two fifths of them.
