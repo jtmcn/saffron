@@ -2030,7 +2030,7 @@ def _assert_unreadable_diff_unrun(bad_diff):
 
 
 def test_revert_leaves_out_exactly_the_declared_renames_census_accepts():
-    """Backlog item b-d2b6b3 (`SA-0398`). `revert_gate` accepts a declared
+    """Backlog item b-d2b6b3 (`SA-0389`). `revert_gate` accepts a declared
     rename by `census`'s own rule. The old name is gone at head, and the new
     one is collected at head and absent at base, matched whole. It leaves
     the accepted new name out of the new-test set, unless a criterion still
@@ -2187,7 +2187,9 @@ def test_revert_leaves_out_exactly_the_declared_renames_census_accepts():
         renames=pair_renames,
     )
     assert renamed_result.status == "fail", renamed_result
-    assert [f.file for f in renamed_result.failures] == ["t.py::test_uniform_witness"]
+    assert [(f.file, f.code) for f in renamed_result.failures] == [
+        ("t.py::test_uniform_witness", "passed-without-source")
+    ]
     assert "t.py::test_tango_left" in renamed_result.summary
     assert "t.py::test_uniform_witness" not in renamed_result.summary
 

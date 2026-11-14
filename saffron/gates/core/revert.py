@@ -263,7 +263,7 @@ def revert_gate(
     declared = {c.witness for c in acceptance}
     before_set, after_set = set(before), set(after)
     new_only = after_set - before_set
-    # `census`'s own rule (`census.py:78-82`): the old name is gone at head
+    # `census_gate`'s own `accepted` rule: the old name is gone at head
     # and the new one is collected at head and absent at base, matched whole.
     accepted_renames = {
         new
@@ -276,10 +276,9 @@ def revert_gate(
     # Subtracted from the difference alone, before the criteria union, so a
     # renamed witness still joins what follows.
     before_exempt = ((new_only - accepted_renames) | (declared & after_set)) - preserved
-    # What the set would hold without this rule, naming only what the rule
-    # itself removed, since a renamed `preserves` witness stays out regardless.
-    would_hold_without_renames = (new_only | (declared & after_set)) - preserved
-    renamed_out = sorted(would_hold_without_renames - before_exempt)
+    # Only what the rule removed: any criterion's witness, `preserves` included,
+    # keeps its own fate, and every accepted name already sits in `new_only`.
+    renamed_out = sorted(accepted_renames - declared)
     # Named only where it was a candidate: a test never added, or one
     # `preserves` dropped, was never going to reach `run_tests` either way.
     exempted = sorted(before_exempt & set(exempt))
