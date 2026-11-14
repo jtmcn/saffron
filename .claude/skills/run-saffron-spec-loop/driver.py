@@ -3035,7 +3035,8 @@ def cmd_pattern(_args) -> int:
 
 def cmd_cite(args) -> int:
     """What `driver.py cite` proves: every `file:line` a spec quotes resolves
-    at `--base`, by the rule the batch's own check holds. It reads
+    at `--base` by the batch's rule. It also refuses a citation no single
+    construct its clause names holds, which the batch passes (SA-0384). It reads
     the spec as text. A refused spec still carries citations worth checking,
     and frontmatter plays no part in resolving one."""
     spec_path = Path(args.spec_path)

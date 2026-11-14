@@ -423,15 +423,29 @@ def _wait_out_rate_limit(
     same spec.
 
     Bounds come before any subtraction. An untrusted cell's `resets_at`
-    can be far larger than a plain subtraction can carry (measured)."""
+    can be far larger than a plain subtraction can carry (measured). A
+    reset past the cap still waits the cap, not one hour."""
     now = clock()
     now_ts = now.timestamp()
-    readable = resets_at is not None and now_ts < resets_at <= now_ts + 21600
-    wait = resets_at - now_ts if readable else 3600.0
+    after_clock = resets_at is not None and now_ts < resets_at
+    within_cap = after_clock and resets_at <= now_ts + 21600
+    wait = resets_at - now_ts if within_cap else 21600.0 if after_clock else 3600.0
     if until is not None and wait >= (until - now).total_seconds():
         return "UNTIL"
-    reopen = (now + timedelta(seconds=wait)).strftime("%H:%M")
-    emit(f"{candidate.spec.id:<10} rate limited, window reopens {reopen}")
+    retry_at = (now + timedelta(seconds=wait)).strftime("%H:%M")
+    if after_clock:
+        try:
+            reset = datetime.fromtimestamp(resets_at, now.tzinfo).strftime(
+                "%a %d %b %H:%M"
+            )
+        except (OverflowError, OSError, ValueError):
+            reset = "unknown"
+    else:
+        reset = "unknown"
+    emit(
+        f"{candidate.spec.id:<10} rate limited, window reopens {reset}, "
+        f"retrying {retry_at}"
+    )
     sleep(wait)
     return None
 

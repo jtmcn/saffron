@@ -66,7 +66,6 @@ acceptance:
       - "`session.py` declares the constant but keeps its f-string literal at the `_phase_start` call."
       - "The constant drops its trailing space, and both sides join it to the hash with a space of their own."
       - "The constant's wording changes, for example to `sha-256`, on both sides at once."
-      - "`_write_review_log` builds its line from the constant, and the constant's wording changes."
   - claim: >-
       `qualify._binds_task` matches a REVIEW detail only when it equals the
       value `session.REVIEWED_DIFF_DETAIL` holds at the moment of the call,
@@ -87,7 +86,6 @@ acceptance:
       - "`_binds_task` matches any REVIEW detail that contains the hash."
       - "`_binds_task` matches any REVIEW detail that ends with the hash."
       - "`_binds_task` matches the constant as a prefix and ignores the hash."
-      - "`_write_review_log` builds its line from the constant, and the constant's wording changes."
   - claim: >-
       A layer whose `events.jsonl` carries today's full line, followed by its
       own task's `RecordAppend`, still has its record bound. Its in-cell
@@ -98,6 +96,49 @@ acceptance:
       - "The constant's wording changes, for example to `sha-256`."
       - "`_binds_task` matches a label other than `REVIEW`."
 ---
+
+## Before this cell starts
+
+Criterion 3 is `preserves`, so `witness` only re-runs its existing test.
+It cannot apply a mutant to it unless one sits on `refs/saffron/mutants` at
+this spec's id. That ref does not exist on origin at this base
+(`git rev-parse --verify --quiet refs/saffron/mutants` against origin
+fails). No spec here carries a mutant yet. Decide now, before dispatch,
+rather than discover it mid-cell:
+
+- **Seed one first**, so `witness` machine-checks that criterion 3's
+  `wrong_versions` fail the test. Run `saffron mutant SA-0386 --from
+  <file>`. Give `<file>` a mapping keyed by
+  `tests/test_qualify.py::test_an_in_cell_concern_is_dropped_when_its_line_changed_since_the_tree_its_critic_read`.
+  Name `file: saffron/qualify.py`. Name a `find` that is the sole line in
+  the tree comparing the event's label to the review phase's name
+  (`saffron/qualify.py:132`). Name a `replace` that swaps that phase's
+  name for the planning phase's name. Name a `case` describing a REVIEW
+  `PhaseStart` whose detail matches today's line, still binding a
+  planning-labeled record to the task. The case explains that
+  `_binds_task` stopped checking the label.
+
+  Write that `find` and `replace` only in `<file>`, never in this spec.
+  `saffron/intake.py:397`'s `refuse_disclosed_mutants` runs again against
+  the filled-in spec. `saffron/mutants.py`'s `attach_mutants` calls it
+  once the ref supplies the mutant. It raises `DisclosedMutantError`, a
+  `SpecError`, when a criterion's `find` sits inside this spec's own body,
+  claims, wrong versions, or cases. Every caller of `attach_mutants_at`
+  catches `SpecError` and returns `Refused`. `saffron/task.py`'s dispatch
+  paths are among those callers. A disclosed `find` refuses the whole
+  task the next time it is dispatched, not criterion 3's witness alone.
+  That is why the target above is named by file, line, and effect, with
+  neither side of the comparison spelled out as source text here.
+
+- **Or accept the gap this round.** With no mutant attached, `witness`
+  reports `skip` for criterion 3, not `fail`: the cell runs and the gate
+  passes either way. Criterion 3's regression guard then stays asserted
+  only in its `wrong_versions` prose, unverified by any gate. That stays
+  true until a later spec or a seeded mutant checks it.
+
+Either choice is compatible with the rest of this spec, provided a seeded
+mutant's `find` is never quoted in this file. Nothing below depends on
+which one is made.
 
 ## Context
 
@@ -156,6 +197,9 @@ finds the text in `saffron/` at these two lines alone.
   literal. A test that builds the line from the constant passes whatever the
   constant says, and these literals are what pin the text.
 - Any other detail text `session.py` writes.
+- Seeding criterion 3's mutant. "Before this cell starts" names the
+  candidate for whoever decides to seed it. This spec's cell neither runs
+  `saffron mutant` nor edits anything on `refs/saffron/mutants`.
 
 ## Notes for the agent
 
@@ -166,19 +210,22 @@ a constant that does not exist at base. So they declare no mutant, and
 `witness` reports `skip` for them. The wrong versions under each criterion
 are what its witness must kill. Do not run them yourself.
 
-**Criterion 3 declares no mutant.** `refs/saffron/mutants` does not exist
-on origin at this base, so no spec carries one. The operator can add one
-with `saffron mutant`. The candidate is `saffron/qualify.py`'s
-`event.label == "REVIEW"`, replaced with `"PLAN"`.
+**Criterion 3's mutant, if any, is seeded outside this cell.** See "Before
+this cell starts". Whether or not one lands on `refs/saffron/mutants`
+before the cell runs changes nothing this cell does: build the refactor,
+keep criterion 3's existing test passing unmodified, and leave
+`saffron mutant` alone.
 
-**Two hand-written lines stay as written.** `_write_review_log` writes
-today's full line as a literal (`tests/test_qualify.py:1596`), and so does
-the unbound case of
+**`_write_review_log` stays a literal.** It writes today's full line as a
+literal (`tests/test_qualify.py:1596`), and so does the unbound case of
 `test_a_layer_whose_record_cannot_be_used_keeps_the_packaged_heads_check`
 (`tests/test_qualify.py:1906`). Criterion 3's witness writes its logs
-through `_write_review_log`. Built from the constant, that line moves with
-any wording change, and criterion 3 would pass it. Criteria 1 and 2 pin
-the wording through their own literals.
+through `_write_review_log`, and that helper's detail must stay a literal.
+Built from the constant instead, the line would move with any wording
+change. Criterion 3's own "wording changes" mutant would then pass silently
+rather than being caught. Do not route `_write_review_log` through the
+constant. Criteria 1 and 2 never call `_write_review_log`. Each pins the
+wording through its own literal, as the Notes below describe.
 
 **Criterion 1's witness.** Drive a clean REVIEW the way
 `test_a_task_whose_lenses_are_handed_no_diff_records_none` drives its clean
@@ -193,13 +240,12 @@ subdirectory. Pick a sentinel that does not contain `reviewed diff recorded`,
 so the claim's last half can see a literal left behind.
 
 **Criterion 2's witness.** Import `_binds_task` inside the test. Write each
-log with `events.EventLog`, as `_write_review_log` does
-(`tests/test_qualify.py:1573`), but with the detail as a parameter.
-Write today's text as a literal, never from the constant. Ask
-every log about the same hash. Assert the shipped log binds before you
-replace the constant. That positive case,
-through the same call, is what makes the later "no longer binds" assertion
-mean something.
+log with `events.EventLog`, directly, not through `_write_review_log`. Pass
+the detail as a literal parameter of the test itself, rather than reading
+it from the constant. Write today's text as a literal, never from the
+constant. Ask every log about the same hash. Assert the shipped log binds
+before you replace the constant. That positive case, through the same
+call, is what makes the later "no longer binds" assertion mean something.
 
 **Docstrings and comments.** The `prose` gate reads each new docstring and
 comment, so keep them in house style.

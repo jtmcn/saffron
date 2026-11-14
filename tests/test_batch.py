@@ -2976,9 +2976,9 @@ def test_a_stack_batch_stops_at_until_rather_than_wait_past_it(
 def test_a_stack_batch_waits_an_hour_when_it_cannot_read_the_reset_time(
     ledger, repo_id, monkeypatch
 ):
-    """`resets_at` values `_wait_out_rate_limit` cannot read all wait an
-    hour. Only a value strictly after now and no more than six hours on is
-    read, and waited in full."""
+    """A missing reset, or one at or before now, waits an hour. Only a
+    value strictly after now and no more than six hours on is waited in
+    full."""
     from saffron.batch import run_stack_batch
 
     _raise_on_real_sleep(monkeypatch)
@@ -2986,12 +2986,8 @@ def test_a_stack_batch_waits_an_hour_when_it_cannot_read_the_reset_time(
     clock = AdvancingClock(start)
     steps = (
         [{"state": "RATE_LIMITED", "resets_at": None}]
-        + [{"state": "RATE_LIMITED", "resets_at": 10**20}]
-        + [{"state": "RATE_LIMITED", "resets_at": 10**12}]
         + [{"state": "RATE_LIMITED", "offset": 0}]
         + [{"state": "RATE_LIMITED", "offset": -60}]
-        + [{"state": "RATE_LIMITED", "offset": 7 * 3600}]
-        + [{"state": "RATE_LIMITED", "resets_at": 10**400}]
         + [{"state": "RATE_LIMITED", "resets_at": -(10**400)}]
         + [{"state": "RATE_LIMITED", "offset": 6 * 3600}]
         + [{"state": "READY_FOR_REVIEW"}]
@@ -3012,14 +3008,179 @@ def test_a_stack_batch_waits_an_hour_when_it_cannot_read_the_reset_time(
     )
 
     assert reason == "DRAINED"
-    assert runner.calls == [("TE-1", None)] * 10
-    assert clock.sleeps == [3600.0] * 8 + [21600.0]
+    assert runner.calls == [("TE-1", None)] * 6
+    assert clock.sleeps == [3600.0] * 4 + [21600.0]
     rate_lines = [
         line
         for line in lines
         if line.startswith(f"{'TE-1':<10}") and "rate limited" in line
     ]
-    assert len(rate_lines) == 9
+    assert len(rate_lines) == 5
+
+
+def test_a_stack_batch_waits_six_hours_for_a_reset_past_the_cap(
+    ledger, repo_id, monkeypatch
+):
+    """A reset after the clock and more than six hours on waits the cap
+    rather than one hour. A reset at most six hours on still waits in
+    full, and a missing, equal or earlier reset still waits an hour."""
+    from saffron.batch import run_stack_batch
+
+    _raise_on_real_sleep(monkeypatch)
+    start = datetime(2030, 1, 1, 16, 39)
+    clock = AdvancingClock(start)
+    thirteen_hours = int(datetime(2030, 1, 2, 6, 0).timestamp())
+    steps = (
+        [{"state": "RATE_LIMITED", "resets_at": thirteen_hours}] * 3
+        + [{"state": "RATE_LIMITED", "offset": 6 * 3600 + 1}]
+        + [{"state": "RATE_LIMITED", "offset": 7 * 3600}]
+        + [{"state": "RATE_LIMITED", "resets_at": 10**12}]
+        + [{"state": "RATE_LIMITED", "resets_at": 10**20}]
+        + [{"state": "RATE_LIMITED", "resets_at": 10**17}]
+        + [{"state": "RATE_LIMITED", "resets_at": 10**400}]
+        + [{"state": "RATE_LIMITED", "resets_at": None}]
+        + [{"state": "RATE_LIMITED", "offset": 0}]
+        + [{"state": "RATE_LIMITED", "offset": -60}]
+        + [{"state": "READY_FOR_REVIEW"}]
+    )
+    runner = RateLimitScript(ledger, repo_id, clock, {"TE-1": steps})
+
+    reason = run_stack_batch(
+        [_candidate("TE-1")],
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        clock=clock,
+        sleep=clock.sleep,
+    )
+
+    assert reason == "DRAINED"
+    assert runner.calls == [("TE-1", None)] * 13
+    assert clock.sleeps == [21600.0, 21600.0, 4860.0] + [21600.0] * 6 + [3600.0] * 3
+
+
+def test_a_reset_past_the_cap_stops_at_until_rather_than_wait_past_it(
+    ledger, repo_id, monkeypatch
+):
+    """The capped wait meets `--until` the way any wait meets it at base.
+    A wait at or past `until` still stops the batch `UNTIL` at once, with
+    no sleep and no line. A wait short of it still sleeps, and the spec
+    starts again before `until`."""
+    from saffron.batch import run_stack_batch
+
+    _raise_on_real_sleep(monkeypatch)
+    start = datetime(2030, 1, 1, 16, 39)
+    thirteen_hours = int(datetime(2030, 1, 2, 6, 0).timestamp())
+    steps = [{"state": "RATE_LIMITED", "resets_at": thirteen_hours}] * 3
+
+    def _run(until_hours):
+        clock = AdvancingClock(start)
+        reads: list[datetime] = []
+        inner = RateLimitScript(ledger, repo_id, clock, {"TE-1": list(steps)})
+
+        def runner(candidate, predecessor=None):
+            reads.append(clock())
+            return inner(candidate, predecessor)
+
+        lines: list[str] = []
+        reason = run_stack_batch(
+            [_candidate("TE-1")],
+            ledger,
+            budget_usd=100.0,
+            until=start + timedelta(hours=until_hours),
+            runner=runner,
+            readiness_check=_ready,
+            clock=clock,
+            sleep=clock.sleep,
+            emit=lines.append,
+        )
+        return reason, reads, clock.sleeps, lines
+
+    reason, reads, sleeps, lines = _run(6)
+    assert reason == "UNTIL"
+    assert reads == [start]
+    assert sleeps == []
+    assert not any("rate limited" in line for line in lines)
+
+    reason, reads, sleeps, lines = _run(8)
+    assert reason == "UNTIL"
+    assert reads == [start, start + timedelta(hours=6)]
+    assert sleeps == [21600.0]
+    assert len([line for line in lines if "rate limited" in line]) == 1
+
+
+def test_a_rate_limit_wait_line_names_the_providers_reset_beside_the_retry_hour(
+    ledger, repo_id, monkeypatch
+):
+    """The wait line names the provider's own reset, read in the clock's
+    own zone, beside the hour the spec starts again. A reset the wait
+    cannot read or render names `unknown` instead."""
+    from saffron.batch import run_stack_batch
+
+    _raise_on_real_sleep(monkeypatch)
+    zones = [
+        None,
+        timezone(timedelta(hours=-7)),
+        timezone(timedelta(hours=5, minutes=45)),
+    ]
+    prefix = f"{'TE-1':<10}"
+    expected = [
+        f"{prefix} rate limited, window reopens Wed 02 Jan 06:00, retrying 22:39",
+        f"{prefix} rate limited, window reopens Wed 02 Jan 00:00, retrying 00:00",
+        f"{prefix} rate limited, window reopens unknown, retrying 01:00",
+        f"{prefix} rate limited, window reopens unknown, retrying 02:00",
+        f"{prefix} rate limited, window reopens unknown, retrying 03:00",
+        f"{prefix} rate limited, window reopens unknown, retrying 09:00",
+        f"{prefix} rate limited, window reopens unknown, retrying 15:00",
+        f"{prefix} rate limited, window reopens unknown, retrying 21:00",
+        f"{prefix} rate limited, window reopens unknown, retrying 03:00",
+    ]
+
+    for zone in zones:
+        start = datetime(2030, 1, 1, 16, 39, tzinfo=zone)
+        clock = AdvancingClock(start)
+        steps = (
+            [
+                {
+                    "state": "RATE_LIMITED",
+                    "resets_at": datetime(2030, 1, 2, 6, 0, tzinfo=zone).timestamp(),
+                }
+            ]
+            + [
+                {
+                    "state": "RATE_LIMITED",
+                    "resets_at": datetime(2030, 1, 2, 0, 0, tzinfo=zone).timestamp(),
+                }
+            ]
+            + [{"state": "RATE_LIMITED", "resets_at": None}]
+            + [{"state": "RATE_LIMITED", "offset": 0}]
+            + [{"state": "RATE_LIMITED", "offset": -60}]
+            + [{"state": "RATE_LIMITED", "resets_at": 10**12}]
+            + [{"state": "RATE_LIMITED", "resets_at": 10**20}]
+            + [{"state": "RATE_LIMITED", "resets_at": 10**17}]
+            + [{"state": "RATE_LIMITED", "resets_at": 10**400}]
+            + [{"state": "READY_FOR_REVIEW"}]
+        )
+        runner = RateLimitScript(ledger, repo_id, clock, {"TE-1": steps})
+        lines: list[str] = []
+
+        reason = run_stack_batch(
+            [_candidate("TE-1")],
+            ledger,
+            budget_usd=100.0,
+            until=None,
+            runner=runner,
+            readiness_check=_ready,
+            clock=clock,
+            sleep=clock.sleep,
+            emit=lines.append,
+        )
+
+        assert reason == "DRAINED"
+        rate_lines = [line for line in lines if "rate limited" in line]
+        assert rate_lines == expected
 
 
 def _review_session(

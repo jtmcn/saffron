@@ -1,12 +1,12 @@
 ---
 id: b-19f43a
 title: The reviewed-diff phase line is spelled in two modules, so a change to one silently unbinds every record
-status: open
+status: done
 tier: 3
 filed: 2026-11-12
-closed:
+closed: 2026-11-13
 specs: [SA-0386]
-prs: []
+prs: [1190]
 commits: []
 cites: [§5.7]
 related: [b-1b05be]
@@ -34,3 +34,5 @@ One constant names the line's detail text. `session.py` writes it and
 ## Record
 
 - 2026-11-12: filed from the Standards seat's out-of-scope note on #1172.
+- 2026-11-13: done by `SA-0386` (#1190). `session.REVIEWED_DIFF_DETAIL`
+  spells the line once, and `qualify._binds_task` reads it live.

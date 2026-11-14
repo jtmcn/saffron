@@ -119,7 +119,7 @@ def _binds_task(task_dir: Path, sha256: str, task_key: str) -> bool:
     `task_key`. A later task of the same spec, or `saffron reconcile`,
     appends to the same file long after. Only the first `RecordAppend`
     after the matching line is read."""
-    target = f"reviewed diff recorded, sha256 {sha256}"
+    target = f"{session.REVIEWED_DIFF_DETAIL}{sha256}"
     bound = False
     for event in events.read_log(task_dir):
         if bound:

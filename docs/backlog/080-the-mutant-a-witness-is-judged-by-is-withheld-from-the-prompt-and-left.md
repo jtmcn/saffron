@@ -107,3 +107,7 @@ that must never reach a cell and must be handed to every cloud host.
   'refs/saffron/mutants*'` prints nothing, so no spec carries a mutant on the
   ref. Three spec reviews that day asked for one. `SA-0385` and `SA-0386`
   each name a candidate in their notes for `saffron mutant` to write.
+- 2026-11-13: run 68. `SA-0386` told the operator how to seed a mutant and
+  quoted its `find` text in the body. Seeding it refuses the task
+  through `refuse_disclosed_mutants`. The batch's spec review caught it at
+  $12.95. `driver.py check` could refuse such a body before any review.

@@ -11419,6 +11419,65 @@ def test_a_task_whose_lenses_are_handed_no_diff_records_none(monkeypatch, tmp_pa
     assert not (refused_dir / "out" / "SY-1" / "reviewed-diff.json").exists()
 
 
+def test_review_spells_its_reviewed_diff_line_from_the_shared_constant(
+    monkeypatch, tmp_path
+):
+    """`SA-0386`, backlog item b-19f43a. REVIEW's own line is built from
+    `REVIEWED_DIFF_DETAIL`, not a second copy of its text. Driven clean
+    twice, the line in `capture` moves with the constant."""
+    shipped_dir = tmp_path / "shipped"
+    cell = _stub_the_runtime(monkeypatch)
+    capture: list = []
+    outcome, _ledger = _drive(
+        monkeypatch,
+        shipped_dir,
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        capture=capture,
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    recorded_sha256 = json.loads(
+        (shipped_dir / "out" / "SY-1" / "reviewed-diff.json").read_text()
+    )["sha256"]
+    assert session.REVIEWED_DIFF_DETAIL == "reviewed diff recorded, sha256 "
+    shipped_details = [
+        event.detail
+        for event in capture
+        if isinstance(event, PhaseStart)
+        and event.phase == "REVIEW"
+        and event.label == "REVIEW"
+    ]
+    expected = f"reviewed diff recorded, sha256 {recorded_sha256}"
+    assert shipped_details.count(expected) == 1
+
+    sentinel_dir = tmp_path / "sentinel"
+    sentinel_cell = _stub_the_runtime(monkeypatch)
+    sentinel = "SA-0386 sentinel detail, "
+    monkeypatch.setattr(session, "REVIEWED_DIFF_DETAIL", sentinel)
+    sentinel_capture: list = []
+    outcome_sentinel, _ledger2 = _drive(
+        monkeypatch,
+        sentinel_dir,
+        cell=sentinel_cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        capture=sentinel_capture,
+    )
+    assert outcome_sentinel.state == "READY_FOR_REVIEW"
+    sentinel_sha256 = json.loads(
+        (sentinel_dir / "out" / "SY-1" / "reviewed-diff.json").read_text()
+    )["sha256"]
+    sentinel_details = [
+        event.detail
+        for event in sentinel_capture
+        if isinstance(event, PhaseStart)
+        and event.phase == "REVIEW"
+        and event.label == "REVIEW"
+    ]
+    sentinel_expected = f"{sentinel}{sentinel_sha256}"
+    assert sentinel_details.count(sentinel_expected) == 1
+    assert not any("reviewed diff recorded" in d for d in sentinel_details)
+
+
 def test_the_lens_gate_suite_runs_inside_the_one_cell_lifecycle(monkeypatch, tmp_path):
     """The claim backlog item 140 makes is that one lifecycle serves both
     callers: patch `critic_cell` itself and show the gate suite ran against
