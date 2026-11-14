@@ -76,7 +76,9 @@ and reports the ones that moved or no longer exist.
 It runs core's own checker (`saffron/spec_citations.py`, SA-0314). That
 checker judges a range by the construct its clause names. The policy at the
 commit declares what opens a construct. A line zero and a reversed range are
-refused before any file is read.
+refused before any file is read. It also refuses a citation whose names
+open constructs when no single one holds the cited lines (SA-0384). Name the
+enclosing construct in the clause, so a parent's edit cannot move it.
 
 What it cannot see. A clause that names no construct passes, so read each such
 citation by hand. After a stack rebase, resolve commit hashes and base branch

@@ -1,11 +1,11 @@
 ---
 id: b-b664d1
 title: "A citation that names one construct beside another's lines passes until a parent moves them, then stops the stack batch"
-status: open
+status: partial
 tier: 2
 filed: 2026-11-02
 specs: [SA-0384]
-prs: []
+prs: [1188]
 commits: []
 cites: [§4.2.1]
 related: [b-d31930, b-61993a]
@@ -47,3 +47,6 @@ changes is flagged or moved before the spec review reads it.
 - 2026-11-13: specced as `SA-0384`. `cite` refuses, at its base, a citation
   whose names open a construct when no single name holds it. The second
   "Done looks like" sentence stays open here.
+- 2026-11-13: `SA-0384` (#1188) landed the first sentence. `driver.py cite`
+  now refuses a citation no single named construct holds. The bare citation
+  into a parent's changed file stays open.

@@ -268,6 +268,11 @@ def _spans_of(by_name: dict[str, list[tuple[int, int]]]) -> list[tuple[int, int]
     return sorted({span for found in by_name.values() for span in found})
 
 
+def _where(spans: list[tuple[int, int]]) -> str:
+    """`spans` as a defect line prints them, comma-joined ranges."""
+    return ", ".join(_range(s, e) for s, e in spans)
+
+
 def _construct_defect(
     cite: _Citation, lines: list[str], by_name: dict[str, list[tuple[int, int]]]
 ) -> CitationDefect | None:
@@ -293,7 +298,7 @@ def _construct_defect(
         for name in cite.names
     ):
         return None
-    where = ", ".join(_range(s, e) for s, e in spans)
+    where = _where(spans)
     line = (
         f"{cite.path}:{_range(cite.start, cite.end)}: the construct it names sits "
         f"at {cite.path}:{where}"
@@ -341,7 +346,7 @@ def _moved_defect(
         return None
     if _held_name(by_name, cite.start, cite.end) is not None:
         return None
-    where = ", ".join(_range(s, e) for s, e in spans)
+    where = _where(spans)
     line = (
         f"{cite.path}:{_range(cite.start, cite.end)}: no single construct it names "
         f"holds it (they sit at {cite.path}:{where})"

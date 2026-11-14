@@ -1,12 +1,12 @@
 ---
 id: b-45783e
 title: A rate-limit reset past six hours is read as unknown, so a batch restarts the cell every hour until the window opens
-status: open
+status: done
 tier: 3
 filed: 2026-11-13
-closed:
+closed: 2026-11-13
 specs: [SA-0385]
-prs: []
+prs: [1189]
 commits: []
 cites: [§5.1]
 related: []
@@ -35,3 +35,5 @@ emitted line names the provider's own reset beside the hour it will retry.
 - 2026-11-13: filed from the spec loop's run 66.
 - 2026-11-13: specced as `SA-0385`. A reset past the cap waits six hours.
   A missing reset, or one at or before the clock, keeps the hour.
+- 2026-11-13: done by `SA-0385` (#1189). A reset past six hours now waits
+  six hours, and the wait line names the reset beside the retry hour.

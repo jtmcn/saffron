@@ -3065,3 +3065,24 @@ critic's own, so they have no line.
 - `SA-0381` (#1183): the witness imported `hash_artifact` in its body,
   beside the module's own import. **Bucket 3**, conventions. **Landed:** a
   review commit on #1183.
+
+## 2026-11-13, spec loop run 68 (#1188, #1189, #1190)
+
+- `SA-0384` (#1188): the witness put its one construct defect last, so a
+  version returning moved defects first passed. **Bucket 1**. **Landed:** a
+  review commit on #1188.
+- `SA-0384` (#1188): the witness compared defects by line only, so a moved
+  defect with a rewrite span or a lost offset passed. **Bucket 1**.
+  **Landed:** a review commit on #1188.
+- `SA-0384` (#1188): a docstring said a refused citation moved, at the
+  commit where nothing moved, and another dropped the policy source.
+  **Bucket 3**, conventions. **Landed:** a review commit on #1188.
+- `SA-0384` (#1188): a test named a defect no construct holds
+  `held_defect`. **Bucket 3**, conventions. **Landed:** a review commit on
+  #1188.
+- `SA-0385` (#1189): the wait renders a reset beside `events.when`, whose
+  docstring calls itself the one place. **Bucket 3**, conventions.
+  **Landed:** filed as b-e11fb7.
+- `SA-0386` (#1190): the constant's comment named two copies and the spec
+  that could not share them. **Bucket 3**, conventions. **Landed:** a review
+  commit on #1190.
