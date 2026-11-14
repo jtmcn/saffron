@@ -41,7 +41,7 @@ forbidden:
   - tests/test_report.py
   - tests/test_scheduler.py
   - tests/test_queued_specs.py
-budget_usd: 34
+budget_usd: 36
 max_attempts: 3
 max_turns: 180
 acceptance:
@@ -87,16 +87,23 @@ acceptance:
       in PACKAGE. Each site's row equals base's on every field. The witness
       wraps the real `queue_line` in a spy. It sets the spy on
       `saffron.phases.package`, and on `saffron.task` where that name exists,
-      so either spelling of the call reaches it. It drives `run_task` to the
-      unpackaged row for a `NOT_IMPLEMENTED` cell with and without a
-      rebuttal, and to the `EXHAUSTED` row for a refused PACKAGE. It drives
-      `_finish` for a `READY_FOR_REVIEW` result with a link, 19 added and 23
-      removed, and for a `MERGE_FAILED` result with no link and no diff stat.
-      It compares each landed row in full with the row base writes. It also
+      so either spelling of the call reaches it. Every outcome it drives
+      carries criterion 1's values: 13 attempts, $17.50, `elevated` against a
+      spec declaring `standard`, 7 unread, 11 unanswered and the five-finding
+      review. A rebutted outcome also carries criterion 1's rebuttal, with 3
+      sustained and 5 unkept. It drives `run_task` to the unpackaged row for
+      a `NOT_IMPLEMENTED` cell with and without that rebuttal, and to the
+      `EXHAUSTED` row for a refused PACKAGE with none. It drives `_finish`
+      over a rebutted outcome twice. One result is `READY_FOR_REVIEW` with the
+      note `opened`, a link, 19 added and 23 removed. The other is
+      `MERGE_FAILED` with the note `gone`, no link and no diff stat. It
+      compares each landed row in full with the row base writes. It also
       asserts that the spy returned those five rows in that order, each with
-      its state. Last, it asserts that the rows agree on the ten fields the
-      sites share, each field but `state`, `note`, `added`, `removed` and
-      `link`.
+      its state. Last, it compares the rows on the ten fields the sites
+      share, each field but `state`, `note`, `added`, `removed` and `link`,
+      in two groups. The rebutted unpackaged row and both `_finish` rows
+      agree on all ten. The `EXHAUSTED` row and the unpackaged row with no
+      rebuttal agree on all ten, with `sustained` and `unkept` at 0.
     witness: tests/test_task.py::test_every_row_a_tasks_end_writes_comes_from_queue_line
     wrong_versions:
       - "The unpackaged site keeps its own `QueueLine` construction."
@@ -222,7 +229,9 @@ and `saffron.scheduler` from this package (`saffron/report/index.py:20-22`).
 ## Problem
 
 1. **`saffron/phases/package.py`.** Add `queue_line` as criterion 1 names it,
-   at module scope. Its body is the one `QueueLine` construction a task's end
+   at module scope. Leave its `outcome` parameter unannotated, as `_finish`'s
+   is (`saffron/phases/package.py:1048`). An annotation would add an import
+   of `saffron.cell.session` that this module lacks today. Its body is the one `QueueLine` construction a task's end
    uses. Replace `_finish`'s construction with a call to it, passing
    `result.added or 0` and `result.removed or 0` as today. Leave `_finish`'s
    `append_queue_line` call and its `header` as they are.
@@ -248,6 +257,9 @@ and `saffron.scheduler` from this package (`saffron/report/index.py:20-22`).
 - **`docs/evidence/scripts/2026-08-25-queue-from-ledger.py:67`**, an evidence
   script that rebuilds rows from the ledger, and every `QueueLine` a test
   builds by hand.
+- **`saffron/report/index.py:428`.** `_existing_queue_rows` rebuilds each stored
+  row with `QueueLine(**item)` as it reads `queue.json` back. That builds no
+  row from an outcome, and the file lies outside criterion 3's walk.
 - **b-edcab7's three stale sentences.** They are in files this spec forbids.
 
 ## Notes for the agent
@@ -282,7 +294,9 @@ field.
 `tests/test_task.py:44-129` already drive `run_task` with `run_one_cell` and
 `push_unpackaged_work` replaced. Give each of the five rows its own
 `out_dir` and the spec id `SY-1`. Each `queue.json` then holds one row, and
-`spec_id` is a shared field. For the `EXHAUSTED` row, replace
+`spec_id` is a shared field. Build every outcome from one helper holding
+criterion 1's values, so `_drive`'s spec keeps its default `standard` while
+each outcome is `elevated`. For the `EXHAUSTED` row, replace
 `package_phase.package` with one returning
 `PackageResult(state="EXHAUSTED", note="conflicts with main")`. Keep the
 anchored blocker in the review and give that outcome no `rebut_result`, as
