@@ -50,6 +50,8 @@ class SuiteSpec(Protocol):
     def acceptance(self) -> list[Criterion]: ...
     @property
     def spec_type(self) -> str: ...
+    @property
+    def renames(self) -> dict[str, str]: ...
 
 
 class Tree(Protocol):
@@ -228,7 +230,7 @@ class GateSuite:
         return SuiteRun(
             results=[
                 *results,
-                census_gate(prior, results),
+                census_gate(prior, results, renames=spec.renames),
                 criteria_gate(spec.acceptance, prior, results),
             ],
             effective_risk=tier,

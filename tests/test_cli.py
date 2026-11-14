@@ -707,6 +707,22 @@ def test_a_specs_declared_risk_reaches_the_cell(tmp_path, monkeypatch, capsys):
     assert cell_spec.risk == "elevated"
 
 
+def test_a_specs_declared_renames_reach_the_cell(tmp_path, monkeypatch, capsys):
+    """`saffron cell` hands the cell the renames its spec declares."""
+    repo = _local_origin(tmp_path)
+    args = _namespace(repo, tmp_path)
+    renames = {
+        "tests/test_a.py::test_one[1]": "tests/test_a.py::test_two[1]",
+        "tests/test_b.py::test_three": "tests/test_b.py::test_four",
+    }
+    renames_yaml = "{" + ", ".join(f"'{k}': '{v}'" for k, v in renames.items()) + "}"
+    args.spec = _ceiling_spec(tmp_path, renames=renames_yaml)
+
+    cell_spec, _printed = _capture_cell_spec(monkeypatch, repo, tmp_path, args, capsys)
+
+    assert cell_spec.renames == renames
+
+
 def test_a_depends_on_reaches_the_cell_unstacked(tmp_path, monkeypatch, capsys):
     """`_run_cell` does consult `depends_on` now (`SA-0026`,
     `_resolve_stacked_on`) — but this repo's fresh `Ledger` has never seen

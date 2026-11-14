@@ -372,6 +372,9 @@ class CellSpec:
     # `intake.Spec.history`, which `run_history` runs in a Gate-only cell
     # over a read-only ledger snapshot (`SA-0272`, b-a8270f).
     history: History | None = None
+    # `intake.Spec.renames`, read by `census_gate` through the suite's
+    # `SuiteSpec` protocol (`SA-0387`). Empty where the spec declares none.
+    renames: dict[str, str] = field(default_factory=dict)
     # Kept in step with `intake.Spec`, which is where a run's ceilings are
     # declared and defaulted; `cli` passes all three, so these are reached only
     # by tests. Two defaults for one ceiling is a drift vector — they disagreed

@@ -104,6 +104,7 @@ class _Spec:
     forbidden: list[str] = field(default_factory=list)
     acceptance: list = field(default_factory=list)
     spec_type: str = "feature"
+    renames: dict = field(default_factory=dict)
 
 
 def _suite(gates=("lint", "tests"), *, policy=None, spec=None):
@@ -549,3 +550,65 @@ def test_the_suite_hands_revert_its_diff_so_a_rewritten_test_is_reported():
     revert_result = next(r for r in comparison.run.results if r.gate == "revert")
     assert "tests/test_a.py::test_old" in revert_result.summary
     assert comparison.new_failures == ()
+
+
+class _CollectorTree(_Tree):
+    """A declared gate under a name other than `tests`, so it reports
+    `collected` and `revert` never executes to mask `census`'s own verdict."""
+
+    def __init__(self, *args, collects, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.collects = collects
+
+    def run(self, argv, cwd, timeout_s):
+        if Path(argv[0]).name != "collector":
+            return super().run(argv, cwd, timeout_s)
+        self.calls.append("run collector")
+        payload = {
+            "gate": "collector",
+            "status": "pass",
+            "tool": "collector 1.0",
+            "collected": [self.collects],
+        }
+        return Completed(0, json.dumps(payload), "")
+
+
+def test_the_suite_hands_census_the_specs_own_renames():
+    from saffron.cell.session import CellSpec
+    from saffron.intake import parse_spec
+
+    old_name = "tests/test_a.py::test_old"
+    new_name = "tests/test_a.py::test_new"
+    policy = Policy(gates={"collector": GateDeclaration()})
+
+    def _run(spec):
+        suite = _suite(("collector",), policy=policy, spec=spec)
+        baseline = suite.baseline(_CollectorTree(collects=old_name))
+        comparison = suite.against(_CollectorTree(collects=new_name), baseline)
+        return next(r for r in comparison.run.results if r.gate == "census")
+
+    cell_spec = CellSpec(
+        spec_id="TE-1",
+        spec_sha="sha",
+        branch="b",
+        base_sha="base",
+        touches=["tests/**"],
+        spec_type="feature",
+        body="",
+        renames={old_name: new_name},
+    )
+    assert _run(cell_spec).status == "pass"
+
+    intake_spec = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: feature\ntouches: ['tests/**']\n"
+        f"renames:\n  {old_name}: {new_name}\n---\n"
+    )
+    assert _run(intake_spec).status == "pass"
+
+    no_renames = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: feature\ntouches: ['tests/**']\n---\n"
+    )
+    result = _run(no_renames)
+    assert result.status == "fail"
+    assert [f.file for f in result.failures] == [old_name]
+    assert result.failures[0].code == "removed-test"

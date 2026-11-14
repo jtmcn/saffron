@@ -408,6 +408,12 @@ before any cell starts. An unresolved entry refuses the task. A spec that declar
 with no `depends_on` does not parse.
 _Avoid_: "import", "dependency" (that is a `depends_on` entry).
 
+**Declared rename**: An entry in a spec's `renames` map. It maps an old collected test
+name to a new one, and both are opaque. `census` accepts the pair only when the old name
+is absent at head, and the new name is collected at head and absent at base. A new name
+not collected at head fails `census` as `rename-not-collected`.
+_Avoid_: "removed name" (that is a `removes` entry).
+
 **Removed name**: An entry in a spec's `removes` list, naming something the spec
 deletes. It is a repo-relative path, or `path:name` for one name in that file. It
 needs no `depends_on`. The queue scan holds a candidate that clashes with a partner on

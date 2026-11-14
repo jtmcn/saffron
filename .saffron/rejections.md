@@ -3086,3 +3086,17 @@ critic's own, so they have no line.
 - `SA-0386` (#1190): the constant's comment named two copies and the spec
   that could not share them. **Bucket 3**, conventions. **Landed:** a review
   commit on #1190.
+
+## 2026-11-14, spec loop run 69 (#1196, #1197)
+
+- `SA-0387` (#1196): the witness's first call kept no old name for its
+  "old name stays" pair, and each new name held its old one. So two wrong
+  versions died only in a later call. **Bucket 1**. **Landed:** a review
+  commit on #1196.
+- `SA-0387` (#1196): a test docstring used "run" for one gate's execution.
+  **Bucket 3**, conventions. **Landed:** a review commit on #1196.
+- `SA-0388` (#1197): the batch witness compared each recorded `now` with
+  itself. **Bucket 1**. **Landed:** a review commit on #1197.
+- `SA-0388` (#1197): the rewritten `when` docstring dropped that its hostile
+  stamps were measured. **Bucket 3**, conventions. **Landed:** a review
+  commit on #1197.

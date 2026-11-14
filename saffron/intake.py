@@ -248,6 +248,9 @@ class Spec(BaseModel):
     # A path or `path:name` this spec deletes (backlog item b-e773d9). Needs
     # no `depends_on`, since a spec can remove a name nothing here built.
     removes: list[str] = Field(default_factory=list)
+    # An old collected test name mapped to its new one, both opaque strings
+    # (`DESIGN.md` §5.4, `SA-0387`).
+    renames: dict[str, str] = Field(default_factory=dict)
     # Spec ids that must sit in `done/` at this spec's base before its cell
     # runs (backlog item b-e7898b). `scheduler.retired_first_refusal` reads it.
     retired_first: list[str] = Field(default_factory=list)
@@ -327,6 +330,25 @@ class Spec(BaseModel):
                 raise ValueError(
                     f"{field} entry {entry!r} has a path that is not canonical"
                 )
+        return value
+
+    @field_validator("renames")
+    @classmethod
+    def _renames_names_are_not_blank_and_new_names_are_unique(
+        cls, value: dict[str, str]
+    ) -> dict[str, str]:
+        """Refuse a blank name on either side of a pair, and a new name two
+        old names share. Declared order survives, since the mapping itself
+        is never sorted."""
+        seen: set[str] = set()
+        for old, new in value.items():
+            if not old.strip():
+                raise ValueError(f"renames entry {old!r} has a blank old name")
+            if not new.strip():
+                raise ValueError(f"renames entry {old!r} has a blank new name")
+            if new in seen:
+                raise ValueError(f"renames new name {new!r} is shared by two pairs")
+            seen.add(new)
         return value
 
     @model_validator(mode="before")

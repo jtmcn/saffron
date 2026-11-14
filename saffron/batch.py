@@ -41,7 +41,7 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Literal, cast
 
-from saffron import spec_review
+from saffron import events, spec_review
 from saffron.cell.runtime import CellRuntimeError
 from saffron.cell.session import CellOutcome
 from saffron.intake import Spec, SpecError, parse_spec
@@ -433,15 +433,7 @@ def _wait_out_rate_limit(
     if until is not None and wait >= (until - now).total_seconds():
         return "UNTIL"
     retry_at = (now + timedelta(seconds=wait)).strftime("%H:%M")
-    if after_clock:
-        try:
-            reset = datetime.fromtimestamp(resets_at, now.tzinfo).strftime(
-                "%a %d %b %H:%M"
-            )
-        except (OverflowError, OSError, ValueError):
-            reset = "unknown"
-    else:
-        reset = "unknown"
+    reset = events.when(resets_at, now=now) if after_clock else "unknown"
     emit(
         f"{candidate.spec.id:<10} rate limited, window reopens {reset}, "
         f"retrying {retry_at}"
