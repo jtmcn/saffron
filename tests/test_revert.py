@@ -2027,3 +2027,233 @@ def _assert_unreadable_diff_unrun(bad_diff):
     )
     assert without_first.status == "skip"
     assert without_first.summary == "the diff adds no new test" + unreadable_clause
+
+
+def test_revert_leaves_out_exactly_the_declared_renames_census_accepts():
+    """Backlog item b-d2b6b3 (`SA-0398`). `revert_gate` accepts a declared
+    rename by `census`'s own rule. The old name is gone at head, and the new
+    one is collected at head and absent at base, matched whole. It leaves
+    the accepted new name out of the new-test set, unless a criterion still
+    names it. Three further calls follow on the same gate. Two accepted
+    renames, one a witness, both theater. The same input with no `renames`
+    at all. Four accepted, non-witness renames alone."""
+    renames = {
+        # Plain accepted pair: left out, named in the note, never handed.
+        "t.py::test_alfa_old": "t.py::test_alfa_new",
+        # Old name stays collected at head too, so the pair is rejected.
+        "t.py::test_bravo_both": "t.py::test_bravo_new",
+        # Old name was never collected at base at all.
+        "t.py::test_charlie_absent": "t.py::test_charlie_new",
+        # New name was already collected at base, so it is not new at all.
+        "t.py::test_delta_old": "t.py::test_delta_dup",
+        # New name is never collected at head.
+        "t.py::test_echo_old": "t.py::test_echo_missing",
+        # Accepted, but the new name is a criterion's witness, so it rejoins
+        # the judged set through the criteria union.
+        "t.py::test_foxtrot_old": "t.py::test_foxtrot_witness",
+        # Accepted, but the new name is a `preserves` witness, so it stays
+        # out through `- preserved`, silently, in neither clause.
+        "t.py::test_golf_old": "t.py::test_golf_preserved",
+        # Old name shares only its text after the last `::` with a base
+        # name in a different file, which a whole-name match must reject.
+        "u.py::test_india": "t.py::test_juliet_claim",
+        # Old name is a prefix of a base name collected only under a
+        # parametrised id, which a whole-name match must reject too.
+        "t.py::test_kilo": "t.py::test_lima",
+        # New name is a prefix of a head name collected only under a
+        # parametrised id, rejected the same way, from the other side.
+        "t.py::test_mike_old": "t.py::test_mike",
+        # Accepted and also named in `exempt`: the rename removes it first,
+        # so it is never counted as an exempt test either.
+        "t.py::test_november_old": "t.py::test_november_exempt",
+    }
+    # An unrelated new test, also named in `exempt`. Unlike the rename
+    # above, the real exempt filter removes this one.
+    exempt_unrelated = "t.py::test_whiskey_added"
+    before = [
+        "t.py::test_alfa_old",
+        "t.py::test_bravo_both",
+        "t.py::test_delta_old",
+        "t.py::test_delta_dup",
+        "t.py::test_echo_old",
+        "t.py::test_foxtrot_old",
+        "t.py::test_golf_old",
+        "t.py::test_india",
+        "t.py::test_kilo[1]",
+        "t.py::test_mike_old",
+        "t.py::test_november_old",
+    ]
+    after = [
+        "t.py::test_alfa_new",
+        "t.py::test_bravo_both",
+        "t.py::test_bravo_new",
+        "t.py::test_charlie_new",
+        "t.py::test_delta_dup",
+        "t.py::test_foxtrot_witness",
+        "t.py::test_golf_preserved",
+        "t.py::test_juliet_claim",
+        "t.py::test_lima",
+        "t.py::test_mike[1]",
+        "t.py::test_november_exempt",
+        "t.py::test_oscar_added",
+        exempt_unrelated,
+    ]
+    acceptance = [
+        Criterion(claim="it works", witness="t.py::test_foxtrot_witness"),
+        Criterion(
+            claim="unaffected",
+            witness="t.py::test_golf_preserved",
+            preserves=True,
+        ),
+    ]
+    captured: list[list[str]] = []
+
+    def run_tests(subset):
+        captured.append(list(subset))
+        return _tests(*subset, failed=tuple(subset))
+
+    result = revert_gate(
+        prior=[_tests(*before)],
+        results=[_tests(*after)],
+        acceptance=acceptance,
+        changed_files=["pkg/a.py"],
+        test_paths=[_TESTS],
+        dirty=lambda: [],
+        reverted=lambda paths: _reverted(paths, log=[]),
+        run_tests=run_tests,
+        exempt=["t.py::test_november_exempt", exempt_unrelated],
+        diff="",
+        renames=renames,
+    )
+    expected_subset = [
+        "t.py::test_bravo_new",
+        "t.py::test_charlie_new",
+        "t.py::test_foxtrot_witness",
+        "t.py::test_juliet_claim",
+        "t.py::test_lima",
+        "t.py::test_mike[1]",
+        "t.py::test_oscar_added",
+    ]
+    assert captured == [expected_subset]
+    assert result.status == "pass", result
+
+    left_out = ["t.py::test_alfa_new", "t.py::test_november_exempt"]
+    for name in left_out:
+        assert name in result.summary, result.summary
+    not_left_out = [
+        "t.py::test_foxtrot_witness",
+        "t.py::test_golf_preserved",
+        "t.py::test_bravo_new",
+        "t.py::test_charlie_new",
+        "t.py::test_juliet_claim",
+        "t.py::test_lima",
+        "t.py::test_mike[1]",
+        "t.py::test_oscar_added",
+        "t.py::test_delta_dup",
+        "t.py::test_echo_missing",
+    ]
+    for name in not_left_out:
+        assert name not in result.summary, result.summary
+    # Named by the real exempt filter, not by a rename. Dropping
+    # `- set(exempt)` from `candidates` would still hand it to `run_tests`.
+    assert f"1 exempt test(s): {exempt_unrelated}" in result.summary
+
+    # Second call: two accepted renames, one a witness. Both pass
+    # reverted, so the verdict names the witness, and the summary names the other.
+    pair_renames = {
+        "t.py::test_tango_old": "t.py::test_tango_left",
+        "t.py::test_uniform_old": "t.py::test_uniform_witness",
+    }
+    pair_acceptance = [
+        Criterion(claim="it works", witness="t.py::test_uniform_witness")
+    ]
+    pair_prior = [_tests("t.py::test_tango_old", "t.py::test_uniform_old")]
+    pair_results = [_tests("t.py::test_tango_left", "t.py::test_uniform_witness")]
+
+    def run_tests_passing(subset):
+        return _tests(*subset)
+
+    renamed_result = revert_gate(
+        prior=pair_prior,
+        results=pair_results,
+        acceptance=pair_acceptance,
+        changed_files=["pkg/a.py"],
+        test_paths=[_TESTS],
+        dirty=lambda: [],
+        reverted=lambda paths: _reverted(paths, log=[]),
+        run_tests=run_tests_passing,
+        exempt=[],
+        diff="",
+        renames=pair_renames,
+    )
+    assert renamed_result.status == "fail", renamed_result
+    assert [f.file for f in renamed_result.failures] == ["t.py::test_uniform_witness"]
+    assert "t.py::test_tango_left" in renamed_result.summary
+    assert "t.py::test_uniform_witness" not in renamed_result.summary
+
+    # Third call: the same input with the keyword omitted entirely, so no
+    # rename is accepted, and both names reach `run_tests` and fail alike.
+    unrenamed_result = revert_gate(
+        prior=pair_prior,
+        results=pair_results,
+        acceptance=pair_acceptance,
+        changed_files=["pkg/a.py"],
+        test_paths=[_TESTS],
+        dirty=lambda: [],
+        reverted=lambda paths: _reverted(paths, log=[]),
+        run_tests=run_tests_passing,
+        exempt=[],
+        diff="",
+    )
+    assert unrenamed_result.status == "fail", unrenamed_result
+    assert sorted(f.file for f in unrenamed_result.failures) == sorted(
+        ["t.py::test_tango_left", "t.py::test_uniform_witness"]
+    )
+
+    # Fourth call: four accepted, non-witness renames alone. One new name
+    # is reported twice, by two declared gates, and named once in the note.
+    four_renames = {
+        "t.py::test_papa_old": "t.py::test_papa_new",
+        "t.py::test_quebec_old": "t.py::test_quebec_new",
+        "t.py::test_romeo_old": "t.py::test_romeo_new",
+        "t.py::test_sierra_old": "t.py::test_sierra_new",
+    }
+    four_prior = [
+        _tests(
+            "t.py::test_papa_old",
+            "t.py::test_quebec_old",
+            "t.py::test_romeo_old",
+            "t.py::test_sierra_old",
+        )
+    ]
+    four_results = [
+        _tests(
+            "t.py::test_papa_new",
+            "t.py::test_quebec_new",
+            "t.py::test_romeo_new",
+            "t.py::test_sierra_new",
+        ),
+        GateResult(
+            gate="collector",
+            status="pass",
+            tool="collector 1.0",
+            collected=["t.py::test_papa_new"],
+        ),
+    ]
+    four_result = revert_gate(
+        prior=four_prior,
+        results=four_results,
+        acceptance=[],
+        changed_files=["pkg/a.py"],
+        test_paths=[_TESTS],
+        dirty=lambda: [],
+        reverted=_refuse,
+        run_tests=_refuse_run,
+        exempt=[],
+        diff="",
+        renames=four_renames,
+    )
+    assert four_result.status == "skip", four_result
+    assert four_result.summary.startswith("the diff adds no new test")
+    for name in four_renames.values():
+        assert four_result.summary.count(name) == 1, four_result.summary

@@ -4,10 +4,11 @@ The anti-theater gate. Revert the source *files* of the diff, keep the test
 files, run only the new tests, and require them to **fail** — file-level, not
 hunk-level, which is the ceiling the `ponytail:` below names. "New" is a set
 difference over names the host already holds (`collected(head) -
-collected(base)`, `census`'s own route). "Changed-body-same-name" is a second
-subset instead. It is built from a name's own reported location and the
-diff's own changed lines, never a hunk-to-node-id mapping core computes
-itself (backlog item 49).
+collected(base)`, `census`'s own route). A declared rename's new name
+leaves that difference too, by `census`'s own acceptance rule.
+"Changed-body-same-name" is a second subset instead. It is built from a
+name's own reported location and the diff's own changed lines, never a
+hunk-to-node-id mapping core computes itself (backlog item 49).
 
 The one sanctioned exception to "core executes nothing" (§2.1): it re-invokes
 a gate the repo already declared, through the same JSON contract as every
@@ -18,7 +19,7 @@ discovered, so every test here runs against a fake and needs no container.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
 
 from saffron.gates.contract import Failure, GateResult, Location
@@ -219,16 +220,17 @@ def revert_gate(
     run_tests: RunTests,
     exempt: Sequence[str],
     diff: str,
+    renames: Mapping[str, str] | None = None,
 ) -> GateResult:
     """New tests, run with their own source reverted, must not pass.
 
-    `skip` is not evidence. Most skips touch neither `reverted` nor
-    `run_tests`. No readable enumeration exists at base. The repo declares
-    no test paths. Every changed file sits inside them. Uncommitted work sits on a
-    path this would revert. No new test is left to run, because none was
-    added, all are exempt or none reaches changed source. If `locations`
-    finds a rewritten test there, the second subset runs alone inside the
-    revert. A reverted run with no trustworthy result also skips.
+    `skip` is not evidence. Most skips touch neither `reverted` nor `run_tests`. No
+    readable enumeration exists at base. The repo declares no test paths. Every changed
+    file sits inside them. Uncommitted work sits on a path this would revert. No new
+    test is left to run, because none was added, all are exempt, every one is an
+    accepted rename, or none reaches changed source. If `locations` finds a rewritten
+    test there, the second subset runs alone inside the revert. A reverted run with no
+    trustworthy result also skips.
     """
     before = _collected(prior)
     after = _collected(results)
@@ -259,7 +261,25 @@ def revert_gate(
     # witness as a live `criteria` hole; this widens the same hole rather than
     # opening a new one, and the spec's own subset claim is what asks for it.
     declared = {c.witness for c in acceptance}
-    before_exempt = ((set(after) - set(before)) | (declared & set(after))) - preserved
+    before_set, after_set = set(before), set(after)
+    new_only = after_set - before_set
+    # `census`'s own rule (`census.py:78-82`): the old name is gone at head
+    # and the new one is collected at head and absent at base, matched whole.
+    accepted_renames = {
+        new
+        for old, new in (renames or {}).items()
+        if old in before_set
+        and old not in after_set
+        and new in after_set
+        and new not in before_set
+    }
+    # Subtracted from the difference alone, before the criteria union, so a
+    # renamed witness still joins what follows.
+    before_exempt = ((new_only - accepted_renames) | (declared & after_set)) - preserved
+    # What the set would hold without this rule, naming only what the rule
+    # itself removed, since a renamed `preserves` witness stays out regardless.
+    would_hold_without_renames = (new_only | (declared & after_set)) - preserved
+    renamed_out = sorted(would_hold_without_renames - before_exempt)
     # Named only where it was a candidate: a test never added, or one
     # `preserves` dropped, was never going to reach `run_tests` either way.
     exempted = sorted(before_exempt & set(exempt))
@@ -279,6 +299,8 @@ def revert_gate(
     )
     if exempted:
         note += f" — {len(exempted)} exempt test(s): {', '.join(exempted)}"
+    if renamed_out:
+        note += f" — {len(renamed_out)} declared rename(s): {', '.join(renamed_out)}"
 
     # Read only when a merged map names something: `None` and `{}` are both
     # "not reported" for this gate's purposes (backlog item 49).
