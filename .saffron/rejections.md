@@ -3100,3 +3100,22 @@ critic's own, so they have no line.
 - `SA-0388` (#1197): the rewritten `when` docstring dropped that its hostile
   stamps were measured. **Bucket 3**, conventions. **Landed:** a review
   commit on #1197.
+
+## 2026-11-14, spec loop run 70 (#1202, #1203)
+
+- `SA-0389` (#1202): the witness docstring cited `SA-0398`, not its own
+  spec. **Bucket 3**, conventions. **Landed:** a review commit on #1202.
+- `SA-0389` (#1202): a comment cited `census.py:78-82`, a line range in a
+  file outside the diff. **Bucket 3**, conventions. **Landed:** a review
+  commit on #1202.
+- `SA-0389` (#1202): `renamed_out` wrote the exempt set's formula a second
+  time to take a difference. It reduces to `accepted_renames - declared`.
+  **Bucket 3**, one source. **Landed:** a review commit on #1202.
+- `SA-0389` (#1202): the `fail` call asserted failure files alone, though
+  the spec's notes ask for `(file, code)` pairs. **Bucket 1**. **Landed:** a
+  review commit on #1202.
+- `SA-0390` (#1203): the criterion 2 witness read the `EXHAUSTED` note by
+  substring, so a site dropping the pushed note passed. **Bucket 1**.
+  **Landed:** a review commit on #1203.
+- `SA-0390` (#1203): a test comment tagged the review round that caused it.
+  **Bucket 3**, conventions. **Landed:** a review commit on #1203.

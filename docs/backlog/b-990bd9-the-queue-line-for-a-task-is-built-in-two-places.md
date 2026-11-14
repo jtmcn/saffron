@@ -1,11 +1,12 @@
 ---
 id: b-990bd9
 title: A task's queue line is built in two places, so a new field must be added twice
-status: open
+status: done
 tier: 3
 filed: 2026-09-18
+closed: 2026-11-14
 specs: [SA-0390]
-prs: []
+prs: [1203]
 commits: []
 cites: [§6]
 related: [165]
@@ -42,3 +43,5 @@ every field the two paths share.
 - 2026-10-05: `SA-0204` (#678) added a third site in `saffron/task.py`.
   Its `EXHAUSTED` row and the unpackaged row are two 13-field copies that
   differ in `state` and `note` (b-edcab7).
+- 2026-11-14: `SA-0390` (#1203) builds all three rows with
+  `package.queue_line`.

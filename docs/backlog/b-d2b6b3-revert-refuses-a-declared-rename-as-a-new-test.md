@@ -1,11 +1,11 @@
 ---
 id: b-d2b6b3
 title: '`revert` reads no declared rename, so a renamed test that passes without the source is refused as new'
-status: open
+status: partial
 tier: 3
 filed: 2026-11-14
 specs: [SA-0389]
-prs: []
+prs: [1202]
 commits: []
 cites: [§5.4]
 related: [b-f30189]
@@ -35,3 +35,6 @@ layers' declared renames to its own suite, or says why it cannot.
 ## Record
 
 - 2026-11-14: filed from the spec loop's run 69.
+- 2026-11-14: `SA-0389` (#1202) lets `revert` read a spec's declared renames
+  by `census`'s rule. The `FINISH-0` half stays open, since that spec
+  declares none.
