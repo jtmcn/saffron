@@ -68,7 +68,7 @@ acceptance:
       `rebuild_tree` records exactly one build, at that base. The mirror's
       index bytes are unchanged after it. The witness then asserts an
       empty dict for a base of forty zeros and for a patch whose hunk no
-      longer matches. Last, a `file_at` stub raising a plain `GitError`
+      longer matches, each over the same eight paths. Last, a `file_at` stub raising a plain `GitError`
       after a good build makes `files_after` raise it.
     witness: tests/test_mirror.py::test_files_after_reads_each_path_from_the_base_tree_with_the_patch_applied
     wrong_versions:
@@ -206,7 +206,8 @@ real function, so the spy sees the build that produced the dict.
 
 **The replace ref and the index**. After `ensure_mirror`, write an empty
 tree with `git hash-object -t tree -w /dev/null`, and a decoy commit over
-it with `git commit-tree`. Run `git replace <base> <decoy>` in the mirror.
+it with `git -c user.email=t@t -c user.name=T commit-tree`, as
+`_record_commit` does in the same file. Run `git replace <base> <decoy>` in the mirror.
 An unpinned `read-tree` then reads the empty tree, and the patch does not
 apply. Then run `git read-tree <decoy>` in the mirror, which writes its own
 `index` file, and keep its bytes. The prototype measured on the host's git
