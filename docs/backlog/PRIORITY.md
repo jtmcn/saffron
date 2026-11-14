@@ -174,6 +174,9 @@ name the old halts.
 **Placed 2026-11-07**, from writing `SA-0350`: ~~**b-7c118b**~~, done by hand in
 the spec's own pull request.
 
+**Placed 2026-11-13**, from writing `SA-0387`: **b-1b5747**, by hand once
+`SA-0387` merges. `CONTEXT.md` has no entry for a declared rename.
+
 **Placed 2026-10-13**, from writing `SA-0291`: ~~**b-cd1566**~~, by hand now that
 `SA-0291` merged (#920). `CONTEXT.md` has no entry for a criterion's subject.
 

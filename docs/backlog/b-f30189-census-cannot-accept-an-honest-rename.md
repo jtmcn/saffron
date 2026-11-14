@@ -4,7 +4,7 @@ title: '`census` has no way to accept an honest rename, so tests keep names that
 status: open
 tier: 3
 filed: 2026-09-23
-specs: []
+specs: [SA-0387]
 prs: []
 commits: []
 cites: [§5.4]
