@@ -554,7 +554,7 @@ def test_the_suite_hands_revert_its_diff_so_a_rewritten_test_is_reported():
 
 class _CollectorTree(_Tree):
     """A declared gate under a name other than `tests`, so it reports
-    `collected` with no `revert` run at all to mask `census`'s own verdict."""
+    `collected` and `revert` never executes to mask `census`'s own verdict."""
 
     def __init__(self, *args, collects, **kwargs):
         super().__init__(*args, **kwargs)

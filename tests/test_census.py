@@ -109,20 +109,21 @@ def test_census_accepts_exactly_the_declared_renames_the_head_carried_out():
     name only after the last `::`. One disappearance with no rename
     entered at all."""
     renames = {
-        "t.py::test_apple": "t.py::test_apple_new",
-        "t.py::test_banana": "t.py::test_banana_new",
-        "t.py::test_cherry": "t.py::test_cherry_new",
-        "t.py::test_date": "t.py::test_date_new",
-        "t.py::test_eggplant": "t.py::test_eggplant_new",
-        "t.py::test_fig": "t.py::test_fig_new",
+        "t.py::test_apple": "t.py::check_apple",
+        "t.py::test_banana": "t.py::check_banana",
+        "t.py::test_cherry": "t.py::check_cherry",
+        "t.py::test_date": "t.py::check_date",
+        "t.py::test_eggplant": "t.py::check_eggplant",
+        "t.py::test_fig": "t.py::check_fig",
     }
     base = [
         _tests(
             "t.py::test_apple",
             "t.py::test_banana",
             "t.py::test_charlie",
+            "t.py::test_cherry",
             "t.py::test_date",
-            "t.py::test_date_new",
+            "t.py::check_date",
             "t.py::test_eggplant",
             "t.py::test_fig",
             "t.py::test_grape",
@@ -130,12 +131,13 @@ def test_census_accepts_exactly_the_declared_renames_the_head_carried_out():
     ]
     head = [
         _tests(
-            "t.py::test_apple_new",
+            "t.py::check_apple",
             "t.py::test_charlie",
-            "t.py::test_date_new",
+            "t.py::test_cherry",
+            "t.py::check_date",
             "t.py::test_eggplant",
-            "t.py::test_eggplant_new",
-            "other.py::test_fig_new",
+            "t.py::check_eggplant",
+            "other.py::check_fig",
         )
     ]
 
@@ -143,18 +145,30 @@ def test_census_accepts_exactly_the_declared_renames_the_head_carried_out():
 
     assert result.status == "fail"
     assert sorted((f.file, f.code) for f in result.failures) == [
+        ("t.py::check_banana", "rename-not-collected"),
+        ("t.py::check_cherry", "rename-not-collected"),
+        ("t.py::check_fig", "rename-not-collected"),
         ("t.py::test_banana", "removed-test"),
-        ("t.py::test_banana_new", "rename-not-collected"),
-        ("t.py::test_cherry_new", "rename-not-collected"),
         ("t.py::test_date", "removed-test"),
         ("t.py::test_fig", "removed-test"),
-        ("t.py::test_fig_new", "rename-not-collected"),
         ("t.py::test_grape", "removed-test"),
     ]
     by_file = {f.file: f for f in result.failures}
-    assert "t.py::test_banana" in by_file["t.py::test_banana_new"].message
-    assert "t.py::test_cherry" in by_file["t.py::test_cherry_new"].message
-    assert "t.py::test_fig" in by_file["t.py::test_fig_new"].message
+    assert "t.py::test_banana" in by_file["t.py::check_banana"].message
+    assert "t.py::test_cherry" in by_file["t.py::check_cherry"].message
+    assert "t.py::test_fig" in by_file["t.py::check_fig"].message
+    assert result.summary == (
+        "4 of 9 collected tests removed, 3 declared renames not collected"
+    )
+    # The base name stays, so nothing at base went missing.
+    only_missing = census_gate(
+        base=[_tests("t.py::test_apple")],
+        head=[_tests("t.py::test_apple")],
+        renames={"t.py::test_apple": "t.py::check_apple"},
+    )
+    assert only_missing.summary == (
+        "0 of 1 collected tests removed, 1 declared renames not collected"
+    )
 
     carried_out = census_gate(
         base=[_tests("t.py::test_apple")],

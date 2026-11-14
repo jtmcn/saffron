@@ -93,7 +93,7 @@ def census_gate(
     ]
     # A new name absent at head fails on its own, whatever the old name's
     # own status.
-    failures += [
+    missing = [
         Failure(
             file=new,
             code="rename-not-collected",
@@ -102,6 +102,7 @@ def census_gate(
         for old, new in pairs.items()
         if new not in after_set
     ]
+    failures += missing
 
     if not failures:
         return GateResult(
@@ -114,5 +115,9 @@ def census_gate(
         gate="census",
         status="fail",
         failures=failures,
-        summary=f"{len(failures)} of {len(before)} collected tests not carried forward",
+        # Counted apart, since a missing new name need not be a base name.
+        summary=(
+            f"{len(removed)} of {len(before)} collected tests removed, "
+            f"{len(missing)} declared renames not collected"
+        ),
     )
