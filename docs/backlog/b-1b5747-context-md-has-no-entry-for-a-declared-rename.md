@@ -1,12 +1,13 @@
 ---
 id: b-1b5747
 title: '`CONTEXT.md` has no entry for a `renames` entry, the field SA-0387 adds'
-status: open
+status: done
 tier: 2
 by_hand: true
 filed: 2026-11-13
+closed: 2026-11-14
 specs: []
-prs: []
+prs: [1198]
 commits: []
 cites: [§5.4]
 related: [b-f30189]
@@ -37,3 +38,5 @@ lands after `SA-0387` merges.
 ## Record
 
 - 2026-11-13: filed with `SA-0387`.
+- 2026-11-14: done by hand in #1198, the spec loop's run 69 pull request,
+  which sits on #1196.

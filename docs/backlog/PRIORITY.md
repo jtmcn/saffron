@@ -174,8 +174,8 @@ name the old halts.
 **Placed 2026-11-07**, from writing `SA-0350`: ~~**b-7c118b**~~, done by hand in
 the spec's own pull request.
 
-**Placed 2026-11-13**, from writing `SA-0387`: **b-1b5747**, by hand once
-`SA-0387` merges. `CONTEXT.md` has no entry for a declared rename.
+**Placed 2026-11-13**, from writing `SA-0387`: ~~**b-1b5747**~~, by hand in
+the spec loop's run 69 pull request. `CONTEXT.md` has no entry for a declared rename.
 
 **Placed 2026-10-13**, from writing `SA-0291`: ~~**b-cd1566**~~, by hand now that
 `SA-0291` merged (#920). `CONTEXT.md` has no entry for a criterion's subject.
@@ -459,7 +459,7 @@ Each line keeps the order it was filed in.
   **b-9ed36d**, **b-b431c1**, ~~**b-ac2f02**~~ and **b-49329e**.
 - From ADR 4's review and the superpowers comparison: ~~**b-07f694**~~,
   **b-7c88f8**, **b-e1afbb** and **b-3732ef**.
-- From spec loop runs 15 to 17 and `SA-0135`'s review: **b-f30189**, ~~**b-a90136**~~,
+- From spec loop runs 15 to 17 and `SA-0135`'s review: ~~**b-f30189**~~, ~~**b-a90136**~~,
   **b-e06dbc**, **b-32f492**, ~~**b-8fb227**~~, **b-79d951**, ~~**b-9ead75**~~ and
   ~~**b-04d4c2**~~.
 - From the stack batch's spec reviews: ~~**b-2d9ae9**~~, ~~**b-223244**~~,
@@ -476,8 +476,10 @@ Each line keeps the order it was filed in.
   retried every hour.
 - From run 67's review of #1183: **b-7f6ce2**, a REBUT withdrawal won by
   tuning the witness to one probe.
-- From run 68's review of #1189: **b-e11fb7**, a second reset-time renderer
+- From run 68's review of #1189: ~~**b-e11fb7**~~, a second reset-time renderer
   beside `events.when`.
+- From run 69's `SA-0387` (#1196): **b-d2b6b3**, `revert` reads no declared
+  rename.
 - From the 2026-09-27 size pricing and spec loop run 32: **b-41664e**, **b-4b386f**,
   ~~**b-d96f14**~~, ~~**b-9b94c9**~~, **b-ff3141**, ~~**b-a99c76**~~, **b-3a8504**,
   ~~**b-7f105f**~~ and ~~**b-8c17dc**~~.
