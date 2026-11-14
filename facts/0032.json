@@ -1,0 +1,1 @@
+{"at": "2026-11-14T06:53:30.984063+00:00", "batch_key": "87", "kind": "attempt_closed", "payload": {"cost_floor_usd_est": null, "cost_usd_est": 0.0, "model": null, "n": 1, "num_turns": 0, "phase": "REPAIRING", "session_id": "9014c36c-e947-43c3-a855-cf3131643c12", "subtype": "success", "terminal_reason": null}, "repo": "saffron", "task_key": "a7d68a000ca5b23b31ff3ca601b31f86"}
