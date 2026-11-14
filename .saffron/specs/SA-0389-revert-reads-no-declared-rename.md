@@ -190,16 +190,12 @@ name the declared renames.
   source. Routing such a name into the second subset is a later change.
 - **A rename a spec does not declare**. `revert` judges its new name as a
   new test, as at base.
-- **Hand edits in the spec's own pull request**. `DESIGN.md` §5.4's
-  rename paragraph, under the integrity section, says `census` accepts a
-  declared pair. It gains that `revert` reads the same pair. Its
-  `revert` paragraph defines the first subset as the new tests. It gains
-  that an accepted rename's new name is not one, unless a criterion
-  names it. In `docs/agents/issue-tracker.md`'s Conventions, the
-  `renames` entry names `revert` beside `census`. One entry says a
-  witness must fail with the source reverted. Its bold subset gains
-  "minus every accepted rename's new name that no criterion names". `CONTEXT.md`'s **Declared rename** entry stays true as
-  written, so it needs no edit.
+- **Hand edits, made in the spec's own pull request**. `DESIGN.md` §5.4's
+  rename paragraph says `revert` reads the same pairs. Its `revert`
+  paragraph says an accepted rename's new name is not a new test, unless a
+  criterion names it. `docs/agents/issue-tracker.md`'s `renames` entry
+  names `revert`, and its revert subset leaves those names out.
+  `CONTEXT.md`'s **Declared rename** entry stays true as written.
 
 ## Notes for the agent
 

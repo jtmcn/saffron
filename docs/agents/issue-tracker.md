@@ -60,7 +60,8 @@ GitHub issues remain in use only for research/evidence records under
 - **`renames`** is optional and empty by default. It maps each collected test
   name the change renames to its new name, both exactly as the runner reports
   them. `census` accepts a pair only when head drops the old name and newly
-  collects the new one. Load refuses a blank name, and one new name shared by
+  collects the new one, and `revert` then leaves the new name out of its new
+  tests (`SA-0389`). Load refuses a blank name, and one new name shared by
   two old ones. Declare it whenever a test's name stops saying what it tests.
   `SA-0387` adds the field. Until it lands, `census` fails every rename.
 - **`retired_first`** is optional and empty by default. Each entry is a spec
@@ -216,8 +217,9 @@ GitHub issues remain in use only for research/evidence records under
   test that does not exist yet is red there by construction, so that check is
   easy to pass. `revert` is the strict one. It re-runs a subset with the diff's
   source files reverted and blocks any that still pass: **every test the diff
-  adds, united with every declared witness the suite collected at head, minus
-  every `preserves` witness** (`saffron/gates/core/revert.py`). After REBUT
+  adds, minus every accepted rename's new name that no criterion names, united
+  with every declared witness the suite collected at head, minus every
+  `preserves` witness** (`saffron/gates/core/revert.py`). After REBUT
   it also spares a test the rebuttal added that killed a surviving probe
   (ADR 3). Two things follow. A test the spec asks the cell to write is judged whether or not a
   criterion declares it, so never ask in prose for a guard that passes at base.
