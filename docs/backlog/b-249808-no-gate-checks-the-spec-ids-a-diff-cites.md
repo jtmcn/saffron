@@ -4,7 +4,7 @@ title: No gate checks the spec ids a diff cites, so a cell cited another spec at
 status: open
 tier: 2
 filed: 2026-11-04
-specs: []
+specs: [SA-0393]
 prs: []
 commits: []
 cites: [§5.4]
