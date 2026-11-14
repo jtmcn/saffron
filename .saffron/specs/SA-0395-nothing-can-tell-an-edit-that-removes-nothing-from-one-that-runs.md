@@ -1,16 +1,17 @@
 ---
 id: SA-0395
-title: "Nothing host-side can tell an edit that keeps its find and adds only unread definitions from one that changes what the file runs"
+title: "Nothing host-side can tell an edit that keeps its find and adds only lines the repo calls inert from one that changes what the file runs"
 type: feature
 priority: 3
 risk: standard
-estimated_lines: 187
+estimated_lines: 102
 estimate_measured: true
 touches:
   - saffron/probe.py
   - tests/test_probe_check.py
 pending_symbols:
   - saffron/probe.py::inert_edit
+  - saffron/repos/policy.py::inert
 forbidden:
   - DESIGN.md
   - CONTEXT.md
@@ -35,6 +36,8 @@ forbidden:
   - saffron/intake.py
   - saffron/task.py
   - saffron/cli.py
+  - tests/test_policy.py
+  - tests/test_setup_saffron.py
   - tests/test_session.py
   - tests/test_review.py
   - tests/test_queued_specs.py
@@ -44,67 +47,43 @@ max_attempts: 3
 max_turns: 150
 acceptance:
   - claim: >-
-      `saffron/probe.py` gains `inert_edit(before, edit)`. It returns a reason
-      when the edit cannot change what the file runs, and `None` otherwise.
-      `before` is the edited file's text. The reason starts with the edit's
-      file and says the edit removed nothing of its find. It is returned only
-      when all of these hold. The file ends `.py`. Its `find` matches
-      `before` exactly once. Its `replace` holds the whole `find`. Both
-      `before` and the edited text parse. Every top-level statement of
-      `before` is still in the edited text, in order and unchanged. Every
-      other top-level statement there is a definition that runs no
-      expression when the module loads. Its name starts with an underscore,
-      is no dunder, and no word of `before` spells it. Such a definition is
-      a `def` or an `async def` with no decorator, no annotation on any
-      parameter or its return, and only literal defaults, keyword-only ones
-      included. It can also be a `class` with no decorator, base or keyword,
-      whose body holds only `pass`, a docstring or such definitions. The
-      witness drives eight refused edits against one file. It appends a
-      `def`, puts one before the find, and appends an `async def`. It
-      appends a `class` holding a docstring, a method and a bare nested
-      `class`. It appends a `def` with a literal default and a literal
-      keyword-only default, and two `def`s where one calls the other. It
-      repeats the find unchanged, and adds only a comment. It drives
-      twenty-nine edits that return `None`, and one more against a `before`
-      that does not parse. Four of the twenty-nine keep the find and add code
-      that runs: an early `return` inside the function, the call wrapped in
-      another, a top-level call and a top-level constant. One deletes part of
-      the find, and one reformats it with the same syntax tree. Ten change
-      an added `def` or `async def`. They are a decorator on each, a call
-      default and a keyword-only call default, and a return annotation. The
-      other five are an annotation on a plain, a positional-only, a
-      keyword-only, a `*` and a `**` parameter. Five give an added `class` a
-      decorator, a base, a keyword, a statement in its body, or a nested
-      `class` holding a statement. Four name the added definition after a
-      function the file defines, after a name the file only calls, as a
-      dunder, or with no leading underscore. The last four aim at a `.txt`
-      file, use a find that matches twice, use one that is absent, and
-      leave the edited text unparseable.
-    witness: tests/test_probe_check.py::test_an_edit_that_keeps_its_find_and_adds_only_unread_definitions_is_inert
+      `saffron/probe.py` gains `inert_edit(before, edit, patterns)`. It
+      returns a reason when the edit adds only lines the repo declares
+      inert, and `None` otherwise. `before` is the edited file's text and
+      `patterns` is a policy's `probes.inert` list. The reason starts with
+      the edit's file and says the edit removed nothing of its find. It is
+      returned only when all of these hold. `patterns` is not empty. The
+      edit's `replace` holds its `find` whole. The `find` occurs exactly once
+      in `before`. The added text is `replace` with that `find` taken out
+      once. Every non-blank line of the added text fully matches some
+      pattern, with `{name}` filled by `INERT_NAME`. Every name a line binds
+      through `{name}` is spelled by no word of `before`, a word inside a
+      string included. The witness declares four patterns: a parameterless
+      `def` of a name starting with one underscore, an indented `pass`, an
+      indented one-line docstring and a comment line. It drives six refused
+      edits. One is the `SA-0390` edit, blank lines included. Others add a
+      `def` holding a docstring, a `def` whose name a longer word of the file
+      only contains, and a comment before the find. One adds nothing, and
+      one adds a comment. It drives nine edits that return `None`. Two bind
+      a name the file calls and a name only a string spells. Five add a line
+      no pattern matches: an early `return`, a call, a matching line with a
+      call after it, a decorator and a call default. One has a find that
+      occurs twice, and one drops its find for an indented `pass`. Last, the
+      edit that adds nothing returns `None` under no patterns.
+    witness: tests/test_probe_check.py::test_an_edit_that_keeps_its_find_and_adds_only_inert_lines_is_refused
     wrong_versions:
-      - The syntax trees compared alone, so a reformat that changes the find's text is refused.
-      - The find's count never checked, so an edit whose find matches twice is judged and refused.
-      - Only the edited text guarded against a parse error, so a `before` that does not parse raises.
-      - Decorators never read, so a decorated added `def` is refused.
-      - Decorators read on a `def` alone, so a decorated `async def` is refused.
-      - Default values never read, so a `def` whose default is a call is refused.
-      - Keyword-only defaults never read, so a `def` whose keyword-only default is a call is refused.
-      - Annotations read on plain parameters alone, so a positional-only, keyword-only, `*` or `**` annotation is refused.
-      - The return annotation never read, so a `def` with one is refused.
-      - The added name never looked for in the file, so a `def` that redefines one of the file's functions is refused.
-      - The added name looked for only among the file's definitions, so a `def` named after a function the file only calls is refused.
-      - A dunder name admitted, so an added module `__getattr__` is refused.
-      - A public name admitted, so an added `def` a star import would carry is refused.
-      - Every file judged, so a `.txt` edit that keeps its find is refused.
-      - A `class` never admitted, so an appended bare class is not refused.
-      - A class's bases never read, so a `class` with a base is refused.
-      - A class's decorators never read, so a decorated `class` is refused.
-      - A class's keywords never read, so a `class` with a metaclass is refused.
-      - A class's body never read, so a `class` whose body calls a function is refused.
-      - A nested `class` admitted without reading its body, so one holding a call is refused.
-      - Only text after the find judged, so a `def` put before the find is not refused.
-      - At least one added definition required, so an edit that repeats its find or adds a comment is not refused.
-      - Any added top-level statement admitted, so an appended top-level call is refused.
+      - An empty pattern list never checked, so an edit that adds nothing is refused with no patterns declared.
+      - The find never looked for in the replace, so an edit that swaps its find for an indented `pass` is refused.
+      - The find's count never checked, so an edit whose find occurs twice is judged and refused.
+      - A pattern matched at a line's start only, so `pass` followed by a call on the same line is refused.
+      - A pattern searched anywhere in a line, so a line holding a call after a match is refused.
+      - Blank added lines judged, so the `SA-0390` edit is not refused.
+      - The bound name never checked, so a `def` named after a function the file calls is refused.
+      - The bound name looked for as a substring, so a name a longer word only contains is not refused.
+      - The bound name looked for among the file's definitions only, so a name the file only calls is refused.
+      - Strings left out of the name check, so a name only a string spells is refused.
+      - Only text after the find judged, so a comment put before the find is not refused.
+      - Every pattern required to match each line, so the `SA-0390` edit is not refused.
 ---
 
 ## Context
@@ -114,13 +93,13 @@ Backlog item **b-7fc792**, filed from spec loop run 70 while reviewing
 below was read at `dffa5474`.
 
 **What happened**. `SA-0390` declared a wrong version for its queue line.
-It reads "`risk` is left out, so it reads `standard`." REVIEW's wrong-version session gave a reason
-that names deleting the `risk=` keyword from `queue_line`. Its edit kept
-the whole `find` and appended `def _risk_placeholder_removed_marker():
-pass` after it. The witness passed under an edit that changed nothing, and
-the host filed the version `survived` as an adequacy blocker. The task's
-`wrong-versions.json` under `~/.saffron/batches/v0/SA-0390/` holds the
-edit and its outcome.
+It reads "`risk` is left out, so it reads `standard`." REVIEW's
+wrong-version session gave a reason that names deleting the `risk=`
+keyword from `queue_line`. Its edit kept the whole `find` and appended
+`def _risk_placeholder_removed_marker():` with an indented `pass`. The
+witness passed under an edit that changed nothing, and the host filed the
+version `survived` as an adequacy blocker. The task's `wrong-versions.json`
+under `~/.saffron/batches/v0/SA-0390/` holds the edit and its outcome.
 
 **What judges an edit today**. The REVIEW block puts each criterion probe
 and each wrong version into one list of pairs
@@ -132,70 +111,96 @@ and each wrong version into one list of pairs
 (`saffron/cell/worktree.py:712-717`). Nothing judges an edit that applies
 and changes nothing.
 
-**This spec is the rule alone**. It adds a pure function beside
-`probe_refusal`. The function reads a file's text and one edit. It says
-whether the edit can change what the file runs. `saffron/probe.py` already imports
-`Mutant` (`saffron/probe.py:40`). `SA-0396` calls the function, so it is
-listed under `pending_symbols`.
+**Why the repo declares the shape**. Core knows nothing about languages
+(`DESIGN.md:140`, §2.1). Where a core check needs a language's shape, the
+repo declares it as patterns, as `integrity` and `witness` do
+(`DESIGN.md:154`). The nearest model is the citation check's definitions.
+`CitationPatterns` holds a list of `re` patterns, each with a `{name}`
+placeholder, and its validator compiles each with the placeholder filled in
+(`saffron/repos/policy.py:165-189`).
+
+**What this pull request lands by hand**. `Policy` refuses an unknown key
+(`saffron/repos/policy.py:193`), and the setup template must name every
+`Policy` field (`tests/test_setup_saffron.py:158-166`). The template sits
+under `.claude/`, where a cell cannot write. So the block, its loader test,
+the template and this repo's declaration land together in this spec's own
+pull request, as `SA-0314`'s citations block did. They are already in the
+tree this spec runs on:
+
+- `saffron/repos/policy.py` holds `INERT_NAME`, the fill for `{name}`: a
+  named group `name` capturing one word. Beside `CitationPatterns` it holds
+  `ProbePatterns`, whose one field `inert` is a list of `re` patterns. Its
+  validator refuses a pattern holding `{name}` more than once, and one that
+  does not compile once `INERT_NAME` fills it. `Policy.probes` defaults to
+  an empty block.
+- `tests/test_policy.py` holds
+  `test_a_probes_block_is_checked_when_the_policy_loads`.
+- The setup template declares an empty `probes:` block after `citations:`.
+- `.saffron/policy.yaml` declares four `inert` patterns after `citations:`.
+  They are a parameterless `def` of a name starting with one underscore, an
+  indented `pass`, an indented one-line docstring and a comment line. Under
+  them the `SA-0390` edit is refused.
 
 ## Problem
 
-Add `inert_edit(before: str, edit: Mutant) -> str | None` to
-`saffron/probe.py`, beside `probe_refusal`. It reads text and runs nothing.
-Use `ast` from the standard library. Compare top-level statements with
-`ast.dump`, which leaves out line numbers. Look for a name in `before` as a
-whole word. The rule is the criterion's claim.
+Add `inert_edit(before: str, edit: Mutant, patterns: Sequence[str]) -> str
+| None` to `saffron/probe.py`, beside `probe_refusal`. It reads text, runs
+nothing and knows no language. The rule is the criterion's claim.
 
-Every condition the claim lists is a reason to return `None`, so a case the
-rule cannot show runs nothing is left to run. A `find` that does not match
-`before` exactly once returns `None` too. `source_mutated` then judges it in
-the cell, as at base.
+Fill `{name}` with `INERT_NAME`, imported from `saffron.repos.policy`, by
+plain string replacement. Never use `str.format`, since a pattern's braces
+are regex. The validator uses the same fill, so a pattern that loads always
+compiles here. Look for a bound name in `before` as a whole word. A `find`
+that does not occur exactly once returns `None`, and `source_mutated` then
+judges the edit in the cell, as at base.
 
 ## Out of scope
 
-- **The call**. `SA-0396` wires `inert_edit` into `_apply_criterion_probes`.
-  The host-side read through `SA-0394`'s `files_after` lands there. So do
-  the handling of an empty read and of a `GitError`, and the `unproven`
-  record with its `refusal` key. So do the reworded docstrings that name
-  `probe_refusal` as the only refusal.
-- **Hand edits**. `DESIGN.md` §5.4.1's wrong-version paragraph and
-  `CONTEXT.md`'s Wrong version entry change with `SA-0396`, when the host
-  starts declining such an edit. This spec changes nothing a reader sees.
+- **The call**. `SA-0396` wires `inert_edit` into `_apply_criterion_probes`,
+  passing the policy's `probes.inert`. The host-side read through
+  `SA-0394`'s `files_after` lands there. So do the handling of an empty read
+  and of a `GitError`, and the `unproven` record with its `refusal` key.
+  The reworded docstrings that name `probe_refusal` as the only refusal
+  land there too.
+- **The policy block, its test, the template and this repo's patterns**.
+  Each lands by hand in this spec's pull request, as the Context says.
+- **Hand edits to `DESIGN.md` §5.4.1 and `CONTEXT.md`'s Wrong version
+  entry**. They change with `SA-0396`, when the host starts declining such
+  an edit. The §2.1 table gains no row here, since no gate reads the block.
+- **A line's place in the file**. The rule reads added lines one by one. A
+  `def` line added with no body of its own can adopt the indented lines
+  after it, and a pattern cannot see that. Nor can it see a method name a
+  base class defines in another file.
 - **A lens's own adequacy probe** (`saffron/cell/session.py:1877`). A later
   spec can call `inert_edit` there.
-- **An inert edit outside the narrow shape**. An added top-level constant,
-  a decorated helper, a public name or a non-Python file returns `None`. So
-  does a reformat that keeps the syntax tree but not the find's text.
 - **A `retired_first`**. Nothing calls the rule until `SA-0396`, and it
   refuses edits REVIEW names, never a spec.
 
 ## Notes for the agent
 
-**The function is new code**, so the criterion declares a witness and no
+**The rule is new code**, so the criterion declares a witness and no
 mutant, and `witness` will report `skip`.
 
 **At base the witness fails in its body**. `probe.inert_edit` does not
 exist there. `tests/test_probe_check.py` imports the module as
-`probe_check` (`tests/test_probe_check.py:18`), so call the function
-through it and never import the name at module scope.
+`probe_check` (`tests/test_probe_check.py:18`). Call the function through
+it, and import nothing new at module scope.
 
-**The witness** is one plain `def`, not a parametrised test. Hold one
-`before` text with an import, one private function and a return that calls
-a private name the file does not define. Keep a dict of refused edits and
-one of edits that return `None`, keyed by a case name. Pass the name as
-each assertion's message. Assert a refused reason's prefix and its words
-"removed nothing". For "find twice", pick a word the text holds twice and
-make the edit's `replace` that same word. For "find absent", let the
-`replace` hold the absent `find`, so only the count can return `None`.
-Drive the unparseable `before` by prefixing the text with a line that does
-not parse.
+**The witness** is one plain `def`. It declares its own four patterns, so
+this repo's policy can change without moving it. Hold one `before` text
+with a private function. Its return calls a private name the file does not
+define, and passes a string holding another private name. Keep a dict of
+refused edits and one of edits that return `None`, keyed by a case name.
+Pass the name as each assertion's message. For the find that occurs twice,
+pick a word the text holds twice and make the `replace` that same word.
 
-**The `dead` gate** reads `pending_symbols` while this spec is open, so
-`inert_edit` with no caller passes it.
+**The `dead` gate** reads `pending_symbols` while this spec is open. A
+prototype measured vulture calling both `inert_edit` and the `inert` field
+unused until `SA-0396` reads them.
 
 **The `prose` gate** counts each new comment and docstring. Write none
-with an em dash, a semicolon, a contraction, the perfect tense or a
-sentence over 25 words.
+with an em dash, a semicolon, a contraction, a hedge, the perfect tense or
+a sentence over 25 words.
 
-**Size**. A prototype measured 347 counted tokens in `saffron/probe.py`
-and 399 in the witness, about 187 changed lines.
+**Size**. A prototype measured 165 counted tokens in `saffron/probe.py`
+and 243 in the witness, about 102 changed lines.

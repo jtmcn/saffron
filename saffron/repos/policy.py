@@ -189,6 +189,38 @@ class CitationPatterns(BaseModel):
         return values
 
 
+# What `{name}` becomes in an inert pattern: one word, captured as `name`.
+INERT_NAME = r"(?P<name>\w+)"
+
+
+class ProbePatterns(BaseModel):
+    """What an added line that runs nothing looks like here (b-7fc792).
+
+    Each `inert` entry is a Python `re` pattern a whole added line must
+    match. It holds `{name}` at most once, for the name that line defines.
+    None declared marks no edit inert.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    inert: list[str] = Field(default_factory=list)
+
+    @field_validator("inert")
+    @classmethod
+    def _each_compiles(cls, values: list[str]) -> list[str]:
+        for value in values:
+            if value.count("{name}") > 1:
+                raise ValueError(f"inert pattern {value!r} holds {{name}} twice")
+            try:
+                re.compile(value.replace("{name}", INERT_NAME))
+            except re.error as exc:
+                raise ValueError(
+                    f"inert pattern {value!r} is not a valid regular expression "
+                    f"once {{name}} is filled in: {exc}"
+                ) from exc
+        return values
+
+
 class Policy(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -201,6 +233,7 @@ class Policy(BaseModel):
     witness: WitnessPatterns = Field(default_factory=WitnessPatterns)
     thread_env: dict[str, str] = Field(default_factory=dict)
     citations: CitationPatterns = Field(default_factory=CitationPatterns)
+    probes: ProbePatterns = Field(default_factory=ProbePatterns)
 
     @model_validator(mode="before")
     @classmethod
