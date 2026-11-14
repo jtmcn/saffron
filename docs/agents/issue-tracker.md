@@ -57,6 +57,12 @@ GitHub issues remain in use only for research/evidence records under
   no `touches` is not checked. The refusal names each reader and the name
   it reads. `SA-0372` adds the refusal. Until it lands, nothing checks the
   tree.
+- **`renames`** is optional and empty by default. It maps each collected test
+  name the change renames to its new name, both exactly as the runner reports
+  them. `census` accepts a pair only when head drops the old name and newly
+  collects the new one. Load refuses a blank name, and one new name shared by
+  two old ones. Declare it whenever a test's name stops saying what it tests.
+  `SA-0387` adds the field. Until it lands, `census` fails every rename.
 - **`retired_first`** is optional and empty by default. Each entry is a spec
   id that must sit in `done/` at the spec's base before its cell runs. Declare
   it for a spec that adds or widens a refusal, and name each queued spec the

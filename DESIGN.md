@@ -992,6 +992,8 @@ The cost of not exempting suppressions is prose: a docstring quoting a token fai
 
 Deletion is exempt from nothing. `touches: tests/test_session.py` authorizes *editing* that file. It does not authorize deleting three unrelated tests inside it to reach green. Exempting deletion would silence `census` on nearly every real task, since almost every spec names a test file.
 
+A rename is not a deletion when the spec declares it. Each `renames` entry maps an old collected name to a new one, and `census` accepts that pair alone. It holds only when head drops the old name and newly collects the new one. A declared new name head does not collect fails `census` as `rename-not-collected` (`SA-0387`).
+
 The *logic* is core: "was a test removed or silenced?" is a question about a diff, and it is identical in every language. The *vocabulary* is not, so the repo declares it:
 
 ```yaml
