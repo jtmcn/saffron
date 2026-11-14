@@ -4,13 +4,16 @@ title: "REVIEW asks a witness of an edit that removes nothing, and files its sur
 type: feature
 priority: 3
 risk: elevated
-estimated_lines: 234
+estimated_lines: 239
 estimate_measured: true
 depends_on: [SA-0394, SA-0395]
 consumes:
   - saffron/repos/mirror.py:files_after
   - saffron/probe.py:inert_edit
-  - saffron/repos/policy.py:ProbePatterns
+pending_symbols:
+  - saffron/repos/mirror.py::files_after
+  - saffron/probe.py::inert_edit
+  - saffron/repos/policy.py::inert
 touches:
   - saffron/cell/session.py
   - saffron/phases/review.py
@@ -57,23 +60,27 @@ acceptance:
       criterion probe and a wrong version alike. `_apply_criterion_probes`
       takes the repo's declared inert patterns, which `_drive_cell` passes
       from `policy.probes.inert`. With a pattern declared, it reads the
-      edited files with one `files_after` call. The call names the mirror,
-      the spec's `tree_base`, the patch the critic cell applies and the set
-      of files the edits name. A pair whose file reads as text, and whose
+      edited files with one `files_after` call, before its check for a
+      `tests` gate. The call names the mirror, the spec's `tree_base`, the
+      patch the critic cell applies and the set of files the edits name,
+      criterion probes' and wrong versions' alike. A pair whose file reads as text, and whose
       edit `inert_edit` refuses under those patterns, is recorded `unproven`.
       Its reason is its `summary` and sits under `refusal`. It never reaches
       the mutator or a witness, so it is never `survived` and files no
       adequacy finding. The REVIEW line counts it among the refused. A pair
       whose file reads `None` reaches the mutator as at base, as does one
       whose `find` is absent from the text or occurs in it twice. The
-      witness drives one cell through REVIEW under a policy declaring two
-      inert patterns. Its criterion-probe session names one inert edit. Its
-      wrong-version session names five edits. They are an inert edit, an
+      witness drives one cell of a stacked spec through REVIEW, under a
+      policy declaring two inert patterns. Its `tree_base` differs from its
+      `base_sha`. Its criterion-probe session names one inert edit on a
+      third file the stubbed read returns as text. Its wrong-version session
+      names five edits. They are an inert edit, an
       edit that keeps its find and adds a top-level statement that executes,
       and an inert-shaped edit on a file the stubbed read returns as `None`.
       The last two are inert-shaped edits whose find is absent from the text
       and whose find occurs in it twice. It asserts the read's arguments,
-      and that only the last four reach the mutator. It asserts both inert
+      the `tree_base` and all three files among them. It asserts that only
+      the last four reach the mutator. It asserts both inert
       edits' records and the outcomes `unproven`, `survived`, then `killed`
       three times. It asserts that only the survivor reaches
       `rebuttal.json`, and both REVIEW lines' counts.
@@ -88,6 +95,9 @@ acceptance:
       - An edit whose find is absent from the host's text refused at the host rather than left to the cell.
       - An edit whose find occurs twice in the host's text refused at the host rather than left to the cell.
       - One `files_after` call made per pair, so the tree is built once for each edit.
+      - The read built at `base_sha` rather than `tree_base`, so a stacked spec's edits are judged against the wrong tree.
+      - The read's paths collected only from wrong versions, so the criterion probe's file is never read and its inert edit reaches the mutator.
+      - The read's paths collected only from pairs carrying `version`, with the same effect.
       - The call site passing an empty list rather than `policy.probes.inert`, so nothing is ever refused.
   - claim: >-
       A repo that declares no inert pattern refuses no edit as inert. No
@@ -96,9 +106,8 @@ acceptance:
       dict, no edit is refused as inert either, and each pair reaches the
       mutator as at base. Under declared patterns, a `GitError` from
       `files_after` reaches the caller of `run_one_cell` unchanged, before
-      any edit is applied. The ledger's run row then reads `ABORTED` and the
-      task `ORPHANED`, as for a `GitError` from the host's read of
-      `CLAUDE.md` before the cell exists. The witness drives three cells
+      any edit is applied. `_drive_cell`'s `except BaseException` then
+      marks the ledger's run row `ABORTED` and the task `ORPHANED`. The witness drives three cells
       through REVIEW, each with one inert-shaped criterion probe and one
       inert-shaped wrong version. Under declared patterns with the read
       stubbed to return an empty dict, both edits reach the mutator, and the
@@ -121,8 +130,8 @@ Backlog item **b-7fc792**, filed from spec loop run 70 while reviewing
 #1203 (`SA-0390`). It cites `DESIGN.md` §5.4.1 and §5.5. This spec is the
 third piece of a split. `SA-0394` gives the host a read of the critic
 cell's tree, and `SA-0395` gives it the rule. This spec makes REVIEW use
-both. Every line number below was read at `a2fec15b`, whose `saffron/`
-matches `dffa5474`.
+both. Every line number below was read at `841e1257`, where `SA-0395`'s
+hand edits sit on `dffa5474`.
 
 **What happened**. `SA-0390` declared a wrong version where `risk` is
 left out and reads `standard`. REVIEW's wrong-version session gave a reason
@@ -141,13 +150,15 @@ tree a critic cell holds, and reads each path from it. A path that tree
 lacks, or that `file_at` finds unreadable, reads `None`. A tree that
 cannot be built, or empty `paths`, returns an empty dict. Any other
 `GitError` raises. `SA-0395` adds `inert_edit(before, edit, patterns)` to
-`saffron/probe.py`. It returns a reason when three things hold. The edit
-keeps its whole `find`, which occurs once in `before`. Every line the
-`replace` adds matches one of the repo's patterns. It returns `None` otherwise, and
-always for an empty `patterns`. It also adds `ProbePatterns` to
-`saffron/repos/policy.py`, read as `Policy.probes`, whose `inert` list
-holds the patterns `.saffron/policy.yaml` declares. This spec `consumes`
-all three.
+`saffron/probe.py`. It returns a reason when the edit keeps its whole
+`find`, which occurs once in `before`. Every line the `replace` adds must
+match one of the repo's patterns. The first kept line beside the added
+text must sit no deeper than the least indented added line. It returns
+`None` otherwise, and always for an empty `patterns`. This spec `consumes`
+both functions. `SA-0395`'s pull request landed `ProbePatterns` by hand.
+`Policy.probes` holds it, and its `inert` list holds the patterns a repo
+declares (`saffron/repos/policy.py:196`, `:206`, `:236`). This repo's
+`.saffron/policy.yaml` declares four in its `probes:` block.
 
 **Where an expression becomes an outcome**. The REVIEW block calls
 `review.run_criterion_probes` and `review.run_wrong_versions` in the critic
@@ -180,16 +191,15 @@ refused (`saffron/phases/review.py:663`, `:858`). An inert edit carrying
 the key is then counted refused with no change to either function.
 
 **What a host git failure does in a cell's drive today**. `_drive_cell`
-reads the mirror host-side before the cell exists, through
-`mirror_ops.file_at` for `CLAUDE.md` (`saffron/cell/session.py:2344`).
-The comment above says a `GitError` there fails before a cell is created
-(`saffron/cell/session.py:2340-2341`). Nothing catches it. `_drive_cell`'s
+creates the run row and the task row (`saffron/cell/session.py:2404`,
+`:2407`). It then enters a `try` (`saffron/cell/session.py:2460`) whose
 `except BaseException` marks the run row `ABORTED` and the task
 `ORPHANED`, then re-raises (`saffron/cell/session.py:4053-4060`). The
-REVIEW block's own `try` catches only `CriticPatchRejected` and
-`CriticPatchUnrepresentable` (`saffron/cell/session.py:3469`, `:3476`),
-and `_apply_criterion_probes` is called in its `else`. So a `GitError`
-raised from `files_after` takes that same path with no new handler.
+REVIEW block sits inside that `try`. Its own inner `try` catches only
+`CriticPatchRejected` and `CriticPatchUnrepresentable`
+(`saffron/cell/session.py:3469`, `:3476`), and `_apply_criterion_probes`
+is called in its `else`. So a `GitError` raised from `files_after` reaches
+the outer handler with no new code.
 
 **One direct caller in the tests**. The helper `_run_apply_criterion_probes`
 calls `session._apply_criterion_probes` with every keyword spelled out
@@ -204,7 +214,9 @@ and an empty list from `_run_apply_criterion_probes`.
 
 In `_apply_criterion_probes`, after the existing refusal loop, read every
 remaining pair's file with one `files_after` call when `inert_patterns`
-holds a pattern. Make no read when it holds none. Import
+holds a pattern. Put the read and the inert refusal before the check for a
+`tests` gate (`saffron/cell/session.py:2124-2130`). An inert edit is then
+refused even where nothing could answer it. Make no read when it holds none. Import
 `saffron.repos.mirror` inside the function, as its other imports are, and
 call it through the module, so a test's stub reaches it. Ask
 `probe.inert_edit` of each pair whose file came back as text, with
@@ -226,9 +238,9 @@ source of a refusal. They are `describe_criterion_probes`'s and
 
 - **The rule and the read themselves**. `inert_edit`, `ProbePatterns` and
   `files_after` are the parents' work, and this spec forbids their files.
-- **This repo's own patterns**. `.saffron/policy.yaml` is `protected`, and
-  this spec declares no `probes.inert` there. Until a hand edit declares
-  some, Saffron's own REVIEW refuses no edit as inert.
+- **This repo's own patterns**. `.saffron/policy.yaml` is `protected`. Its
+  `probes:` block landed by hand with `SA-0395`, and this spec reads it
+  unchanged.
 - **A lens's own adequacy probe**. `probe_findings` checks it through
   `check_probe` (`saffron/cell/session.py:1877`). An inert lens probe is
   the same defect there. A later spec can call `inert_edit` there.
@@ -253,9 +265,10 @@ source of a refusal. They are `describe_criterion_probes`'s and
   REVIEW line keep it, as `probe_refusal` does.
 - **A `retired_first`**. The new refusal declines edits REVIEW names, never
   a spec, so no queued spec is refused by it.
-- **Hand edits, made in this spec's own pull request**. Two sentences
-  join the `DESIGN.md` §5.4.1 paragraph on an edit a spec lists in prose.
-  They follow the sentence on the gate-only cell.
+- **Hand edits, made in this spec's own pull request**. `DESIGN.md` §2.1's
+  table gains a row for REVIEW's inert-edit refusal, core logic over repo
+  patterns. Two sentences join the `DESIGN.md` §5.4.1 paragraph on an edit
+  a spec lists in prose. They follow the sentence on the gate-only cell.
 
   > Before any cell, the host declines an edit that keeps its whole `find`
   > and adds only lines the repo declares inert. It does so for a criterion
@@ -284,12 +297,16 @@ two drives pass at base, and the third fails it.
 `_stub_probe_gates`, `_probe_turns`, `_probe_answer` and
 `_wrong_version_answer`. Stub `files_after` on the `saffron.repos.mirror`
 module with `monkeypatch.setattr`. `_drive` hands `run_one_cell` the mirror
-`tmp_path / "m.git"`, and `_spec`'s `tree_base` is its `base_sha`. Declare
+`tmp_path / "m.git"`. `_spec`'s `base_sha` is forty `b`s. Pass
+`stacked_on` forty `c`s in criterion 1, so `tree_base` differs from it. Declare
 the patterns in a `probes:` block appended to `_PROBE_POLICY`. One pattern
 matches a bare `def` line holding `{name}`, and one its `pass` body.
 
-In criterion 1's witness the stub records its arguments and returns text
-for `src/x.py` and `None` for `src/y.py`. Give `src/x.py` a word that
+In criterion 1's witness the stub records its arguments. It returns text
+for `src/x.py` and `src/z.py`, and `None` for `src/y.py`. Put the
+criterion probe's inert edit on `src/z.py`. Append each inert edit after
+the last line of its file, where `SA-0395`'s indentation guard still
+refuses it. Give `src/x.py` a word that
 occurs twice, and make the twice-found edit's `find` that word. Read the
 survivor's line through a `read_at_head` stub. The survivor is applied
 twice, once for its witness and once for the whole `tests` gate, so
@@ -311,5 +328,5 @@ with an em dash, a semicolon, a contraction, the perfect tense or a
 sentence over 25 words. `_apply_criterion_probes`'s docstring is at ten
 lines already, so reword its refusal clause inside the lines it holds.
 
-**Size**. A prototype on top of both parents measured 118 changed tokens
-outside `tests/` and 819 under it, about 234 changed lines.
+**Size**. A prototype on top of both parents measured 115 changed tokens
+outside `tests/` and 840 under it, about 239 changed lines.
