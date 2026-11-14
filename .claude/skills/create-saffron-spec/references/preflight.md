@@ -31,6 +31,17 @@ shipped a resolver that resolves none.
 **Every failure path the spec names has a witness.** Treat the list of failures
 as a set. A path with no witness ships as an escaped exception.
 
+**A wrong version needs a non-default input.** For each wrong version, name
+the field it changes, then read the witness's input for that field. A
+default value hides the change. `SA-0390` held a note, a risk and a concern
+count at their defaults through two reviews. Pin a distinct value in the
+spec's own text, since the cell builds only what the spec states.
+
+**A list of names takes four.** A claim about every name a summary lists
+drives at least four. This repo cuts several name lists to three
+(`SA-0389`). A claim that names compare whole drives a prefix and a
+substring case beside the short-name case.
+
 ## 2. Criteria against each other
 
 For each pair of criteria, find an input both of them answer. Two criteria that
