@@ -109,8 +109,8 @@ HISTORY_OUTPUT_CHARS = 20_000
 # the declared command alike. Reasoned, not measured, the same as above.
 HISTORY_EXEC_TIMEOUT_S = 600.0
 
-# Read live by `qualify._binds_task`, so the two copies cannot drift
-# (`SA-0378`). Trailing space kept so both sides join it to the hash the same way.
+# Read live by `qualify._binds_task`, so emit and match share one spelling
+# (b-19f43a). Its trailing space joins it to the hash on both sides.
 REVIEWED_DIFF_DETAIL = "reviewed diff recorded, sha256 "
 
 # What `probe_findings`/`_apply_criterion_probes` write when something
