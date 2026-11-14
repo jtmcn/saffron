@@ -1005,7 +1005,7 @@ integrity:
 
 This split is the boundary of §2.1 in miniature, and it is the pattern to reach for whenever a check feels language-specific: usually the *question* is universal and only the *tokens* are local. Pushing the tokens into `policy.yaml` keeps the check in core where it gets maintained.
 
-**`census`: which tests existed, and which exist now.** The set of test names collected at `base_sha`, minus the set collected at head. A name that was there and is not is a removed test, one failure each.
+**`census`: which tests existed, and which exist now.** The set of test names collected at `base_sha`, minus the set collected at head. A name that was there and is not is a removed test, one failure each, unless the spec declares it renamed.
 
 This is the same question `integrity` used to ask of the diff, asked where the answer lives. Three diff-shaped versions of it were written and all three were wrong, in three different ways. Net line count is defeated by a comment longer than the test. Run adjacency is defeated by *any* adjacent added line. Neither sees a test renamed out of collection. There, nothing is removed, nothing is suppressed, the body survives intact, and the test never runs again. A set comparison has no false positive on a `parametrize` consolidation, because consolidation keeps the names.
 
