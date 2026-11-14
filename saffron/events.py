@@ -44,6 +44,7 @@ import json
 import types
 import typing
 from dataclasses import asdict, dataclass, fields, replace
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -750,29 +751,26 @@ def read_log_since(task_dir: Path, offset: int) -> tuple[list[Event], int]:
     return events, offset + consumed
 
 
-def when(stamp: int | None) -> str:
-    """The one place a unix reset time becomes something an operator can act
-    on: "when can I retry", in local time, the day dropped unless it isn't
-    today. Its one caller is `describe()`: the `rate_limit` branch and the
-    `TaskOutcome` one below; item 104 deleted the unguarded copy in
-    `phases.implement`.
+def when(stamp: object, *, now: datetime | None = None) -> str:
+    """A unix reset time, rendered for an operator: "when can I retry".
+    Without `now`, in the host's own zone, with the day dropped when it is
+    today, suffixed " local": `describe()`'s two branches call this form.
+    With `now`, a `datetime`, in `now`'s own zone, always with the day,
+    with no suffix: `_wait_out_rate_limit` calls this form with the wait's
+    clock.
 
-    `stamp` arrives from an untrusted cell's `resets_at`, unchecked by any
-    shape gate — it is a value, not a shape, so `read_log` would not refuse
-    it either. A string, a list, an integer past `time_t`'s range, and NaN
-    are all measured to reach here (`SA-0070`, then item 104's own table for
-    the `session.py` call site) and must render `"unknown"`, never raise.
-
-    `None` also renders `"unknown"` here, rather than `time.localtime`'s own
-    reading of it as *now* — which would print a reset time already past.
-    Both branches guard with an `is not None` check before calling this, so
-    it is not reachable through either today; it is still handled
-    deliberately, not left to accident, since a caller that stops guarding is
-    a caller this function must not silently mislead."""
+    `stamp` arrives from an untrusted cell's `resets_at`. Both forms render
+    `"unknown"` rather than raise, on a bool, a non-number, an unreadable
+    number, or `None`, though every caller already guards against `None`."""
     import time
 
     if isinstance(stamp, bool) or not isinstance(stamp, (int, float)):
         return "unknown"
+    if now is not None:
+        try:
+            return datetime.fromtimestamp(stamp, now.tzinfo).strftime("%a %d %b %H:%M")
+        except (OverflowError, OSError, ValueError):
+            return "unknown"
     try:
         local = time.localtime(stamp)
         today = time.localtime()

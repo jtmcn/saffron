@@ -3183,6 +3183,71 @@ def test_a_rate_limit_wait_line_names_the_providers_reset_beside_the_retry_hour(
         assert rate_lines == expected
 
 
+def test_a_rate_limit_wait_line_reads_its_reset_through_events_when(
+    ledger, repo_id, monkeypatch
+):
+    """`_wait_out_rate_limit` no longer renders its own reset. A reset past
+    the clock goes to `events.when`, with the clock's own `now` object.
+    Any other reset stays `"unknown"`, straight from the wait itself."""
+    from saffron import batch, events
+    from saffron.batch import run_stack_batch
+
+    _raise_on_real_sleep(monkeypatch)
+    calls: list[tuple[object, object, bool]] = []
+
+    def spy(stamp, *, now=None):
+        calls.append((stamp, now, now is clock()))
+        return "SENTINEL"
+
+    monkeypatch.setattr(events, "when", spy)
+    monkeypatch.setattr(batch, "when", spy, raising=False)
+
+    zone = timezone(timedelta(hours=-7))
+    start = datetime(2030, 1, 1, 16, 39, tzinfo=zone)
+    clock = AdvancingClock(start)
+    reset_1800 = datetime(2030, 1, 1, 18, 0, tzinfo=zone).timestamp()
+    steps = (
+        [{"state": "RATE_LIMITED", "resets_at": reset_1800}]
+        + [{"state": "RATE_LIMITED", "resets_at": 10**12}]
+        + [{"state": "RATE_LIMITED", "resets_at": None}]
+        + [{"state": "RATE_LIMITED", "offset": 0}]
+        + [{"state": "RATE_LIMITED", "offset": -60}]
+        + [{"state": "RATE_LIMITED", "resets_at": float("nan")}]
+        + [{"state": "RATE_LIMITED", "resets_at": True}]
+        + [{"state": "READY_FOR_REVIEW"}]
+    )
+    runner = RateLimitScript(ledger, repo_id, clock, {"TE-1": steps})
+    lines: list[str] = []
+
+    reason = run_stack_batch(
+        [_candidate("TE-1")],
+        ledger,
+        budget_usd=100.0,
+        until=None,
+        runner=runner,
+        readiness_check=_ready,
+        clock=clock,
+        sleep=clock.sleep,
+        emit=lines.append,
+    )
+
+    assert reason == "DRAINED"
+    prefix = f"{'TE-1':<10}"
+    rate_lines = [line for line in lines if "rate limited" in line]
+    assert rate_lines == [
+        f"{prefix} rate limited, window reopens SENTINEL, retrying 18:00",
+        f"{prefix} rate limited, window reopens SENTINEL, retrying 00:00",
+        f"{prefix} rate limited, window reopens unknown, retrying 01:00",
+        f"{prefix} rate limited, window reopens unknown, retrying 02:00",
+        f"{prefix} rate limited, window reopens unknown, retrying 03:00",
+        f"{prefix} rate limited, window reopens unknown, retrying 04:00",
+        f"{prefix} rate limited, window reopens unknown, retrying 05:00",
+    ]
+    assert len(calls) == 2
+    assert calls[0] == (reset_1800, calls[0][1], True)
+    assert calls[1] == (10**12, calls[1][1], True)
+
+
 def _review_session(
     findings=(),
     *,

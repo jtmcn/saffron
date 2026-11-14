@@ -1527,6 +1527,86 @@ def test_when_renders_a_readable_reset_time_in_local_time(monkeypatch):
         time.tzset()
 
 
+def test_when_renders_each_reset_stamp_in_both_forms(monkeypatch):
+    """`when` keeps two conversions. Without `now` it reads `time.localtime`,
+    the host's own zone, dropping the day when the stamp falls on today and
+    suffixing " local". With `now` it reads `datetime`'s own timestamp
+    constructor in `now`'s own zone, always with the day and no suffix. The
+    two part on `10**12`: a date in the first form, `unknown` in the
+    second, since `datetime.fromtimestamp` cannot carry that year."""
+    import time
+    from datetime import datetime, timedelta, timezone
+
+    monkeypatch.setenv("TZ", "XXX-9")
+    time.tzset()
+    try:
+        naive_now = datetime(2025, 8, 22, 1, 0)
+        minus7_now = datetime(2025, 8, 21, 9, 0, tzinfo=timezone(timedelta(hours=-7)))
+        plus545_now = datetime(
+            2025, 8, 21, 20, 0, tzinfo=timezone(timedelta(hours=5, minutes=45))
+        )
+        unreadable = ("unknown", "unknown", "unknown", "unknown")
+        cases = [
+            (
+                1755800000,
+                (
+                    "Fri 22 Aug 03:13 local",
+                    "Fri 22 Aug 03:13",
+                    "Thu 21 Aug 11:13",
+                    "Thu 21 Aug 23:58",
+                ),
+            ),
+            (
+                1755800000.0,
+                (
+                    "Fri 22 Aug 03:13 local",
+                    "Fri 22 Aug 03:13",
+                    "Thu 21 Aug 11:13",
+                    "Thu 21 Aug 23:58",
+                ),
+            ),
+            (10**12, ("Fri 27 Sep 10:46 local", "unknown", "unknown", "unknown")),
+            (None, unreadable),
+            (True, unreadable),
+            (False, unreadable),
+            ("soon", unreadable),
+            ([1], unreadable),
+            (float("nan"), unreadable),
+            (10**17, unreadable),
+            (10**20, unreadable),
+            (10**400, unreadable),
+        ]
+        for stamp, expected in cases:
+            actual = (
+                when(stamp),
+                when(stamp, now=naive_now),
+                when(stamp, now=minus7_now),
+                when(stamp, now=plus545_now),
+            )
+            assert actual == expected, stamp
+
+        today = time.localtime()
+        noon_today = time.mktime(
+            (
+                today.tm_year,
+                today.tm_mon,
+                today.tm_mday,
+                12,
+                0,
+                0,
+                today.tm_wday,
+                today.tm_yday,
+                today.tm_isdst,
+            )
+        )
+        assert when(noon_today) == "12:00 local"
+        naive_noon = datetime.fromtimestamp(noon_today)
+        assert when(noon_today, now=naive_noon) == naive_noon.strftime("%a %d %b 12:00")
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+
+
 def test_every_cell_authored_field_is_clipped():
     """Item 63: `_describe_agent_event` clipped only `text` (160) and
     `tool_use`'s input (120). `tool_use.name`, the `result` branch, the
