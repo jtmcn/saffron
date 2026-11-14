@@ -288,11 +288,16 @@ unanchored concern, one anchored note and one anchored blocker. Give the
 a `LensVerdicts` confirming 1 to 8, and `moved=False`. `_confirmed_with`
 (`saffron/phases/rebut.py:747-767`) then counts 3 sustained and 5 unkept.
 Compare `dataclasses.asdict` of each row with a full dict, never field by
-field.
+field. The call naming every caller field passes non-default, distinct
+values: `repo_name="r"`, `spec_id="SY-1"`, `state="READY_FOR_REVIEW"`,
+`note="opened"`, `added=19`, `removed=23` and `link="https://x/pull/1"`.
 
 **Criterion 2's drive.** `_drive`, `_push` and `_rows` at
 `tests/test_task.py:44-129` already drive `run_task` with `run_one_cell` and
-`push_unpackaged_work` replaced. Give each of the five rows its own
+`push_unpackaged_work` replaced. Replace the push with
+`_push(monkeypatch, PushResult(pushed=False, note=_NO_COMMITS))`, as
+`test_both_queue_writers_put_the_trailing_accept_rate_in_the_header` does
+(`tests/test_task.py:316`), so the unpackaged row's note is not empty. Give each of the five rows its own
 `out_dir` and the spec id `SY-1`. Each `queue.json` then holds one row, and
 `spec_id` is a shared field. Build every outcome from one helper holding
 criterion 1's values, so `_drive`'s spec keeps its default `standard` while
@@ -306,7 +311,8 @@ rebuttal, and compare the rebutted unpackaged row with the two `_finish`
 rows. For `_finish`, create the task on a `Ledger` of the test's own, since
 `set_task_package` writes its row (`saffron/phases/package.py:1052-1060`).
 Then call `package_phase._finish` positionally, as
-`tests/test_task.py:366` does. Set the spy with
+`tests/test_task.py:366` does, with `"target-repo"` as its repo name, so
+`repo` matches `run_task`'s rows (`tests/test_task.py:106`). Set the spy with
 `monkeypatch.setattr(package_phase, "queue_line", spy)` and
 `monkeypatch.setattr(task_module, "queue_line", spy, raising=False)`. Have
 it call the real function it wrapped and record the row it returns.
