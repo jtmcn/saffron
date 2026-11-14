@@ -1162,7 +1162,9 @@ reaches the lenses with the body. During
 REVIEW a fresh session per such criterion turns each version into an edit. It
 sees the claim, the list and the diff, and never the witness. The host applies
 each edit in the gate-only cell the criterion probes use, and runs that
-criterion's witness. A survivor is a blocker for REBUT
+criterion's witness. Before any cell, the host declines an edit that keeps its
+whole `find` and adds only lines the repo declares inert. It does so for a
+criterion probe too, and records the edit `unproven` (`SA-0396`). A survivor is a blocker for REBUT
 whether or not it anchors, filed as a surviving criterion probe is (`SA-0190`, `SA-0299`). An answer that
 is not the schema is re-prompted once in its own session, as a lens's is. A
 criterion still without a usable answer is an `error`. It blocks nothing, and
