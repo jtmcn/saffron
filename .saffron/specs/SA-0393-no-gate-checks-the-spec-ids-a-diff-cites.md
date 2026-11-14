@@ -84,8 +84,7 @@ acceptance:
       any character but a letter, a digit, `_`, `-`, a double or single
       quote, or `/`. It is also judged right after three double quotes, the
       opening of a docstring. And it is judged right after a `/` that
-      directly follows an id of the prefix, itself not preceded by a letter,
-      a digit, `_` or `-`. So every id in a slash list of ids is judged,
+      directly follows an id of the prefix that these rules judge. So every id in a slash list of ids is judged,
       while a quoted fixture value, a path and a file name are not. The witness drives ten judged lines and
       fifteen left alone, one per line, with `SA-0398` known. Judged, each
       failing: `SA-03981` and the unpadded `SA-398` at the start of their
@@ -96,7 +95,9 @@ acceptance:
       second. Left alone: `SA-0399` after a letter, a digit, `_`, `-`, a
       double quote, a single quote, three single quotes, `specs/` and
       `done/x/`, then before `-slug.md`, `.yaml`, `.5`, a letter and `_`, and
-      the lowercase `sa-0399`. It asserts the exact list of failing lines and
+      the lowercase `sa-0399`. Two slash lists of the known id and
+      `SA-0399` are left alone too: one opening after `_`, and one inside
+      double quotes, since neither first id is judged. It asserts the exact list of failing lines and
       the id each names.
     witness: tests/test_integrity.py::test_a_cited_id_is_bounded_so_fixture_values_and_file_names_are_not_citations
     wrong_versions:
@@ -110,6 +111,7 @@ acceptance:
       - A case-insensitive match, so `sa-0399` fails.
       - Ids compared after stripping leading zeros, so `SA-398` resolves against `SA-0398`.
       - Three double quotes treated as any other quote, so `"""SA-0399` passes.
+      - Any `/` after an id-shaped token opens a citation, so both left-alone slash lists fail on `SA-0399`.
       - Any double quote opening a citation, so `"SA-0399"` fails.
       - Three single quotes judged as well, so `'''SA-0399` fails.
       - A slash list read by the quote and slash rule alone, so only its first id fails.
@@ -132,18 +134,25 @@ acceptance:
       in `.saffron/specs/done/` at the worktree's HEAD, read through
       `CellTree`. The witness drives a real git repo through `CellTree`, with
       baselines taken at the base commit. Its head commit adds one spec file,
-      deletes another, and adds lines citing ten ids. One spec file is named
+      deletes another, and adds lines citing eleven ids. One spec file is named
       `SA-0021-renamed.md` and declares `id: SA-0023`. A `CellSpec` and an
-      `intake.Spec`, both `SA-0007`, each yield exactly five new `integrity`
-      failures. They fall on the deleted spec's id, on an id whose file lies
-      in a nested directory under `.saffron/specs/`, on one whose file lies
+      `intake.Spec`, both `SA-0007`, each yield exactly six new `integrity`
+      failures. They fall on the deleted spec's id, on two ids whose files
+      lie in nested directories, one under `.saffron/specs/` and one under
+      `.saffron/specs/done/`, on one whose file lies
       outside it, on the renamed file's name prefix `SA-0021`, and on the id
       a `.txt` file in `.saffron/specs/` declares. The retired, queued, added
       and own ids pass, and so does the renamed file's declared `SA-0023`.
+      Two more calls go through the same function `CellTree` answers with. A
+      repo whose HEAD holds no `.saffron/specs/` file yields no ids and does
+      not raise. A repo with an unborn HEAD raises `CellRuntimeError`.
     witness: tests/test_worktree.py::test_the_suite_judges_cited_ids_against_the_spec_files_at_head
     wrong_versions:
       - The listing read at the diff base rather than HEAD, so the added spec's id fails and the deleted one's passes.
       - A recursive listing of `.saffron/specs/`, so the nested file's id resolves.
+      - A recursive listing of `.saffron/specs/done/` alone, so the file nested under `done/` resolves.
+      - Any non-zero exit of the listing raises, so a HEAD with no spec file raises.
+      - Any non-zero exit of the listing reads as no ids, so the unborn HEAD returns no ids and does not raise.
       - A listing of `.saffron/specs/` alone, so the retired spec's id fails.
       - A listing of every file whatever its extension, so the `.txt` file's id resolves.
       - Ids read from file names rather than frontmatter, so `SA-0021` resolves and `SA-0023` fails.
@@ -248,7 +257,9 @@ reads ids. `CellTree` answers it through a new function in
 `saffron/cell/worktree.py`, in one git call over HEAD in the cell. A
 prototype used `git grep -z -m1 -e '^id:' HEAD` with a `:(glob)` pathspec
 for each directory, since a plain `*` there also matches `/`. `git grep`
-exits 1 when nothing matches, so read that as no ids. Raise
+exits 1 when nothing matches, so read that as no ids. Pin
+`--no-line-number`, `--no-column` and `-G`, since the agent can write the
+worktree's git config. Raise
 `CellRuntimeError` on any other non-zero exit, as `changed_files` does. Hand
 both to `integrity_gate` from `GateSuite._run`. The baseline call hands them
 too, and at the base the diff is empty, so it fails nothing.
