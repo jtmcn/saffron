@@ -148,6 +148,7 @@ The consequence is F11: **onboarding a repo touches zero lines of Saffron.** If 
 | Cell lifecycle, network policy, resource limits | **Core** | Containers are containers. The runtime hides behind one module (Appendix G) |
 | `scope`, `size`, `secrets` gates | **Core** | Operate on the diff as text and paths, with no language knowledge needed |
 | `integrity` gate logic | **Core**, patterns from repo | "Was a suppression added, or gate config edited?" is universal. *What a suppression comment looks like* is not |
+| REVIEW's inert-edit refusal | **Core** logic, patterns from repo | "Does this edit remove nothing and add only lines that run nothing?" is universal. *What such a line looks like* is not, so it reads the repo's `probes.inert` patterns (`SA-0396`) |
 | `census` gate | **Core** | Subtracts two lists of names the repo's `tests` gate already reported. It reads a gate result and invokes nothing |
 | `criteria` gate | **Core** | Judges each declared witness against the same two reported lists. It reads a gate result and invokes nothing |
 | `revert` gate | **Core** logic, the repo's `tests` gate as runner | The sanctioned exception below: core re-invokes a declared gate, it does not run a tool |
