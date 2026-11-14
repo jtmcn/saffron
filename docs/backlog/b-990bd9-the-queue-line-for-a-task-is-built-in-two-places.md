@@ -4,7 +4,7 @@ title: A task's queue line is built in two places, so a new field must be added 
 status: open
 tier: 3
 filed: 2026-09-18
-specs: []
+specs: [SA-0390]
 prs: []
 commits: []
 cites: [§6]
