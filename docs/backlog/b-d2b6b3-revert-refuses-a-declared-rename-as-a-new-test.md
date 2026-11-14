@@ -4,7 +4,7 @@ title: '`revert` reads no declared rename, so a renamed test that passes without
 status: open
 tier: 3
 filed: 2026-11-14
-specs: []
+specs: [SA-0389]
 prs: []
 commits: []
 cites: [§5.4]
