@@ -2148,6 +2148,7 @@ def test_revert_leaves_out_exactly_the_declared_renames_census_accepts():
         "t.py::test_juliet_claim",
         "t.py::test_lima",
         "t.py::test_mike[1]",
+        "t.py::test_mike",
         "t.py::test_oscar_added",
         "t.py::test_delta_dup",
         "t.py::test_echo_missing",
