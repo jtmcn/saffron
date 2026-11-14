@@ -4,7 +4,7 @@ title: "`revert` reads no declared rename, so a renamed test that passes without
 type: bug
 priority: 3
 risk: elevated
-estimated_lines: 138
+estimated_lines: 143
 estimate_measured: true
 touches:
   - saffron/gates/core/revert.py
@@ -52,25 +52,34 @@ acceptance:
       `revert_gate` takes a spec's declared `renames` as a keyword that
       defaults to none. It accepts a pair by `census`'s own rule: the old
       name is collected at base and absent at head, and the new name is
-      collected at head and absent at base. Names are compared whole. An
-      accepted pair's new name leaves the set of tests the diff adds, so
-      `run_tests` is never handed it, unless a criterion names it as its
-      witness. A renamed criterion witness is judged as before, and a
-      renamed `preserves` witness stays out as before. The summary names
-      each new name the rule left out, and no other pair's new name. In
-      one call the witness drives eight pairs: one accepted, one whose old
-      name stays at head, one whose old name was never collected, one whose
-      new name was already collected at base, one whose new name head does
-      not collect, one accepted whose new name a criterion names, one
-      accepted whose new name a `preserves` criterion names, and one whose
-      old name matches a base name only after the last `::`. One undeclared
-      new test sits beside them. It asserts the exact subset handed to
-      `run_tests`, and which new names the summary holds. Over two
-      accepted renames, one a criterion's witness, both passing with the
-      source reverted, it asserts a `fail` naming the witness alone. With
-      no renames, the same input fails both names. With the non-witness
-      pair alone, the gate skips as a diff that adds no new test, and its
-      summary names that pair's new name.
+      collected at head and absent at base. Names are compared whole, never
+      by prefix, substring or the text after the last `::`. An accepted
+      pair's new name leaves the set of tests the diff adds before the
+      exempt names are taken from it, so `run_tests` is never handed it
+      unless a criterion names it as its witness. A renamed criterion
+      witness is judged as before, and a renamed `preserves` witness stays
+      out as before. One clause names each new name the rule left out, once
+      each, and no other pair's new name. It rides the summaries that carry
+      the exempt names: a `pass`, a `fail`, and a `skip` with no new test
+      left to judge. An accepted new name that is also exempt is named by
+      that clause and not by the exempt clause. In one call that ends `pass`,
+      the witness drives eleven pairs: one accepted, one whose old name
+      stays at head, one whose old name was never collected, one whose new
+      name was already collected at base, one whose new name head does not
+      collect, one accepted whose new name a criterion names, one accepted
+      whose new name a `preserves` criterion names, one whose old name
+      matches a base name only after the last `::`, one whose old name is a
+      prefix of a base name and of no head name, one whose new name is a
+      prefix of a head name only, and one accepted whose new name is
+      exempt. One undeclared new test sits beside them. It asserts the
+      exact subset handed to `run_tests`, which new names the summary
+      holds, and that no exempt clause appears. Over two accepted renames,
+      one a criterion's witness, both passing with the source reverted, it
+      asserts a `fail` naming the witness alone, whose summary names the
+      other. With the keyword omitted, the same input fails both names.
+      With the non-witness pair alone, its new name collected twice at
+      head, the gate skips as a diff that adds no new test, and its
+      summary names that new name exactly once.
     witness: tests/test_revert.py::test_revert_leaves_out_exactly_the_declared_renames_census_accepts
     wrong_versions:
       - Every declared new name left out, whatever base and head collected.
@@ -78,8 +87,13 @@ acceptance:
       - The renamed names subtracted after the criteria union, so a renamed criterion witness is never judged.
       - The renames read for the summary but never subtracted, so an accepted pair still fails `passed-without-source`.
       - Names matched on the text after the last `::`, so a pair whose old name only shares a test's short name is accepted.
+      - The old name counted as collected at base when a base name starts with it, so a parametrised family at base accepts its bare name.
+      - Old names matched as substrings at base and at head, so an old name inside a vanished base name is accepted.
+      - The new name counted as collected at head when a head name starts with it, so the clause names a new name head never collected.
+      - The exempt names taken before the renames are subtracted, so an exempt renamed test appears in the exempt clause.
       - A summary that names every accepted new name, a criterion's witness and a `preserves` witness included.
       - A summary built without the new-name checks, so it names a pair whose new name was already collected at base, or one head does not collect.
+      - A clause built from the collected list rather than a set, so a name collected twice is named twice.
       - A summary that names no left-out pair.
       - A skip that reports every new test as exempt when only renames remained.
   - claim: >-
@@ -150,12 +164,16 @@ In `revert_gate`, accept a pair by `census`'s rule. Its old name is
 collected at base and absent at head. Its new name is collected at head
 and absent at base. Compare names whole, and never split one, as
 `census`'s module docstring says (`saffron/gates/core/census.py:9-12`).
+A parametrised family at base, such as `t.py::test_a[1]`, does not
+collect the bare name `t.py::test_a`.
 
 An accepted pair's new name leaves the `set(after) - set(before)` half
 of the new-test set. The criteria union is untouched: a criterion's
 witness is a name this change claims to make pass, so a renamed witness
 still joins the set. `- preserved` stays last, so a renamed `preserves`
-witness stays out.
+witness stays out. Subtract the renames before the exempt names are
+taken (`saffron/gates/core/revert.py:265`). An accepted new name that is
+also exempt is then a rename, not an exempt test.
 
 **Why the rule is `census`'s**. A pair `revert` leaves out is then
 exactly a pair `census` accepts. One whose old name head still collects
@@ -163,13 +181,21 @@ added a test beside the old one, and `revert` judges it. One whose old
 name base never collected renamed nothing `census` can see, and `revert`
 judges it too.
 
-Add one clause to the gate's summary naming each new name the rule left
-out, and no other name. It is the channel the exempt names already ride
-(`saffron/gates/core/revert.py:280-281`). Leave out a new name a
-criterion names, since that name is judged. Leave out one the set
-would not hold without the rule. A skip whose subset holds
-only left-out renames keeps the message "the diff adds no new test"
+Add one clause to the gate's `note` naming each new name the rule left
+out, once each, and no other name. Build it from a set, since a
+collected list can hold a name twice. It is the channel the exempt names
+already ride (`saffron/gates/core/revert.py:280-281`). Leave out a new
+name a criterion names, since that name is judged. Leave out one the set
+would not hold without the rule. A skip whose subset holds only
+left-out renames keeps the message "the diff adds no new test"
 (`saffron/gates/core/revert.py:308`).
+
+`note` reaches four summaries. One is the skip with no new test left
+(`saffron/gates/core/revert.py:309`). One is the skip once a mutant's
+file sets every witness aside (`:387`). The others are the `fail`
+(`:601-603`) and the `pass` (`:614`). The other skips and every `error` carry no `note`, and stay
+as they are. The first criterion drives the first, the third and the
+fourth.
 
 Update the module docstring's sentence that defines "new"
 (`saffron/gates/core/revert.py:5-7`), and the list of skips in
@@ -220,12 +246,19 @@ the suite witness, as
 
 **The `revert` witness** uses `_tests` and `_reverted`
 (`tests/test_revert.py:12`, `:48`). Give each pair its own names, none a
-substring of another's. A check that the summary lacks a name then
-means what it says. Hand `run_tests` a recorder that fails every name it
+substring of another's, outside the two prefix pairs. A check that the
+summary lacks a name then means what it says. The old-name prefix pair
+can be `t.py::test_kilo` renamed to `t.py::test_lima`, with only
+`t.py::test_kilo[1]` collected at base. The new-name prefix pair can be
+`t.py::test_mike_old` renamed to `t.py::test_mike`, with only
+`t.py::test_mike[1]` collected at head. Hand the first call's `exempt`
+the exempt pair's new name. Hand `run_tests` a recorder that fails every name it
 receives, and compare the recorded subset against a literal list. Put the
 suffix pair's old name in a second file, such as `u.py::test_india`, with
-`t.py::test_india` collected at base and absent at head. For the three
-theater calls, hand `run_tests` a fake that passes every name. Assert the
+`t.py::test_india` collected at base and absent at head. For the two
+theater calls, hand `run_tests` a fake that passes every name. Hand the
+lone-pair call `_refuse` and `_refuse_run` (`tests/test_revert.py:62`,
+`:68`), and two `tests` results that each collect its new name. Assert the
 `fail` call's failures as `(file, code)` pairs. In the summary checks,
 assert that each left-out name is in the summary, and that each judged
 or never-new pair's new name is not.
@@ -244,10 +277,11 @@ must keep its verdict.
 
 **The `prose` gate** counts each new comment and docstring. Write none
 with an em dash, a semicolon, a contraction, the perfect tense or a
-sentence over 25 words. A docstring line over 88 characters counts as
-two toward its ten-line limit, and `revert_gate`'s docstring sits at
-nine.
+sentence over 25 words. `revert_gate`'s docstring already holds ten
+lines as the gate counts them, its limit, with the closing quotes' line
+counted. A line over 88 characters counts as two. So reflow the skip
+list inside the existing lines, and add none.
 
 **Size**. A prototype of this change measured 110 counted tokens outside
-`tests/` and 439 under it, against the 1300-token `bug` ceiling. That is
-138 changed lines in all.
+`tests/` and 460 under it, against the 1300-token `bug` ceiling. That is
+143 changed lines in all.
