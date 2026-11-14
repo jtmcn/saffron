@@ -109,6 +109,10 @@ HISTORY_OUTPUT_CHARS = 20_000
 # the declared command alike. Reasoned, not measured, the same as above.
 HISTORY_EXEC_TIMEOUT_S = 600.0
 
+# Read live by `qualify._binds_task`, so the two copies cannot drift
+# (`SA-0378`). Trailing space kept so both sides join it to the hash the same way.
+REVIEWED_DIFF_DETAIL = "reviewed diff recorded, sha256 "
+
 # What `probe_findings`/`_apply_criterion_probes` write when something
 # raised, named once so a caller can tell that apart from a refusal (b-4a63b7).
 _PROBE_CELL_UNENTERABLE = "the probe cell could not be entered: "
@@ -3391,7 +3395,7 @@ def _drive_cell(
                         _phase_start(
                             "REVIEW",
                             "REVIEW",
-                            f"reviewed diff recorded, sha256 {reviewed_diff_sha256}",
+                            f"{REVIEWED_DIFF_DETAIL}{reviewed_diff_sha256}",
                         )
                         # A witnessed spec's claims live only in frontmatter
                         # (§3.2); append them so the critic sees what a

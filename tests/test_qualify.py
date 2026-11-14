@@ -1545,6 +1545,64 @@ def test_an_in_cell_concern_whose_cited_line_a_review_commit_changed_is_not_draf
         assert by_claim[claim]["outcome"] == "follow_up"
 
 
+def test_binds_task_reads_the_reviewed_diff_line_from_the_shared_constant(
+    tmp_path, monkeypatch
+):
+    """`SA-0386`, backlog item b-19f43a. `_binds_task` builds its target
+    from `session.REVIEWED_DIFF_DETAIL`, read live, not a copy frozen at
+    import. Four hand-built logs carry today's text or a sentinel, each
+    with one of two hashes. The binding truth table moves with the
+    constant rather than staying fixed to it."""
+    from saffron.qualify import _binds_task
+
+    today = "reviewed diff recorded, sha256 "
+    sentinel = "SA-0386 test sentinel, "
+    asked = "a" * 64
+    other = "b" * 64
+
+    def _write(name: str, detail: str, task_key: str) -> Path:
+        task_dir = tmp_path / name
+        log = events.EventLog(task_dir)
+        log.append(
+            events.PhaseStart(
+                timestamp=0.0,
+                spec_id="TE-1",
+                phase="REVIEW",
+                label="REVIEW",
+                detail=detail,
+            )
+        )
+        log.append(
+            events.RecordAppend(
+                timestamp=1.0,
+                spec_id="TE-1",
+                fact_kind="attempt_opened",
+                task_key=task_key,
+            )
+        )
+        return task_dir
+
+    today_asked = _write("today-asked", f"{today}{asked}", "today-asked-key")
+    today_other = _write("today-other", f"{today}{other}", "today-other-key")
+    sentinel_asked = _write(
+        "sentinel-asked", f"{sentinel}{asked}", "sentinel-asked-key"
+    )
+    sentinel_other = _write(
+        "sentinel-other", f"{sentinel}{other}", "sentinel-other-key"
+    )
+
+    assert _binds_task(today_asked, asked, "today-asked-key") is True
+    assert _binds_task(today_other, asked, "today-other-key") is False
+    assert _binds_task(sentinel_asked, asked, "sentinel-asked-key") is False
+    assert _binds_task(sentinel_other, asked, "sentinel-other-key") is False
+
+    monkeypatch.setattr(session, "REVIEWED_DIFF_DETAIL", sentinel)
+
+    assert _binds_task(today_asked, asked, "today-asked-key") is False
+    assert _binds_task(sentinel_asked, asked, "sentinel-asked-key") is True
+    assert _binds_task(sentinel_other, asked, "sentinel-other-key") is False
+
+
 @dataclass
 class _ReviewedTreeFixture:
     """Two layers on base `A`. TE-1's critic tree `T1` is rewritten once more into its
