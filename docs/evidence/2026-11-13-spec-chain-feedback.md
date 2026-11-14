@@ -50,3 +50,51 @@ hand. The concerns asked for a mutant the ref cannot yet hold.
     alone.
 45. A boundary named in a claim, such as "at or before", is driven at the
     boundary itself.
+
+## SA-0387 (b-f30189)
+
+A spec declares `renames`, and `census` accepts exactly the pairs head
+carried out.
+
+**Review 1: 0 blockers, 3 concerns, 4 notes.** The writer revised.
+
+- No call held a missing new name with nothing removed. The writer measured
+  two builds that pass whenever nothing is removed, and both passed. Pre-flight
+  1 missed a member that one call's other contents masked.
+- One member left its old name's head state open, so it told no build
+  apart. Pre-flight 1 missed the open state.
+- Out of scope claimed every recurrence changed its test's assertion. The
+  item's own record says `revert` still refused #1099. Pre-flight 5 missed a
+  claim about the item, not the tree.
+
+**Review 2: 1 blocker, 2 concerns, 2 notes.** Applied by hand. The witness
+compared only `file` and `code`, so a wrong version about the message
+passed. The budget cleared review and rebut by $1.51, and rose to $48.
+
+## SA-0388 (b-e11fb7)
+
+One function in `events.py` renders a reset stamp, with the clock's `now` as
+a parameter. Both callers use it.
+
+**Review 1: 0 blockers, 2 concerns, 4 notes.** The writer revised.
+
+- A claim named "at most six hours", and no witness drove 21600 seconds.
+  Pre-flight 1 missed the boundary member. Check 45 names it.
+- A claim named "the same object", and the witness compared by equality.
+  Pre-flight 1 missed object identity.
+- The body quoted the new code's text, so a later mutant could not pin it
+  (§5.4.1). No check reads a body for a future mutant's text.
+
+**Review 2: 1 blocker, 2 concerns, 2 notes.** Applied by hand. A wrong
+version said the clock is read twice, but the test clock returns one
+object, so no witness could tell. Two claim words, "always with the day"
+and "keyword-only", had no driven member.
+
+## Checks to build
+
+46. For each field a failure carries, a wrong version that changes it has a
+    witness that reads that field.
+47. Each wrong version is checked against the test double the witness uses.
+    A fake that returns one object cannot tell a second read apart.
+48. A claim about the item's own history is read against the item's
+    Record.
