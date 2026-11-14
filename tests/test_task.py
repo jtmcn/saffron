@@ -4,6 +4,7 @@ packaged (`DESIGN.md` §6). `run_one_cell`, `push_unpackaged_work` and
 
 from __future__ import annotations
 
+import ast
 import errno
 import hashlib
 import json
@@ -12,6 +13,7 @@ import re
 import subprocess
 import time
 from collections.abc import Callable, Sequence
+from dataclasses import asdict, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import get_args
@@ -5171,3 +5173,425 @@ def test_claude_md_command_table_names_the_cells_raise_not_just_its_green_review
     next_bullet_start = text.index("- `saffron/agents/`", bullet_start)
     bullet_text = text[bullet_start:next_bullet_start]
     assert "whose cell raised but rebuilds green" in bullet_text
+
+
+def _criterion_1_findings() -> list[Finding]:
+    """Two anchored concerns, one unanchored concern, one anchored note and
+    one anchored blocker (b-990bd9's own test shape)."""
+    return [
+        Finding(
+            lens="correctness",
+            severity="concern",
+            file="a.py",
+            line=1,
+            claim="c1",
+            anchored=True,
+        ),
+        Finding(
+            lens="correctness",
+            severity="concern",
+            file="a.py",
+            line=2,
+            claim="c2",
+            anchored=True,
+        ),
+        Finding(
+            lens="correctness",
+            severity="concern",
+            file="a.py",
+            line=3,
+            claim="c3",
+            anchored=False,
+        ),
+        Finding(
+            lens="correctness",
+            severity="note",
+            file="a.py",
+            line=4,
+            claim="c4",
+            anchored=True,
+        ),
+        Finding(
+            lens="correctness",
+            severity="blocker",
+            file="a.py",
+            line=5,
+            claim="c5",
+            anchored=True,
+        ),
+    ]
+
+
+def _criterion_1_rebuttal() -> RebutResult:
+    """Argues findings 1-3, fixes 4-8, confirms all eight: 3 sustained,
+    5 unkept (`_confirmed_with`, `saffron/phases/rebut.py:747`)."""
+    rebuttals = [
+        Rebuttal(finding=n, action="argued", argument="wrong") for n in (1, 2, 3)
+    ] + [
+        Rebuttal(finding=n, action="fixed", argument="fixed it")
+        for n in (4, 5, 6, 7, 8)
+    ]
+    verdicts = [
+        Verdict(finding=n, verdict="confirmed", reason="r") for n in range(1, 9)
+    ]
+    return RebutResult(
+        state="REBUTTING",
+        why="halted",
+        rebuttal=RebuttalTurn(rebuttals=rebuttals),
+        verdicts=[LensVerdicts(lens="correctness", verdicts=verdicts)],
+        moved=False,
+        cost_usd=0.0,
+    )
+
+
+def _criterion_1_outcome_kwargs(rebut_result: RebutResult | None) -> dict:
+    """13 attempts, $17.50, `elevated`, 7 unread, 11 unanswered, and the
+    five-finding review every criterion-2 drive shares."""
+    return dict(
+        spent_usd=17.5,
+        attempts=13,
+        effective_risk="elevated",
+        unread=7,
+        unanswered=11,
+        reviews=[LensReview(lens="correctness", findings=_criterion_1_findings())],
+        rebut_result=rebut_result,
+    )
+
+
+def test_queue_line_builds_a_tasks_row_from_its_outcome():
+    """`package_phase.queue_line` derives eight fields from a `CellOutcome`
+    and takes every other field from its own caller (b-990bd9)."""
+    rebutted = _criterion_1_outcome_kwargs(_criterion_1_rebuttal())
+    outcome = CellOutcome(
+        state="READY_FOR_REVIEW",
+        task_id=1,
+        run_id=1,
+        task_dir=Path("/tmp/t"),
+        **rebutted,
+    )
+
+    full = package_phase.queue_line(
+        outcome,
+        repo_name="r",
+        spec_id="SY-1",
+        state="READY_FOR_REVIEW",
+        note="opened",
+        added=19,
+        removed=23,
+        link="https://x/pull/1",
+    )
+    assert asdict(full) == {
+        "repo": "r",
+        "spec_id": "SY-1",
+        "state": "READY_FOR_REVIEW",
+        "attempts": 13,
+        "cost_usd_est": 17.5,
+        "concerns": 2,
+        "added": 19,
+        "removed": 23,
+        "link": "https://x/pull/1",
+        "note": "opened",
+        "risk": "elevated",
+        "sustained": 3,
+        "unkept": 5,
+        "unread": 7,
+        "unanswered": 11,
+    }
+
+    defaulted = package_phase.queue_line(
+        outcome, repo_name="r", spec_id="SY-1", state="READY_FOR_REVIEW"
+    )
+    assert asdict(defaulted) == {
+        "repo": "r",
+        "spec_id": "SY-1",
+        "state": "READY_FOR_REVIEW",
+        "attempts": 13,
+        "cost_usd_est": 17.5,
+        "concerns": 2,
+        "added": 0,
+        "removed": 0,
+        "link": "",
+        "note": "",
+        "risk": "elevated",
+        "sustained": 3,
+        "unkept": 5,
+        "unread": 7,
+        "unanswered": 11,
+    }
+
+    no_rebuttal = replace(outcome, rebut_result=None)
+    bare = package_phase.queue_line(
+        no_rebuttal, repo_name="r", spec_id="SY-1", state="READY_FOR_REVIEW"
+    )
+    assert asdict(bare) == {
+        "repo": "r",
+        "spec_id": "SY-1",
+        "state": "READY_FOR_REVIEW",
+        "attempts": 13,
+        "cost_usd_est": 17.5,
+        "concerns": 2,
+        "added": 0,
+        "removed": 0,
+        "link": "",
+        "note": "",
+        "risk": "elevated",
+        "sustained": 0,
+        "unkept": 0,
+        "unread": 7,
+        "unanswered": 11,
+    }
+
+
+def test_every_row_a_tasks_end_writes_comes_from_queue_line(tmp_path, monkeypatch):
+    """Three sites build their `QueueLine` with `package_phase.queue_line`:
+    `run_task`'s unpackaged row, its `EXHAUSTED` row and `_finish`'s row.
+    Every stored row equals the row that call returned (b-990bd9)."""
+    real_queue_line = package_phase.queue_line
+    calls: list[dict] = []
+
+    def spy(outcome, **kwargs):
+        row = real_queue_line(outcome, **kwargs)
+        calls.append({"row": row})
+        return row
+
+    monkeypatch.setattr(package_phase, "queue_line", spy)
+    monkeypatch.setattr(task_module, "queue_line", spy, raising=False)
+
+    rebutted = _criterion_1_rebuttal()
+
+    # 1) The unpackaged row, rebutted.
+    out_dir_1 = tmp_path / "out1"
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-1",
+        state="NOT_IMPLEMENTED",
+        task_id=1,
+        out_dir=out_dir_1,
+        **_criterion_1_outcome_kwargs(rebutted),
+    )
+
+    # 2) The unpackaged row, with no rebuttal.
+    out_dir_2 = tmp_path / "out2"
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-1",
+        state="NOT_IMPLEMENTED",
+        task_id=2,
+        out_dir=out_dir_2,
+        **_criterion_1_outcome_kwargs(None),
+    )
+
+    # 3) The `EXHAUSTED` row, for a refused PACKAGE with no rebuttal.
+    out_dir_3 = tmp_path / "out3"
+    monkeypatch.setattr(
+        package_phase,
+        "package",
+        lambda *a, **k: package_phase.PackageResult(
+            state="EXHAUSTED", note="conflicts with main"
+        ),
+    )
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-1",
+        state="EXHAUSTED",
+        task_id=3,
+        out_dir=out_dir_3,
+        **_criterion_1_outcome_kwargs(None),
+    )
+
+    # 4) `_finish`'s row, `READY_FOR_REVIEW`, over the rebutted outcome.
+    out_dir_4 = tmp_path / "out4"
+    ledger_4 = Ledger(tmp_path / "finish4.db")
+    repo_id_4 = ledger_4.upsert_repo(
+        "target-repo", "https://github.com/o/r.git", "/m.git", None
+    )
+    run_id_4 = ledger_4.create_run(repo_id_4, base_sha="a" * 40)
+    task_id_4 = ledger_4.create_task(
+        run_id_4, spec_id="SY-1", spec_sha="s" * 64, branch="saffron/SY-1"
+    )
+    outcome_4 = CellOutcome(
+        state="REVIEWING",
+        task_id=task_id_4,
+        run_id=task_id_4,
+        task_dir=out_dir_4 / "SY-1",
+        **_criterion_1_outcome_kwargs(rebutted),
+    )
+    spec_4 = Spec(
+        id="SY-1",
+        title="t",
+        type="feature",
+        touches=["src/**"],
+        acceptance_criteria=["it works"],
+    )
+    result_4 = package_phase.PackageResult(
+        state="READY_FOR_REVIEW",
+        note="opened",
+        pr_url="https://x/pull/1",
+        branch="saffron/SY-1",
+        added=19,
+        removed=23,
+    )
+    package_phase._finish(
+        ledger_4, outcome_4, out_dir_4, spec_4, "target-repo", result_4
+    )
+    ledger_4.close()
+
+    # 5) `_finish`'s row, `MERGE_FAILED`, over the same rebutted outcome.
+    out_dir_5 = tmp_path / "out5"
+    ledger_5 = Ledger(tmp_path / "finish5.db")
+    repo_id_5 = ledger_5.upsert_repo(
+        "target-repo", "https://github.com/o/r.git", "/m.git", None
+    )
+    run_id_5 = ledger_5.create_run(repo_id_5, base_sha="a" * 40)
+    task_id_5 = ledger_5.create_task(
+        run_id_5, spec_id="SY-1", spec_sha="s" * 64, branch="saffron/SY-1"
+    )
+    outcome_5 = CellOutcome(
+        state="REVIEWING",
+        task_id=task_id_5,
+        run_id=task_id_5,
+        task_dir=out_dir_5 / "SY-1",
+        **_criterion_1_outcome_kwargs(rebutted),
+    )
+    spec_5 = Spec(
+        id="SY-1",
+        title="t",
+        type="feature",
+        touches=["src/**"],
+        acceptance_criteria=["it works"],
+    )
+    result_5 = package_phase.PackageResult(
+        state="MERGE_FAILED", note="gone", branch="saffron/SY-1"
+    )
+    package_phase._finish(
+        ledger_5, outcome_5, out_dir_5, spec_5, "target-repo", result_5
+    )
+    ledger_5.close()
+
+    assert len(calls) == 5
+    assert [call["row"].state for call in calls] == [
+        "NOT_IMPLEMENTED",
+        "NOT_IMPLEMENTED",
+        "EXHAUSTED",
+        "READY_FOR_REVIEW",
+        "MERGE_FAILED",
+    ]
+
+    rows = [
+        _rows(d)[0] for d in (out_dir_1, out_dir_2, out_dir_3, out_dir_4, out_dir_5)
+    ]
+    for row, call in zip(rows, calls, strict=True):
+        assert row == asdict(call["row"])
+
+    # Literal values, not the spy's own return: a bug inside `queue_line`
+    # would carry the same wrong answer on both sides (SA-0390 review).
+    shared = (
+        "repo",
+        "spec_id",
+        "attempts",
+        "cost_usd_est",
+        "concerns",
+        "risk",
+        "sustained",
+        "unkept",
+        "unread",
+        "unanswered",
+    )
+
+    def _shared(row: dict) -> dict:
+        return {k: row[k] for k in shared}
+
+    rebutted_shared = {
+        "repo": "target-repo",
+        "spec_id": "SY-1",
+        "attempts": 13,
+        "cost_usd_est": 17.5,
+        "concerns": 2,
+        "risk": "elevated",
+        "sustained": 3,
+        "unkept": 5,
+        "unread": 7,
+        "unanswered": 11,
+    }
+    bare_shared = {**rebutted_shared, "sustained": 0, "unkept": 0}
+
+    assert _shared(rows[0]) == _shared(rows[3]) == _shared(rows[4]) == rebutted_shared
+    assert _shared(rows[1]) == _shared(rows[2]) == bare_shared
+
+    # Each site's own fields, read off the stored row, not the spy's return.
+    assert rows[0]["note"] == _NO_COMMITS
+    assert (rows[0]["added"], rows[0]["removed"], rows[0]["link"]) == (0, 0, "")
+
+    assert rows[1]["note"] == _NO_COMMITS
+    assert (rows[1]["added"], rows[1]["removed"], rows[1]["link"]) == (0, 0, "")
+
+    # No trace of `package()`'s refusal would mean it never ran.
+    assert "conflicts with main" in rows[2]["note"]
+    assert (rows[2]["added"], rows[2]["removed"], rows[2]["link"]) == (0, 0, "")
+
+    assert rows[3]["note"] == "opened"
+    assert (rows[3]["added"], rows[3]["removed"]) == (19, 23)
+    assert rows[3]["link"] == "https://x/pull/1"
+
+    assert rows[4]["note"] == "gone"
+    assert (rows[4]["added"], rows[4]["removed"]) == (0, 0)
+    assert rows[4]["link"] == ""
+
+
+def _queue_line_call_sites(path: Path) -> list[str | None]:
+    """The innermost enclosing `FunctionDef`/`AsyncFunctionDef` name for every
+    `QueueLine(...)` call `ast` finds in `path`. `None` for one at module
+    scope (b-990bd9's own criterion 3)."""
+    tree = ast.parse(path.read_text(), filename=str(path))
+    found: list[str | None] = []
+    stack: list[str] = []
+
+    class _Visitor(ast.NodeVisitor):
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            stack.append(node.name)
+            self.generic_visit(node)
+            stack.pop()
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+            stack.append(node.name)
+            self.generic_visit(node)
+            stack.pop()
+
+        def visit_Call(self, node: ast.Call) -> None:
+            func = node.func
+            name = None
+            if isinstance(func, ast.Name):
+                name = func.id
+            elif isinstance(func, ast.Attribute):
+                name = func.attr
+            if name == "QueueLine":
+                found.append(stack[-1] if stack else None)
+            self.generic_visit(node)
+
+    _Visitor().visit(tree)
+    return found
+
+
+def test_only_queue_line_and_the_live_row_construct_a_queue_line():
+    """`QueueLine` is constructed in exactly two functions across
+    `saffron/task.py` and `saffron/phases/package.py`: `queue_line` and
+    `_live_row` (b-990bd9)."""
+    repo_root = Path(__file__).resolve().parents[1]
+    found = [
+        (rel, name)
+        for rel in ("saffron/task.py", "saffron/phases/package.py")
+        for name in _queue_line_call_sites(repo_root / rel)
+    ]
+
+    assert sorted(found) == sorted(
+        [
+            ("saffron/phases/package.py", "queue_line"),
+            ("saffron/task.py", "_live_row"),
+        ]
+    )

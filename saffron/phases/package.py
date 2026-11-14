@@ -1045,6 +1045,38 @@ def _rebuttal_head_moved(task_dir: Path) -> bool:
         return False
 
 
+def queue_line(
+    outcome,
+    *,
+    repo_name: str,
+    spec_id: str,
+    state: str,
+    note: str = "",
+    added: int = 0,
+    removed: int = 0,
+    link: str = "",
+) -> index_report.QueueLine:
+    """The one `QueueLine` construction a task's end uses (b-990bd9). Every
+    field but the caller's own derives from `outcome`."""
+    return index_report.QueueLine(
+        repo=repo_name,
+        spec_id=spec_id,
+        state=state,
+        attempts=outcome.attempts,
+        cost_usd_est=outcome.spent_usd,
+        concerns=anchored_concerns(outcome.reviews),
+        added=added,
+        removed=removed,
+        link=link,
+        note=note,
+        risk=outcome.effective_risk,
+        sustained=sustained_blockers(outcome.rebut_result),
+        unkept=unkept_fixes(outcome.rebut_result),
+        unread=outcome.unread,
+        unanswered=outcome.unanswered,
+    )
+
+
 def _finish(ledger, outcome, out_dir: Path, spec, repo_name: str, result):
     """Persist and append. A PACKAGE that *raises* reaches neither, and that is
     deliberate: an index line whose link points at a pull request that was
@@ -1060,22 +1092,15 @@ def _finish(ledger, outcome, out_dir: Path, spec, repo_name: str, result):
     )
     index_report.append_queue_line(
         out_dir,
-        index_report.QueueLine(
-            repo=repo_name,
+        queue_line(
+            outcome,
+            repo_name=repo_name,
             spec_id=spec.id,
             state=result.state,
-            attempts=outcome.attempts,
-            cost_usd_est=outcome.spent_usd,
-            concerns=anchored_concerns(outcome.reviews),
+            note=result.note,
             added=result.added or 0,
             removed=result.removed or 0,
             link=result.pr_url,
-            note=result.note,
-            risk=outcome.effective_risk,
-            sustained=sustained_blockers(outcome.rebut_result),
-            unkept=unkept_fixes(outcome.rebut_result),
-            unread=outcome.unread,
-            unanswered=outcome.unanswered,
         ),
         header=index_report.accept_rate_header(ledger),
     )
