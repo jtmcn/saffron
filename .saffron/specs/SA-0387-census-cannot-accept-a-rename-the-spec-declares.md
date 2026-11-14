@@ -4,7 +4,7 @@ title: "`census` cannot accept a rename the spec declares, so a test keeps a nam
 type: feature
 priority: 3
 risk: elevated
-estimated_lines: 204
+estimated_lines: 211
 estimate_measured: true
 touches:
   - saffron/gates/core/census.py
@@ -51,16 +51,18 @@ acceptance:
       A spec may declare `renames`, a mapping from an old collected test
       name to its new one. It loads as that mapping, every name whole and
       in declared order, and as an empty mapping when omitted. Load
-      refuses six shapes: an empty old name, a blank old name, an empty
-      new name, one new name two entries share, a list in place of the
-      mapping, and an integer in place of a new name. The witness drives the
-      declared mapping, with names holding `::` and brackets out of sorted
-      order, the omitted key, and each of the six refused shapes.
+      refuses seven shapes: an empty old name, a blank old name, an empty
+      new name, a blank new name, one new name two entries share, a list
+      in place of the mapping, and an integer in place of a new name. The
+      witness drives the declared mapping, with names holding `::` and
+      brackets out of sorted order, the omitted key, and each of the seven
+      refused shapes.
     witness: tests/test_intake.py::test_renames_loads_as_a_mapping_and_refuses_a_blank_or_shared_new_name
     wrong_versions:
       - A field with no validator, so two old names sharing one new name load.
       - A blank check on the new name alone, so an empty or blank old name loads.
       - A blank check by emptiness, so an old name of one space loads.
+      - A blank check by emptiness on the new name, so a new name of two spaces loads.
       - The mapping sorted at load, so the declared order is lost.
   - claim: >-
       `census_gate` takes the declared renames and accepts a pair only when
@@ -75,12 +77,16 @@ acceptance:
       `census_gate` call the witness drives seven members: a pair carried
       out, a pair whose new name is absent and whose old name is gone, a
       pair whose new name is absent and whose old name stays, a pair whose
-      new name was already collected at base, a pair whose old name stays
+      old name is gone at head and whose new name was already collected at
+      base and still is, a pair whose old name stays
       and whose new name is added, a pair whose new name only matches a
       collected name from another file after the last `::`, and one
       undeclared disappearance. It asserts the exact set of `file` and
       `code` pairs. A second call with only the carried-out pair is a
-      `pass` with no failures.
+      `pass` with no failures. A third call holds only a pair whose old
+      name stays and whose new name is absent, so nothing is removed. It
+      is a `fail` with exactly one failure, the new name's
+      `rename-not-collected`.
     witness: tests/test_census.py::test_census_accepts_exactly_the_declared_renames_the_head_carried_out
     wrong_versions:
       - Every declared old name accepted whatever head collected, so a deleted test with a declared rename passes.
@@ -91,6 +97,8 @@ acceptance:
       - The renames read but never subtracted, so the carried-out pair still fails `removed-test`.
       - A message that does not name the old name.
       - No failure at all for a missing new name, only the old name's `removed-test`.
+      - The `pass` return kept for an empty removed set ahead of the rename check, so a lone missing new name passes.
+      - The status set to `fail` only when a name was removed, so a lone `rename-not-collected` failure reads as `pass`.
   - claim: >-
       The gate suite hands `census_gate` the renames of the spec it was
       built with. The witness builds a suite three times over one baseline
@@ -189,22 +197,33 @@ the renames.
 
 ## Out of scope
 
-- **`revert`**. It treats a name collected at head and not at base as a
-  new test (`saffron/gates/core/revert.py:261`), and so a renamed test is
-  one. It re-runs it with the source reverted and blocks it when it
-  passes. A rename whose test passes without the diff's source is still
-  refused there. Each recurrence in the item changed what its test
-  asserts, so its renamed test fails without the source.
+- **What this fixes, and what it leaves**. The item's record names five
+  recurrences. `census` now accepts a declared rename in #478, #483 and
+  #519. In #478 and #483 each renamed test asserts what the change made
+  true, so it also fails without the diff's source. #519 ended with an
+  id-only rename. `census` accepts it, and `revert` still refuses it
+  wherever its test passes without the source.
+  This change does not fix #1099. `revert` treats a name collected at
+  head and not at base as a new test
+  (`saffron/gates/core/revert.py:261`), and no `renames` reaches it. So
+  a renamed test that passes without the diff's source is still refused
+  there, as #1099's was. It does not fix finish 82 either. The finishing layer's suite runs under the synthetic
+  `FINISH-0` spec (`saffron/finish.py:110-115`), which declares no
+  renames.
 - **A rename a spec does not declare**. It fails `census` as before. The
   host cannot tell a rename from a deletion and an addition.
 - **A pair whose old name equals its new name**. It loads. It can never
   be accepted, since its old name cannot be absent where its new name is
   collected. It reports `rename-not-collected` only when the name is gone.
-- **Hand edits in the spec's own pull request**. `DESIGN.md` §5.4 gains a
-  sentence after "Deletion is exempt from nothing". It says a rename the
-  spec declares is accepted pair by pair, never a deletion.
-  `docs/agents/issue-tracker.md` gains a `renames` entry beside `removes`.
-  `CONTEXT.md` gets its entry by hand under b-1b5747.
+- **Two entries with one old name**. `yaml.safe_load` keeps the last of
+  two duplicate mapping keys and drops the first without an error. So
+  load never sees the first entry, and nothing refuses it.
+- **Hand edits in the spec's own pull request**. `DESIGN.md` §5.4 says a
+  rename the spec declares is accepted pair by pair, never as a
+  deletion. Its definition of a removed test ends "unless the spec
+  declares it renamed". `docs/agents/issue-tracker.md` holds a `renames`
+  entry beside `removes`. `CONTEXT.md` gets its entry by hand under
+  b-1b5747.
 
 ## Notes for the agent
 
@@ -229,7 +248,11 @@ Import `CellSpec` and `parse_spec` inside the suite witness, as
 `sorted((f.file, f.code) for f in result.failures)` against a literal
 list, so the order the gate reports in is not pinned. Give each pair its
 own names, none a substring of another's, and put the sibling-suffix
-pair's collected name in a second file, such as `other.py`.
+pair's collected name in a second file, such as `other.py`. In the pair
+whose new name was already collected at base, drop the old name from
+head. With the old name still collected, that member tells no build
+apart. The third call holds no removed name at all, so a build that
+returns `pass` whenever nothing was removed fails it.
 
 **The suite witness** needs a tree whose `tests` gate collects one list
 on its full suite and echoes the subset `revert` hands it. Subclass
@@ -256,5 +279,5 @@ with an em dash, a semicolon, a contraction, the perfect tense or a
 sentence over 25 words.
 
 **Size**. A prototype of this change measured 323 counted tokens outside
-`tests/` and 493 under it, against the 3000-token `feature` ceiling.
-That is 204 changed lines in all.
+`tests/` and 521 under it, against the 3000-token `feature` ceiling.
+That is 211 changed lines in all.
