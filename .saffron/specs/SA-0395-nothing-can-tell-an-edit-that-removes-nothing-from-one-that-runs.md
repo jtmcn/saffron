@@ -141,7 +141,7 @@ placeholder, and its validator compiles each with the placeholder filled in
 (`saffron/repos/policy.py:165-189`).
 
 **What this pull request lands by hand**. `Policy` refuses an unknown key
-(`saffron/repos/policy.py:193`), and the setup template must name every
+(`saffron/repos/policy.py:225`), and the setup template must name every
 `Policy` field (`tests/test_setup_saffron.py:158-166`). The template sits
 under `.claude/`, where a cell cannot write. So the block, its loader test,
 the template and this repo's declaration land together in this spec's own
