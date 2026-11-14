@@ -891,6 +891,7 @@ def test_a_citation_no_single_construct_it_names_holds_is_refused_at_its_own_com
     base = _git(repo, "rev-parse", "HEAD")
 
     paragraphs = [
+        "The helper `_finish` builds the row elsewhere at `mod/order.py:11`.",
         "The helper `_finish` and the word `EXHAUSTED` sit at `mod/order.py:2-3`.",
         "The function `stack_finish` is quoted early at `mod/order.py:11-12`.",
         "The module `mod/order.py` names `stack_finish` at `:11-12`.",
@@ -900,12 +901,14 @@ def test_a_citation_no_single_construct_it_names_holds_is_refused_at_its_own_com
         "Both `package` and `_state` sit nested together at `mod/order.py:2-3`.",
         "The constant `EXHAUSTED` sits plainly at `mod/order.py:33`.",
         "The helper `package` builds the whole flow at `mod/order.py:1-4`.",
-        "The helper `_finish` builds the row elsewhere at `mod/order.py:11`.",
     ]
     text = "\n\n".join(paragraphs)
 
-    held_defect = "mod/order.py:11: the construct it names sits at mod/order.py:7-8"
+    construct_defect = (
+        "mod/order.py:11: the construct it names sits at mod/order.py:7-8"
+    )
     new_lines = [
+        construct_defect,
         "mod/order.py:2-3: no single construct it names holds it "
         "(they sit at mod/order.py:7-8)",
         "mod/order.py:11-12: no single construct it names holds it "
@@ -916,17 +919,27 @@ def test_a_citation_no_single_construct_it_names_holds_is_refused_at_its_own_com
         "(they sit at mod/order.py:19-20, 23-24)",
         "mod/order.py:27-30: no single construct it names holds it "
         "(they sit at mod/order.py:27-28, 29-30)",
-        held_defect,
     ]
 
     count, defects = citation_count_and_defects(repo, base, text)
     assert count == 10
     assert [str(d) for d in defects] == new_lines
+    moved = defects[1:]
+    assert [(d.path, d.replace, d.spans) for d in moved] == [
+        ("mod/order.py", None, None)
+    ] * 5
+    assert [d.offset for d in moved] == [
+        text.index("mod/order.py:2-3"),
+        text.index("mod/order.py:11-12"),
+        text.index("`:11-12`") + 1,
+        text.index("mod/order.py:19-20"),
+        text.index("mod/order.py:27-30"),
+    ]
 
     count_old, defects_old = citation_count_and_defects(repo, base, text, movable=False)
     assert count_old == 10
-    assert [str(d) for d in defects_old] == [held_defect]
-    assert [str(d) for d in citation_defects(repo, base, text)] == [held_defect]
+    assert [str(d) for d in defects_old] == [construct_defect]
+    assert [str(d) for d in citation_defects(repo, base, text)] == [construct_defect]
 
     # A sole construct, the nested pair's inner one, no construct at all,
     # and a construct's own whole span each hold one unflagged citation.

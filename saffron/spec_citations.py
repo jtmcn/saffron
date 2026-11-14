@@ -263,8 +263,13 @@ def _name_spans_by_name(
     return result
 
 
+def _spans_of(by_name: dict[str, list[tuple[int, int]]]) -> list[tuple[int, int]]:
+    """Every construct span `by_name`'s names open, sorted and once each."""
+    return sorted({span for found in by_name.values() for span in found})
+
+
 def _construct_defect(
-    cite: _Citation, lines: list[str], patterns: list[str]
+    cite: _Citation, lines: list[str], by_name: dict[str, list[tuple[int, int]]]
 ) -> CitationDefect | None:
     """`None` when `cite` passes the construct check. A citation passes
     when its names find no construct, or its range sits inside one, or
@@ -272,8 +277,7 @@ def _construct_defect(
     construct still quotes one of its names as a whole word. Otherwise the
     defect names where each construct sits, and carries each name's own
     spans for a later rewrite."""
-    by_name = _name_spans_by_name(cite.names, lines, patterns)
-    spans = sorted({span for found in by_name.values() for span in found})
+    spans = _spans_of(by_name)
     if not spans:
         return None
     if any(_holds(span, cite.start, cite.end) for span in spans):
@@ -325,15 +329,14 @@ def _held_name(
 
 
 def _moved_defect(
-    cite: _Citation, lines: list[str], patterns: list[str]
+    cite: _Citation, by_name: dict[str, list[tuple[int, int]]]
 ) -> CitationDefect | None:
     """`None` when `cite`'s clause names open no construct, or one of them
     alone holds its range by `_held_name`'s rule. Otherwise the names open
-    a construct and none holds it, so the citation moved since it was
-    written. The defect carries no `replace` or `spans`, since there is no
-    single construct to rewrite it onto."""
-    by_name = _name_spans_by_name(cite.names, lines, patterns)
-    spans = sorted({span for found in by_name.values() for span in found})
+    a construct and none holds it, so no rewrite can follow a later move.
+    The defect carries no `replace` or `spans`, since there is no single
+    construct to rewrite it onto."""
+    spans = _spans_of(by_name)
     if not spans:
         return None
     if _held_name(by_name, cite.start, cite.end) is not None:
@@ -392,8 +395,8 @@ def citation_count_and_defects(
     passes those is refused for a missing file or a range past its end.
     It is then refused for a construct its own clause's names open
     elsewhere, or, with `movable` true, for one with no single holder.
-    A commit `mirror` lacks raises `GitError`. An invalid policy at
-    `commit` raises `PolicyError`.
+    `.saffron/policy.yaml` at `commit` declares the construct patterns. A
+    commit `mirror` lacks raises `GitError`, an invalid policy `PolicyError`.
     """
     names_in_tree = _tree_names(mirror, commit)
     suffixes = {Path(n).suffix for n in names_in_tree if Path(n).suffix}
@@ -460,9 +463,10 @@ def citation_count_and_defects(
                 )
             )
         else:
-            defect = _construct_defect(cite, lines, patterns)
+            by_name = _name_spans_by_name(cite.names, lines, patterns)
+            defect = _construct_defect(cite, lines, by_name)
             if defect is None and movable:
-                defect = _moved_defect(cite, lines, patterns)
+                defect = _moved_defect(cite, by_name)
             if defect:
                 defects.append(defect)
     return len(citations), defects
