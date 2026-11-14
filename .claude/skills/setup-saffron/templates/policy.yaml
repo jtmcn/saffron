@@ -42,5 +42,9 @@ witness:
 citations:
   definitions: []
 
+# FILL: a Python `re` per added line that runs nothing, holding `{name}` at most once.
+probes:
+  inert: []
+
 # FILL: caps for a thread pool sized from the CPU count.
 thread_env: {}

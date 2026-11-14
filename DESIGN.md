@@ -148,6 +148,7 @@ The consequence is F11: **onboarding a repo touches zero lines of Saffron.** If 
 | Cell lifecycle, network policy, resource limits | **Core** | Containers are containers. The runtime hides behind one module (Appendix G) |
 | `scope`, `size`, `secrets` gates | **Core** | Operate on the diff as text and paths, with no language knowledge needed |
 | `integrity` gate logic | **Core**, patterns from repo | "Was a suppression added, or gate config edited?" is universal. *What a suppression comment looks like* is not |
+| REVIEW's inert-edit refusal | **Core** logic, patterns from repo | "Does this edit remove nothing and add only lines that run nothing?" is universal. *What such a line looks like* is not, so it reads the repo's `probes.inert` patterns (`SA-0396`) |
 | `census` gate | **Core** | Subtracts two lists of names the repo's `tests` gate already reported. It reads a gate result and invokes nothing |
 | `criteria` gate | **Core** | Judges each declared witness against the same two reported lists. It reads a gate result and invokes nothing |
 | `revert` gate | **Core** logic, the repo's `tests` gate as runner | The sanctioned exception below: core re-invokes a declared gate, it does not run a tool |
@@ -1162,7 +1163,9 @@ reaches the lenses with the body. During
 REVIEW a fresh session per such criterion turns each version into an edit. It
 sees the claim, the list and the diff, and never the witness. The host applies
 each edit in the gate-only cell the criterion probes use, and runs that
-criterion's witness. A survivor is a blocker for REBUT
+criterion's witness. Before any cell, the host declines an edit that keeps its
+whole `find` and adds only lines the repo declares inert. It does so for a
+criterion probe too, and records the edit `unproven` (`SA-0396`). A survivor is a blocker for REBUT
 whether or not it anchors, filed as a surviving criterion probe is (`SA-0190`, `SA-0299`). An answer that
 is not the schema is re-prompted once in its own session, as a lens's is. A
 criterion still without a usable answer is an `error`. It blocks nothing, and

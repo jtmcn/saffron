@@ -671,7 +671,8 @@ version it cannot express as an edit is recorded as such. The host applies each 
 gate-only cell criterion probes use and runs that criterion's witness. Every outcome is
 recorded in `wrong-versions.json`. A survivor is a blocker for REBUT whether or not it
 anchors (`SA-0187`, `SA-0190`, `SA-0299`). The host declines to run an edit to a declared test path or outside the
-tree. It records why under the version's `refusal` key, and REVIEW's line counts it as refused.
+tree. It also declines one that keeps its whole `find` and adds only lines the repo declares
+inert (`SA-0396`). It records why under the version's `refusal` key, and REVIEW's line counts it as refused.
 That is not a task **Refusal** (`SA-0233`).
 _Avoid_ "mutant" for one. A mutant is exact text withheld from the implementer, and a wrong
 version is prose the implementer reads. _Avoid_ "criterion probe" for its edit. A criterion

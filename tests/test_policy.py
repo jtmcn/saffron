@@ -380,3 +380,36 @@ def test_a_citations_block_is_checked_when_the_policy_loads(tmp_path):
             load_policy(repo)
         with pytest.raises(PolicyError, match=re.escape(expected)):
             parse_policy(text.encode())
+
+
+def test_a_probes_block_is_checked_when_the_policy_loads(tmp_path):
+    """b-7fc792: `load_policy` reads `probes: inert:` and refuses a pattern
+    holding `{name}` twice, or one that is no regular expression once
+    `{name}` is filled in. A pattern with no `{name}`, or with a quantifier's
+    braces, loads. An absent block reads empty."""
+    from saffron.repos.policy import parse_policy
+
+    good = [r"\s*def (?=_){name}\(\):", r"\s+pass", r"\s*#.{0,80}"]
+    text = yaml.dump({"gates": {}, "probes": {"inert": good}})
+    good_dir = tmp_path / "good"
+    good_dir.mkdir()
+    policy, _ = load_policy(write_repo(good_dir, policy_text=text, gates=()))
+    assert policy.probes.inert == good
+    assert parse_policy(text.encode()).probes.inert == good
+    assert parse_policy(b"gates: {}\n").probes.inert == []
+
+    cases = [
+        ("{name} = {name}", "inert pattern '{name} = {name}' holds {name} twice"),
+        (
+            "def {name}((",
+            "inert pattern 'def {name}((' is not a valid regular expression "
+            "once {name} is filled in",
+        ),
+    ]
+    for index, (entry, expected) in enumerate(cases):
+        text = yaml.dump({"gates": {}, "probes": {"inert": [entry]}})
+        case_dir = tmp_path / str(index)
+        case_dir.mkdir()
+        repo = write_repo(case_dir, policy_text=text, gates=())
+        with pytest.raises(PolicyError, match=re.escape(expected)):
+            load_policy(repo)

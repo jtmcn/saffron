@@ -138,3 +138,12 @@ citations:
   definitions:
     - '\s*(?:async\s+)?def\s+{name}\b'
     - '\s*class\s+{name}\b'
+
+# What an added line that runs nothing looks like here, so REVIEW can decline
+# an edit that removes nothing (b-7fc792).
+probes:
+  inert:
+    - '\s*def (?=_)(?!__){name}\(\):'
+    - '\s+pass'
+    - '\s+"""[^"]*"""'
+    - '\s*#.*'
