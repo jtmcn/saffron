@@ -14,6 +14,8 @@ anything about a language.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from saffron.gates.contract import Failure, GateResult
 
 
@@ -31,21 +33,22 @@ def _collected(results: list[GateResult]) -> list[str] | None:
     return [name for names in reported for name in names]
 
 
-# ponytail: a task that legitimately removes a test cannot pass — the `touches`
-# exemption binds `integrity` and deliberately not this gate (§5.4), so there is
-# no override. The upgrade path is a spec field (`may_remove_tests`, or a
-# per-name allowance); unbuilt because no task has needed one, and schema
-# designed against a guess is schema designed wrong.
-
-
-def census_gate(base: list[GateResult], head: list[GateResult]) -> GateResult:
-    """Names collected at `base_sha`, minus names collected at head.
+def census_gate(
+    base: list[GateResult],
+    head: list[GateResult],
+    *,
+    renames: Mapping[str, str] | None = None,
+) -> GateResult:
+    """Names collected at `base_sha`, minus names collected at head, with a
+    spec's declared `renames` read pair by pair (`DESIGN.md` §5.4, `SA-0387`).
 
     The two sides are deliberately not symmetric. No names at base is a gate
     with nothing to compare; no names at head after some at base is a suite
     that stopped enumerating, which is infrastructure and charged to nobody
     (§5.4) — never a report that every test was deleted.
-    """
+
+    A pair is accepted where its old name is gone at head and its new name
+    is collected at head and absent at base."""
     before = _collected(base)
     after = _collected(head)
 
@@ -65,12 +68,42 @@ def census_gate(base: list[GateResult], head: list[GateResult]) -> GateResult:
             ),
         )
 
-    # A set, unlike the baseline subtraction it sits beside: failure identities
-    # collide legitimately and must be counted (§5.4), but a name is unique in
-    # a suite by construction. Sorted so the failure order does not depend on
-    # the runner's.
-    removed = sorted(set(before) - set(after))
-    if not removed:
+    pairs = renames or {}
+    before_set = set(before)
+    after_set = set(after)
+    # A set, unlike the baseline subtraction beside it: a name is unique in
+    # a suite, so removal is a set difference (§5.4).
+    removed = before_set - after_set
+    # An accepted pair's old name leaves the removed set below.
+    accepted = {
+        old
+        for old, new in pairs.items()
+        if old in removed and new in after_set and new not in before_set
+    }
+    removed -= accepted
+
+    failures = [
+        Failure(
+            file=name,
+            code="removed-test",
+            message="collected at base_sha, absent at head",
+        )
+        # Sorted so the failure order does not depend on the runner's.
+        for name in sorted(removed)
+    ]
+    # A new name absent at head fails on its own, whatever the old name's
+    # own status.
+    failures += [
+        Failure(
+            file=new,
+            code="rename-not-collected",
+            message=f"declared renamed from {old!r}, not collected at head",
+        )
+        for old, new in pairs.items()
+        if new not in after_set
+    ]
+
+    if not failures:
         return GateResult(
             gate="census",
             status="pass",
@@ -80,13 +113,6 @@ def census_gate(base: list[GateResult], head: list[GateResult]) -> GateResult:
     return GateResult(
         gate="census",
         status="fail",
-        failures=[
-            Failure(
-                file=name,
-                code="removed-test",
-                message="collected at base_sha, absent at head",
-            )
-            for name in removed
-        ],
-        summary=f"{len(removed)} of {len(before)} collected tests no longer collected",
+        failures=failures,
+        summary=f"{len(failures)} of {len(before)} collected tests not carried forward",
     )

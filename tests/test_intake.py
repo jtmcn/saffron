@@ -950,3 +950,39 @@ def test_retired_first_loads_as_a_list_of_ids_with_no_depends_on():
     with pytest.raises(SpecError) as excinfo:
         parse_spec("---\nid: TE-1\ntitle: t\ntype: chore\nretired_first: TE-1\n---\n")
     assert isinstance(excinfo.value.__cause__, ValidationError)
+
+
+def test_renames_loads_as_a_mapping_and_refuses_a_blank_or_shared_new_name():
+    """A spec declares `renames`, a mapping from an old collected test name
+    to its new one (`DESIGN.md` §5.4, `SA-0387`). It loads as that mapping,
+    every name whole and in declared order, and as an empty mapping when
+    the key is omitted."""
+    declared = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: chore\n"
+        "renames:\n"
+        "  tests/test_b.py::test_two[1]: tests/test_b.py::check_two[1]\n"
+        "  tests/test_a.py::test_one: tests/test_a.py::check_one\n"
+        "---\n"
+    )
+    assert list(declared.renames.items()) == [
+        ("tests/test_b.py::test_two[1]", "tests/test_b.py::check_two[1]"),
+        ("tests/test_a.py::test_one", "tests/test_a.py::check_one"),
+    ]
+
+    omitted = parse_spec("---\nid: TE-1\ntitle: t\ntype: chore\n---\n")
+    assert omitted.renames == {}
+
+    # Each shape below refuses to load: a blank name, a shared new name, a
+    # list for the mapping, and a non-string name.
+    refused_shapes = [
+        "renames:\n  '': a\n",
+        "renames:\n  ' ': a\n",
+        "renames:\n  a: ''\n",
+        "renames:\n  a: ' '\n",
+        "renames:\n  a: x\n  b: x\n",
+        "renames:\n  - [a, b]\n",
+        "renames:\n  a: 1\n",
+    ]
+    for shape in refused_shapes:
+        with pytest.raises(SpecError):
+            parse_spec(f"---\nid: TE-1\ntitle: t\ntype: chore\n{shape}---\n")

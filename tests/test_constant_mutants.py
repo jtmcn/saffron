@@ -95,6 +95,7 @@ class _Spec:
     forbidden: list[str] = field(default_factory=list)
     acceptance: list = field(default_factory=list)
     spec_type: str = "feature"
+    renames: dict = field(default_factory=dict)
 
 
 _TESTS_GATE = """\
