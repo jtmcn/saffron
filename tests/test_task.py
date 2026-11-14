@@ -5490,7 +5490,7 @@ def test_every_row_a_tasks_end_writes_comes_from_queue_line(tmp_path, monkeypatc
         assert row == asdict(call["row"])
 
     # Literal values, not the spy's own return: a bug inside `queue_line`
-    # would carry the same wrong answer on both sides (SA-0390 review).
+    # would carry the same wrong answer on both sides.
     shared = (
         "repo",
         "spec_id",
@@ -5532,7 +5532,7 @@ def test_every_row_a_tasks_end_writes_comes_from_queue_line(tmp_path, monkeypatc
     assert (rows[1]["added"], rows[1]["removed"], rows[1]["link"]) == (0, 0, "")
 
     # No trace of `package()`'s refusal would mean it never ran.
-    assert "conflicts with main" in rows[2]["note"]
+    assert rows[2]["note"] == f"conflicts with main; {_NO_COMMITS}"
     assert (rows[2]["added"], rows[2]["removed"], rows[2]["link"]) == (0, 0, "")
 
     assert rows[3]["note"] == "opened"
