@@ -205,12 +205,17 @@ sample's flagged lines as an exact list, so a detector that flags too much
 or too little fails. Read intake's hit through the same scan as the rest,
 and check that its line is the line of the `RETIRED_DIRNAME` assignment.
 That positive case is what makes "no other file yields any" mean something.
+Compare each part for exact equality with `done`, with no strip and no
+split on whitespace. `saffron/cell/session.py:1418` holds a bare `done`
+line inside an f-string, and it stays unflagged only under that rule. The
+rule is a tripwire. A later `"done"` that is not the directory fails it,
+so give the assertion a message that says to narrow the test then.
 
 **Criterion 2's witness**. Walk `saffron/` and `tests/` with `ast`. Record
 each `ast.ImportFrom` whose names include `RETIRED_DIRNAME`, with its
 module. Record each `ast.Attribute` whose `attr` is the name, with its
-value rendered as a dotted name. Record each `ast.Assign` to a plain name
-`RETIRED_DIRNAME`. Use one function for the sample and for each file.
+value rendered as a dotted name. Record each `ast.Assign` or `ast.AnnAssign`
+to a plain name `RETIRED_DIRNAME`. Use one function for the sample and for each file.
 The sample then shows the walk sees an attribute read and an import from
 another module. Accept `saffron.intake` and `intake` as routes. Assert
 the six readers as a subset of the files read through them, so a later
