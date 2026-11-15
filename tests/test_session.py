@@ -14614,6 +14614,338 @@ def test_a_wrong_version_its_witness_survives_is_rebutted_as_a_blocker(
     ]
 
 
+# --- an inert edit is refused before any witness reads it (SA-0396) ---
+
+_INERT_PROBE_POLICY = _PROBE_POLICY + (
+    "probes:\n  inert:\n    - 'def {name}\\(\\):'\n    - '    pass'\n"
+)
+
+
+def test_an_edit_that_removes_nothing_is_refused_before_any_witness_reads_it(
+    monkeypatch, tmp_path
+):
+    """REVIEW refuses an inert edit before any cell applies it, for a
+    criterion probe and a wrong version alike (SA-0396). `_apply_criterion_probes`
+    reads every live pair's own file once, at the stacked spec's `tree_base`,
+    and only an edit matching the repo's declared inert patterns is refused.
+    An edit that looks inert-shaped, for one of three other reasons, still
+    reaches the mutator exactly as before."""
+    from saffron.intake import Criterion
+
+    criterion = Criterion(
+        claim="the change does something a witness would notice",
+        witness="t.py::only",
+        wrong_versions=[
+            "the keyword is dropped and an inert marker left behind",
+            "a dead top-level statement is appended instead",
+            "the edit targets a file the tree no longer holds",
+            "the edit's find text is absent from the file",
+            "the edit's find text occurs twice in the file",
+            "the version cannot be put as a concrete edit",
+        ],
+    )
+
+    probe_edit = {
+        "file": "src/z.py",
+        "find": "x = 1",
+        "replace": "x = 1\ndef _probe_marker():\n    pass",
+    }
+    # On `src/x.py`, never `src/z.py`, so the probe's own file is asked by
+    # no other pair and a path-collection bug there would leave it unread.
+    inert_version = {
+        "file": "src/x.py",
+        "find": "y = 2",
+        "replace": "y = 2\ndef _version_marker():\n    pass",
+    }
+    executing_version = {
+        "file": "src/x.py",
+        "find": "z = 3",
+        "replace": "z = 3\nTOP_LEVEL_STATEMENT = 1",
+    }
+    missing_file_version = {
+        "file": "src/y.py",
+        "find": "whatever",
+        "replace": "whatever\nmore",
+    }
+    absent_find_version = {
+        "file": "src/x.py",
+        "find": "q = 99",
+        "replace": "q = 99\ndef _absent_marker():\n    pass",
+    }
+    twice_found_version = {
+        "file": "src/x.py",
+        "find": "w = 4",
+        "replace": "w = 4\ndef _twice_marker():\n    pass",
+    }
+
+    tree_x = "y = 2\nz = 3\nw = 4\nw = 4\n"
+    tree_z = "x = 1\n"
+    tree = {"src/x.py": tree_x, "src/z.py": tree_z, "src/y.py": None}
+
+    files_after_calls: list[tuple] = []
+
+    def _files_after(_mirror, tree_base, patch, paths):
+        files_after_calls.append((tree_base, patch, list(paths)))
+        # Only what `paths` names, so a path a caller forgot to ask for
+        # reads as missing, not as whatever this fixture holds.
+        return {p: tree[p] for p in paths if p in tree}
+
+    monkeypatch.setattr(mirror, "files_after", _files_after)
+
+    cell = _stub_the_runtime(
+        monkeypatch,
+        patch=_ANCHORING_DIFF,
+        gate_cell_suite=[_tests_result("pass", collected=["t.py::only"])],
+    )
+    _rebuttable(monkeypatch, cell, rebut_commits=0)
+    contents = {"src/x.py": tree_x, "src/z.py": tree_z}
+
+    def _read_at_head(container, path):
+        return None if container == _CRITIC_CONTAINER else contents.get(path)
+
+    monkeypatch.setattr("saffron.cell.worktree.read_at_head", _read_at_head)
+
+    _stub_probe_gates(
+        monkeypatch,
+        cell,
+        gate_results=[
+            _tests_result("pass", collected=["t.py::only"]),
+            _tests_result("pass", collected=["t.py::only"]),
+            _tests_result("fail", collected=["t.py::only"]),
+            _tests_result("fail", collected=["t.py::only"]),
+            _tests_result("fail", collected=["t.py::only"]),
+        ],
+    )
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_probe_turns(
+            _turn(_probe_answer(probe_edit, "removes the keyword and adds nothing"))
+        )
+        + [
+            _turn(
+                _wrong_version_answer(
+                    (inert_version, "drops the keyword, an inert marker left behind"),
+                    (executing_version, "a dead statement that still executes"),
+                    (missing_file_version, "the file the tree no longer holds"),
+                    (absent_find_version, "a find text absent from the file"),
+                    (twice_found_version, "a find text duplicated in the file"),
+                    (None, "cannot be put as a concrete edit"),
+                )
+            ),
+            _turn("I have addressed the findings."),
+            _turn(structured_output=_CLAIMED_FIX),
+        ],
+        spec=_spec(acceptance=[criterion], base_sha="b" * 40, stacked_on="c" * 40),
+        policy=_INERT_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "REBUTTAL_UNJUDGED"
+
+    assert len(files_after_calls) == 1
+    tree_base_arg, patch_arg, paths_arg = files_after_calls[0]
+    assert tree_base_arg == "c" * 40
+    assert patch_arg == _ANCHORING_DIFF
+    assert set(paths_arg) == {"src/x.py", "src/y.py", "src/z.py"}
+
+    criterion_probes = json.loads(
+        (tmp_path / "out" / "SY-1" / "criterion-probes.json").read_text()
+    )
+    (probe_entry,) = criterion_probes[0]["probes"]
+    assert probe_entry["outcome"] == "unproven"
+    assert (
+        probe_entry["summary"]
+        == "src/z.py: keeps its whole find and adds only inert lines"
+    )
+    assert probe_entry["refusal"] == probe_entry["summary"]
+
+    wrong_versions = json.loads(
+        (tmp_path / "out" / "SY-1" / "wrong-versions.json").read_text()
+    )
+    (
+        inert_entry,
+        executing_entry,
+        missing_entry,
+        absent_entry,
+        twice_entry,
+        unexpressed_entry,
+    ) = wrong_versions[0]["versions"]
+    assert inert_entry["outcome"] == "unproven"
+    assert (
+        inert_entry["summary"]
+        == "src/x.py: keeps its whole find and adds only inert lines"
+    )
+    assert inert_entry["refusal"] == inert_entry["summary"]
+    assert unexpressed_entry["outcome"] == "unproven"
+    assert unexpressed_entry["summary"] == "this session named no edit"
+    assert "refusal" not in unexpressed_entry
+
+    assert executing_entry["outcome"] == "survived"
+    assert missing_entry["outcome"] == "killed"
+    assert absent_entry["outcome"] == "killed"
+    assert twice_entry["outcome"] == "killed"
+
+    assert [(m.file, m.find) for m in cell.mutated] == [
+        ("src/x.py", "z = 3"),
+        ("src/x.py", "z = 3"),
+        ("src/y.py", "whatever"),
+        ("src/x.py", "q = 99"),
+        ("src/x.py", "w = 4"),
+    ]
+
+    record = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
+    assert len(record["blockers"]) == 1
+    assert record["blockers"][0]["probe"] == executing_version
+
+    lines = [
+        w
+        for w in cell.watched
+        if w.startswith("REVIEW: criterion probes:")
+        or w.startswith("REVIEW: wrong versions:")
+    ]
+    assert lines == [
+        "REVIEW: criterion probes: 0 named over 1 criteria, 0 unnamed, 1 refused",
+        "REVIEW: wrong versions: 6 declared, 4 expressed, 1 refused",
+    ]
+
+
+def test_no_inert_pattern_or_unbuilt_tree_refuses_an_edit_and_a_broken_read_orphans(
+    monkeypatch, tmp_path
+):
+    """No declared pattern refuses no edit as inert, and makes no
+    `files_after` read at all (SA-0396). Declared patterns with an empty
+    read refuse nothing either: `rebuild_tree`'s own cause is dropped there,
+    out of scope here. Declared patterns with a raising read let the
+    `GitError` reach `run_one_cell`'s own caller unchanged, before any edit
+    is applied. `_drive_cell`'s `except BaseException` then stamps the run
+    `ABORTED` and the task `ORPHANED`."""
+    from saffron.intake import Criterion
+
+    criterion = Criterion(
+        claim="the change does something a witness would notice",
+        witness="t.py::only",
+        wrong_versions=["only version"],
+    )
+    probe_edit = {
+        "file": "src/z.py",
+        "find": "x = 1",
+        "replace": "x = 1\ndef _probe_marker():\n    pass",
+    }
+    wrong_edit = {
+        "file": "src/z.py",
+        "find": "y = 2",
+        "replace": "y = 2\ndef _version_marker():\n    pass",
+    }
+
+    def _turns():
+        return _probe_turns(
+            _turn(_probe_answer(probe_edit, "removes the keyword and adds nothing"))
+        ) + [_turn(_wrong_version_answer((wrong_edit, "drops the keyword too")))]
+
+    # No declared pattern: no read, both edits reach the mutator as at base.
+    cell_a = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    calls_a: list[tuple] = []
+    monkeypatch.setattr(mirror, "files_after", lambda *a: calls_a.append(a) or {})
+    _stub_probe_gates(
+        monkeypatch,
+        cell_a,
+        gate_results=[
+            _tests_result("fail", collected=["t.py::only"]),
+            _tests_result("fail", collected=["t.py::only"]),
+        ],
+    )
+    outcome_a, _ledger_a = _drive(
+        monkeypatch,
+        tmp_path / "no-pattern",
+        cell=cell_a,
+        turns=_turns(),
+        spec=_spec(acceptance=[criterion]),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome_a.state == "READY_FOR_REVIEW"
+    assert calls_a == []
+    assert [m.find for m in cell_a.mutated] == ["x = 1", "y = 2"]
+    probes_a = json.loads(
+        (tmp_path / "no-pattern" / "out" / "SY-1" / "criterion-probes.json").read_text()
+    )
+    (probe_entry_a,) = probes_a[0]["probes"]
+    versions_a = json.loads(
+        (tmp_path / "no-pattern" / "out" / "SY-1" / "wrong-versions.json").read_text()
+    )
+    (version_entry_a,) = versions_a[0]["versions"]
+    for entry in (probe_entry_a, version_entry_a):
+        assert entry["outcome"] == "killed"
+        assert "refusal" not in entry
+
+    # Declared patterns, but the read comes back empty: still no refusal.
+    cell_b = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+    calls_b: list[tuple] = []
+    monkeypatch.setattr(mirror, "files_after", lambda *a: calls_b.append(a) or {})
+    _stub_probe_gates(
+        monkeypatch,
+        cell_b,
+        gate_results=[
+            _tests_result("fail", collected=["t.py::only"]),
+            _tests_result("fail", collected=["t.py::only"]),
+        ],
+    )
+    outcome_b, _ledger_b = _drive(
+        monkeypatch,
+        tmp_path / "empty-read",
+        cell=cell_b,
+        turns=_turns(),
+        spec=_spec(acceptance=[criterion]),
+        policy=_INERT_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome_b.state == "READY_FOR_REVIEW"
+    assert len(calls_b) == 1
+    assert [m.find for m in cell_b.mutated] == ["x = 1", "y = 2"]
+    probes_b = json.loads(
+        (tmp_path / "empty-read" / "out" / "SY-1" / "criterion-probes.json").read_text()
+    )
+    (probe_entry_b,) = probes_b[0]["probes"]
+    versions_b = json.loads(
+        (tmp_path / "empty-read" / "out" / "SY-1" / "wrong-versions.json").read_text()
+    )
+    (version_entry_b,) = versions_b[0]["versions"]
+    for entry in (probe_entry_b, version_entry_b):
+        assert entry["outcome"] == "killed"
+        assert "refusal" not in entry
+
+    # Declared patterns, and the read raises: nothing reaches the mutator,
+    # and the task that could not be judged is left `ORPHANED`.
+    cell_c = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF)
+
+    def _raising_files_after(*_a):
+        raise mirror.GitError("the mirror could not build tree_base")
+
+    monkeypatch.setattr(mirror, "files_after", _raising_files_after)
+    _stub_probe_gates(monkeypatch, cell_c, gate_results=[])
+    subdir = tmp_path / "raising-read"
+    with pytest.raises(mirror.GitError, match="could not build"):
+        _drive(
+            monkeypatch,
+            subdir,
+            cell=cell_c,
+            turns=_turns(),
+            spec=_spec(acceptance=[criterion]),
+            policy=_INERT_PROBE_POLICY,
+            gates=("tests",),
+        )
+    assert cell_c.mutated == []
+
+    reopened = Ledger(subdir / "ledger.db")
+    run_row = reopened._db.execute("SELECT status FROM runs").fetchone()
+    task_row = reopened._db.execute("SELECT state FROM tasks").fetchone()
+    assert run_row["status"] == "ABORTED"
+    assert task_row["state"] == "ORPHANED"
+    reopened.close()
+
+
 def test_a_survivor_outside_the_diff_still_reaches_rebut(monkeypatch, tmp_path):
     """SA-0288's measured shape, run through a whole cell: a wrong version's
     survivor and a criterion probe's own survivor both reach REBUT though
@@ -15203,6 +15535,7 @@ def _run_apply_criterion_probes(
         reviews=reviews,
         created=created,
         note=lambda *a: None,
+        inert_patterns=[],
     )
     return log, kwargs_log, reviews[0], created
 

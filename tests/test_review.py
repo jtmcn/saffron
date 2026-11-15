@@ -2756,11 +2756,11 @@ def test_a_host_filed_survivor_is_a_blocker_whether_or_not_it_anchors():
 
 def test_the_wrong_version_line_counts_refused_versions_apart_from_expressed_ones():
     """b-34d743: `expressed` counts every version with an edit except one
-    `probe.probe_refusal` refused. `refused` reads a version's own
-    `refusal` key, never its summary text. The witness pins six
-    arrangements of the line: none, some and all versions refused, each
-    with and without an unanswered entry. Its refused versions carry all
-    three of `probe_refusal`'s reasons."""
+    carrying a `refusal` key. `refused` reads that key, never its
+    summary text. The witness pins six arrangements of the line: none,
+    some and all versions refused, each with and without an unanswered
+    entry. Its refused versions carry all three of `probe_refusal`'s
+    reasons."""
 
     def _version(edit, outcome, summary, *, refusal=None):
         version: dict[str, object] = {
