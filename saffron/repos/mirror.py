@@ -7,14 +7,16 @@ is free now and expensive later.
 
 from __future__ import annotations
 
+import os
 import posixpath
 import re
 import shutil
 import subprocess
 import tarfile
+import tempfile
 from pathlib import Path
 
-from saffron.cell.worktree import DIFF_FLAGS
+from saffron.cell.worktree import DIFF_FLAGS, git_argv
 
 MUTANTS_REF = "refs/saffron/mutants"
 
@@ -291,6 +293,65 @@ def file_at(mirror: Path, sha: str, path: str) -> str | None:
     raise UnreadablePath(
         f"{path} at {sha[:12]}: mode {mode} is not a regular file or symlink"
     )
+
+
+def rebuild_tree(mirror: Path, tree_base: str, raw: str) -> tuple[str | None, str]:
+    """`tree_base` plus `raw` applied, as a new tree id in `mirror`. Never
+    the worktree, which this bare mirror has none of. Built under a fresh
+    `GIT_INDEX_FILE` so the mirror's own index, if it has one, is left
+    alone. Each of `read-tree`, `apply --cached` and `write-tree` runs
+    under `worktree.git_argv`'s pins, the same ones the critic cell's own
+    `git apply` ran under."""
+    with tempfile.TemporaryDirectory() as tmp:
+        index_path = Path(tmp) / "index"
+        env = dict(os.environ)
+        env["GIT_INDEX_FILE"] = str(index_path)
+        read = subprocess.run(
+            git_argv("-C", str(mirror), "read-tree", tree_base),
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        if read.returncode != 0:
+            return None, f"the mirror lacks its tree base {tree_base}"
+        applied = subprocess.run(
+            git_argv("-C", str(mirror), "apply", "--cached", "--whitespace=nowarn"),
+            input=raw,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        if applied.returncode != 0:
+            return None, f"its diff does not apply to {tree_base}"
+        written = subprocess.run(
+            git_argv("-C", str(mirror), "write-tree"),
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        if written.returncode != 0:
+            return None, f"its rebuilt tree on {tree_base} did not write"
+        return written.stdout.strip(), ""
+
+
+def files_after(
+    mirror: Path, tree_base: str, patch: str, paths: list[str]
+) -> dict[str, str | None]:
+    """Each of `paths` as the critic cell's own tree holds it: `tree_base`
+    with `patch` applied, built once with `rebuild_tree`. A path that tree
+    lacks reads `None`, and so does one `file_at` cannot read as text. An
+    empty dict comes back both when the tree cannot be built and when
+    `paths` is empty, so a caller tests `if not result`."""
+    tree_id, _ = rebuild_tree(mirror, tree_base, patch)
+    if tree_id is None:
+        return {}
+    result: dict[str, str | None] = {}
+    for path in paths:
+        try:
+            result[path] = file_at(mirror, tree_id, path)
+        except UnreadablePath:
+            result[path] = None
+    return result
 
 
 def has_commit(mirror: Path, sha: str) -> bool:
