@@ -13,7 +13,6 @@ from __future__ import annotations
 import ast
 import contextlib
 import inspect
-import re
 from pathlib import Path
 
 import pytest
@@ -21,6 +20,7 @@ import pytest
 from saffron import probe as probe_check
 from saffron.gates.contract import Failure, GateResult, GateStatus
 from saffron.intake import Mutant
+from tests.hook_helpers import load_script
 
 PROBE = Mutant(
     file="saffron/report/pr_body.py",
@@ -725,11 +725,11 @@ INERT_PATTERNS = (
     r' +"""[^"]*"""',
     r" *#.{0,80}",
 )
-"""Four shapes stand in for `.saffron/policy.yaml`'s own four. A parameterless
-`def` of a name with one leading underscore, an indented `pass`, and an
-indented one-line docstring. Also a comment whose pattern holds a
-quantifier's braces. Declared here, so a change to the repo's real patterns
-leaves this witness unmoved."""
+"""Four shapes stand in for `.saffron/policy.yaml`'s own four. Three are a
+parameterless `def` of a name with one leading underscore, an indented `pass`
+and an indented one-line docstring. The fourth is a comment whose pattern
+holds a quantifier's braces. Declared here, so a change to the repo's real
+patterns leaves this witness unmoved."""
 
 _CALLS_FIND = '    return _helper("_stringed")'
 BEFORE_CALLS = f"def _existing():\n{_CALLS_FIND}\n"
@@ -956,7 +956,7 @@ def test_an_edit_that_keeps_its_find_and_adds_only_inert_lines_is_refused():
 
 def _inert_patterns_note() -> str:
     """The bare string statement right after `INERT_PATTERNS`, read from this
-    file's own source rather than from a name the `prose` gate would see."""
+    file's own source, since the `prose` gate never reads it."""
     tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
     body = tree.body
     for statement, following in zip(body, body[1:], strict=False):
@@ -965,20 +965,19 @@ def _inert_patterns_note() -> str:
         ]
         if any(getattr(name, "id", None) == "INERT_PATTERNS" for name in bound):
             assert isinstance(following, ast.Expr)
-            return ast.literal_eval(following.value)
+            note = ast.literal_eval(following.value)
+            assert isinstance(note, str)
+            return note
     raise AssertionError("INERT_PATTERNS note not found")
 
 
 def test_the_inert_patterns_note_obeys_claude_mds_sentence_limit_by_hand():
     """The `prose` gate never reads a bare statement following an assignment.
-    This test checks `INERT_PATTERNS`'s own note by hand, split the same way
-    the gate would split a sentence."""
-    flattened = " ".join(_inert_patterns_note().split("\n"))
-    pieces = re.split(r"(?<=[.:])\s+", flattened)
-    sentences = [piece for piece in pieces if piece.split()]
-    assert len(sentences) >= 2
-    for sentence in sentences:
-        assert len(sentence.split()) <= 25, sentence
+    This test hands `INERT_PATTERNS`'s own note to the gate's own check."""
+    repo = Path(__file__).resolve().parent.parent
+    prose = load_script(repo / ".saffron" / "gates" / "prose.py", "saffron_prose_gate")
+    hits = prose.check(_inert_patterns_note(), "note.md", "prose", root=repo)
+    assert [(hit.code, hit.excerpt) for hit in hits] == []
 
 
 def test_added_tests_are_the_names_collected_at_head_and_not_at_base():
