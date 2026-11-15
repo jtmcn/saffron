@@ -4,7 +4,7 @@ title: "Nothing reads which killed wrong versions a parent recorded under a witn
 type: feature
 priority: 3
 risk: elevated
-estimated_lines: 289
+estimated_lines: 294
 estimate_measured: true
 depends_on: [SA-0399]
 consumes:
@@ -54,13 +54,14 @@ acceptance:
       `depends_on` order. A name neither directory declares is left out,
       and a file in either that does not parse is skipped. A missing
       retired directory reads as empty, as `scheduler._retired_ids` reads
-      it. A changed path
-      is the path each `diff --git` block of `diff` names.
+      it. A changed path is the path each `diff --git` block of `diff`
+      names.
       `names_file(witness, path)` holds when the witness begins with the
       path and the next character, if any, is neither a letter, a digit
       nor one of `_`, `.`, `-` and `/`. A parent criterion is chosen when
       it declares wrong versions and `names_file` holds for its witness and
-      some changed path. Its record is
+      some changed path. A parent's chosen criteria are read in declared
+      order. Its record is
       `out_dir / <parent id> / wrong-versions.json`. Each entry whose
       `witness` equals the criterion's adds each of its versions whose
       `outcome` is `killed`, in recorded order. Each pair is that parent
@@ -71,20 +72,25 @@ acceptance:
       it false for a letter, a digit, `_`, `.`, `-` or `/` after the path,
       for another file, and for the path preceded by a directory. Its diff
       modifies tests/test_a.py, then src/a.py, then tests/test_c.py. It
-      builds retired
-      parents `SP-1` and `SP-2`, a retired non-parent `SP-4`, a queued
-      parent `SP-3` and a queued non-parent `SP-5`. A `README.md` in the
-      retired directory and a `broken.md` in the queue have no
-      frontmatter. `depends_on` is `SP-3`, `SP-1`, `SP-7` and `SP-2`, and
-      no file declares `SP-7`. `SP-1`'s record holds killed, survived,
-      unproven, error and killed versions under its matching witness. It
-      also holds a killed version under a witness on tests/test_a.pyi,
-      one under an unchanged file, and one under a witness no criterion
-      declares. `SP-2`'s witness is on tests/test_c.py, and every other
-      parent's is on tests/test_a.py. The witness asserts the exact pairs,
-      each criterion's claim and witness included. It then builds a specs
-      directory with no retired directory and the queued `SP-3`, and
-      asserts `SP-3`'s one pair and an empty second list.
+      builds retired parents `SP-1` and `SP-2`, a retired non-parent
+      `SP-4`, a queued parent `SP-3` and a queued non-parent `SP-5`. A
+      `README.md` in the retired directory and a `broken.md` in the queue
+      have no frontmatter. `depends_on` is `SP-3`, `SP-1`, `SP-7` and
+      `SP-2`, and no file declares `SP-7`. `SP-1` declares four criteria,
+      with witnesses on tests/test_a.py, tests/test_a.pyi,
+      tests/test_b.py and tests/test_c.py, in that order. `SP-2`'s one
+      witness is on tests/test_c.py. `SP-3`'s witness is the bare path
+      tests/test_a.py. `SP-4` and `SP-5` each have one witness on
+      tests/test_a.py. `SP-1`'s record holds killed, survived, unproven,
+      error and killed versions under its first witness. It holds one
+      killed version under each of its other three witnesses. It also
+      holds one under `test_old` on tests/test_a.py, a witness no
+      criterion declares. Every other record holds one killed version
+      under its spec's witness. The witness asserts the exact pairs, each
+      criterion's claim and witness included. `SP-1`'s pair from its
+      fourth criterion comes after `k2`. It then builds a specs directory
+      with no retired directory and the queued `SP-3`, and asserts
+      `SP-3`'s one pair and an empty second list.
     witness: tests/test_parent_versions.py::test_a_childs_diff_pairs_each_killed_version_of_each_parent_whose_witness_it_edits
     wrong_versions:
       - Every spec in either directory read as a parent, so `SP-4` and `SP-5` are paired.
@@ -92,14 +98,15 @@ acceptance:
       - The retired directory never read, so `SP-1` and `SP-2` are not paired.
       - Parents taken in file-name order rather than `depends_on` order, so `SP-3` comes last.
       - A name no file declares indexed directly, so `SP-7` raises `KeyError`.
-      - Only the first `diff --git` block read, so `SP-2` is not paired.
-      - Only the last `diff --git` block read, so `SP-1` and `SP-3` are not paired.
+      - Only the first `diff --git` block read, so `SP-2` and `SP-1`'s version on tests/test_c.py are not paired.
+      - Only the last `diff --git` block read, so `SP-3` and `SP-1`'s versions on tests/test_a.py are not paired.
       - A missing retired directory handed to `discover_specs`, so the specs directory without one raises `SpecError`.
       - A witness matched as a plain prefix of the path, so the witness on tests/test_a.pyi is paired.
       - A witness matched only before a `::` separator, so `SP-3`'s witness, which is the whole path, is not paired.
       - A witness matched where the path occurs anywhere in it, so a path preceded by a directory names the file.
       - Every recorded version paired whatever its outcome, so the survived, unproven and error versions are paired.
       - Only the first killed version of each entry paired, so `k2` is missing.
+      - Only the first chosen criterion of each parent read, so `SP-1`'s version on tests/test_c.py is not paired.
       - A recorded entry paired by its own witness with no criterion declaring it, so the version under `test_old` is paired.
       - Each retired file read with `load_spec`, so the `README.md` raises.
       - Each queued file read with `load_spec`, so `broken.md` raises.
@@ -119,8 +126,9 @@ acceptance:
       `depends_on` order `SP-9`, `SP-5`, `SP-6`, `SP-7`, `SP-8`, `SP-13`,
       `SP-10`, `SP-11`, `SP-12`, `SP-99`. `SP-5` has no record. `SP-6`
       holds broken JSON, and `SP-7` a JSON object. `SP-8`'s entry lacks
-      `versions`. `SP-9`'s killed version has a null edit, and `SP-13`'s an
-      edit with no `find`. `SP-10`'s criterion names an unchanged file and
+      `versions`. `SP-9`'s killed version has a null edit. `SP-13`'s matching entry
+      holds a valid killed version and then a killed one whose edit has
+      no `find`. `SP-10`'s criterion names an unchanged file and
       has no record. `SP-11`'s criterion names the changed file, declares
       no wrong versions and has no record. `SP-12`'s criterion names an
       unchanged file, and its record is broken JSON. `SP-99`'s matching
@@ -137,6 +145,7 @@ acceptance:
       - An entry lacking `versions` read as an empty list, so `SP-8` is not named.
       - A killed version with a null edit paired with a stand-in edit, so `SP-9` is paired.
       - Only a null edit counted unreadable, so `SP-13` is not named.
+      - Pairs appended as each version validates, so `SP-13`'s valid version is paired.
       - The unread list sorted by name, so `SP-13` comes first.
       - Every entry read for `versions` whatever its witness, so `SP-99` is named.
       - Every entry's killed edits validated whatever its witness, so `SP-99` is named.
@@ -148,7 +157,7 @@ acceptance:
 
 ## Context
 
-Backlog item **b-9efbe2**, filed from the spec loop's run 36 on #856. It
+Backlog item **b-9efbe2**, found by both review seats on #856. It
 cites `DESIGN.md` §5.4 and §5.5, and §5.4.1 holds the wrong-version
 paragraph this work extends. This spec is the first piece of a split.
 It chooses which recorded versions to ask again. `SA-0402` makes REVIEW
@@ -239,6 +248,9 @@ in `pending_symbols`. `SA-0402` calls it from REVIEW.
 - **A diff `integrity` refuses**. `_split_blocks` raises on it, and the
   attempt has already ended before REVIEW. This module returns no changed
   path then, and no witness drives it.
+- **Two chosen criteria sharing a witness**. Each reads the same entries, so their versions pair twice. No witness drives it.
+- **A spec in both directories**. The retired copy is read. No witness drives it.
+- **A name repeated in `depends_on`**. The parent is read once per mention. No witness drives it.
 - **A `retired_first`**. This spec adds no refusal.
 - **Hand edits**. None. The `DESIGN.md` and `CONTEXT.md` sentences belong
   to `SA-0402`, which adds the behaviour they describe.
@@ -264,5 +276,5 @@ diff by hand, with one `diff --git` block each on `tests/test_a.py`,
 Write none with an em dash, a semicolon, a contraction, the perfect tense
 or a sentence over 25 words.
 
-**Size**. A prototype measured 486 changed tokens outside `tests/` and 669
-under it, about 289 changed lines.
+**Size**. A prototype measured 486 changed tokens outside `tests/` and 688
+under it, about 294 changed lines.
