@@ -843,7 +843,7 @@ def test_files_after_reads_each_path_from_the_base_tree_with_the_patch_applied(
     A changed or added path reads as the patch leaves it. An untouched
     path reads as `tree_base` holds it. A path the built tree lacks, or
     that `file_at` cannot read as text, reads `None`. The build keeps its
-    own index and the mirror's replace-ref pin, proven with a replace
+    own git index and the mirror's replace-ref pin, proven with a replace
     ref on the base commit. A bad base or a stale patch is an empty
     dict. Any other `GitError` from `file_at` reaches the caller. Last,
     `saffron.qualify` carries no `_rebuild_tree` any more."""
@@ -857,6 +857,7 @@ def test_files_after_reads_each_path_from_the_base_tree_with_the_patch_applied(
     (repo / "untouched.py").write_text("untouched\n")
     (repo / "changed.py").write_text("old\n")
     (repo / "deleted.py").write_text("gone\n")
+    (repo / "latin.txt").write_bytes(b"caf\xe9\n")
     (repo / "dir").mkdir()
     (repo / "dir" / "nested.py").write_text("nested\n")
     os.symlink("../outside", repo / "escape.py")
@@ -887,11 +888,12 @@ def test_files_after_reads_each_path_from_the_base_tree_with_the_patch_applied(
         "absent.py",
         "escape.py",
         "escape2.py",
+        "latin.txt",
         "dir",
     ]
 
     # A decoy, empty-tree commit, replaced onto the base. The mirror's
-    # own index below must stay untouched by `files_after`'s own build.
+    # git index below must stay untouched by `files_after`'s own build.
     empty_tree = subprocess.run(
         ["git", "-C", str(mirror), "hash-object", "-t", "tree", "-w", "/dev/null"],
         capture_output=True,
@@ -940,6 +942,7 @@ def test_files_after_reads_each_path_from_the_base_tree_with_the_patch_applied(
         "absent.py": None,
         "escape.py": None,
         "escape2.py": None,
+        "latin.txt": None,
         "dir": None,
     }
     assert builds == [(mirror, base)]

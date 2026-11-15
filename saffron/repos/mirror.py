@@ -349,7 +349,7 @@ def files_after(
     for path in paths:
         try:
             result[path] = file_at(mirror, tree_id, path)
-        except UnreadablePath:
+        except (UnreadablePath, UnicodeDecodeError):
             result[path] = None
     return result
 
