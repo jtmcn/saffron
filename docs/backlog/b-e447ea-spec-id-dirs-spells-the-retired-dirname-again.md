@@ -4,7 +4,7 @@ title: "`SPEC_ID_DIRS` spells `done` again, because `RETIRED_DIRNAME` sits in a 
 status: open
 tier: 3
 filed: 2026-11-15
-specs: []
+specs: [SA-0399]
 prs: []
 commits: []
 cites: [§5.4]
