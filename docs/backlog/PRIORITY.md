@@ -358,7 +358,7 @@ passes until a parent moves them, then stops the batch. A finish drafts a
 follow-up its own batch refuses, so nothing pushes.
 
 **Placed 2026-11-04**, from the spec loop's run 53: **b-bece8b**, **b-0ac661**,
-**b-f011f3** and **b-249808**. A by-hand merge of a `PLAN_REJECTED` parent left
+**b-f011f3** and ~~**b-249808**~~. A by-hand merge of a `PLAN_REJECTED` parent left
 its child refused. A fix to the plan checkpoint could not pass it. A lost
 connection after a completed turn ended `NOT_IMPLEMENTED`. A cell cited the
 wrong spec at 20 sites.
@@ -478,10 +478,14 @@ Each line keeps the order it was filed in.
   tuning the witness to one probe.
 - From run 68's review of #1189: ~~**b-e11fb7**~~, a second reset-time renderer
   beside `events.when`.
-- From run 69's `SA-0387` (#1196): **b-d2b6b3**, `revert` reads no declared
+- From run 69's `SA-0387` (#1196): ~~**b-d2b6b3**~~, `revert` reads no declared
   rename.
-- From run 70's review of #1203: **b-7fc792**, a wrong version's edit that
+- From run 70's review of #1203: ~~**b-7fc792**~~, a wrong version's edit that
   removes nothing.
+- From run 72's review of #1214: **b-e447ea**, `SPEC_ID_DIRS` spells `done`
+  again.
+- From run 72's review of #1218 and #1219: **b-11e2ac**, a criterion probe
+  edits code a test-only witness never reads.
 - From the 2026-09-27 size pricing and spec loop run 32: **b-41664e**, **b-4b386f**,
   ~~**b-d96f14**~~, ~~**b-9b94c9**~~, **b-ff3141**, ~~**b-a99c76**~~, **b-3a8504**,
   ~~**b-7f105f**~~ and ~~**b-8c17dc**~~.
