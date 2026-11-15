@@ -2121,10 +2121,10 @@ def _apply_criterion_probes(
             continue
         with_edit.append((criterion, entry))
 
-    # An edit that changes nothing a witness could notice is refused here
-    # too, before any cell (SA-0396).
+    # An edit that keeps its find and adds only declared-inert lines is
+    # refused here, before any cell (SA-0396).
     if with_edit and inert_patterns:
-        paths = [entry["edit"]["file"] for _criterion, entry in with_edit]
+        paths = list(dict.fromkeys(e["edit"]["file"] for _c, e in with_edit))
         texts = mirror_ops.files_after(mirror, spec.tree_base, patch, paths)
         still_live: list[tuple[Criterion, dict]] = []
         for criterion, entry in with_edit:

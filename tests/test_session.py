@@ -14748,7 +14748,7 @@ def test_an_edit_that_removes_nothing_is_refused_before_any_witness_reads_it(
     tree_base_arg, patch_arg, paths_arg = files_after_calls[0]
     assert tree_base_arg == "c" * 40
     assert patch_arg == _ANCHORING_DIFF
-    assert set(paths_arg) == {"src/x.py", "src/y.py", "src/z.py"}
+    assert sorted(paths_arg) == ["src/x.py", "src/y.py", "src/z.py"]
 
     criterion_probes = json.loads(
         (tmp_path / "out" / "SY-1" / "criterion-probes.json").read_text()
