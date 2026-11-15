@@ -4,7 +4,7 @@ title: A child's cell can weaken its parent's witness, and no gate re-checks the
 status: open
 tier: 2
 filed: 2026-10-12
-specs: [SA-0270]
+specs: [SA-0270, SA-0401]
 prs: [856]
 commits: []
 cites: [§5.4, §5.5]
