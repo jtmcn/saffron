@@ -1191,17 +1191,7 @@ def test_a_volume_target_routes_through_run_ephemeral_read_only_at_work(
 def _host_git(tmp_path, monkeypatch):
     """Point `worktree._git` at a real repo in `tmp_path` instead of a cell."""
 
-    def exec_(_container, command, *, workdir=None, timeout_s=900):
-        # Bytes then `runtime._decode`, exactly as `runtime._call` does it —
-        # not `text=True`. Universal-newline translation and a strict decode
-        # are both things production does not do, and a seam that does them
-        # hides every byte-fidelity defect in the code under test.
-        done = subprocess.run(command, cwd=tmp_path, capture_output=True, check=False)
-        return runtime.Completed(
-            done.returncode, runtime._decode(done.stdout), runtime._decode(done.stderr)
-        )
-
-    monkeypatch.setattr(worktree.runtime, "exec_", exec_)
+    monkeypatch.setattr(worktree.runtime, "exec_", _exec_in(tmp_path))
 
 
 def _commit(tmp_path, message):
@@ -1221,7 +1211,7 @@ def _commit(tmp_path, message):
 
 
 def test_the_suite_judges_cited_ids_against_the_spec_files_at_head(
-    tmp_path, monkeypatch
+    tmp_path, tmp_path_factory, monkeypatch
 ):
     """Backlog item b-249808: `GateSuite` hands `integrity_gate` the task's
     own id. It also hands it `CellTree.spec_ids`'s own ids, read off
@@ -1254,6 +1244,7 @@ def test_the_suite_judges_cited_ids_against_the_spec_files_at_head(
     write(".saffron/specs/done/sub/SA-0031-nested.md", spec_md("SA-0031"))
     write("docs/SA-0040-outside.md", spec_md("SA-0040"))
     write(".saffron/specs/SA-0398.txt", "id: SA-0398\n")
+    write(".saffron/specs/done/README.md", "# Shipped\n\nid: SA-0050\n")
 
     _host_git(tmp_path, monkeypatch)
     base = _commit(tmp_path, "base")
@@ -1294,6 +1285,7 @@ def test_the_suite_judges_cited_ids_against_the_spec_files_at_head(
                 "# outside SA-0040",
                 "# renamed name SA-0021",
                 "# txt file SA-0398",
+                "# readme SA-0050",
                 "",
             ]
         ),
@@ -1307,22 +1299,21 @@ def test_the_suite_judges_cited_ids_against_the_spec_files_at_head(
             for nf in comparison.new_failures
             if nf.gate == "integrity" and nf.failure.code == "unknown-spec-id"
         )
-        assert len(cited) == 6
-        for id_ in ("SA-0010", "SA-0030", "SA-0031", "SA-0040", "SA-0021", "SA-0398"):
+        assert len(cited) == 7
+        judged = ("SA-0010", "SA-0030", "SA-0031", "SA-0040", "SA-0021", "SA-0398")
+        for id_ in (*judged, "SA-0050"):
             assert any(id_ in message for message in cited), (suite.spec, id_)
         for id_ in ("SA-0005", "SA-0002", "SA-0023", "SA-0007"):
             assert not any(id_ in message for message in cited), (suite.spec, id_)
 
-    no_specs = tmp_path.parent / "no-specs"
-    no_specs.mkdir()
+    no_specs = tmp_path_factory.mktemp("no-specs")
     subprocess.run(["git", "init", "-q", "-b", "main", str(no_specs)], check=True)
     (no_specs / "README.md").write_text("nothing to see\n")
     monkeypatch.setattr(worktree.runtime, "exec_", _exec_in(no_specs))
     _commit(no_specs, "no specs here")
     assert worktree.spec_ids("unused") == []
 
-    unborn = tmp_path.parent / "unborn"
-    unborn.mkdir()
+    unborn = tmp_path_factory.mktemp("unborn")
     subprocess.run(["git", "init", "-q", "-b", "main", str(unborn)], check=True)
     monkeypatch.setattr(worktree.runtime, "exec_", _exec_in(unborn))
     with pytest.raises(runtime.CellRuntimeError):
@@ -1330,10 +1321,13 @@ def test_the_suite_judges_cited_ids_against_the_spec_files_at_head(
 
 
 def _exec_in(repo: Path):
-    """The shape `_host_git` wires in, aimed at `repo` instead of a closure
-    over one fixed directory, for a test that visits more than one."""
+    """A `runtime.exec_` that runs each command in `repo` on the host."""
 
     def exec_(_container, command, *, workdir=None, timeout_s=900):
+        # Bytes then `runtime._decode`, exactly as `runtime._call` does it —
+        # not `text=True`. Universal-newline translation and a strict decode
+        # are both things production does not do, and a seam that does them
+        # hides every byte-fidelity defect in the code under test.
         done = subprocess.run(command, cwd=repo, capture_output=True, check=False)
         return runtime.Completed(
             done.returncode, runtime._decode(done.stdout), runtime._decode(done.stderr)

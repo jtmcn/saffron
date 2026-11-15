@@ -459,7 +459,7 @@ def test_an_added_empty_gate_config_file_is_seen(tmp_path):
 
 # --- the third question: an added line citing an unknown spec id -----------
 
-_ID_IN_MESSAGE = re.compile(r"[A-Za-z0-9]+-\d+")
+_ID_IN_MESSAGE = re.compile(r"spec id '([^']+)'")
 
 
 def _citations(result):
@@ -470,7 +470,7 @@ def _citations(result):
             continue
         match = _ID_IN_MESSAGE.search(f.message)
         assert match is not None, f.message
-        triples.append((f.file, f.line, match.group(0)))
+        triples.append((f.file, f.line, match.group(1)))
     return sorted(triples)
 
 
@@ -543,14 +543,16 @@ _BOUNDS_LINES = [
     "sa-0399 lowercase never matches",
     "_SA-0398/SA-0399 slash list opens after underscore",
     '"SA-0398/SA-0399" slash list inside quotes',
+    "SA-0399._x dot then underscore",
+    "the line ends on SA-0399",
 ]
 
 
 def test_a_cited_id_is_bounded_so_fixture_values_and_file_names_are_not_citations(
     tmp_path,
 ):
-    """Ten of the lines below are judged, several more than once. The other
-    seventeen are left alone. A quote or a slash before an id marks a
+    """Eleven of the lines below are judged, several more than once. The
+    other eighteen are left alone. A quote or a slash before an id marks a
     fixture value or a file name. So does a `-` or an extension right after
     it. A backtick, a parenthesis, or a line's start opens a citation
     instead. So does a docstring's own opening quotes, and an earlier id in
@@ -583,14 +585,15 @@ def test_a_cited_id_is_bounded_so_fixture_values_and_file_names_are_not_citation
         ("src/b.py", 9, "SA-7002"),
         ("src/b.py", 9, "SA-7003"),
         ("src/b.py", 10, "SA-9999"),
+        ("src/b.py", 29, "SA-0399"),
     ]
 
 
 def test_only_ids_of_the_tasks_own_prefix_are_judged(tmp_path):
-    """One diff, judged three times under three task ids, with `SY-2` and
+    """One diff, judged four times under four task ids, with `SY-2` and
     `B2-10` each already known. Every task fails only an unknown id of its
     own prefix and leaves every other prefix's ids alone, lowercase and
-    mixed-case prefixes included."""
+    mixed-case prefixes included. A prefix holding a `-` ends at the last one."""
     run = _repo(tmp_path, {"src/a.py": "x = 1\n"})
     diff = _diff(
         tmp_path,
@@ -604,6 +607,8 @@ def test_only_ids_of_the_tasks_own_prefix_are_judged(tmp_path):
                 "cites SA-0398 known-ish\n"
                 "cites B2-10 known\n"
                 "cites B2-11 unknown\n"
+                "cites Sy-9 mixed case\n"
+                "cites SY-B-4 unknown\n"
             )
         },
     )
@@ -630,3 +635,8 @@ def test_only_ids_of_the_tasks_own_prefix_are_judged(tmp_path):
         diff, PATTERNS, touches=["src/a.py"], spec_id="SA-0007", known_ids=frozenset()
     )
     assert _citations(sa) == [("src/a.py", 5, "SA-0398")]
+
+    syb = integrity_gate(
+        diff, PATTERNS, touches=["src/a.py"], spec_id="SY-B-3", known_ids=frozenset()
+    )
+    assert _citations(syb) == [("src/a.py", 9, "SY-B-4")]

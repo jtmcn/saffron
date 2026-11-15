@@ -261,8 +261,8 @@ def integrity_gate(
     `worktree.DIFF_FLAGS` — the same contract `scope_gate` relies on. A diff
     this gate cannot parse is `error`, never a `pass` nobody checked (§5.4).
 
-    `spec_id` set judges every added line against its prefix, `known_ids`
-    included. Absent, this third question asks nothing.
+    With `spec_id`, each added id of its prefix fails unless it is `spec_id`
+    or in `known_ids`. Absent, this third question asks nothing.
     """
     if not patterns.suppressions and not patterns.gate_config:
         return GateResult(

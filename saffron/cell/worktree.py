@@ -458,21 +458,28 @@ def porcelain_paths(stdout: str) -> list[str]:
     return sorted(paths)
 
 
-# Each directory's own files, never a nested one. `:(glob)` makes `*` a
-# pathname-aware wildcard that cannot cross a `/`.
 SPEC_ID_DIRS = (".saffron/specs", ".saffron/specs/done")
 
 
 def spec_ids(container: str) -> list[str]:
-    """Each spec file's declared `id:`, for every `.md` file directly in
-    `SPEC_ID_DIRS`, at `HEAD`.
+    """Each spec file's declared `id:`, for every `.md` file but a README
+    directly in `SPEC_ID_DIRS`, at `HEAD`.
 
     `-m1` takes the first such line a file holds. `--no-line-number`,
     `--no-column` and `-G` are pinned on the command line. The agent's own
     worktree config could otherwise set `grep.lineNumber`, `grep.column` or
     `grep.patternType` and change what this call reports.
     """
-    pathspecs = [f":(glob){directory}/*.md" for directory in SPEC_ID_DIRS]
+    # Each directory's own files, never a nested one: `:(glob)` keeps `*` from
+    # crossing a `/`. A README is a resident, not a spec, as `_retired_ids` reads it.
+    pathspecs = [
+        spec
+        for directory in SPEC_ID_DIRS
+        for spec in (
+            f":(glob){directory}/*.md",
+            f":(exclude,glob){directory}/README.md",
+        )
+    ]
     done = _git(
         container,
         "grep",
@@ -497,10 +504,10 @@ def spec_ids(container: str) -> list[str]:
 def _parse_spec_id_grep(stdout: str) -> list[str]:
     """One id per match in `spec_ids`'s own `-z` output.
 
-    Each record is `<tree>:<path>` then a NUL then one line of content, with
-    no separator before the next record's own path. The first chunk after a
-    NUL split is therefore a bare path, and every chunk after that starts
-    with one line of real content.
+    Each record is `<tree>:<path>`, then a NUL, then one content line ending
+    in a newline, then the next record's path. The first chunk after a NUL
+    split is therefore a bare path, and every chunk after that starts with
+    one line of real content.
     """
     ids: list[str] = []
     for chunk in stdout.split("\0")[1:]:

@@ -10340,7 +10340,9 @@ _SPEC_IDS = tuple(
         "HEAD",
         "--",
         ":(glob).saffron/specs/*.md",
+        ":(exclude,glob).saffron/specs/README.md",
         ":(glob).saffron/specs/done/*.md",
+        ":(exclude,glob).saffron/specs/done/README.md",
     )
 )
 
