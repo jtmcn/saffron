@@ -48,6 +48,11 @@ Turns count every phase, so REVIEW and REBUT sit inside each figure.
    own head and read `unverified`. Review commits fixed three of them, and
    b-e447ea holds the fourth. Nothing in the file says so, so step 5
    matches them by hand.
+7. **`driver.py stack --top` leaves out the finishing layer.** Its link
+   named #1214 to #1219 and #1222, and `gh stack link` refused to drop
+   #1220 from the stack finish 89 linked. I ran the link by hand with all
+   eight. A tool change: the driver reads the finish's layer as one of the
+   stack's own.
 
 ## What the reviews found
 
@@ -95,6 +100,8 @@ Turns count every phase, so REVIEW and REBUT sit inside each figure.
    `find`.** A gate change, on item 080.
 6. **`cite` flags a bare citation into a parent's changed file.** A tool
    change, the open half of b-b664d1.
+7. **`driver.py stack` links a finish's layer.** A tool change, with no
+   item yet. Item 7 linked it by hand.
 
 This PR changes no skill text. It records `SA-0397` and `SA-0398` from
 finish 89's ran texts.
