@@ -4,7 +4,7 @@ title: A criterion probe of a test-only spec edits production code its witness n
 status: open
 tier: 3
 filed: 2026-11-15
-specs: []
+specs: [SA-0400]
 prs: []
 commits: []
 cites: [§5.4.1, §5.5]
