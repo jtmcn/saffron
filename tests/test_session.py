@@ -22,6 +22,7 @@ from saffron.cell import proxy, runtime, session
 from saffron.cell.runtimes.apple import Apple
 from saffron.cell.runtimes.podman import Podman
 from saffron.cell.worktree import DIFF_FLAGS, git_argv
+from saffron.cell.worktree import spec_ids as _real_spec_ids
 from saffron.events import (
     Agent,
     Attempt,
@@ -1377,6 +1378,7 @@ def _stub_the_runtime(
 
     monkeypatch.setattr("saffron.cell.worktree.changed_files", _changed_files)
     monkeypatch.setattr("saffron.cell.worktree.dirty_paths", lambda container: [])
+    monkeypatch.setattr("saffron.cell.worktree.spec_ids", lambda container: [])
 
     @contextlib.contextmanager
     def _source_reverted(_container, _tree_base, paths):
@@ -11540,6 +11542,21 @@ def test_the_lens_gate_suite_runs_inside_the_one_cell_lifecycle(monkeypatch, tmp
     assert comparison.new_failures == ()
 
 
+def test_the_generic_stub_answers_spec_ids_without_a_real_grep_call(
+    monkeypatch, tmp_path
+):
+    """`_stub_the_runtime`'s generic `spec_ids` stub, beside `dirty_paths`,
+    must answer every ordinary cell directly. Otherwise it falls through to
+    the fixture's catch-all `exec_` double, which logs the real `git grep`
+    argv (backlog item b-249808)."""
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert all(argv != _SPEC_IDS for _c, argv, _stdin in cell.execs)
+
+
 def test_the_lens_gate_cell_holds_no_credential_and_is_gone_before_any_lens_runs(
     monkeypatch, tmp_path
 ):
@@ -11551,6 +11568,9 @@ def test_the_lens_gate_cell_holds_no_credential_and_is_gone_before_any_lens_runs
     creates no such cell at all, so every assertion here fails honestly
     against the unfixed code rather than passing on an absence."""
     cell = _stub_the_runtime(monkeypatch)
+    # The generic `spec_ids` stub above would otherwise erase the one real
+    # call this test's exact-list assertion below depends on.
+    monkeypatch.setattr("saffron.cell.worktree.spec_ids", _real_spec_ids)
     outcome, _ledger = _drive(
         monkeypatch,
         tmp_path,
