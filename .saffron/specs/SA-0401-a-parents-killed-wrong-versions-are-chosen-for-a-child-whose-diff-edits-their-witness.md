@@ -4,7 +4,7 @@ title: "Nothing reads which killed wrong versions a parent recorded under a witn
 type: feature
 priority: 3
 risk: elevated
-estimated_lines: 265
+estimated_lines: 289
 estimate_measured: true
 depends_on: [SA-0399]
 consumes:
@@ -52,7 +52,9 @@ acceptance:
       `diff`. A parent is a spec `depends_on` names, read from
       `specs_dir`'s retired directory or from `specs_dir` itself, taken in
       `depends_on` order. A name neither directory declares is left out,
-      and a file in either that does not parse is skipped. A changed path
+      and a file in either that does not parse is skipped. A missing
+      retired directory reads as empty, as `scheduler._retired_ids` reads
+      it. A changed path
       is the path each `diff --git` block of `diff` names.
       `names_file(witness, path)` holds when the witness begins with the
       path and the next character, if any, is neither a letter, a digit
@@ -68,7 +70,8 @@ acceptance:
       true for a `::` suffix, a space suffix and the bare path. It asserts
       it false for a letter, a digit, `_`, `.`, `-` or `/` after the path,
       for another file, and for the path preceded by a directory. Its diff
-      modifies src/a.py and then tests/test_a.py. It builds retired
+      modifies tests/test_a.py, then src/a.py, then tests/test_c.py. It
+      builds retired
       parents `SP-1` and `SP-2`, a retired non-parent `SP-4`, a queued
       parent `SP-3` and a queued non-parent `SP-5`. A `README.md` in the
       retired directory and a `broken.md` in the queue have no
@@ -77,8 +80,11 @@ acceptance:
       unproven, error and killed versions under its matching witness. It
       also holds a killed version under a witness on tests/test_a.pyi,
       one under an unchanged file, and one under a witness no criterion
-      declares. The witness asserts the exact pairs, each criterion's claim
-      and witness included.
+      declares. `SP-2`'s witness is on tests/test_c.py, and every other
+      parent's is on tests/test_a.py. The witness asserts the exact pairs,
+      each criterion's claim and witness included. It then builds a specs
+      directory with no retired directory and the queued `SP-3`, and
+      asserts `SP-3`'s one pair and an empty second list.
     witness: tests/test_parent_versions.py::test_a_childs_diff_pairs_each_killed_version_of_each_parent_whose_witness_it_edits
     wrong_versions:
       - Every spec in either directory read as a parent, so `SP-4` and `SP-5` are paired.
@@ -86,7 +92,9 @@ acceptance:
       - The retired directory never read, so `SP-1` and `SP-2` are not paired.
       - Parents taken in file-name order rather than `depends_on` order, so `SP-3` comes last.
       - A name no file declares indexed directly, so `SP-7` raises `KeyError`.
-      - Only the first `diff --git` block read, so no witness names a changed path.
+      - Only the first `diff --git` block read, so `SP-2` is not paired.
+      - Only the last `diff --git` block read, so `SP-1` and `SP-3` are not paired.
+      - A missing retired directory handed to `discover_specs`, so the specs directory without one raises `SpecError`.
       - A witness matched as a plain prefix of the path, so the witness on tests/test_a.pyi is paired.
       - A witness matched only before a `::` separator, so `SP-3`'s witness, which is the whole path, is not paired.
       - A witness matched where the path occurs anywhere in it, so a path preceded by a directory names the file.
@@ -99,19 +107,28 @@ acceptance:
       `parent_version_pairs` names a parent whose record cannot be read, in
       `depends_on` order, and pairs none of its versions. A record cannot
       be read when it is missing or is not JSON. It also cannot when it
-      holds no list, or an entry lacks `versions`. A killed version whose
-      `edit` is not an edit makes it unreadable too. A parent with no
-      chosen criterion is never named, even when its record is missing or
-      broken. A parent after an unreadable one is still paired. The
-      witness declares parents `SP-5` to `SP-12` and `SP-99`. `SP-5` has no
-      record. `SP-6` holds broken JSON, and `SP-7` a JSON object. `SP-8`'s
-      entry lacks `versions`, and `SP-9`'s killed version has a null edit.
-      `SP-10`'s criterion names an unchanged file and has no record.
-      `SP-11`'s criterion names the changed file, declares no wrong
-      versions and has no record. `SP-12`'s criterion names an unchanged
-      file, and its record is broken JSON. `SP-99` holds one killed
-      version. The witness asserts the second list is exactly `SP-5` to
-      `SP-9`, and the pairs are `SP-99`'s one version.
+      holds no list. Only an entry whose
+      `witness` equals a chosen criterion's is read further. Such an entry
+      makes the record unreadable when it lacks `versions`. It does so too
+      when a version recorded `killed` holds an `edit` that is not an
+      edit, null or a mapping `Mutant` refuses alike. A version recorded
+      with another outcome is never validated. A parent with no chosen
+      criterion is never named, even when its record is missing or broken.
+      A parent after an unreadable one is still paired. The witness
+      declares parents `SP-5` to `SP-13` and `SP-99`, in the
+      `depends_on` order `SP-9`, `SP-5`, `SP-6`, `SP-7`, `SP-8`, `SP-13`,
+      `SP-10`, `SP-11`, `SP-12`, `SP-99`. `SP-5` has no record. `SP-6`
+      holds broken JSON, and `SP-7` a JSON object. `SP-8`'s entry lacks
+      `versions`. `SP-9`'s killed version has a null edit, and `SP-13`'s an
+      edit with no `find`. `SP-10`'s criterion names an unchanged file and
+      has no record. `SP-11`'s criterion names the changed file, declares
+      no wrong versions and has no record. `SP-12`'s criterion names an
+      unchanged file, and its record is broken JSON. `SP-99`'s matching
+      entry holds a killed version and an unproven one with a null edit.
+      Its record also holds an entry under another witness that lacks
+      `versions`, and one whose killed version has a null edit. The
+      witness asserts the second list is exactly `SP-9`, `SP-5`, `SP-6`,
+      `SP-7`, `SP-8` and `SP-13`, and the pairs are `SP-99`'s one version.
     witness: tests/test_parent_versions.py::test_a_parent_whose_record_cannot_be_read_is_named_and_pairs_nothing
     wrong_versions:
       - A missing record skipped without naming its parent, so `SP-5` is absent from the list.
@@ -119,6 +136,11 @@ acceptance:
       - A record that holds no list raising `TypeError` uncaught, so `SP-7` raises.
       - An entry lacking `versions` read as an empty list, so `SP-8` is not named.
       - A killed version with a null edit paired with a stand-in edit, so `SP-9` is paired.
+      - Only a null edit counted unreadable, so `SP-13` is not named.
+      - The unread list sorted by name, so `SP-13` comes first.
+      - Every entry read for `versions` whatever its witness, so `SP-99` is named.
+      - Every entry's killed edits validated whatever its witness, so `SP-99` is named.
+      - Every version's edit validated whatever its outcome, so `SP-99`'s unproven null edit makes it named.
       - An unreadable record ending the scan, so `SP-99`'s version is not paired.
       - The record read before any criterion is chosen, so `SP-10` and `SP-12` are named.
       - A criterion chosen whether or not it declares wrong versions, so `SP-11` is named.
@@ -159,7 +181,10 @@ the one store the base can read.
 
 **What this module reads with**. `discover_specs` parses every `*.md` in
 one directory. It returns the files it could not parse apart and never
-raises for one (`saffron/intake.py:557-601`). Its `retired=True` keeps a
+raises for one (`saffron/intake.py:557-601`). `discover_specs` does raise
+for a directory that does not exist (`saffron/intake.py:580-581`).
+`scheduler._retired_ids` reads a missing retired directory as empty
+instead (`saffron/scheduler.py:652-654`). Its `retired=True` keeps a
 retired spec as it shipped (`saffron/intake.py:560-561`). `Mutant` holds
 `file`, `find`, `replace` and an optional `case` that `model_dump` leaves
 out when it is `None` (`saffron/intake.py:93-112`). `intake.Spec` declares
@@ -232,12 +257,12 @@ scope, so the reverted suite fails rather than erroring at collection.
 version, except `SP-11`'s, which declares none. Write each record with
 `json.dumps`, except the broken ones. A recorded `edit` holds `file`,
 `find` and `replace` only, which is what `model_dump()` returns. Build the
-diff by hand, one `diff --git` block on `src/a.py` and then one on
-`tests/test_a.py`.
+diff by hand, with one `diff --git` block each on `tests/test_a.py`,
+`src/a.py` and `tests/test_c.py`, in that order.
 
 **The `prose` gate** counts each new comment and docstring from zero.
 Write none with an em dash, a semicolon, a contraction, the perfect tense
 or a sentence over 25 words.
 
-**Size**. A prototype measured 492 changed tokens outside `tests/` and 577
-under it, about 265 changed lines.
+**Size**. A prototype measured 486 changed tokens outside `tests/` and 669
+under it, about 289 changed lines.
