@@ -180,18 +180,19 @@ def _added_lines(text: str) -> list[str]:
     return [line for line in text.split("\n") if line.strip()]
 
 
-def _kept_line_at(before: str, start: int) -> str:
-    """The line in `before` that holds offset `start`, read from its own
-    start. `find`'s own line is never blank, since it holds `find`."""
-    line_start = before.rfind("\n", 0, start) + 1
-    line_end = before.find("\n", start)
-    return before[line_start : line_end if line_end != -1 else len(before)]
+def _splits_no_line(before: str, at: int, added: str) -> bool:
+    """Whether `added`, inserted at offset `at` of `before`, keeps every kept
+    line whole. It must open at a line's start and end in a newline, or
+    open with a newline at a line's end."""
+    at_start = at == 0 or before[at - 1] == "\n"
+    at_end = at == len(before) or before[at] == "\n"
+    return (at_start and added.endswith("\n")) or (at_end and added.startswith("\n"))
 
 
-def _first_kept_line_after(before: str, end: int) -> str | None:
-    """The first non-blank line of `before` strictly after offset `end`, or
+def _first_kept_line_after(before: str, at: int) -> str | None:
+    """The first non-blank line of `before` from line boundary `at` on, or
     `None` when every remaining line is blank."""
-    for line in before[end:].split("\n"):
+    for line in before[at:].split("\n"):
         if line.strip():
             return line
     return None
@@ -220,9 +221,8 @@ def inert_edit(before: str, edit: Mutant, patterns: Sequence[str]) -> str | None
     `find` stays whole inside `replace` and occurs once in `before`. Every
     added line fully matches one of `patterns`, filled through plain text
     replacement so a pattern's own regex braces survive. Every name a line
-    binds through `{name}` appears nowhere in `before`. No added side leaves
-    a kept line indented deeper than its own least indented addition, since
-    that line would shift into the added one's body.
+    binds through `{name}` appears nowhere in `before`. No added side splits
+    a kept line, and none sits above one deeper than its least indented line.
     """
     if not patterns:
         return None
@@ -255,17 +255,17 @@ def inert_edit(before: str, edit: Mutant, patterns: Sequence[str]) -> str | None
     start = before.find(find)
     end = start + len(find)
 
-    added_before_lines = _added_lines(added_before)
-    if added_before_lines:
-        least = min(_indent(line) for line in added_before_lines)
-        if _indent(_kept_line_at(before, start)) > least:
+    for added, at in ((added_before, start), (added_after, end)):
+        if not added:
+            continue
+        if not _splits_no_line(before, at, added):
             return None
-
-    added_after_lines = _added_lines(added_after)
-    if added_after_lines:
-        least = min(_indent(line) for line in added_after_lines)
-        kept_after = _first_kept_line_after(before, end)
-        if kept_after is not None and _indent(kept_after) > least:
+        added_lines = _added_lines(added)
+        if not added_lines:
+            continue
+        least = min(_indent(line) for line in added_lines)
+        kept = _first_kept_line_after(before, at)
+        if kept is not None and _indent(kept) > least:
             return None
 
     return f"{edit.file}: keeps its whole find and adds only inert lines"
