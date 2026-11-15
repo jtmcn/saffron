@@ -714,6 +714,174 @@ def test_a_new_failure_no_counted_test_can_be_matched_to_is_unproven():
     assert set(run5.uncounted) == {"t.py::test_x", "t.py::test_unknown"}
 
 
+# --- b-7fc792: an edit that keeps its whole find and adds only a no-op ---
+
+INERT_PATTERNS = (
+    r" *def {name}\(\):",
+    r" *pass",
+    r' *"""[^"]*"""',
+    r" *#.{0,80}",
+)
+"""Four shapes standing in for `.saffron/policy.yaml`'s own four: a
+parameterless `def`, an indented `pass`, an indented one-line docstring, and
+a comment whose pattern holds a quantifier's braces. Declared here, so a
+change to the repo's real patterns leaves this witness unmoved."""
+
+_CALLS_FIND = '    return _helper("_stringed")'
+BEFORE_CALLS = f"def _existing():\n{_CALLS_FIND}\n"
+"""One private function. Its return calls a private name the file never
+defines, and passes a string holding a second private name."""
+
+BEFORE_BLANK = (
+    "def _first():\n    x = 1\n\n    return x\n\n\ndef _second():\n    return 2\n"
+)
+"""Two functions. The first holds a blank line inside its own body."""
+
+
+def _mutant(find: str, replace: str) -> Mutant:
+    return Mutant(file="saffron/x.py", find=find, replace=replace)
+
+
+def test_an_edit_that_keeps_its_find_and_adds_only_inert_lines_is_refused():
+    """`inert_edit` refuses an edit only when `find` stays whole and matches
+    `before` once. Every added line then reads as one of the repo's own
+    no-op shapes. It binds no name `before` already spells, and adopts no
+    kept line that follows it."""
+    marker_tail = "\ndef _risk_placeholder_removed_marker():\n    pass"
+    risk_before = "def queue_line():\n    return risk\n"
+    risk_find = "    return risk"
+
+    refused = {
+        "at the end of a file": (
+            risk_before,
+            _mutant(risk_find, risk_find + marker_tail),
+        ),
+        "before a blank line": (
+            "def queue_line():\n    return risk\n\ndef other():\n    return 1\n",
+            _mutant(risk_find, risk_find + marker_tail),
+        ),
+        "before a line of lesser indent": (
+            "class C:\n    def queue_line():\n        return risk\nTRAIL = 1\n",
+            _mutant(
+                "        return risk",
+                "        return risk\n"
+                "    def _risk_placeholder_removed_marker():\n"
+                "        pass",
+            ),
+        ),
+        "a def holding a docstring": (
+            risk_before,
+            _mutant(risk_find, risk_find + '\ndef _stub():\n    """stub."""'),
+        ),
+        "a def whose name a longer word of the file only contains": (
+            "def _foobar():\n    return 1\n\n" + risk_before,
+            _mutant(risk_find, risk_find + "\ndef _foo():\n    pass"),
+        ),
+        "a comment before the find at its own indent": (
+            risk_before,
+            _mutant(risk_find, "    # stub\n" + risk_find),
+        ),
+        "an edit that adds nothing": (
+            risk_before,
+            _mutant(risk_find, risk_find),
+        ),
+    }
+    for name, (before, edit) in refused.items():
+        reason = probe_check.inert_edit(before, edit, INERT_PATTERNS)
+        assert reason is not None, name
+        assert reason.startswith(edit.file), name
+
+    none = {
+        "a name the file calls": (
+            BEFORE_CALLS,
+            _mutant(_CALLS_FIND, _CALLS_FIND + "\ndef _helper():\n    pass"),
+            INERT_PATTERNS,
+        ),
+        "a name only a string spells": (
+            BEFORE_CALLS,
+            _mutant(_CALLS_FIND, _CALLS_FIND + "\ndef _stringed():\n    pass"),
+            INERT_PATTERNS,
+        ),
+        "a second name the file spells after a first it does not": (
+            BEFORE_CALLS,
+            _mutant(
+                _CALLS_FIND,
+                _CALLS_FIND + "\ndef _missing():\n    pass\n\ndef _helper():\n    pass",
+            ),
+            INERT_PATTERNS,
+        ),
+        "an early return": (
+            risk_before,
+            _mutant(risk_find, risk_find + "\n    return None"),
+            INERT_PATTERNS,
+        ),
+        "a call": (
+            risk_before,
+            _mutant(risk_find, risk_find + "\n    do_thing()"),
+            INERT_PATTERNS,
+        ),
+        "a matching line with a call after it": (
+            risk_before,
+            _mutant(risk_find, risk_find + "\n    pass; do_thing()"),
+            INERT_PATTERNS,
+        ),
+        "a call with a trailing comment": (
+            risk_before,
+            _mutant(risk_find, risk_find + "\n    do_thing()  # trailing"),
+            INERT_PATTERNS,
+        ),
+        "a decorator above a def and pass": (
+            risk_before,
+            _mutant(risk_find, risk_find + "\n@decorator\ndef _f():\n    pass"),
+            INERT_PATTERNS,
+        ),
+        "a call default": (
+            risk_before,
+            _mutant(risk_find, risk_find + "\ndef _f(x=call()):\n    pass"),
+            INERT_PATTERNS,
+        ),
+        "a bare def line added above a deeper line": (
+            "def g():\n    x = 1\n    return x\n",
+            _mutant("    x = 1", "    x = 1\ndef _f():"),
+            INERT_PATTERNS,
+        ),
+        "the marker lands mid-block with a blank line after it": (
+            BEFORE_BLANK,
+            _mutant("    x = 1", "    x = 1" + marker_tail),
+            INERT_PATTERNS,
+        ),
+        "a def line added before an indented find": (
+            "class C:\n    def g():\n        x = 1\n",
+            _mutant("        x = 1", "def _f():\n        x = 1"),
+            INERT_PATTERNS,
+        ),
+        "a find that occurs twice": (
+            "word = 1\nword = 1\n",
+            _mutant("word = 1", "word = 1"),
+            INERT_PATTERNS,
+        ),
+        "a find that is absent": (
+            "def g():\n    return 1\n",
+            _mutant("    return missing", "    return missing\n    # note"),
+            INERT_PATTERNS,
+        ),
+        "a find not held whole in the replace": (
+            risk_before,
+            _mutant(risk_find, "    # note"),
+            INERT_PATTERNS,
+        ),
+        "an edit that adds nothing, under no declared patterns": (
+            risk_before,
+            _mutant(risk_find, risk_find),
+            (),
+        ),
+    }
+    assert len(refused) == 7
+    assert len(none) == 16
+    for name, (before, edit, patterns) in none.items():
+        assert probe_check.inert_edit(before, edit, patterns) is None, name
+
+
 def test_added_tests_are_the_names_collected_at_head_and_not_at_base():
     """`probe.added_tests(base, head)` returns, as a frozenset, the names
     `head` collected that the `tests` result in `base` did not (b-19b255)."""
