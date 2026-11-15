@@ -4,7 +4,7 @@ title: "A criterion probe edits a file its spec may not change, and files its su
 type: feature
 priority: 3
 risk: elevated
-estimated_lines: 127
+estimated_lines: 129
 estimate_measured: true
 touches:
   - saffron/cell/session.py
@@ -57,8 +57,8 @@ acceptance:
       reason. The witness calls `_apply_criterion_probes` with touches
       src/*.py, lib/one.py and pkg/**. Probes on src/x.py,
       ./src/a.py, lib/one.py and pkg/deep/c.py reach the mutator.
-      So do probes on other/s.py and ./other/s.py under a criterion
-      whose subject is other/s.py, and a wrong version on
+      So do probes on other/s.py, ./other/s.py and pkg/z.py under a
+      criterion whose subject is other/s.py, and a wrong version on
       elsewhere/w.py. Probes on src/deep/a.py, lib/one.pyc and
       ./lib/two.py are refused. So are one on other/t.py under that
       criterion and one on other/s.py under a criterion with no subject.
@@ -76,6 +76,7 @@ acceptance:
       - The subject compared with the raw path, so `./other/s.py` is refused.
       - Any criterion's subject accepted, so the probe on `other/s.py` under the criterion with no subject reaches the mutator.
       - The subject's directory accepted, so `other/t.py` reaches the mutator.
+      - A declared subject replaces `touches`, so `pkg/z.py` under the subject criterion is refused.
       - The scope rule asked before `probe_refusal`, so `tests/t.py` and `../out.py` carry the scope reason.
       - The pair recorded `unproven` with no `refusal` key, so the REVIEW line counts it as named.
       - A fixed sentence as the reason, which names no file.
@@ -85,8 +86,8 @@ acceptance:
 
 ## Context
 
-Backlog item **b-11e2ac**, filed from the spec loop's run 72 while
-reviewing #1218 (`SA-0397`) and #1219 (`SA-0398`). It cites `DESIGN.md`
+Backlog item **b-11e2ac**, found reviewing #1218 (`SA-0397`) and #1219
+(`SA-0398`). It cites `DESIGN.md`
 §5.4.1 and §5.5. Every line number below was read at `7219608c`.
 
 **What happened**. Each spec's `touches` named one test file and nothing
@@ -239,8 +240,10 @@ refused by `probe_refusal` first. Pass a mutator that records each edit's
 so the helper's `read_at_head` stub finds its line. It is applied twice,
 once for its witness and once for the whole `tests` gate. Script the
 gate results as `pass`, `pass`, then `fail` for each later edit that
-reaches the mutator. Build the REVIEW line's input from the probe
-entries, one entry per criterion. Use `review.describe_criterion_probes`.
+reaches the mutator, seven of them. Build the REVIEW line's input from
+the probe entries, one entry per criterion. Use
+`review.describe_criterion_probes`. It counts seven named over two
+criteria, none unnamed and seven refused.
 
 **Every other caller of `_apply_criterion_probes` in the tests** passes
 `_spec()`, whose `src/**` covers each probe file they name. Each passed
@@ -250,5 +253,5 @@ unchanged under the prototype.
 with an em dash, a semicolon, a contraction, the perfect tense or a
 sentence over 25 words.
 
-**Size**. A prototype measured 91 changed tokens outside `tests/` and 416
-under it, about 127 changed lines.
+**Size**. A prototype measured 101 changed tokens outside `tests/` and 416
+under it, about 129 changed lines.
