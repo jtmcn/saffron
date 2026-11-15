@@ -10327,8 +10327,8 @@ _COMMIT = tuple(
     git_argv("commit", "-q", "-m", "critic: exported patch, applied and committed")
 )
 
-# `GateSuite._run`'s own listing call, the one tree read here that is not
-# stubbed past `runtime.exec_` (backlog item b-249808).
+# `GateSuite._run`'s own listing call. `_stub_the_runtime` stubs it, and the
+# lens-gate test puts the real call back (backlog item b-249808).
 _SPEC_IDS = tuple(
     git_argv(
         "grep",
@@ -11554,7 +11554,7 @@ def test_the_generic_stub_answers_spec_ids_without_a_real_grep_call(
         monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PLAN)), _turn()]
     )
     assert outcome.state == "READY_FOR_REVIEW"
-    assert all(argv != _SPEC_IDS for _c, argv, _stdin in cell.execs)
+    assert all("grep" not in argv for _c, argv, _stdin in cell.execs)
 
 
 def test_the_lens_gate_cell_holds_no_credential_and_is_gone_before_any_lens_runs(
