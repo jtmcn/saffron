@@ -1,9 +1,10 @@
-"""The `integrity` gate: was a suppression added, or gate config edited? (§5.4)
+"""The `integrity` gate: was a suppression added, was gate config edited, or
+does an added line cite a spec id no spec file holds? (§5.4)
 
-Core, because both questions are about diff text and are identical in every
-language — no execution of repo code, the same shape as `scope.py`. The
-*vocabulary* is not universal, so `IntegrityPatterns` arrives from the repo's
-`.saffron/policy.yaml` (§2.1) rather than being guessed here.
+Core, because all three questions are about diff text and are identical in
+every language. None needs any execution of repo code, the same shape as
+`scope.py`. The *vocabulary* is not universal, so `IntegrityPatterns` arrives
+from the repo's `.saffron/policy.yaml` (§2.1) rather than being guessed here.
 
 **Removal is not asked here.** "Was an existing test removed?" is a question
 about which tests exist, and a diff is a lossy projection of that: three
@@ -62,6 +63,53 @@ _HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 _BINARY = re.compile(
     r'^Binary files (?:"?a/(.+?)"?|/dev/null) and (?:"?b/(.+?)"?|/dev/null) differ$'
 )
+
+# The task's own prefix, a literal `-`, then a run of digits taken whole
+# (`DESIGN.md` §5.4).
+_CITED_ID = "{prefix}-\\d+"
+
+
+def _opens_citation(content: str, start: int, judged_ends: set[int]) -> bool:
+    """Whether the character before `start` leaves the match a citation
+    rather than a quoted fixture value, a path, or a file name."""
+    if start == 0:
+        return True
+    if content[max(0, start - 3) : start] == '"""':
+        return True
+    before = content[start - 1]
+    if before == "/" and (start - 1) in judged_ends:
+        return True
+    return not (before.isalnum() or before in "_-\"'/")
+
+
+def _closes_citation(content: str, end: int) -> bool:
+    """Whether the character after `end` still reads as a citation, rather
+    than the start of a longer file name or a decimal value."""
+    if end >= len(content):
+        return True
+    after = content[end]
+    if after.isalnum() or after in "_-":
+        return False
+    if after == ".":
+        past = content[end + 1] if end + 1 < len(content) else ""
+        return not (past.isalnum() or past == "_")
+    return True
+
+
+def _cited_ids(content: str, prefix: str) -> list[str]:
+    """Every bounded citation of `prefix`'s shape on one added line, in the
+    order it appears."""
+    pattern = re.compile(_CITED_ID.format(prefix=re.escape(prefix)))
+    judged_ends: set[int] = set()
+    found: list[str] = []
+    for match in pattern.finditer(content):
+        start, end = match.start(), match.end()
+        if _opens_citation(content, start, judged_ends) and _closes_citation(
+            content, end
+        ):
+            judged_ends.add(end)
+            found.append(match.group(0))
+    return found
 
 
 class _DiffError(Exception):
@@ -199,7 +247,12 @@ def _parse_block(block: str) -> _FileDiff:
 
 
 def integrity_gate(
-    diff: str, patterns: IntegrityPatterns, touches: list[str]
+    diff: str,
+    patterns: IntegrityPatterns,
+    touches: list[str],
+    *,
+    spec_id: str | None = None,
+    known_ids: frozenset[str] = frozenset(),
 ) -> GateResult:
     """`pass`/`fail` over a unified diff, the repo's patterns, and the spec's
     `touches`.
@@ -207,6 +260,9 @@ def integrity_gate(
     `diff` is the export the reviewer reads, produced with the pinned
     `worktree.DIFF_FLAGS` — the same contract `scope_gate` relies on. A diff
     this gate cannot parse is `error`, never a `pass` nobody checked (§5.4).
+
+    With `spec_id`, each added id of its prefix fails unless it is `spec_id`
+    or in `known_ids`. Absent, this third question asks nothing.
     """
     if not patterns.suppressions and not patterns.gate_config:
         return GateResult(
@@ -214,6 +270,9 @@ def integrity_gate(
             status="skip",
             summary="no integrity patterns declared",
         )
+
+    prefix = spec_id.rsplit("-", 1)[0] if spec_id is not None else None
+    allowed = known_ids | {spec_id} if spec_id is not None else known_ids
 
     try:
         files = [_parse_block(block) for block in _split_blocks(diff)]
@@ -259,27 +318,45 @@ def integrity_gate(
                 )
             )
 
-        if patterns.suppressions:
+        if patterns.suppressions or prefix is not None:
             for hunk in file_diff.hunks:
                 for kind, content, line_number in hunk:
                     if kind != "+":
                         continue
-                    for token in patterns.suppressions:
-                        if token in content:
-                            failures.append(
-                                Failure(
-                                    file=file_diff.path,
-                                    line=line_number,
-                                    code="added-suppression",
-                                    message=f"added suppression {token!r} in {file_diff.path}",
+                    if patterns.suppressions:
+                        for token in patterns.suppressions:
+                            if token in content:
+                                failures.append(
+                                    Failure(
+                                        file=file_diff.path,
+                                        line=line_number,
+                                        code="added-suppression",
+                                        message=f"added suppression {token!r} in {file_diff.path}",
+                                    )
                                 )
-                            )
+                    if prefix is not None:
+                        for cited in _cited_ids(content, prefix):
+                            if cited not in allowed:
+                                failures.append(
+                                    Failure(
+                                        file=file_diff.path,
+                                        line=line_number,
+                                        code="unknown-spec-id",
+                                        message=(
+                                            f"cites unknown spec id {cited!r} "
+                                            f"in {file_diff.path}"
+                                        ),
+                                    )
+                                )
 
     if not failures:
         return GateResult(
             gate="integrity",
             status="pass",
-            summary=f"{len(files)} changed files clean of suppression and gate-config edits",
+            summary=(
+                f"{len(files)} changed files clean of suppression, gate-config "
+                "and unknown spec id edits"
+            ),
         )
 
     return GateResult(

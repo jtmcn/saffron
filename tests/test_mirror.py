@@ -832,6 +832,136 @@ def test_file_at_raises_on_a_directory_at_the_path(tmp_path, origin):
         file_at(mirror, sha, "CLAUDE.md")
 
 
+# --------------------------------------------------------- files_after
+
+
+def test_files_after_reads_each_path_from_the_base_tree_with_the_patch_applied(
+    tmp_path, monkeypatch
+):
+    """`files_after` builds `tree_base` plus `patch` once with
+    `rebuild_tree`, and reads every path there, not at `tree_base`.
+    A changed or added path reads as the patch leaves it. An untouched
+    path reads as `tree_base` holds it. A path the built tree lacks, or
+    that `file_at` cannot read as text, reads `None`. The build keeps its
+    own git index and the mirror's replace-ref pin, proven with a replace
+    ref on the base commit. A bad base or a stale patch is an empty
+    dict. Any other `GitError` from `file_at` reaches the caller. Last,
+    `saffron.qualify` carries no `_rebuild_tree` any more."""
+    import saffron.qualify
+    from saffron.repos import mirror as mirror_module
+    from saffron.repos.mirror import files_after
+
+    assert not hasattr(saffron.qualify, "_rebuild_tree")
+
+    repo = _plain_repo(tmp_path, "files-after")
+    (repo / "untouched.py").write_text("untouched\n")
+    (repo / "changed.py").write_text("old\n")
+    (repo / "deleted.py").write_text("gone\n")
+    (repo / "latin.txt").write_bytes(b"caf\xe9\n")
+    (repo / "dir").mkdir()
+    (repo / "dir" / "nested.py").write_text("nested\n")
+    os.symlink("../outside", repo / "escape.py")
+    os.symlink("escape.py", repo / "escape2.py")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "base")
+    base = git(repo, "rev-parse", "HEAD")
+
+    (repo / "changed.py").write_text("new\n")
+    (repo / "added.py").write_text("added\n")
+    (repo / "deleted.py").unlink()
+    git(repo, "add", "-A")
+    patch = subprocess.run(
+        ["git", "-C", str(repo), "diff", "--cached"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert patch
+
+    mirror = ensure_mirror(repo, tmp_path / "files-after.git")
+
+    paths = [
+        "changed.py",
+        "added.py",
+        "untouched.py",
+        "deleted.py",
+        "absent.py",
+        "escape.py",
+        "escape2.py",
+        "latin.txt",
+        "dir",
+    ]
+
+    # A decoy, empty-tree commit, replaced onto the base. The mirror's
+    # git index below must stay untouched by `files_after`'s own build.
+    empty_tree = subprocess.run(
+        ["git", "-C", str(mirror), "hash-object", "-t", "tree", "-w", "/dev/null"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    decoy = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(mirror),
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=T",
+            "commit-tree",
+            empty_tree,
+            "-m",
+            "decoy",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    git(mirror, "replace", base, decoy)
+    git(mirror, "read-tree", decoy)
+    index_path = mirror / "index"
+    index_before = index_path.read_bytes()
+
+    builds = []
+    real_rebuild_tree = mirror_module.rebuild_tree
+
+    def _spy(*args, **kwargs):
+        builds.append(args[:2])
+        return real_rebuild_tree(*args, **kwargs)
+
+    monkeypatch.setattr(mirror_module, "rebuild_tree", _spy)
+
+    result = files_after(mirror, base, patch, paths)
+
+    assert result == {
+        "changed.py": "new\n",
+        "added.py": "added\n",
+        "untouched.py": "untouched\n",
+        "deleted.py": None,
+        "absent.py": None,
+        "escape.py": None,
+        "escape2.py": None,
+        "latin.txt": None,
+        "dir": None,
+    }
+    assert builds == [(mirror, base)]
+    assert index_path.read_bytes() == index_before
+
+    assert files_after(mirror, "0" * 40, patch, paths) == {}
+
+    stale = patch.replace("-old\n", "-not-old\n", 1)
+    assert stale != patch
+    assert files_after(mirror, base, stale, paths) == {}
+
+    def _broken_file_at(*args, **kwargs):
+        raise mirror_module.GitError("the toolchain broke")
+
+    monkeypatch.setattr(mirror_module, "file_at", _broken_file_at)
+    with pytest.raises(GitError, match="the toolchain broke"):
+        files_after(mirror, base, patch, ["untouched.py"])
+
+
 # --------------------------------------------------------- unresolved_consumes
 
 

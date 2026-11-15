@@ -3119,3 +3119,36 @@ critic's own, so they have no line.
   **Landed:** a review commit on #1203.
 - `SA-0390` (#1203): a test comment tagged the review round that caused it.
   **Bucket 3**, conventions. **Landed:** a review commit on #1203.
+
+## 2026-11-15, spec loop run 72 (#1214 to #1219)
+
+- `SA-0393` (#1214): three claim members drove no witness. These were an id
+  after a dot then an underscore, an id at a line's end, and a mixed-case or
+  unknown prefix. Each mutant passed. **Bucket 1**. **Landed:** a review
+  commit on #1214.
+- `SA-0393` (#1214): two docstrings misstated what `spec_ids` reads and the
+  record shape its parser takes. **Bucket 3**, conventions. **Landed:** a
+  review commit on #1214.
+- `SA-0393` (#1214): the test helper `_host_git` restated `_exec_in`'s byte
+  handling. **Bucket 3**, one source. **Landed:** a review commit on #1214.
+- `SA-0393` (#1214): `SPEC_ID_DIRS` spells `done` beside `RETIRED_DIRNAME`.
+  **No bucket**, since an import cycle blocks the one source. **Open:**
+  b-e447ea.
+- `SA-0394` (#1215): two comments called the git index by another name.
+  **Bucket 3**, conventions. **Landed:** a review commit on #1215.
+- `SA-0395` (#1216): an added side that split a kept line read as inert, so
+  a call placed before the find passed. **Bucket 1**. **Landed:** a review
+  commit on #1216.
+- `SA-0395` (#1216): the witness's patterns matched any `def` and any
+  comment, wider than the shapes its note names. **Bucket 1**. **Landed:** a
+  review commit on #1216.
+- `SA-0396` (#1217): the inert read listed a file once per edit on it.
+  **Bucket 3**, correctness. **Landed:** a review commit on #1217.
+- `SA-0396` (#1217): the comment at the refusal did not say what it refuses.
+  **Bucket 3**, conventions. **Landed:** a review commit on #1217.
+- `SA-0397` (#1218): the note test restated the `prose` gate's limit and a
+  narrower sentence split. **Bucket 3**, one source. **Landed:** a review
+  commit on #1218.
+- `SA-0398` (#1219): the witness matched one exact `git grep` argv, so a
+  drifted argv with no stub passed. **Bucket 1**. **Landed:** a review commit
+  on #1219.

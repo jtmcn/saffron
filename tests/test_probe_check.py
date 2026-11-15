@@ -10,14 +10,17 @@ them, so every branch is reachable without a container.
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import inspect
+from pathlib import Path
 
 import pytest
 
 from saffron import probe as probe_check
 from saffron.gates.contract import Failure, GateResult, GateStatus
 from saffron.intake import Mutant
+from tests.hook_helpers import load_script
 
 PROBE = Mutant(
     file="saffron/report/pr_body.py",
@@ -712,6 +715,269 @@ def test_a_new_failure_no_counted_test_can_be_matched_to_is_unproven():
     )
     assert run5.verdict == "survived"
     assert set(run5.uncounted) == {"t.py::test_x", "t.py::test_unknown"}
+
+
+# --- b-7fc792: an edit that keeps its whole find and adds only a no-op ---
+
+INERT_PATTERNS = (
+    r" *def (?=_)(?!__){name}\(\):",
+    r" +pass",
+    r' +"""[^"]*"""',
+    r" *#.{0,80}",
+)
+"""Four shapes stand in for `.saffron/policy.yaml`'s own four. Three are a
+parameterless `def` of a name with one leading underscore, an indented `pass`
+and an indented one-line docstring. The fourth is a comment whose pattern
+holds a quantifier's braces. Declared here, so a change to the repo's real
+patterns leaves this witness unmoved."""
+
+_CALLS_FIND = '    return _helper("_stringed")'
+BEFORE_CALLS = f"def _existing():\n{_CALLS_FIND}\n"
+"""One private function. Its return calls a private name the file never
+defines, and passes a string holding a second private name."""
+
+BEFORE_BLANK = (
+    "def _first():\n    x = 1\n\n    return x\n\n\ndef _second():\n    return 2\n"
+)
+"""Two functions. The first holds a blank line inside its own body."""
+
+
+def _edit(find: str, replace: str) -> Mutant:
+    return Mutant(file="saffron/x.py", find=find, replace=replace)
+
+
+def test_an_edit_that_keeps_its_find_and_adds_only_inert_lines_is_refused():
+    """`inert_edit` refuses an edit only when `find` stays whole and matches
+    `before` once. Every added line then reads as one of the repo's own
+    no-op shapes. It binds no name `before` already spells, splits no kept
+    line, and adopts no kept line that follows it."""
+    marker_tail = "\ndef _risk_placeholder_removed_marker():\n    pass"
+    risk_before = "def queue_line():\n    return risk\n"
+    risk_find = "    return risk"
+
+    refused = {
+        "at the end of a file": (
+            risk_before,
+            _edit(risk_find, risk_find + marker_tail),
+        ),
+        "before a blank line": (
+            "def queue_line():\n    return risk\n\ndef other():\n    return 1\n",
+            _edit(risk_find, risk_find + marker_tail),
+        ),
+        "before a line of lesser indent": (
+            "class C:\n    def queue_line():\n        return risk\nTRAIL = 1\n",
+            _edit(
+                "        return risk",
+                "        return risk\n"
+                "    def _risk_placeholder_removed_marker():\n"
+                "        pass",
+            ),
+        ),
+        "a def holding a docstring": (
+            risk_before,
+            _edit(risk_find, risk_find + '\ndef _stub():\n    """stub."""'),
+        ),
+        "a def whose name a longer word of the file only contains": (
+            "def _foobar():\n    return 1\n\n" + risk_before,
+            _edit(risk_find, risk_find + "\ndef _foo():\n    pass"),
+        ),
+        "a comment before the find at its own indent": (
+            risk_before,
+            _edit(risk_find, "    # stub\n" + risk_find),
+        ),
+        "an edit that adds nothing": (
+            risk_before,
+            _edit(risk_find, risk_find),
+        ),
+    }
+    for name, (before, edit) in refused.items():
+        reason = probe_check.inert_edit(before, edit, INERT_PATTERNS)
+        assert reason is not None, name
+        assert reason.startswith(edit.file), name
+
+    assert len(refused) == 7
+
+    # Each added name is already spelled somewhere in before, so the bound-name
+    # guard lets the edit through.
+    none_bound_name = {
+        "a name the file calls": (
+            BEFORE_CALLS,
+            _edit(_CALLS_FIND, _CALLS_FIND + "\ndef _helper():\n    pass"),
+            INERT_PATTERNS,
+        ),
+        "a name only a string spells": (
+            BEFORE_CALLS,
+            _edit(_CALLS_FIND, _CALLS_FIND + "\ndef _stringed():\n    pass"),
+            INERT_PATTERNS,
+        ),
+        "a second name the file spells after a first it does not": (
+            BEFORE_CALLS,
+            _edit(
+                _CALLS_FIND,
+                _CALLS_FIND + "\ndef _missing():\n    pass\n\ndef _helper():\n    pass",
+            ),
+            INERT_PATTERNS,
+        ),
+    }
+    assert len(none_bound_name) == 3
+
+    # Each added line matches no declared pattern, so the shape check itself
+    # lets the edit through.
+    none_unmatched_line = {
+        "an early return": (
+            risk_before,
+            _edit(risk_find, risk_find + "\n    return None"),
+            INERT_PATTERNS,
+        ),
+        "a call": (
+            risk_before,
+            _edit(risk_find, risk_find + "\n    do_thing()"),
+            INERT_PATTERNS,
+        ),
+        "a matching line with a call after it": (
+            risk_before,
+            _edit(risk_find, risk_find + "\n    pass; do_thing()"),
+            INERT_PATTERNS,
+        ),
+        "a call with a trailing comment": (
+            risk_before,
+            _edit(risk_find, risk_find + "\n    do_thing()  # trailing"),
+            INERT_PATTERNS,
+        ),
+        "a decorator above a def and pass": (
+            risk_before,
+            _edit(risk_find, risk_find + "\n@decorator\ndef _f():\n    pass"),
+            INERT_PATTERNS,
+        ),
+        "a call default": (
+            risk_before,
+            _edit(risk_find, risk_find + "\ndef _f(x=call()):\n    pass"),
+            INERT_PATTERNS,
+        ),
+    }
+    assert len(none_unmatched_line) == 6
+
+    # Each added side sits above a kept line deeper than its own least indent,
+    # so the adoption guard lets the edit through.
+    none_adopts_kept_line = {
+        "a bare def line added above a deeper line": (
+            "def g():\n    x = 1\n    return x\n",
+            _edit("    x = 1", "    x = 1\ndef _f():"),
+            INERT_PATTERNS,
+        ),
+        "the marker lands mid-block with a blank line after it": (
+            BEFORE_BLANK,
+            _edit("    x = 1", "    x = 1" + marker_tail),
+            INERT_PATTERNS,
+        ),
+        "a def line added before an indented find": (
+            "class C:\n    def g():\n        x = 1\n",
+            _edit("        x = 1", "def _f():\n        x = 1"),
+            INERT_PATTERNS,
+        ),
+    }
+    assert len(none_adopts_kept_line) == 3
+
+    # Each edit breaks the find's own rule: twice in before, absent from
+    # before, or not held whole in replace.
+    none_find_rule = {
+        "a find that occurs twice": (
+            "word = 1\nword = 1\n",
+            _edit("word = 1", "word = 1"),
+            INERT_PATTERNS,
+        ),
+        "a find that is absent": (
+            "def g():\n    return 1\n",
+            _edit("    return missing", "    return missing\n    # note"),
+            INERT_PATTERNS,
+        ),
+        "a find not held whole in the replace": (
+            risk_before,
+            _edit(risk_find, "    # note"),
+            INERT_PATTERNS,
+        ),
+    }
+    assert len(none_find_rule) == 3
+
+    # Each added side ends, starts or opens mid-line, so the split guard lets
+    # the edit through.
+    none_splits_kept_line = {
+        "a call before the find": (
+            risk_before,
+            _edit(risk_find, "    do_thing()\n" + risk_find),
+            INERT_PATTERNS,
+        ),
+        "a def and pass added before an indented find": (
+            risk_before,
+            _edit(risk_find, "def _f():\n    pass\n" + risk_find),
+            INERT_PATTERNS,
+        ),
+        "a find that ends mid-line, so the def adopts the line's tail": (
+            "def g():\n    y = 1;z = 2\n    return y\n",
+            _edit("    y = 1;", "    y = 1;\ndef _f():\n    "),
+            INERT_PATTERNS,
+        ),
+        "a find that starts mid-line, so the def splits its line": (
+            "x = f(a)\n",
+            _edit("f(a)", "\ndef _g():\n    pass\nf(a)"),
+            INERT_PATTERNS,
+        ),
+        "a find that opens with a newline, so the def adopts its line": (
+            "def g():\n    return x\n",
+            _edit("\n    return x", "\ndef _f():\n    return x"),
+            INERT_PATTERNS,
+        ),
+    }
+    assert len(none_splits_kept_line) == 5
+
+    # No pattern is declared at all, so the edit is let through before any
+    # shape is checked.
+    none_no_patterns = {
+        "an edit that adds nothing, under no declared patterns": (
+            risk_before,
+            _edit(risk_find, risk_find),
+            (),
+        ),
+    }
+    assert len(none_no_patterns) == 1
+
+    none = {
+        **none_bound_name,
+        **none_unmatched_line,
+        **none_adopts_kept_line,
+        **none_find_rule,
+        **none_splits_kept_line,
+        **none_no_patterns,
+    }
+    assert len(none) == 21
+    for name, (before, edit, patterns) in none.items():
+        assert probe_check.inert_edit(before, edit, patterns) is None, name
+
+
+def _inert_patterns_note() -> str:
+    """The bare string statement right after `INERT_PATTERNS`, read from this
+    file's own source, since the `prose` gate never reads it."""
+    tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    body = tree.body
+    for statement, following in zip(body, body[1:], strict=False):
+        bound = getattr(statement, "targets", None) or [
+            getattr(statement, "target", None)
+        ]
+        if any(getattr(name, "id", None) == "INERT_PATTERNS" for name in bound):
+            assert isinstance(following, ast.Expr)
+            note = ast.literal_eval(following.value)
+            assert isinstance(note, str)
+            return note
+    raise AssertionError("INERT_PATTERNS note not found")
+
+
+def test_the_inert_patterns_note_obeys_claude_mds_sentence_limit_by_hand():
+    """The `prose` gate never reads a bare statement following an assignment.
+    This test hands `INERT_PATTERNS`'s own note to the gate's own check."""
+    repo = Path(__file__).resolve().parent.parent
+    prose = load_script(repo / ".saffron" / "gates" / "prose.py", "saffron_prose_gate")
+    hits = prose.check(_inert_patterns_note(), "note.md", "prose", root=repo)
+    assert [(hit.code, hit.excerpt) for hit in hits] == []
 
 
 def test_added_tests_are_the_names_collected_at_head_and_not_at_base():

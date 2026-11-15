@@ -184,9 +184,9 @@ criterion's witness answers, and a survivor becomes an adequacy finding.
 
 **What refuses an edit today**. `source_mutated` yields a reason for six
 edits that apply nothing, among them a `find` that is absent and one that
-matches more than once (`saffron/cell/worktree.py:712-717`). An edit that
+matches more than once (`saffron/cell/worktree.py:752-877`). An edit that
 applies and changes nothing is not among them. `probe_refusal`
-(`saffron/probe.py:154`) reads only the path.
+(`saffron/probe.py:156-170`) reads only the path.
 
 **How refusals are counted**. `describe_criterion_probes` and
 `describe_wrong_versions` count every entry with a `refusal` key as

@@ -1,7 +1,8 @@
 ---
 id: b-d2b6b3
 title: '`revert` reads no declared rename, so a renamed test that passes without the source is refused as new'
-status: partial
+status: done
+closed: 2026-11-15
 tier: 3
 filed: 2026-11-14
 specs: [SA-0389]
@@ -38,3 +39,6 @@ layers' declared renames to its own suite, or says why it cannot.
 - 2026-11-14: `SA-0389` (#1202) lets `revert` read a spec's declared renames
   by `census`'s rule. The `FINISH-0` half stays open, since that spec
   declares none.
+- 2026-11-15: closed, since the `FINISH-0` half cannot apply. The
+  finishing suite's base is the top layer, so every layer's declared
+  rename already sits below it. Passing them would exempt nothing.

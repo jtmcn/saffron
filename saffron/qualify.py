@@ -26,9 +26,6 @@ read at the graded head, never meet this.
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
@@ -38,12 +35,12 @@ from saffron import end_review, events
 from saffron.agents import artifacts
 from saffron.agents.findings import Finding, Severity, anchor, parse_diff
 from saffron.cell import session
-from saffron.cell.worktree import DIFF_FLAGS, git_argv
+from saffron.cell.worktree import DIFF_FLAGS
 from saffron.gates.contract import GateResult
 from saffron.intake import Mutant
 from saffron.ledger import Ledger
 from saffron.phases import review
-from saffron.repos.mirror import _git, file_at
+from saffron.repos.mirror import _git, file_at, rebuild_tree
 
 
 @dataclass(frozen=True)
@@ -136,45 +133,6 @@ def _binds_task(task_dir: Path, sha256: str, task_key: str) -> bool:
     return False
 
 
-def _rebuild_tree(mirror: Path, tree_base: str, raw: str) -> tuple[str | None, str]:
-    """`tree_base` plus `raw` applied, as a new tree id in `mirror`. Never
-    the worktree, which this bare mirror has none of. Built under a fresh
-    `GIT_INDEX_FILE` so the mirror's own index, if it has one, is left
-    alone. Each of `read-tree`, `apply --cached` and `write-tree` runs
-    under `worktree.git_argv`'s pins, the same ones the critic cell's own
-    `git apply` ran under."""
-    with tempfile.TemporaryDirectory() as tmp:
-        index_path = Path(tmp) / "index"
-        env = dict(os.environ)
-        env["GIT_INDEX_FILE"] = str(index_path)
-        read = subprocess.run(
-            git_argv("-C", str(mirror), "read-tree", tree_base),
-            capture_output=True,
-            text=True,
-            env=env,
-        )
-        if read.returncode != 0:
-            return None, f"the mirror lacks its tree base {tree_base}"
-        applied = subprocess.run(
-            git_argv("-C", str(mirror), "apply", "--cached", "--whitespace=nowarn"),
-            input=raw,
-            capture_output=True,
-            text=True,
-            env=env,
-        )
-        if applied.returncode != 0:
-            return None, f"its diff does not apply to {tree_base}"
-        written = subprocess.run(
-            git_argv("-C", str(mirror), "write-tree"),
-            capture_output=True,
-            text=True,
-            env=env,
-        )
-        if written.returncode != 0:
-            return None, f"its rebuilt tree on {tree_base} did not write"
-        return written.stdout.strip(), ""
-
-
 def _reviewed_tree(
     mirror: Path, out_dir: Path, spec_id: str, task_key: str
 ) -> tuple[str | None, str]:
@@ -200,7 +158,7 @@ def _reviewed_tree(
         return None, "its sha256 does not match its diff"
     if not _binds_task(out_dir / spec_id, sha256, task_key):
         return None, "no REVIEW line binds it to this task"
-    return _rebuild_tree(mirror, tree_base, raw)
+    return rebuild_tree(mirror, tree_base, raw)
 
 
 def _qualify_range(

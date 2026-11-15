@@ -652,11 +652,12 @@ def describe_criterion_probes(entries: Sequence[Mapping[str, object]]) -> str:
     """The one REVIEW line criterion-probing adds, counted over every probe
     across every entry (backlog item b-78a590), the way
     `describe_wrong_versions` counts versions across every entry. A probe
-    with an edit and no `refusal` is named, a null-edit probe is unnamed,
-    and a `probe.probe_refusal` refusal is refused. `_unasked_tail` adds a
-    further tail for a named probe its fresh cell left unasked. The last
-    tail names, in entry order, the witness of each entry whose session
-    never answered the schema."""
+    with an edit and no `refusal` is named, and a null-edit probe is
+    unnamed. One carrying a `refusal` is refused, whether `probe_refusal`
+    or `inert_edit` filed it (`SA-0396`). `_unasked_tail` adds a further
+    tail for a named probe its fresh cell left unasked. The last tail
+    names, in entry order, the witness of each entry whose session never
+    answered the schema."""
     probes = [
         p for e in entries for p in cast("list[Mapping[str, object]]", e["probes"])
     ]
@@ -846,12 +847,13 @@ def run_wrong_versions(
 def describe_wrong_versions(entries: Sequence[Mapping[str, object]]) -> str:
     """The one REVIEW line the wrong-version sessions add. The first
     clause counts every version across every entry. It then counts how
-    many named an edit and were not refused, and how many
-    `probe.probe_refusal` refused to run. `_unasked_tail` adds a further
-    tail for an expressed version its fresh cell left unasked. The last
-    tail names, in entry order, the witness of each entry whose session
-    never answered the schema. With none of either, the line matches the
-    first clause alone."""
+    many named an edit and were not refused, and how many carry a
+    `refusal` key instead. Either `probe_refusal` or `inert_edit` can
+    file that key (`SA-0396`). `_unasked_tail` adds a further tail for
+    an expressed version its fresh cell left unasked. The last tail
+    names, in entry order, the witness of each entry whose session
+    never answered the schema. With none of either, the line matches
+    the first clause alone."""
     versions = [
         v for e in entries for v in cast("list[Mapping[str, object]]", e["versions"])
     ]

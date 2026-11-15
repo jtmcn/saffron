@@ -1,11 +1,12 @@
 ---
 id: b-249808
 title: No gate checks the spec ids a diff cites, so a cell cited another spec at 20 sites
-status: open
+status: done
+closed: 2026-11-15
 tier: 2
 filed: 2026-11-04
-specs: [SA-0393]
-prs: []
+specs: [SA-0393, SA-0398]
+prs: [1214, 1219]
 commits: []
 cites: [§5.4]
 related: []
@@ -28,3 +29,6 @@ task's own, or a spec in `.saffron/specs/` or `done/`.
 ## Record
 
 - 2026-11-04: filed from the spec loop's run 53.
+- 2026-11-15: `SA-0393` (#1214) adds the check to `integrity`, which fails a
+  cited spec id that no spec file declares. Finish 89's `SA-0398` (#1219)
+  stubs the new listing in `_stub_the_runtime`.

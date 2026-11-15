@@ -129,7 +129,7 @@ and each wrong version into one list of pairs
 `probe.probe_refusal` names a reason (`saffron/cell/session.py:2109-2120`).
 `probe_refusal` reads only the path (`saffron/probe.py:154`). In the cell,
 `worktree.source_mutated` yields a reason for six edits that apply nothing
-(`saffron/cell/worktree.py:712-717`). Nothing judges an edit that applies
+(`saffron/cell/worktree.py:752-877`). Nothing judges an edit that applies
 and changes nothing.
 
 **Why the repo declares the shape**. Core knows nothing about languages

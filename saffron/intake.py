@@ -296,6 +296,11 @@ class Spec(BaseModel):
         return self.type
 
     @property
+    def spec_id(self) -> str:
+        """`id` under the name `CellSpec` and the gate suite read it by."""
+        return self.id
+
+    @property
     def declared_risk(self) -> RiskTier | None:
         """The tier the frontmatter set, as opposed to `risk`'s defaulted
         value. `None` where the spec declared no tier at all. A fact filed

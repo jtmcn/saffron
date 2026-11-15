@@ -29,6 +29,7 @@ results.
 from __future__ import annotations
 
 import posixpath
+import re
 from collections.abc import Callable, Collection, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -38,6 +39,7 @@ from saffron.gates.baseline import subtract_baseline
 from saffron.gates.contract import GateResult
 from saffron.gates.core.scope import NO_TEST_PATHS, matches
 from saffron.intake import Mutant
+from saffron.repos.policy import INERT_NAME
 
 # Redeclared rather than imported from `witness`/`revert`: this module owes
 # them a precedent, not a dependency.
@@ -166,6 +168,107 @@ def probe_refusal(file: str, test_paths: Sequence[str]) -> str | None:
     if any(matches(target, pattern) for pattern in test_paths):
         return f"{target} is a test; a probe must target source"
     return None
+
+
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip())
+
+
+def _added_lines(text: str) -> list[str]:
+    """`text`'s non-blank lines, in order. A blank line is neither matched
+    against a pattern nor counted toward an indent."""
+    return [line for line in text.split("\n") if line.strip()]
+
+
+def _splits_no_line(before: str, at: int, added: str) -> bool:
+    """Whether `added`, inserted at offset `at` of `before`, keeps every kept
+    line whole. It must open at a line's start and end in a newline, or
+    open with a newline at a line's end."""
+    at_start = at == 0 or before[at - 1] == "\n"
+    at_end = at == len(before) or before[at] == "\n"
+    return (at_start and added.endswith("\n")) or (at_end and added.startswith("\n"))
+
+
+def _first_kept_line_after(before: str, at: int) -> str | None:
+    """The first non-blank line of `before` from line boundary `at` on, or
+    `None` when every remaining line is blank."""
+    for line in before[at:].split("\n"):
+        if line.strip():
+            return line
+    return None
+
+
+def _match_added_side(
+    text: str, compiled: Sequence[re.Pattern[str]]
+) -> list[str] | None:
+    """Every name an added side binds through `{name}`, or `None` when one
+    of its non-blank lines matches no pattern."""
+    bound: list[str] = []
+    for line in _added_lines(text):
+        match = next((c.fullmatch(line) for c in compiled if c.fullmatch(line)), None)
+        if match is None:
+            return None
+        name = match.groupdict().get("name")
+        if name is not None:
+            bound.append(name)
+    return bound
+
+
+def inert_edit(before: str, edit: Mutant, patterns: Sequence[str]) -> str | None:
+    """Why `edit` added nothing but inert lines, or `None` to leave the
+    question to `source_mutated` in the cell.
+
+    `find` stays whole inside `replace` and occurs once in `before`. Every
+    added line fully matches one of `patterns`, filled through plain text
+    replacement so a pattern's own regex braces survive. Every name a line
+    binds through `{name}` appears nowhere in `before`. No added side splits
+    a kept line, and none sits above one deeper than its least indented line.
+    """
+    if not patterns:
+        return None
+    find = edit.find
+    replace = edit.replace
+    if find not in replace:
+        return None
+    if before.count(find) != 1:
+        return None
+
+    split_at = replace.find(find)
+    added_before = replace[:split_at]
+    added_after = replace[split_at + len(find) :]
+
+    compiled = [
+        re.compile(pattern.replace("{name}", INERT_NAME)) for pattern in patterns
+    ]
+
+    before_names = _match_added_side(added_before, compiled)
+    if before_names is None:
+        return None
+    after_names = _match_added_side(added_after, compiled)
+    if after_names is None:
+        return None
+
+    for name in (*before_names, *after_names):
+        if re.search(rf"\b{re.escape(name)}\b", before):
+            return None
+
+    start = before.find(find)
+    end = start + len(find)
+
+    for added, at in ((added_before, start), (added_after, end)):
+        if not added:
+            continue
+        if not _splits_no_line(before, at, added):
+            return None
+        added_lines = _added_lines(added)
+        if not added_lines:
+            continue
+        least = min(_indent(line) for line in added_lines)
+        kept = _first_kept_line_after(before, at)
+        if kept is not None and _indent(kept) > least:
+            return None
+
+    return f"{edit.file}: keeps its whole find and adds only inert lines"
 
 
 def check_probe(

@@ -2085,21 +2085,23 @@ def _apply_criterion_probes(
     reviews: list[review.LensReview],
     created: set[str],
     note: Callable[[str, bool, str], None],
+    inert_patterns: Sequence[str],
 ) -> None:
     """Applies every criterion probe's and wrong version's own edit, and asks
     its criterion's witness (items b-2750d5, b-7e69d0, b-78a590, b-7c88f8).
     `pairs` holds one pair per probe of each criterion-probe entry, then each
     wrong version paired with its criterion. Writes each pair's outcome and
-    summary in place, and a refused pair's own `probe.probe_refusal` reason
-    under `refusal`. A stopped or unenterable cell is entered once more for
-    whatever pairs are left. One still left after that reads `error`, with
-    its runtime error under `unasked`. Appends a survivor's `Finding` to
-    `reviews`'s `adequacy` lens, and asks it a second time of the whole
-    `tests` gate too (backlog b-b9365d)."""
+    summary in place, and a refused pair's own reason, from `probe_refusal`
+    or `inert_edit`, under `refusal`. A stopped or unenterable cell is
+    entered once more for whatever pairs are left. One still left after that
+    reads `error`, with its runtime error under `unasked`. Appends a
+    survivor's `Finding` to `reviews`'s `adequacy` lens, and asks it a
+    second time of the whole `tests` gate too (backlog b-b9365d)."""
     from saffron import probe as probe_check
     from saffron.cell import worktree
     from saffron.gates import runner
     from saffron.gates.core.witness import witness_gate
+    from saffron.repos import mirror as mirror_ops
 
     def _unproven(pending: list[tuple[Criterion, dict]], reason: str) -> None:
         for _criterion, entry in pending:
@@ -2118,6 +2120,28 @@ def _apply_criterion_probes(
             entry["refusal"] = refusal
             continue
         with_edit.append((criterion, entry))
+
+    # An edit that keeps its find and adds only declared-inert lines is
+    # refused here, before any cell (SA-0396).
+    if with_edit and inert_patterns:
+        paths = list(dict.fromkeys(e["edit"]["file"] for _c, e in with_edit))
+        texts = mirror_ops.files_after(mirror, spec.tree_base, patch, paths)
+        still_live: list[tuple[Criterion, dict]] = []
+        for criterion, entry in with_edit:
+            before = texts.get(entry["edit"]["file"])
+            reason = (
+                None
+                if before is None
+                else probe_check.inert_edit(
+                    before, Mutant.model_validate(entry["edit"]), inert_patterns
+                )
+            )
+            if reason is None:
+                still_live.append((criterion, entry))
+                continue
+            _unproven([(criterion, entry)], reason)
+            entry["refusal"] = reason
+        with_edit = still_live
 
     if not with_edit:
         return
@@ -3547,6 +3571,7 @@ def _drive_cell(
                         reviews=reviews,
                         created=created,
                         note=_critic_teardown,
+                        inert_patterns=policy.probes.inert,
                     )
 
                     # A spec declaring no criterion bought no session above

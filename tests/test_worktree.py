@@ -1191,17 +1191,7 @@ def test_a_volume_target_routes_through_run_ephemeral_read_only_at_work(
 def _host_git(tmp_path, monkeypatch):
     """Point `worktree._git` at a real repo in `tmp_path` instead of a cell."""
 
-    def exec_(_container, command, *, workdir=None, timeout_s=900):
-        # Bytes then `runtime._decode`, exactly as `runtime._call` does it —
-        # not `text=True`. Universal-newline translation and a strict decode
-        # are both things production does not do, and a seam that does them
-        # hides every byte-fidelity defect in the code under test.
-        done = subprocess.run(command, cwd=tmp_path, capture_output=True, check=False)
-        return runtime.Completed(
-            done.returncode, runtime._decode(done.stdout), runtime._decode(done.stderr)
-        )
-
-    monkeypatch.setattr(worktree.runtime, "exec_", exec_)
+    monkeypatch.setattr(worktree.runtime, "exec_", _exec_in(tmp_path))
 
 
 def _commit(tmp_path, message):
@@ -1218,6 +1208,132 @@ def _commit(tmp_path, message):
         text=True,
         check=True,
     ).stdout.strip()
+
+
+def test_the_suite_judges_cited_ids_against_the_spec_files_at_head(
+    tmp_path, tmp_path_factory, monkeypatch
+):
+    """Backlog item b-249808: `GateSuite` hands `integrity_gate` the task's
+    own id. It also hands it `CellTree.spec_ids`'s own ids, read off
+    `.saffron/specs/` and `.saffron/specs/done/` at HEAD. A `CellSpec` and
+    an `intake.Spec` both reach this path. The baseline is taken before the
+    head commit, so the diff it judges is empty either way.
+    """
+    from saffron.cell.session import CellSpec
+    from saffron.gates.suite import CellTree, GateSuite
+    from saffron.intake import parse_spec
+    from saffron.repos.policy import IntegrityPatterns, Policy
+
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+
+    def write(rel: str, content: str) -> None:
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+
+    def spec_md(spec_id: str) -> str:
+        return f"---\nid: {spec_id}\ntitle: t\ntype: feature\n---\nbody\n"
+
+    write("src/a.py", "x = 1\n")
+    write(".saffron/specs/SA-0005-queued.md", spec_md("SA-0005"))
+    write(".saffron/specs/SA-0010-gone.md", spec_md("SA-0010"))
+    write(".saffron/specs/done/SA-0002-retired.md", spec_md("SA-0002"))
+    write(".saffron/specs/sub/SA-0030-nested.md", spec_md("SA-0030"))
+    write(".saffron/specs/done/sub/SA-0031-nested.md", spec_md("SA-0031"))
+    write("docs/SA-0040-outside.md", spec_md("SA-0040"))
+    write(".saffron/specs/SA-0398.txt", "id: SA-0398\n")
+    write(".saffron/specs/done/README.md", "# Shipped\n\nid: SA-0050\n")
+
+    _host_git(tmp_path, monkeypatch)
+    base = _commit(tmp_path, "base")
+
+    policy = Policy(gates={}, integrity=IntegrityPatterns(suppressions=["NOPE"]))
+    intake_spec = parse_spec("---\nid: SA-0007\ntitle: t\ntype: feature\n---\nbody\n")
+    cell_spec = CellSpec(
+        spec_id="SA-0007",
+        spec_sha="a" * 40,
+        branch="b",
+        base_sha=base,
+        touches=[],
+        spec_type="feature",
+        body="",
+    )
+    tree = CellTree("unused", cwd=tmp_path)
+
+    suites = [
+        GateSuite(gates={}, spec=spec, policy=policy, diff_base=base)
+        for spec in (cell_spec, intake_spec)
+    ]
+    baselines = [suite.baseline(tree) for suite in suites]
+
+    write(".saffron/specs/SA-0021-renamed.md", spec_md("SA-0023"))
+    (tmp_path / ".saffron/specs/SA-0010-gone.md").unlink()
+    write(
+        "src/notes.py",
+        "\n".join(
+            [
+                "# queued SA-0005",
+                "# retired SA-0002",
+                "# added SA-0023",
+                "# own SA-0007",
+                "# own again SA-0007",
+                "# deleted SA-0010",
+                "# nested specs SA-0030",
+                "# nested done SA-0031",
+                "# outside SA-0040",
+                "# renamed name SA-0021",
+                "# txt file SA-0398",
+                "# readme SA-0050",
+                "",
+            ]
+        ),
+    )
+    _commit(tmp_path, "head")
+
+    for suite, baseline in zip(suites, baselines, strict=True):
+        comparison = suite.against(tree, baseline)
+        cited = sorted(
+            nf.failure.message
+            for nf in comparison.new_failures
+            if nf.gate == "integrity" and nf.failure.code == "unknown-spec-id"
+        )
+        assert len(cited) == 7
+        judged = ("SA-0010", "SA-0030", "SA-0031", "SA-0040", "SA-0021", "SA-0398")
+        for id_ in (*judged, "SA-0050"):
+            assert any(id_ in message for message in cited), (suite.spec, id_)
+        for id_ in ("SA-0005", "SA-0002", "SA-0023", "SA-0007"):
+            assert not any(id_ in message for message in cited), (suite.spec, id_)
+
+    no_specs = tmp_path_factory.mktemp("no-specs")
+    subprocess.run(["git", "init", "-q", "-b", "main", str(no_specs)], check=True)
+    (no_specs / "README.md").write_text("nothing to see\n")
+    monkeypatch.setattr(worktree.runtime, "exec_", _exec_in(no_specs))
+    _commit(no_specs, "no specs here")
+    assert worktree.spec_ids("unused") == []
+
+    unborn = tmp_path_factory.mktemp("unborn")
+    subprocess.run(["git", "init", "-q", "-b", "main", str(unborn)], check=True)
+    monkeypatch.setattr(worktree.runtime, "exec_", _exec_in(unborn))
+    with pytest.raises(runtime.CellRuntimeError):
+        worktree.spec_ids("unused")
+
+
+def _exec_in(repo: Path):
+    """A `runtime.exec_` that runs each command in `repo` on the host."""
+
+    def exec_(_container, command, *, workdir=None, timeout_s=900):
+        # Bytes then `runtime._decode`, exactly as `runtime._call` does it —
+        # not `text=True`. Universal-newline translation and a strict decode
+        # are both things production does not do, and a seam that does them
+        # hides every byte-fidelity defect in the code under test.
+        done = subprocess.run(command, cwd=repo, capture_output=True, check=False)
+        return runtime.Completed(
+            done.returncode, runtime._decode(done.stdout), runtime._decode(done.stderr)
+        )
+
+    return exec_
 
 
 def _porcelain(tmp_path):

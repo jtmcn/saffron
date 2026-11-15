@@ -78,6 +78,9 @@ class _GitTree:
     def dirty_paths(self) -> list[str]:
         return []
 
+    def spec_ids(self) -> list[str]:
+        return []
+
     @contextmanager
     def reverted(self, base: str, paths):
         yield
@@ -93,6 +96,7 @@ class _Spec:
         default_factory=lambda: ["prompts.py", "pytest.ini", "tests/test_prompts.py"]
     )
     forbidden: list[str] = field(default_factory=list)
+    spec_id: str = "SA-0001"
     acceptance: list = field(default_factory=list)
     spec_type: str = "feature"
     renames: dict = field(default_factory=dict)

@@ -1,12 +1,12 @@
 ---
 id: b-7fc792
 title: A wrong version's edit that removes nothing survives, and REVIEW files it as an adequacy blocker
-status: open
+status: done
 tier: 3
 filed: 2026-11-14
-closed:
-specs: [SA-0394, SA-0395, SA-0396]
-prs: []
+closed: 2026-11-15
+specs: [SA-0394, SA-0395, SA-0396, SA-0397]
+prs: [1215, 1216, 1217, 1218]
 commits: []
 cites: [§5.4.1, §5.5]
 related: [b-f06097, b-12e717]
@@ -41,3 +41,7 @@ never reaches a witness as a `survived` outcome.
 ## Record
 
 - 2026-11-14: filed from the spec loop's run 70, #1203.
+- 2026-11-15: `SA-0394` (#1215) reads an edited file at the tree base.
+  `SA-0395` (#1216) names an edit that adds only inert lines. `SA-0396`
+  (#1217) refuses one before any cell applies it. Finish 89's `SA-0397`
+  (#1218) groups the witness's `None` cases.
