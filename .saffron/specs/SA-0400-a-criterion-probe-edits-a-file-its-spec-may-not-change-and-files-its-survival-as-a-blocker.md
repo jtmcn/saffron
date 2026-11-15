@@ -62,6 +62,7 @@ acceptance:
       elsewhere/w.py. Probes on src/deep/a.py, lib/one.pyc and
       ./lib/two.py are refused. So are one on other/t.py under that
       criterion and one on other/s.py under a criterion with no subject.
+      So is one on pkg/../other/u.py, whose raw path pkg/** would match.
       A probe on tests/t.py and one on ../out.py keep their
       `probe_refusal` reasons. It asserts the mutator's exact sequence,
       each record, the one survivor's finding and the REVIEW line. A
@@ -81,6 +82,7 @@ acceptance:
       - The pair recorded `unproven` with no `refusal` key, so the REVIEW line counts it as named.
       - A fixed sentence as the reason, which names no file.
       - The raw path named in the reason, so `./lib/two.py` appears in it.
+      - A leading `./` stripped rather than the path normalised, so `pkg/../other/u.py` reaches the mutator.
       - The refusal made inside the probe cell, so a list of only refused pairs still enters one.
 ---
 
@@ -243,7 +245,7 @@ gate results as `pass`, `pass`, then `fail` for each later edit that
 reaches the mutator, seven of them. Build the REVIEW line's input from
 the probe entries, one entry per criterion. Use
 `review.describe_criterion_probes`. It counts seven named over two
-criteria, none unnamed and seven refused.
+criteria, none unnamed and eight refused.
 
 **Every other caller of `_apply_criterion_probes` in the tests** passes
 `_spec()`, whose `src/**` covers each probe file they name. Each passed
