@@ -10325,6 +10325,25 @@ _COMMIT = tuple(
     git_argv("commit", "-q", "-m", "critic: exported patch, applied and committed")
 )
 
+# `GateSuite._run`'s own listing call, the one tree read here that is not
+# stubbed past `runtime.exec_` (backlog item b-249808).
+_SPEC_IDS = tuple(
+    git_argv(
+        "grep",
+        "-z",
+        "-m1",
+        "--no-line-number",
+        "--no-column",
+        "-G",
+        "-e",
+        "^id:",
+        "HEAD",
+        "--",
+        ":(glob).saffron/specs/*.md",
+        ":(glob).saffron/specs/done/*.md",
+    )
+)
+
 _OUTSIDE_HUNK_FINDING = {
     "findings": [
         {
@@ -11560,6 +11579,7 @@ def test_the_lens_gate_cell_holds_no_credential_and_is_gone_before_any_lens_runs
     assert [argv for _c, argv, _stdin in gate_execs] == [
         _APPLY,
         _COMMIT,
+        _SPEC_IDS,
     ]
     assert gate_execs[0][2] == _DIFF
 

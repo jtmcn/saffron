@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -454,3 +455,178 @@ def test_an_added_empty_gate_config_file_is_seen(tmp_path):
     assert result.status == "fail"
     assert result.failures[0].code == "gate-config-changed"
     assert result.failures[0].file == "pyproject.toml"
+
+
+# --- the third question: an added line citing an unknown spec id -----------
+
+_ID_IN_MESSAGE = re.compile(r"[A-Za-z0-9]+-\d+")
+
+
+def _citations(result):
+    """Each `unknown-spec-id` failure as a `(file, line, id)` triple, sorted."""
+    triples = []
+    for f in result.failures:
+        if f.code != "unknown-spec-id":
+            continue
+        match = _ID_IN_MESSAGE.search(f.message)
+        assert match is not None, f.message
+        triples.append((f.file, f.line, match.group(0)))
+    return sorted(triples)
+
+
+def test_an_added_line_citing_an_id_no_spec_file_holds_fails_at_its_file_and_line(
+    tmp_path,
+):
+    """Backlog item b-249808: a line naming an id of the task's own prefix
+    fails unless it names the task or a spec file's own id. The second hunk
+    sits far down, so its header's own line number is wrong for the line it
+    adds. A context line and a removed line each carry an id the scan must
+    leave alone.
+    """
+    base_lines = [f"line{n:02d}\n" for n in range(1, 41)]
+    base_lines[23] = "context has SA-7777 inside it\n"
+    base_lines[25] = "removed line with SA-6666\n"
+    run = _repo(tmp_path, {"src/a.py": "".join(base_lines)})
+
+    new_lines = list(base_lines)
+    new_lines[5:5] = [
+        "cites SA-0007 and SA-0400 and SA-0002 all fine\n",
+        "cites SA-8001 and SA-8002 both unknown\n",
+    ]
+    idx = new_lines.index("removed line with SA-6666\n")
+    new_lines[idx : idx + 1] = ["replacement line with SA-000 short id\n"]
+    diff = _diff(tmp_path, run, {"src/a.py": "".join(new_lines)})
+
+    result = integrity_gate(
+        diff,
+        PATTERNS,
+        touches=["src/a.py"],
+        spec_id="SA-0007",
+        known_ids=frozenset({"SA-0400", "SA-0002", "SA-0005"}),
+    )
+    assert result.status == "fail"
+    assert _citations(result) == [
+        ("src/a.py", 7, "SA-8001"),
+        ("src/a.py", 7, "SA-8002"),
+        ("src/a.py", 28, "SA-000"),
+    ]
+
+    with_no_spec_id = integrity_gate(diff, PATTERNS, touches=["src/a.py"])
+    assert with_no_spec_id.status == "pass"
+
+
+_BOUNDS_LINES = [
+    "SA-03981 begins this line",
+    "SA-398 begins this line too",
+    "(SA-0399) parenthesized",
+    "`SA-0399` backticked",
+    "Sentence ends in SA-0399.",
+    "Label: SA-0399:",
+    "versions include SA-0398, SA-0399 noted",
+    '"""SA-0399 opens a docstring',
+    "SA-7001/SA-7002/SA-7003 chained",
+    "SA-0398/SA-9999 chained",
+    "xSA-0399 after a letter",
+    "9SA-0399 after a digit",
+    "_SA-0399 after underscore",
+    "-SA-0399 after hyphen",
+    '"SA-0399 after one double quote',
+    "'SA-0399 after one single quote",
+    "'''SA-0399 after three single quotes",
+    "specs/SA-0399 after a path slash",
+    "done/x/SA-0399 nested path slash",
+    "SA-0399-slug.md as a file name",
+    "SA-0399.yaml as a file name",
+    "SA-0399.5 as a decimal looking value",
+    "SA-0399a continues into a word",
+    "SA-0399_ continues into an identifier",
+    "sa-0399 lowercase never matches",
+    "_SA-0398/SA-0399 slash list opens after underscore",
+    '"SA-0398/SA-0399" slash list inside quotes',
+]
+
+
+def test_a_cited_id_is_bounded_so_fixture_values_and_file_names_are_not_citations(
+    tmp_path,
+):
+    """Ten of the lines below are judged, several more than once. The other
+    seventeen are left alone. A quote or a slash before an id marks a
+    fixture value or a file name. So does a `-` or an extension right after
+    it. A backtick, a parenthesis, or a line's start opens a citation
+    instead. So does a docstring's own opening quotes, and an earlier id in
+    a slash list.
+    """
+    run = _repo(tmp_path, {"src/a.py": "x = 1\n"})
+    diff = _diff(
+        tmp_path,
+        run,
+        {"src/b.py": "".join(f"{line}\n" for line in _BOUNDS_LINES)},
+    )
+    result = integrity_gate(
+        diff,
+        PATTERNS,
+        touches=["src/a.py", "src/b.py"],
+        spec_id="SA-0001",
+        known_ids=frozenset({"SA-0398"}),
+    )
+    assert result.status == "fail"
+    assert _citations(result) == [
+        ("src/b.py", 1, "SA-03981"),
+        ("src/b.py", 2, "SA-398"),
+        ("src/b.py", 3, "SA-0399"),
+        ("src/b.py", 4, "SA-0399"),
+        ("src/b.py", 5, "SA-0399"),
+        ("src/b.py", 6, "SA-0399"),
+        ("src/b.py", 7, "SA-0399"),
+        ("src/b.py", 8, "SA-0399"),
+        ("src/b.py", 9, "SA-7001"),
+        ("src/b.py", 9, "SA-7002"),
+        ("src/b.py", 9, "SA-7003"),
+        ("src/b.py", 10, "SA-9999"),
+    ]
+
+
+def test_only_ids_of_the_tasks_own_prefix_are_judged(tmp_path):
+    """One diff, judged three times under three task ids, with `SY-2` and
+    `B2-10` each already known. Every task fails only an unknown id of its
+    own prefix and leaves every other prefix's ids alone, lowercase and
+    mixed-case prefixes included."""
+    run = _repo(tmp_path, {"src/a.py": "x = 1\n"})
+    diff = _diff(
+        tmp_path,
+        run,
+        {
+            "src/a.py": (
+                "x = 1\n"
+                "cites SY-2 known\n"
+                "cites SY-9 unknown\n"
+                "cites sy-9 lowercase\n"
+                "cites SA-0398 known-ish\n"
+                "cites B2-10 known\n"
+                "cites B2-11 unknown\n"
+            )
+        },
+    )
+
+    sy = integrity_gate(
+        diff,
+        PATTERNS,
+        touches=["src/a.py"],
+        spec_id="SY-7",
+        known_ids=frozenset({"SY-2"}),
+    )
+    assert _citations(sy) == [("src/a.py", 3, "SY-9")]
+
+    b2 = integrity_gate(
+        diff,
+        PATTERNS,
+        touches=["src/a.py"],
+        spec_id="B2-3",
+        known_ids=frozenset({"B2-10"}),
+    )
+    assert _citations(b2) == [("src/a.py", 7, "B2-11")]
+
+    sa = integrity_gate(
+        diff, PATTERNS, touches=["src/a.py"], spec_id="SA-0007", known_ids=frozenset()
+    )
+    assert _citations(sa) == [("src/a.py", 5, "SA-0398")]

@@ -260,6 +260,7 @@ def _stub_package_cells(monkeypatch, *suites):
         "saffron.cell.worktree.export_patch", lambda c, base: _read_diff(c, base, "")
     )
     monkeypatch.setattr("saffron.cell.worktree.dirty_paths", lambda c: [])
+    monkeypatch.setattr("saffron.cell.worktree.spec_ids", lambda c: [])
     return seen
 
 
@@ -376,6 +377,7 @@ def test_two_reverify_runs_at_once_hold_disjoint_networks_and_neither_removes_th
     monkeypatch.setattr("saffron.cell.worktree.changed_files", lambda c, base: [])
     monkeypatch.setattr("saffron.cell.worktree.export_patch", lambda c, base: "")
     monkeypatch.setattr("saffron.cell.worktree.dirty_paths", lambda c: [])
+    monkeypatch.setattr("saffron.cell.worktree.spec_ids", lambda c: [])
 
     claimed: list[tuple[str, str]] = []
     real_allocate = runtime.allocate_network
@@ -3412,6 +3414,7 @@ def test_reverification_runs_the_same_suite_shape_the_session_ran(
     monkeypatch.setattr(worktree, "changed_files", lambda c, base: [])
     monkeypatch.setattr(worktree, "export_patch", lambda c, base: "")
     monkeypatch.setattr(worktree, "dirty_paths", lambda c: [])
+    monkeypatch.setattr(worktree, "spec_ids", lambda c: [])
     monkeypatch.setattr(runner, "run_suite", fake_run_suite)
 
     criterion = Criterion(

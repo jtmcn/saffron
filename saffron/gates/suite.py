@@ -43,6 +43,8 @@ class SuiteSpec(Protocol):
     @property
     def risk(self) -> str: ...
     @property
+    def spec_id(self) -> str: ...
+    @property
     def touches(self) -> list[str]: ...
     @property
     def forbidden(self) -> list[str]: ...
@@ -64,6 +66,7 @@ class Tree(Protocol):
     def changed_files(self, base: str) -> list[str]: ...
     def patch(self, base: str) -> str: ...
     def dirty_paths(self) -> list[str]: ...
+    def spec_ids(self) -> list[str]: ...
     def reverted(
         self, base: str, paths: Sequence[str]
     ) -> AbstractContextManager[None]: ...
@@ -90,6 +93,9 @@ class CellTree:
 
     def dirty_paths(self) -> list[str]:
         return worktree.dirty_paths(self.container)
+
+    def spec_ids(self) -> list[str]:
+        return worktree.spec_ids(self.container)
 
     def reverted(self, base: str, paths: Sequence[str]) -> AbstractContextManager[None]:
         return worktree.source_reverted(self.container, base, paths)
@@ -213,7 +219,13 @@ class GateSuite:
                 forbidden=spec.forbidden,
                 protected=policy.protected,
             ),
-            integrity_gate(diff, policy.integrity, spec.touches),
+            integrity_gate(
+                diff,
+                policy.integrity,
+                spec.touches,
+                spec_id=spec.spec_id,
+                known_ids=frozenset(tree.spec_ids()),
+            ),
             # An unreadable diff refused here aborts the attempt, which no
             # advisory filter can soften — so it refuses only where it blocks.
             size_gate(

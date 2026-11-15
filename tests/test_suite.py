@@ -22,11 +22,12 @@ class _Tree:
     """The in-memory adapter: each gate answers from a table, the worktree is
     two lists, and every read the suite makes is recorded in order."""
 
-    def __init__(self, answers=None, *, changed=(), dirty=(), patch=""):
+    def __init__(self, answers=None, *, changed=(), dirty=(), patch="", known_ids=()):
         self.answers = answers or {}
         self.changed = list(changed)
         self.dirty = list(dirty)
         self._patch = patch
+        self.known_ids = list(known_ids)
         self.calls: list[str] = []
         self.cwd = Path("/work")
 
@@ -52,6 +53,10 @@ class _Tree:
     def dirty_paths(self):
         self.calls.append("dirty_paths")
         return list(self.dirty)
+
+    def spec_ids(self):
+        self.calls.append("spec_ids")
+        return list(self.known_ids)
 
     @contextlib.contextmanager
     def reverted(self, base, paths):
@@ -105,6 +110,7 @@ class _Spec:
     acceptance: list = field(default_factory=list)
     spec_type: str = "feature"
     renames: dict = field(default_factory=dict)
+    spec_id: str = "SA-0001"
 
 
 def _suite(gates=("lint", "tests"), *, policy=None, spec=None):
@@ -156,8 +162,8 @@ def test_committed_reads_the_tree_only_after_every_declared_gate_has_run():
     suite = _suite()
     base_tree, head_tree = _Tree(), _Tree()
     suite.against(head_tree, suite.baseline(base_tree))
-    assert base_tree.calls == ["run lint", "run tests", "dirty_paths"]
-    assert head_tree.calls == ["run lint", "run tests", "dirty_paths"]
+    assert base_tree.calls == ["run lint", "run tests", "spec_ids", "dirty_paths"]
+    assert head_tree.calls == ["run lint", "run tests", "spec_ids", "dirty_paths"]
 
 
 def test_an_elevate_on_path_elevates_the_tier_and_blocks_on_size_and_witness():
