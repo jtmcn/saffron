@@ -318,9 +318,13 @@ default value passes REBUT. A spec can prescribe a false line. No gate
 resolves a citation. A stack batch's follow-up guard has no witness. `migrate`
 writes a false package fact for an adopted row.
 
-**Placed 2026-10-12**, from the spec loop's run 36: **b-9efbe2**. A child's
+**Placed 2026-10-12**, from the spec loop's run 36: ~~**b-9efbe2**~~. A child's
 cell deleted its parent's witness setup, and the parent's own wrong version
 then passed it. No gate re-runs a parent's wrong versions.
+
+**Placed 2026-11-16**, from the spec loop's run 75: **b-d9a027**. `SA-0402`
+asks a parent's wrong versions in a cell. A review commit is still never asked
+them, and REBUT can withdraw a parent survivor's blocker.
 
 **Placed 2026-10-13**, from the spec loop's run 37: **b-7c8bc4**, then
 **b-a12047**. Fakes kept a reordered function's old signature, so a revert
