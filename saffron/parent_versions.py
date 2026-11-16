@@ -13,13 +13,11 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from saffron.gates.core.integrity import _parse_block, _split_blocks
+from saffron.gates.core.integrity import _DiffError, _parse_block, _split_blocks
 from saffron.intake import RETIRED_DIRNAME, Criterion, Mutant, Spec, discover_specs
 
-# Everything `names_file` lets stand right after `path` inside a longer witness.
-_PATH_CONTINUATION = frozenset(
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-/"
-)
+# Besides letters and digits, what continues a longer path right after `path`.
+_PATH_CONTINUATION = frozenset("_.-/")
 
 
 def names_file(witness: str, path: str) -> bool:
@@ -31,12 +29,16 @@ def names_file(witness: str, path: str) -> bool:
     if not witness.startswith(path):
         return False
     rest = witness[len(path) :]
-    return not rest or rest[0] not in _PATH_CONTINUATION
+    return not rest or not (rest[0].isalnum() or rest[0] in _PATH_CONTINUATION)
 
 
 def _changed_paths(diff: str) -> list[str]:
-    """Every path a diff's `diff --git` blocks name, one per block (§2.1)."""
-    return [_parse_block(block).path for block in _split_blocks(diff)]
+    """Every path a diff's `diff --git` blocks name, one per block (§2.1).
+    Empty for a diff `integrity` refuses, since that attempt ends before REVIEW."""
+    try:
+        return [_parse_block(block).path for block in _split_blocks(diff)]
+    except _DiffError:
+        return []
 
 
 def _chosen_criteria(spec: Spec, changed_paths: list[str]) -> list[Criterion]:
@@ -100,7 +102,7 @@ def _parent_pairs(
                 if version.get("outcome") != "killed":
                     continue
                 try:
-                    mutant = Mutant.model_validate(version.get("edit"))
+                    edit = Mutant.model_validate(version.get("edit"))
                 except ValidationError as exc:
                     raise _Unreadable from exc
                 pairs.append(
@@ -110,7 +112,7 @@ def _parent_pairs(
                             "parent": parent_id,
                             "witness": criterion.witness,
                             "version": version.get("version"),
-                            "edit": mutant.model_dump(),
+                            "edit": edit.model_dump(),
                             "reason": "",
                         },
                     )
@@ -125,7 +127,7 @@ def parent_version_pairs(
     puts back in play, and which parent's record could not answer.
 
     A parent is named by `depends_on`, read from `specs_dir`'s retired
-    directory first and from `specs_dir` itself otherwise (§3.2). A name
+    directory first and from `specs_dir` itself otherwise. A name
     neither declares is left out of both returned lists. A named parent with
     no criterion the diff's changed files put in play is left out too. The
     rest is read from `out_dir / <parent id> / wrong-versions.json`: an

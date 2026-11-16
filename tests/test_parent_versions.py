@@ -49,7 +49,7 @@ def _killed(version: str, file: str, find: str, replace: str = "r") -> dict:
     return {
         "version": version,
         "edit": {"file": file, "find": find, "replace": replace},
-        "reason": "",
+        "reason": "the witness failed",
         "outcome": "killed",
         "summary": "s",
     }
@@ -74,6 +74,7 @@ def test_a_childs_diff_pairs_each_killed_version_of_each_parent_whose_witness_it
     assert not names_file("sub/tests/test_a.py", "tests/test_a.py")
     # The path is a substring of the witness, but not its prefix.
     assert not names_file("xy:ab", "ab")
+    assert not names_file("tests/test_a.pyé", "tests/test_a.py")
 
     specs_dir = tmp_path / "specs"
     retired_dir = specs_dir / RETIRED_DIRNAME
@@ -169,7 +170,7 @@ def test_a_childs_diff_pairs_each_killed_version_of_each_parent_whose_witness_it
             "versions": [_killed("k_c", "c.py", "f8")],
         },
         {
-            "witness": "test_old",
+            "witness": "tests/test_a.py::test_old",
             "claim": "cold",
             "versions": [_killed("k_old", "a.py", "f9")],
         },
@@ -268,6 +269,14 @@ def test_a_childs_diff_pairs_each_killed_version_of_each_parent_whose_witness_it
     criterion, entry = pairs2[0]
     assert criterion.claim == "c7"
     assert entry["version"] == "k_sp3"
+
+    # A diff `integrity` refuses names no changed path.
+    assert parent_version_pairs(
+        depends_on=["SP-3"],
+        specs_dir=only_queued_dir,
+        out_dir=out_dir,
+        diff="diff --git a/x b/y z\n",
+    ) == ([], [])
 
 
 def test_a_parent_whose_record_cannot_be_read_is_named_and_pairs_nothing(tmp_path):
