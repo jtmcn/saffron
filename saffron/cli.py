@@ -52,7 +52,7 @@ from saffron.cell.session import (
 from saffron.cell.session import _SHA as _RESOLVED_SHA
 from saffron.events import Event, EventLog, RecordAppend
 from saffron.gates.baseline import NewFailure
-from saffron.intake import Spec, SpecError, load_spec
+from saffron.intake import RETIRED_DIRNAME, Spec, SpecError, load_spec
 from saffron.ledger import Ledger
 from saffron.phases import implement, review
 from saffron.phases import package as package_phase
@@ -755,7 +755,7 @@ def _run_cell(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                 # Its two causes look alike here too (`_protected_paths_at`),
                 # so this names only the read that failed, never "not retired".
                 print(
-                    f"{spec.id:<10} .saffron/specs/{scheduler.RETIRED_DIRNAME}/ "
+                    f"{spec.id:<10} .saffron/specs/{RETIRED_DIRNAME}/ "
                     f"at {base_sha} could not be read, so retired_first could "
                     f"not be checked: {broke}"
                 )

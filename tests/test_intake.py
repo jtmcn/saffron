@@ -1,10 +1,14 @@
+import ast
 import json
 import os
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
 from saffron.intake import SpecError, discover_specs, load_spec, parse_spec
+
+REPO = Path(__file__).resolve().parents[1]
 
 VALID = """---
 id: TE-9001
@@ -986,3 +990,198 @@ def test_renames_loads_as_a_mapping_and_refuses_a_blank_or_shared_new_name():
     for shape in refused_shapes:
         with pytest.raises(SpecError):
             parse_spec(f"---\nid: TE-1\ntitle: t\ntype: chore\n{shape}---\n")
+
+
+def _done_hits(source: str) -> list[tuple[int, str]]:
+    """Each string constant whose value, split on `/` and compared with no
+    stripping, holds a part equal to `done`. An f-string's literal segments
+    are constants too. A string standing alone as a statement, docstring or
+    not, is skipped (backlog item b-e447ea)."""
+    tree = ast.parse(source)
+    docstrings = {
+        id(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+    }
+    hits = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+            continue
+        if id(node) in docstrings:
+            continue
+        if "done" in node.value.split("/"):
+            hits.append((node.lineno, node.value))
+    return hits
+
+
+_DONE_SAMPLE_LINES = [
+    '"""A docstring naming specs/done/ in prose."""',
+    "",
+    'A = "done"',
+    "B = 'done'",
+    'C = ".saffron/specs/done"',
+    'D = "done/x.md"',
+    'E = f"{a}/done"',
+    'F = "outside done/, found"',
+    'G = "undone"',
+    'H = "done_dir"',
+]
+_DONE_SAMPLE = "\n".join(_DONE_SAMPLE_LINES) + "\n"
+
+
+def test_only_intake_spells_the_retired_directory_in_saffron_source():
+    """`saffron/intake.py` is the one module under `saffron/` holding a
+    bare `done` path-part literal (backlog item b-e447ea). Its one hit
+    sits on the `RETIRED_DIRNAME` assignment, and `worktree.SPEC_ID_DIRS`
+    still names the same two directories built from it.
+
+    Proves `_done_hits` on a declared sample first: every line the spec
+    lists as a positive is flagged, and every line it lists as a
+    negative, docstring included, is not.
+    """
+    assert [line for line, _value in _done_hits(_DONE_SAMPLE)] == [3, 4, 5, 6, 7]
+
+    from saffron.cell import worktree
+
+    saffron_root = REPO / "saffron"
+    found = {
+        str(path.relative_to(REPO)): hits
+        for path in sorted(saffron_root.rglob("*.py"))
+        for hits in [_done_hits(path.read_text())]
+        if hits
+    }
+    assert set(found) == {"saffron/intake.py"}
+    [(line, value)] = found["saffron/intake.py"]
+    assert value == "done"
+
+    intake_tree = ast.parse((saffron_root / "intake.py").read_text())
+    assignment_line = next(
+        node.lineno
+        for node in ast.walk(intake_tree)
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == "RETIRED_DIRNAME"
+    )
+    assert line == assignment_line
+    assert worktree.SPEC_ID_DIRS == (".saffron/specs", ".saffron/specs/done")
+
+
+def _retired_dirname_routes(
+    source: str,
+) -> tuple[list[str], list[str], int, int]:
+    """Every way `RETIRED_DIRNAME` is read or bound in one file: each
+    import's module, each attribute read's dotted owner, a count of
+    plain-name assignments to it, and a count of its bare-name reads
+    (backlog item b-e447ea). A bare import with no bare-name read is an
+    import the file never reads."""
+    tree = ast.parse(source)
+    imports: list[str] = []
+    attributes: list[str] = []
+    assigns = 0
+    uses = 0
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and any(
+            alias.name == "RETIRED_DIRNAME" for alias in node.names
+        ):
+            imports.append(node.module or "")
+        elif isinstance(node, ast.Attribute) and node.attr == "RETIRED_DIRNAME":
+            attributes.append(ast.unparse(node.value))
+        elif isinstance(node, ast.Assign):
+            assigns += sum(
+                1
+                for target in node.targets
+                if isinstance(target, ast.Name) and target.id == "RETIRED_DIRNAME"
+            )
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "RETIRED_DIRNAME"
+        ):
+            assigns += 1
+        elif (
+            isinstance(node, ast.Name)
+            and node.id == "RETIRED_DIRNAME"
+            and isinstance(node.ctx, ast.Load)
+        ):
+            uses += 1
+    return imports, attributes, assigns, uses
+
+
+_ROUTES_SAMPLE = (
+    "\n".join(
+        [
+            "from saffron.intake import RETIRED_DIRNAME",
+            "from saffron.scheduler import RETIRED_DIRNAME",
+            "import saffron.intake as intake",
+            "import saffron.scheduler as scheduler",
+            "x = intake.RETIRED_DIRNAME",
+            "y = saffron.intake.RETIRED_DIRNAME",
+            "z = scheduler.RETIRED_DIRNAME",
+            "w = RETIRED_DIRNAME",
+            'RETIRED_DIRNAME = "done"',
+        ]
+    )
+    + "\n"
+)
+
+
+def test_every_reader_of_the_retired_directory_name_imports_it_from_intake():
+    """Every file under `saffron/` and `tests/` that reads `RETIRED_DIRNAME`
+    reads it through `saffron.intake`, and only `saffron/intake.py` assigns
+    it (backlog item b-e447ea). A file that imports the bare name also
+    reads it somewhere, so an import left unconsulted does not pass as a
+    route.
+
+    Proves `_retired_dirname_routes` on a declared sample first: it sees
+    an attribute read, an import from another module, one bare-name
+    read, and one assignment.
+    """
+    imports, attributes, assigns, uses = _retired_dirname_routes(_ROUTES_SAMPLE)
+    assert imports == ["saffron.intake", "saffron.scheduler"]
+    assert attributes == ["intake", "saffron.intake", "scheduler"]
+    assert assigns == 1
+    assert uses == 1
+
+    files = {
+        str(path.relative_to(REPO)): path.read_text()
+        for root in ("saffron", "tests")
+        for path in sorted((REPO / root).rglob("*.py"))
+    }
+    assigning_files: list[str] = []
+    foreign_imports: list[tuple[str, str]] = []
+    foreign_attributes: list[tuple[str, str]] = []
+    reads_through_intake: set[str] = set()
+    unconsulted_imports: list[str] = []
+    for path, source in files.items():
+        imports, attributes, assigns, uses = _retired_dirname_routes(source)
+        if assigns:
+            assigning_files.append(path)
+        if imports and not uses:
+            unconsulted_imports.append(path)
+        for module in imports:
+            if module in ("saffron.intake", "intake"):
+                reads_through_intake.add(path)
+            else:
+                foreign_imports.append((path, module))
+        for owner in attributes:
+            if owner in ("saffron.intake", "intake"):
+                reads_through_intake.add(path)
+            else:
+                foreign_attributes.append((path, owner))
+
+    assert assigning_files == ["saffron/intake.py"]
+    assert foreign_imports == []
+    assert foreign_attributes == []
+    assert unconsulted_imports == []
+    expected_readers = {
+        "saffron/scheduler.py",
+        "saffron/draft.py",
+        "saffron/follow_up.py",
+        "saffron/cli.py",
+        "saffron/cell/worktree.py",
+        "tests/test_cli.py",
+    }
+    assert expected_readers <= reads_through_intake

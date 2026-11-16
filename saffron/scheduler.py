@@ -69,7 +69,13 @@ from typing import Literal
 
 from saffron.cell.session import _SHA as _RESOLVED_SHA
 from saffron.gates.core.scope import matches
-from saffron.intake import DiscoveredSpec, DiscoveryFailure, Spec, discover_specs
+from saffron.intake import (
+    RETIRED_DIRNAME,
+    DiscoveredSpec,
+    DiscoveryFailure,
+    Spec,
+    discover_specs,
+)
 from saffron.ledger import Ledger
 from saffron.repos.mirror import _word_pattern
 
@@ -623,9 +629,6 @@ def _dangling_marker_refusals(
         for path, spec_id in markers
         if spec_id not in known_ids
     ]
-
-
-RETIRED_DIRNAME = "done"
 
 
 def _retired_ids(directory: Path) -> tuple[frozenset[str], list[DiscoveryFailure]]:

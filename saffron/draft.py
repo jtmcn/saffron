@@ -22,8 +22,8 @@ from pathlib import Path
 from typing import Literal
 
 from saffron import follow_up, intake, spec_review
+from saffron.intake import RETIRED_DIRNAME
 from saffron.ledger import Ledger
-from saffron.scheduler import RETIRED_DIRNAME
 
 # A file's name as `<prefix>-<digits>`, with an optional `-slug` before `.md`.
 _FILE_ID = re.compile(r"^([A-Za-z0-9]+)-([0-9]+)(?:-.*)?$")
