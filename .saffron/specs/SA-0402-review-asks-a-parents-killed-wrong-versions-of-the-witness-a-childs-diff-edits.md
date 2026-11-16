@@ -212,7 +212,7 @@ export at `base_sha` (`saffron/cell/session.py:2363`). `task_dir` is
 (`saffron/cell/session.py:3406`). `witness_gate` records a witness the
 head suite did not collect as unproven and never applies its edit
 (`saffron/gates/core/witness.py:187-189`). `CellSpec` carries no `depends_on`
-(`saffron/cell/session.py:351-396`). `run_task` builds it from the spec
+(`saffron/cell/session.py:352-418`). `run_task` builds it from the spec
 field by field (`saffron/task.py:859-879`), and `intake.Spec` declares
 `depends_on` (`saffron/intake.py:244`).
 
