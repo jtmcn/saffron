@@ -4,7 +4,7 @@ title: "Nothing chooses which of a task's own killed wrong versions a review com
 type: feature
 priority: 3
 risk: standard
-estimated_lines: 282
+estimated_lines: 283
 estimate_measured: true
 pending_symbols:
   - saffron/parent_versions.py::own_version_pairs
@@ -64,9 +64,10 @@ acceptance:
       recorded `edit` and an empty `reason`, the shape
       `parent_version_pairs` returns. `parent` holds the spec's own id.
       The boolean is false. The witness parses spec `SP-1` with five
-      criteria. Their witnesses are on tests/test_a.py, tests/test_a.pyi,
-      tests/test_b.py, tests/test_c.py and tests/test_a.py again. The
-      first four declare one wrong version each, and the fifth declares
+      criteria. Their witnesses are the distinct node ids
+      tests/test_a.py::test_one, tests/test_a.pyi::test_two,
+      tests/test_b.py::test_three, tests/test_c.py::test_four and
+      tests/test_a.py::test_five. The first four declare one wrong version each, and the fifth declares
       none. Its diff modifies tests/test_a.py, then src/a.py, then
       tests/test_c.py. The record holds killed `k1`, a survived version
       and killed `k2` under the first witness. It holds one killed version
@@ -249,7 +250,9 @@ first-parent chain whose full message equals `pushed_sha`'s, or `None`
 (`saffron/repos/mirror.py:64-67`). `end_review._is_ancestor` raises
 `GitError` on any exit but 0 and 1 (`saffron/end_review.py:155-166`).
 On git 2.54 on the host, `git merge-base --is-ancestor` with forty zeros
-and `git cat-file -e` of forty zeros each exited 128 (measured).
+exited 128 (measured). `mirror.has_commit` answers whether the mirror
+holds a commit and returns false rather than raising
+(`saffron/repos/mirror.py:357-366`).
 `DIFF_FLAGS` carries `--no-renames` (`saffron/cell/worktree.py:207`).
 
 **Why the import waits until the call**. `commit_review` imports
@@ -273,12 +276,22 @@ both are in `pending_symbols`. `SA-0404` calls them from `run_regate`.
   pair and true.
 - `review_commit_diff(mirror, pushed_sha, baseline_sha, head)` in
   `saffron/regate.py`. Find the range's start as the criteria state. Ask
-  whether the mirror holds `pushed_sha` before any call that raises for
-  an unknown commit. Import `_rebased_copy` inside the function body, for
-  the reason the context gives. Read each side's changed paths with
-  `DIFF_FLAGS` and `--name-only -z`. Pass the shared paths after `--`
-  with `--literal-pathspecs`, and return empty before `git diff` when
-  none is shared.
+  `git_mirror.has_commit` before any ancestry call. Test ancestry with
+  `end_review._is_ancestor`, which raises on exit 128. Importing
+  `end_review` at module scope does not cycle. Import `_rebased_copy`
+  inside the function body, for the reason the context gives. Its
+  arguments run `(mirror, head, pushed_sha)`, the reverse of this
+  function's order. Read each side's changed paths with `DIFF_FLAGS` and
+  `--name-only -z`. Return empty before `git diff` when no path is
+  shared. Otherwise pass the shared paths after `--`.
+  `--literal-pathspecs` is a global git option and goes before `diff`,
+  as in `_git(mirror, "--literal-pathspecs", "diff", *DIFF_FLAGS, ...)`.
+  `_git` puts `git -C <repo>` in front (`saffron/repos/mirror.py:64-65`).
+  On the host's git 2.54, `git --literal-pathspecs diff` exited 0 and
+  `git diff --literal-pathspecs` exited 129 (measured).
+- `parent_versions.py`'s module docstring speaks only of a child's diff.
+  Add one sentence saying a task's own review commit puts its own killed
+  versions back in play too.
 
 Keeping only the paths `baseline_sha..head` also changes is what keeps a
 merge from the base branch out. That merge's files are in the review
@@ -327,7 +340,7 @@ checkout with a `main` branch, which `review_commit_diff` reads as its
 mirror. No bare origin, no ledger and no `gh` fake is needed. Give the
 packaged commit a message no other commit repeats. Keep a branch on the
 original packaged commit after the rebase, as
-`tests/test_commit_review.py:474` does, or the restacked case turns into
+`tests/test_commit_review.py:510` does, or the restacked case turns into
 the absent one. Make the renamed file long enough for git to read the
 pair as a rename. The module docstring says every witness drives a bare
 origin and a checkout, so add one sentence naming the checkout-only
@@ -340,8 +353,9 @@ or a sentence over 25 words.
 **Git's own behaviour**. Each git fact these criteria rest on was seen
 on the host's git 2.54 alone. That covers rename pairing without
 `--no-renames`, an empty pathspec printing the whole diff, and
-`--literal-pathspecs`. The cell image carries git 2.39.5, so the
-witnesses are what settle it there.
+the placement of `--literal-pathspecs`. The cell image carries git
+2.39.5, and none of these facts was measured there. The witnesses
+settle them in the cell.
 
-**Size**. A prototype measured 298 changed tokens outside `tests/` and
-828 under it, about 282 changed lines.
+**Size**. A prototype measured 302 changed tokens outside `tests/` and
+828 under it, about 283 changed lines.
