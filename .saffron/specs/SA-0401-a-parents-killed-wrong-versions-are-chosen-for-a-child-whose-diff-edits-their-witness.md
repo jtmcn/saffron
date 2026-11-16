@@ -196,7 +196,7 @@ for a directory that does not exist (`saffron/intake.py:580-581`).
 instead (`saffron/scheduler.py:652-654`). Its `retired=True` keeps a
 retired spec as it shipped (`saffron/intake.py:560-561`). `Mutant` holds
 `file`, `find`, `replace` and an optional `case` that `model_dump` leaves
-out when it is `None` (`saffron/intake.py:93-112`). `intake.Spec` declares
+out when it is `None` (`saffron/intake.py:96-147`). `intake.Spec` declares
 `depends_on` (`saffron/intake.py:244`). The integrity gate's diff parser,
 `_split_blocks` and `_parse_block`, splits a diff by its `diff --git`
 headers (`saffron/gates/core/integrity.py:151`, `:170`). `revert` already
