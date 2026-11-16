@@ -376,6 +376,9 @@ class CellSpec:
     # `intake.Spec.renames`, read by `census_gate` and `revert_gate` through the
     # `SuiteSpec` protocol (`SA-0387`, `SA-0389`). Empty where the spec declares none.
     renames: dict[str, str] = field(default_factory=dict)
+    # `intake.Spec.depends_on`, read by `parent_versions.parent_version_pairs`
+    # to ask REVIEW each parent's own killed wrong versions again (`SA-0402`).
+    depends_on: list[str] = field(default_factory=list)
     # Kept in step with `intake.Spec`, which is where a run's ceilings are
     # declared and defaulted; `cli` passes all three, so these are reached only
     # by tests. Two defaults for one ceiling is a drift vector — they disagreed
@@ -2090,14 +2093,14 @@ def _apply_criterion_probes(
 ) -> None:
     """Applies every criterion probe's and wrong version's own edit, and asks its
     criterion's witness (items b-2750d5, b-7e69d0, b-78a590, b-7c88f8). `pairs` holds
-    one pair per probe of each criterion-probe entry, then each wrong version paired
-    with its criterion. Writes each pair's outcome and summary in place. A refused
-    pair's reason sits under `refusal`, from `probe_refusal`, the touches/subject
-    refusal, or `inert_edit` (`SA-0400`). A stopped or unenterable cell is
-    entered once more for whatever pairs are left. One still left after that reads
-    `error`, with its runtime error under `unasked`. Appends a survivor's `Finding` to
-    `reviews`'s `adequacy` lens, and asks it a second time of the whole `tests` gate too
-    (backlog b-b9365d)."""
+    one pair per probe of each criterion-probe entry, each wrong version paired with
+    its criterion, then each parent's killed wrong version (`SA-0402`). Writes each
+    pair's outcome and summary in place. A refused pair's reason sits under `refusal`,
+    from `probe_refusal`, the touches/subject refusal, or `inert_edit` (`SA-0400`). A
+    stopped or unenterable cell is entered once more for whatever pairs are left. One
+    still left after that reads `error`, with its runtime error under `unasked`.
+    Appends a survivor's `Finding` to `reviews`'s `adequacy` lens, and asks it a
+    second time of the whole `tests` gate too (backlog b-b9365d)."""
     from saffron import probe as probe_check
     from saffron.cell import worktree
     from saffron.gates import runner
@@ -2233,7 +2236,11 @@ def _apply_criterion_probes(
                     entry["summary"] = "the survivor's line could not be read"
                     continue
                 finding = review.survivor_finding(
-                    criterion, edit, content, version=entry.get("version")
+                    criterion,
+                    edit,
+                    content,
+                    version=entry.get("version"),
+                    parent=entry.get("parent"),
                 )
                 (anchored,) = anchor(
                     [finding], diff, read_head=partial(worktree.read_at_head, container)
@@ -2327,7 +2334,7 @@ def _drive_cell(
     on_state: Callable[[LiveState], None] | None = None,
 ) -> CellOutcome:
     """`run_one_cell`'s whole body. `exported` is teardown's way out."""
-    from saffron import preflight
+    from saffron import parent_versions, preflight
     from saffron.agents import artifacts, context
     from saffron.cell import proxy, runtime, worktree
     from saffron.gates.core.criteria import witnesses_green_at_base
@@ -3567,6 +3574,16 @@ def _drive_cell(
                         for version in wv_entry["versions"]:
                             pairs.append((criterion, version))
 
+                    # After the spec's own pairs: each parent's own killed
+                    # wrong version, of a witness this diff edits (`SA-0402`).
+                    parent_pairs, parent_unread = parent_versions.parent_version_pairs(
+                        depends_on=spec.depends_on,
+                        specs_dir=gates_dir / ".saffron" / "specs",
+                        out_dir=out_dir,
+                        diff=reviewed_diff,
+                    )
+                    pairs.extend(parent_pairs)
+
                     # Every named edit, applied and asked (items b-2750d5,
                     # b-7e69d0), before the records below are written.
                     _apply_criterion_probes(
@@ -3609,6 +3626,24 @@ def _drive_cell(
                             "REVIEW",
                             "REVIEW",
                             review.describe_wrong_versions(wrong_versions),
+                        )
+
+                    # No pair and no unread parent writes no record here
+                    # either (`SA-0402`).
+                    if parent_pairs or parent_unread:
+                        parent_entries = [entry for _criterion, entry in parent_pairs]
+                        (task_dir / "parent-versions.json").write_text(
+                            json.dumps(
+                                {"versions": parent_entries, "unread": parent_unread},
+                                indent=2,
+                            )
+                        )
+                        _phase_start(
+                            "REVIEW",
+                            "REVIEW",
+                            parent_versions.describe_parent_versions(
+                                parent_entries, parent_unread
+                            ),
                         )
 
                     # REVIEW's pool already bounded each session as it ended.

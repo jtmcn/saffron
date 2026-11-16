@@ -892,16 +892,21 @@ _WITNESS_ONLY_TAIL = ", and only that witness ran under the edit."
 
 
 def survivor_finding(
-    criterion: Criterion, edit: Mutant, content: str, *, version: str | None = None
+    criterion: Criterion,
+    edit: Mutant,
+    content: str,
+    *,
+    version: str | None = None,
+    parent: str | None = None,
 ) -> Finding:
     """The blocker filed when a criterion's own witness survives an edit
-    (backlog items b-2750d5, b-7e69d0). `content` is the file at head in the
-    cell that applied and restored the edit. The line is where `edit.find`
-    begins there, never a hunk line. `version` names the wrong version the
-    edit came from. Without it, the edit is read as the criterion's own.
+    (backlog items b-2750d5, b-7e69d0, `SA-0402`). `content` is the file at
+    head in the cell that applied and restored the edit. The line is where
+    `edit.find` begins there, never a hunk line. `version` names the wrong
+    version the edit came from, read as the criterion's own without it.
+    `parent` names whose version it is, read as the spec's own without it.
     `survivor_claim_with_suite_verdict` can extend the claim afterward
     (backlog b-b9365d), keeping only the text up to the quoted claim stable.
-
     Unanchored: the caller still runs this through `findings.anchor`, exactly
     as every other finding in a `LensReview` is."""
     line = content.count("\n", 0, content.index(edit.find)) + 1
@@ -913,9 +918,10 @@ def survivor_finding(
         )
         if version is None
         else (
-            f"{HOST_FILED}{criterion.witness} stayed green with the spec's "
-            f"wrong version {version!r} applied to {edit.file} as an edit. The claim "
-            f"was {criterion.claim!r}{_WITNESS_ONLY_TAIL}"
+            f"{HOST_FILED}{criterion.witness} stayed green with "
+            f"{parent or 'the spec'}'s wrong version {version!r} applied to "
+            f"{edit.file} as an edit. The claim was "
+            f"{criterion.claim!r}{_WITNESS_ONLY_TAIL}"
         )
     )
     return Finding(

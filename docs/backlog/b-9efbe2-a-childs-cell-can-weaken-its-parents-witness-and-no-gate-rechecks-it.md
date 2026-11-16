@@ -1,11 +1,12 @@
 ---
 id: b-9efbe2
 title: A child's cell can weaken its parent's witness, and no gate re-checks the parent's wrong versions
-status: open
+status: done
+closed: 2026-11-16
 tier: 2
 filed: 2026-10-12
 specs: [SA-0270, SA-0401, SA-0402]
-prs: [856]
+prs: [856, 1232, 1233]
 commits: []
 cites: [§5.4, §5.5]
 related: [b-20043f]
@@ -41,3 +42,7 @@ survives blocks the attempt, and the result names the parent and the version.
   run 70. A review commit on #1202 rewrote `SA-0389`'s clause, and the
   spec's wrong version 8 then passed the witness. Finish 88's end review
   found it, and `SA-0391` (#1204) pinned it.
+- 2026-11-16: `SA-0401` (#1232) chooses each killed wrong version a parent
+  recorded under a witness the child's diff edits. `SA-0402` (#1233) asks
+  them in REVIEW, and a survivor blocks naming its parent. A review commit
+  that edits a witness is still never asked them, which b-d9a027 carries.
