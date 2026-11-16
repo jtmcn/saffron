@@ -870,6 +870,7 @@ def run_task(
         declared_risk=spec.declared_risk,
         history=spec.history,
         renames=spec.renames,
+        depends_on=spec.depends_on,
         stacked_on=stacked_on,
         budget_usd=ceilings.budget_usd,
         max_attempts=ceilings.max_attempts,

@@ -2,13 +2,14 @@
 
 A parent's REVIEW already ran each declared wrong version once, against its
 own criterion's witness. When a child edits that witness, the wrong versions
-it once caught are worth asking again. This module only chooses the pairs.
-`SA-0402` runs them.
+it once caught are worth asking again. This module chooses the pairs and
+states the one line their asking earns. `SA-0402` runs them.
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -152,3 +153,28 @@ def parent_version_pairs(
         except _Unreadable:
             unreadable.append(name)
     return pairs, unreadable
+
+
+def describe_parent_versions(
+    entries: Sequence[Mapping[str, object]], unread: Sequence[str]
+) -> str:
+    """REVIEW's own line for the asked parent pairs (`SA-0402`). Every entry
+    counts as chosen. It then counts at most one more thing: `survived`, a
+    `refusal` key read as refused, or an `unproven` outcome with neither. A
+    killed or errored entry counts only as chosen. The tail names, in
+    `unread`'s own order, each parent whose record could not answer."""
+    chosen = len(entries)
+    survived = sum(1 for e in entries if e.get("outcome") == "survived")
+    refused = sum(1 for e in entries if e.get("refusal") is not None)
+    unproven = sum(
+        1
+        for e in entries
+        if e.get("outcome") == "unproven" and e.get("refusal") is None
+    )
+    line = (
+        f"parent wrong versions: {chosen} chosen, {survived} survived, "
+        f"{refused} refused, {unproven} unproven"
+    )
+    if unread:
+        line += "; no record read for " + ", ".join(unread)
+    return line

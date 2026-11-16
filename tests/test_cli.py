@@ -724,6 +724,18 @@ def test_a_specs_declared_renames_reach_the_cell(tmp_path, monkeypatch, capsys):
     assert cell_spec.renames == renames
 
 
+def test_a_specs_declared_depends_on_reaches_the_cell(tmp_path, monkeypatch, capsys):
+    """`saffron cell` hands the cell `depends_on` in the spec's own declared
+    order, for `parent_versions.parent_version_pairs` to read (`SA-0402`)."""
+    repo = _local_origin(tmp_path)
+    args = _namespace(repo, tmp_path)
+    args.spec = _ceiling_spec(tmp_path, depends_on="[SA-0002, SA-0001]")
+
+    cell_spec, _printed = _capture_cell_spec(monkeypatch, repo, tmp_path, args, capsys)
+
+    assert cell_spec.depends_on == ["SA-0002", "SA-0001"]
+
+
 def test_a_depends_on_reaches_the_cell_unstacked(tmp_path, monkeypatch, capsys):
     """`_run_cell` does consult `depends_on` now (`SA-0026`,
     `_resolve_stacked_on`) — but this repo's fresh `Ledger` has never seen

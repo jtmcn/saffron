@@ -14634,6 +14634,410 @@ def test_a_wrong_version_its_witness_survives_is_rebutted_as_a_blocker(
     ]
 
 
+# --- a child asking a parent's own killed wrong versions again (SA-0402) ---
+
+
+def _parent_spec_text(spec_id: str, witness: str, claim: str) -> str:
+    """A frontmatter-only parent spec: `type: bug`, so `touches` needs no
+    declaration, and one criterion whose `wrong_versions` is truthy, which
+    is all `_chosen_criteria` reads from the frontmatter itself."""
+    return (
+        f"---\nid: {spec_id}\ntitle: {spec_id} title\ntype: bug\n"
+        f"acceptance:\n  - claim: {claim}\n    witness: {witness}\n"
+        "    wrong_versions:\n      - placeholder\n---\n"
+    )
+
+
+def _parent_killed(version: str, file: str, find: str) -> dict:
+    """One killed version entry, the shape a parent's own `wrong-versions
+    .json` record holds (`SA-0401`)."""
+    return {
+        "version": version,
+        "edit": {"file": file, "find": find, "replace": "r"},
+        "reason": "",
+        "outcome": "killed",
+        "summary": "s",
+    }
+
+
+_GUARD_WITNESS = "tests/test_p.py::test_guard"
+_GONE_WITNESS = "tests/test_p.py::test_gone"
+_PARENT_DIFF = (
+    "diff --git a/tests/test_p.py b/tests/test_p.py\n"
+    "--- a/tests/test_p.py\n"
+    "+++ b/tests/test_p.py\n"
+    "@@ -1 +1 @@\n"
+    "-old\n"
+    "+new\n"
+)
+
+
+def test_a_parents_killed_wrong_version_its_witness_now_survives_is_rebutted_as_a_blocker(
+    monkeypatch, tmp_path
+):
+    """After the spec's own pairs, REVIEW asks each parent's own killed
+    wrong version of a witness this diff edits, in the same probe cell.
+    `SP-1`'s two killed versions die again. `SP-3`'s lib/q.py edit does
+    not, and is filed as a host-filed blocker naming `SP-3`. `SP-2` and
+    `SP-5` cannot answer. `SP-3`'s two spec/ edits are refused before any
+    cell, and `SP-6`'s uncollected witness never reaches the mutator.
+    `SP-4`, not a parent, is never asked at all."""
+    from saffron import parent_versions as parent_versions_mod
+    from saffron.intake import Criterion, Mutant
+
+    criterion = Criterion(
+        claim="the guard holds", witness="t.py::a", wrong_versions=["only version"]
+    )
+    own_edit = {"file": "src/y.py", "find": "check(9)", "replace": "check(0)"}
+
+    specs_dir = tmp_path / "repo" / ".saffron" / "specs"
+    done_dir = specs_dir / "done"
+    done_dir.mkdir(parents=True)
+    (done_dir / "SP-1.md").write_text(
+        _parent_spec_text("SP-1", _GUARD_WITNESS, "sp1 holds")
+    )
+    (done_dir / "SP-2.md").write_text(
+        _parent_spec_text("SP-2", _GUARD_WITNESS, "sp2 holds")
+    )
+    (specs_dir / "SP-3.md").write_text(
+        _parent_spec_text("SP-3", _GUARD_WITNESS, "sp3 holds")
+    )
+    (done_dir / "SP-4.md").write_text(
+        _parent_spec_text("SP-4", _GUARD_WITNESS, "sp4 holds")
+    )
+    (done_dir / "SP-5.md").write_text(
+        _parent_spec_text("SP-5", _GUARD_WITNESS, "sp5 holds")
+    )
+    (done_dir / "SP-6.md").write_text(
+        _parent_spec_text("SP-6", _GONE_WITNESS, "sp6 holds")
+    )
+
+    out_dir = tmp_path / "out"
+    (out_dir / "SP-1").mkdir(parents=True)
+    (out_dir / "SP-1" / "wrong-versions.json").write_text(
+        json.dumps(
+            [
+                {
+                    "witness": _GUARD_WITNESS,
+                    "versions": [
+                        _parent_killed("p-v1", "src/p.py", "p1"),
+                        _parent_killed("p-v2", "src/p.py", "p2"),
+                    ],
+                }
+            ]
+        )
+    )
+    (out_dir / "SP-3").mkdir(parents=True)
+    (out_dir / "SP-3" / "wrong-versions.json").write_text(
+        json.dumps(
+            [
+                {
+                    "witness": _GUARD_WITNESS,
+                    "versions": [
+                        _parent_killed("v0", "lib/q.py", "x = 1"),
+                        _parent_killed("t-v0", "spec/t.py", "t1"),
+                        _parent_killed("u-v0", "spec/u.py", "u1"),
+                    ],
+                }
+            ]
+        )
+    )
+    (out_dir / "SP-4").mkdir(parents=True)
+    (out_dir / "SP-4" / "wrong-versions.json").write_text(
+        json.dumps(
+            [
+                {
+                    "witness": _GUARD_WITNESS,
+                    "versions": [_parent_killed("sp4-v0", "src/w.py", "w1")],
+                }
+            ]
+        )
+    )
+    (out_dir / "SP-5").mkdir(parents=True)
+    (out_dir / "SP-5" / "wrong-versions.json").write_text("{not json")
+    (out_dir / "SP-6").mkdir(parents=True)
+    (out_dir / "SP-6" / "wrong-versions.json").write_text(
+        json.dumps(
+            [
+                {
+                    "witness": _GONE_WITNESS,
+                    "versions": [
+                        _parent_killed("g-v0", "src/z.py", "z0"),
+                        _parent_killed("g-v1", "src/z.py", "z1"),
+                        _parent_killed("g-v2", "src/z.py", "z2"),
+                    ],
+                }
+            ]
+        )
+    )
+
+    cell = _stub_the_runtime(
+        monkeypatch,
+        patch=_PARENT_DIFF,
+        gate_cell_suite=[_tests_result("pass", collected=["t.py::a", _GUARD_WITNESS])],
+    )
+    _rebuttable(monkeypatch, cell, rebut_commits=0)
+    contents = {"lib/q.py": "x = 1\n"}
+
+    def _read_at_head(container, path):
+        return None if container == _CRITIC_CONTAINER else contents.get(path)
+
+    monkeypatch.setattr("saffron.cell.worktree.read_at_head", _read_at_head)
+
+    subsets: list[list[str]] = []
+    _stub_probe_gates(
+        monkeypatch,
+        cell,
+        gate_results=[
+            _tests_result("fail", collected=["t.py::a"]),
+            _tests_result("fail", collected=[_GUARD_WITNESS]),
+            _tests_result("fail", collected=[_GUARD_WITNESS]),
+            _tests_result("pass", collected=[_GUARD_WITNESS]),
+            _tests_result("pass", collected=["t.py::a", _GUARD_WITNESS]),
+        ],
+        subsets=subsets,
+    )
+
+    real_parent_version_pairs = parent_versions_mod.parent_version_pairs
+    pv_calls: list[dict] = []
+
+    def _spy_pairs(**kwargs):
+        pv_calls.append(kwargs)
+        return real_parent_version_pairs(**kwargs)
+
+    monkeypatch.setattr("saffron.parent_versions.parent_version_pairs", _spy_pairs)
+
+    real_critic_cell = session.critic_cell
+    cells_entered: list[str | None] = []
+
+    def _spy_critic(**kwargs):
+        cells_entered.append(kwargs["network"])
+        return real_critic_cell(**kwargs)
+
+    monkeypatch.setattr("saffron.cell.session.critic_cell", _spy_critic)
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_probe_turns(_turn(_probe_answer(None, "the diff needs no probe")))
+        + [
+            _turn(_wrong_version_answer((own_edit, "own reason"))),
+            _turn("I have addressed the findings."),
+            _turn(structured_output=_CLAIMED_FIX),
+        ],
+        spec=_spec(
+            acceptance=[criterion],
+            depends_on=["SP-1", "SP-2", "SP-3", "SP-5", "SP-6"],
+        ),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome.state == "REBUTTAL_UNJUDGED"
+    assert subsets == [
+        ["t.py::a"],
+        [_GUARD_WITNESS],
+        [_GUARD_WITNESS],
+        [_GUARD_WITNESS],
+        [],
+    ]
+    assert cell.mutated == [
+        Mutant.model_validate(own_edit),
+        Mutant.model_validate({"file": "src/p.py", "find": "p1", "replace": "r"}),
+        Mutant.model_validate({"file": "src/p.py", "find": "p2", "replace": "r"}),
+        Mutant.model_validate({"file": "lib/q.py", "find": "x = 1", "replace": "r"}),
+        Mutant.model_validate({"file": "lib/q.py", "find": "x = 1", "replace": "r"}),
+    ]
+    assert cells_entered == [None, "saffron-critic-net-sy-1", None]
+
+    assert len(pv_calls) == 1
+    assert pv_calls[0] == {
+        "depends_on": ["SP-1", "SP-2", "SP-3", "SP-5", "SP-6"],
+        "specs_dir": tmp_path / "out" / "SY-1" / "gates" / ".saffron" / "specs",
+        "out_dir": tmp_path / "out",
+        "diff": _PARENT_DIFF,
+    }
+
+    own_record = json.loads(
+        (tmp_path / "out" / "SY-1" / "wrong-versions.json").read_text()
+    )
+    assert own_record == [
+        {
+            "witness": "t.py::a",
+            "claim": "the guard holds",
+            "cost_usd": pytest.approx(0.1),
+            "error": None,
+            "versions": [
+                {
+                    "version": "only version",
+                    "edit": own_edit,
+                    "reason": "own reason",
+                    "outcome": "killed",
+                    "summary": "1 of 1 witness(es) died under their own wrong version",
+                }
+            ],
+        }
+    ]
+    assert "REVIEW: wrong versions: 1 declared, 1 expressed, 0 refused" in cell.watched
+
+    record = json.loads(
+        (tmp_path / "out" / "SY-1" / "parent-versions.json").read_text()
+    )
+    assert record["unread"] == ["SP-2", "SP-5"]
+    assert len(record["versions"]) == 8
+    by_version = {v["version"]: v for v in record["versions"]}
+
+    assert by_version["p-v1"]["outcome"] == "killed"
+    assert by_version["p-v1"]["parent"] == "SP-1"
+    assert by_version["p-v2"]["outcome"] == "killed"
+    assert by_version["v0"]["outcome"] == "survived"
+    assert by_version["v0"]["parent"] == "SP-3"
+    assert by_version["t-v0"]["outcome"] == "unproven"
+    assert by_version["t-v0"]["refusal"] is not None
+    assert by_version["u-v0"]["outcome"] == "unproven"
+    assert by_version["u-v0"]["refusal"] is not None
+    for name in ("g-v0", "g-v1", "g-v2"):
+        assert by_version[name]["outcome"] == "unproven"
+        assert "refusal" not in by_version[name]
+
+    review_lines = [
+        w for w in cell.watched if w.startswith("REVIEW: parent wrong versions:")
+    ]
+    assert review_lines == [
+        "REVIEW: parent wrong versions: 8 chosen, 1 survived, 2 refused, "
+        "3 unproven; no record read for SP-2, SP-5"
+    ]
+
+    rebuttal = json.loads((tmp_path / "out" / "SY-1" / "rebuttal.json").read_text())
+    (blocker,) = rebuttal["blockers"]
+    assert blocker["probe_verdict"] == "survived"
+    assert blocker["file"] == "lib/q.py"
+    assert blocker["line"] == 1
+    assert blocker["claim"] == (
+        f"{review.HOST_FILED}{_GUARD_WITNESS} stayed green with SP-3's wrong "
+        "version 'v0' applied to lib/q.py as an edit. The claim was "
+        "'sp3 holds', and the whole `tests` gate stayed green under the "
+        "edit too."
+    )
+
+
+def test_review_records_parent_versions_only_when_a_pair_or_an_unread_parent_exists(
+    monkeypatch, tmp_path
+):
+    """`parent-versions.json` and its line exist exactly when a parent pair
+    or an unread parent exists, whether or not the spec itself declares
+    wrong versions. `SP-3`'s witness names a file this diff leaves alone,
+    so it is never even attempted."""
+    other_witness = "tests/test_other.py::test_other"
+
+    def _seed(root):
+        done_dir = root / "repo" / ".saffron" / "specs" / "done"
+        done_dir.mkdir(parents=True)
+        (done_dir / "SP-1.md").write_text(
+            _parent_spec_text("SP-1", _GUARD_WITNESS, "sp1 holds")
+        )
+        (done_dir / "SP-2.md").write_text(
+            _parent_spec_text("SP-2", _GUARD_WITNESS, "sp2 holds")
+        )
+        (done_dir / "SP-3.md").write_text(
+            _parent_spec_text("SP-3", other_witness, "sp3 holds")
+        )
+        out_dir = root / "out"
+        (out_dir / "SP-1").mkdir(parents=True)
+        (out_dir / "SP-1" / "wrong-versions.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "witness": _GUARD_WITNESS,
+                        "versions": [_parent_killed("only", "src/p.py", "p1")],
+                    }
+                ]
+            )
+        )
+        (out_dir / "SP-3").mkdir(parents=True)
+        (out_dir / "SP-3" / "wrong-versions.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "witness": other_witness,
+                        "versions": [_parent_killed("only2", "src/o.py", "o1")],
+                    }
+                ]
+            )
+        )
+
+    outcomes = []
+    for spec_id, depends_on, gate_results in (
+        ("SY-1", ["SP-1"], [_tests_result("fail", collected=[_GUARD_WITNESS])]),
+        ("SY-2", ["SP-2"], None),
+        ("SY-3", ["SP-3"], None),
+        ("SY-4", [], None),
+    ):
+        root = tmp_path / spec_id
+        _seed(root)
+        cell = _stub_the_runtime(
+            monkeypatch,
+            patch=_PARENT_DIFF,
+            gate_cell_suite=[
+                _tests_result("pass", collected=["t.py::a", _GUARD_WITNESS])
+            ],
+        )
+        if gate_results is not None:
+            _stub_probe_gates(monkeypatch, cell, gate_results=gate_results)
+        outcome, _ledger = _drive(
+            monkeypatch,
+            root,
+            cell=cell,
+            turns=_probe_turns(),
+            spec=_spec(spec_id=spec_id, depends_on=depends_on),
+            policy=_PROBE_POLICY,
+            gates=("tests",),
+        )
+        outcomes.append((spec_id, root, outcome, cell))
+
+    for _spec_id, _root, outcome, _cell in outcomes:
+        assert outcome.state == "READY_FOR_REVIEW"
+
+    for spec_id, root, _outcome, _cell in outcomes[:2]:
+        assert (root / "out" / spec_id / "parent-versions.json").exists()
+    for spec_id, root, _outcome, _cell in outcomes[2:]:
+        assert not (root / "out" / spec_id / "parent-versions.json").exists()
+
+    # A wrongly `survived` outcome reads as `error` here, uncounted by the
+    # line above either way, so the entry itself must say `killed`.
+    record1 = json.loads(
+        (outcomes[0][1] / "out" / "SY-1" / "parent-versions.json").read_text()
+    )
+    assert record1["versions"] == [
+        {
+            "parent": "SP-1",
+            "witness": _GUARD_WITNESS,
+            "version": "only",
+            "edit": {"file": "src/p.py", "find": "p1", "replace": "r"},
+            "reason": "",
+            "outcome": "killed",
+            "summary": "1 of 1 witness(es) died under their own wrong version",
+        }
+    ]
+
+    cells = {spec_id: cell for spec_id, _root, _outcome, cell in outcomes}
+    assert [
+        w for w in cells["SY-1"].watched if w.startswith("REVIEW: parent wrong")
+    ] == ["REVIEW: parent wrong versions: 1 chosen, 0 survived, 0 refused, 0 unproven"]
+    assert [
+        w for w in cells["SY-2"].watched if w.startswith("REVIEW: parent wrong")
+    ] == [
+        "REVIEW: parent wrong versions: 0 chosen, 0 survived, 0 refused, 0 "
+        "unproven; no record read for SP-2"
+    ]
+    assert [
+        w for w in cells["SY-3"].watched if w.startswith("REVIEW: parent wrong")
+    ] == []
+    assert [
+        w for w in cells["SY-4"].watched if w.startswith("REVIEW: parent wrong")
+    ] == []
+
+
 # --- an inert edit is refused before any witness reads it (SA-0396) ---
 
 _INERT_PROBE_POLICY = _PROBE_POLICY + (
