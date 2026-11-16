@@ -4,7 +4,7 @@ title: "REVIEW never asks a parent's killed wrong versions again when a child's 
 type: feature
 priority: 3
 risk: elevated
-estimated_lines: 295
+estimated_lines: 312
 estimate_measured: true
 depends_on: [SA-0401, SA-0400]
 consumes:
@@ -59,38 +59,45 @@ acceptance:
       `CellSpec.depends_on`, the `.saffron/specs` it exported under
       `gates_dir`, `out_dir` and `reviewed_diff`. A parent pair whose edit
       lies outside the spec's `touches` is still asked. A survivor is a
-      host-filed `adequacy` blocker whose claim names the parent and the
+      host-filed `adequacy` blocker whose claim names its own parent and
       version, as `<parent>'s wrong version`. The task writes
       `parent-versions.json` after the edits are asked. It holds
       `versions`, each parent entry with its `outcome` and `summary`, and
       `unread`, the unread parents. One REVIEW line reads `parent wrong
-      versions: <n> asked, <s> survived, <u> unproven`, then `; no record
-      read for` and the unread parents joined by commas. The spec's own
+      versions: <c> chosen, <s> survived, <r> refused, <u> unproven`.
+      Chosen counts every parent pair. Survived counts an outcome of
+      `survived`. Refused counts a pair refused before any cell, which
+      carries a `refusal` key. Unproven counts an outcome of `unproven`
+      with no `refusal` key. No pair counts in two of the last three, and
+      a killed pair counts only as chosen. Then come `; no record read
+      for` and the unread parents joined by commas. The spec's own
       `wrong-versions.json` and its REVIEW line hold its own versions
       alone. The witness drives one cell through REVIEW. Its diff edits
       tests/test_p.py alone. The spec declares one criterion on `t.py::a`
-      with one wrong version, which its session expresses as an edit on
+      with one wrong version. Its criterion-probe session names no edit,
+      and its wrong-version session expresses the version as an edit on
       src/y.py. `depends_on` is `SP-1`, `SP-2`, `SP-3`, `SP-5` and `SP-6`.
       `SP-1`, `SP-2`, `SP-5` and `SP-6` are retired, and `SP-3` is queued.
-      A retired non-parent `SP-4` has its witness on tests/test_p.py and
-      records one killed version, which is never asked. Each parent has
-      one criterion. `SP-6`'s witness `test_gone` on tests/test_p.py is
-      not among the tests the head suite collected, and it records one
-      killed version. Every other witness is `test_guard` on
-      tests/test_p.py, which the suite collected. `SP-1` records two
-      killed versions on src/p.py. `SP-3` records one on lib/q.py, outside
-      `touches`, and one on spec/t.py, a declared test path. `SP-2` has no
-      record, and `SP-5`'s is broken JSON. The `tests` gate kills the
-      spec's own edit, `SP-1`'s first and `SP-3`'s lib/q.py edit.
-      `SP-1`'s second survives. A spy on `parent_version_pairs` records
-      its keyword arguments and calls through. The witness asserts the
-      spy's one call, the mutator's exact sequence and each `tests` subset.
-      It asserts the whole record. `SP-3`'s spec/t.py version is
+      Each parent has one criterion, which declares one wrong version. A
+      retired non-parent `SP-4` has its witness on tests/test_p.py and
+      records one killed version, which is never asked. `SP-6`'s witness
+      `test_gone` on tests/test_p.py is not among the tests the head suite
+      collected, and it records one killed version. Every other witness is
+      `test_guard` on tests/test_p.py, which the suite collected. `SP-1`
+      records two killed versions on src/p.py. `SP-3` records one on
+      lib/q.py, outside `touches`, and then one on spec/t.py, a declared
+      test path. `SP-2` has no record, and `SP-5`'s is broken JSON. The
+      `tests` gate kills the spec's own edit and both of `SP-1`'s.
+      `SP-3`'s lib/q.py edit survives. A spy on `parent_version_pairs`
+      records its keyword arguments and calls through. The witness asserts
+      the spy's one call, the mutator's exact sequence and each `tests`
+      subset. It asserts the whole record. `SP-3`'s spec/t.py version is
       `unproven` under its refusal. `SP-6`'s version is `unproven` with no
       `refusal` key, and never reaches the mutator. It asserts the line
-      `parent wrong versions: 5 asked, 1 survived, 2 unproven; no record
-      read for SP-2, SP-5`. It asserts the spec's own record and line, and the one
-      blocker's claim, file and line in `rebuttal.json`.
+      `parent wrong versions: 5 chosen, 1 survived, 1 refused, 1
+      unproven; no record read for SP-2, SP-5`. It asserts the spec's own
+      record and line. It asserts the one blocker in `rebuttal.json`,
+      naming `SP-3`'s wrong version `v0` on lib/q.py line 1.
     witness: tests/test_session.py::test_a_parents_killed_wrong_version_its_witness_now_survives_is_rebutted_as_a_blocker
     wrong_versions:
       - The call passing an empty `depends_on`, so no parent is read.
@@ -98,11 +105,13 @@ acceptance:
       - Each parent's record read under the child's own task folder, so every parent reads as unread.
       - The parent pairs put ahead of the spec's own, so the spec's edit is no longer applied first.
       - The finding built without the parent, so its claim says the spec's own wrong version.
+      - The blocker naming the first `depends_on` entry, so it says `SP-1`.
       - The record's entries copied before `_apply_criterion_probes` runs, so none carries an outcome.
       - The unread parents left out of the record.
       - The line counting killed versions as survived.
       - The line leaving unproven versions uncounted.
-      - The line counting only refused versions as unproven, so `SP-6`'s is missed.
+      - The line counting a refused pair as unproven too, so it says 2 unproven.
+      - The line leaving refused pairs uncounted.
       - The line naming only the first unread parent.
       - "`SA-0400`'s scope rule applied to parent pairs, so the edit on lib/q.py is refused."
       - The parent entries folded into the spec's own `wrong-versions.json`.
@@ -110,21 +119,26 @@ acceptance:
       REVIEW writes `parent-versions.json` and its line exactly when there
       is a parent pair or an unread parent, whether or not the spec
       declares wrong versions of its own. With no unread parent the line
-      carries no `; no record read for` tail. The witness drives three
+      carries no `; no record read for` tail. The witness drives four
       cells whose specs declare no criterion. Each diff edits
-      tests/test_p.py, and retired `SP-1` and `SP-2` each have a witness
-      there. `SP-1` records one killed version and `SP-2` has no record.
-      The first cell's `depends_on` is `SP-1`, the second's `SP-2`, and the
-      third's is empty. It asserts each cell ends `READY_FOR_REVIEW`. It
-      asserts the lines `parent wrong versions: 1 asked, 0 survived, 0
-      unproven` and `parent wrong versions: 0 asked, 0 survived, 0
-      unproven; no record read for SP-2`, and no line for the third. It
-      asserts the record exists for the first two cells and not the third.
+      tests/test_p.py. Retired `SP-1` and `SP-2` each have one criterion
+      with one wrong version and its witness `test_guard` there, which the
+      head suite collected. Retired `SP-3` has the same, but its witness
+      is on tests/test_other.py, which the diff leaves alone. `SP-1` and
+      `SP-3` each record one killed version, and `SP-2` has no record. The
+      `tests` gate kills `SP-1`'s version. The cells' `depends_on` are
+      `SP-1`, `SP-2`, `SP-3` and empty, in that order. It asserts each cell
+      ends `READY_FOR_REVIEW`. It asserts the lines `parent wrong versions:
+      1 chosen, 0 survived, 0 refused, 0 unproven` and `parent wrong
+      versions: 0 chosen, 0 survived, 0 refused, 0 unproven; no record
+      read for SP-2`, and no line for the last two. It asserts the record
+      exists for the first two cells and not the last two.
     witness: tests/test_session.py::test_review_records_parent_versions_only_when_a_pair_or_an_unread_parent_exists
     wrong_versions:
-      - The record written for every cell, so the third cell writes one.
-      - The record written only when there is a pair, so the second cell writes none.
-      - The record written only when a parent is unread, so the first cell writes none.
+      - The record written for every cell, so the last two write one.
+      - The record written whenever `depends_on` is non-empty, so the `SP-3` cell writes one.
+      - The record written only when there is a pair, so the `SP-2` cell writes none.
+      - The record written only when a parent is unread, so the `SP-1` cell writes none.
       - The record written only when there are both, so neither of the first two writes one.
       - The parent pairs gathered only when the spec declares wrong versions, so no cell writes a record.
       - The unread tail always appended, so the first line ends with an empty `; no record read for`.
@@ -234,7 +248,9 @@ it inside the lines it holds.
 
 - **A review commit**. #1202 rewrote `SA-0389`'s clause in a review commit, and no cell judged it. `saffron regate` could ask the same versions of a pull request's head. That is a later spec.
 - **A fix in REBUT**. The post-rebuttal probe counts kills only among tests the diff adds, and a parent's witness exists at base. Its verdict on a parent survivor reaches no lens verdict.
-- **An `error` outcome**. A parent pair the probe cell could not ask counts as asked and in neither count. No witness drives it.
+- **An `error` outcome**. A parent pair the probe cell could not ask counts as chosen and in no other count. No witness drives it.
+- **A withdrawn parent survivor**. A lens can withdraw a parent survivor's blocker in REBUT, as it can any survivor of a criterion that is not `preserves`. Guarding it as `_guarded_blockers` guards a `preserves` one is a later spec.
+- **The pull request body**. It names no parent outcome and no unread parent, because `saffron/report/**` is forbidden here.
 - **`reviewed_diff` against `patch_to_review`**. The session stub exports one patch for both, so no witness tells them apart.
 - **Which parents count and which versions**. That is `SA-0401`'s, and this spec forbids its test file.
 - **A `retired_first`**. This spec adds no refusal of a spec.
@@ -242,14 +258,16 @@ it inside the lines it holds.
 
   > When the diff edits a file a parent's witness names, the host asks
   > that witness each version the parent's own record killed. A survivor
-  > names its parent (`SA-0401`, `SA-0402`).
+  > names its parent. The REVIEW line counts them chosen, survived,
+  > refused and unproven (`SA-0401`, `SA-0402`).
 
   `CONTEXT.md`'s Wrong version entry gains one sentence after the one
   ending `REVIEW's line counts it as refused.`
 
   > A child whose diff edits its parent's witness file is asked the
   > parent's killed versions too. Their outcomes are recorded in
-  > `parent-versions.json` (`SA-0402`).
+  > `parent-versions.json`, and REVIEW's line counts the refused apart
+  > from the unproven (`SA-0402`).
 
 ## Notes for the agent
 
@@ -270,10 +288,10 @@ records under `<root> / "out" / <id>`. Use `_PROBE_POLICY`, whose test
 path is `spec/**`. `_spec` declares `touches` `src/**` and `tests/**`
 (`tests/test_session.py:253`), so lib/q.py lies outside them. Pass `_stub_the_runtime` the diff as `patch` and its
 file as `changed`, with `t.py::a` and `test_guard` in `collected` and not `test_gone`. Stub `read_at_head`
-so the survivor's `find` is on line 2 of src/p.py. The survivor is applied
+so the survivor's `find` is on line 1 of lib/q.py. The survivor is applied
 twice, once for its witness and once for the whole `tests` gate. So the
-first witness scripts the gate results `fail`, `fail`, `pass`, `pass`,
-`fail`. Install the spy with `monkeypatch.setattr` on the
+first witness scripts the gate results `fail`, `fail`, `fail`, `pass`,
+`pass`. Install the spy with `monkeypatch.setattr` on the
 `saffron.parent_versions` module. In the second witness drive each cell
 under its own `tmp_path` subdirectory, with `_probe_turns()` and no
 rebuttal turns.
@@ -286,5 +304,5 @@ uses `_ceiling_spec` and `_capture_cell_spec`.
 with an em dash, a semicolon, a contraction, the perfect tense or a
 sentence over 25 words.
 
-**Size**. A prototype on both parents measured 200 changed tokens outside
-`tests/` and 980 under it, about 295 changed lines.
+**Size**. A prototype on both parents measured 230 changed tokens outside
+`tests/` and 1019 under it, about 312 changed lines.
