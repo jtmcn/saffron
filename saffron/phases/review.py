@@ -654,7 +654,7 @@ def describe_criterion_probes(entries: Sequence[Mapping[str, object]]) -> str:
     `describe_wrong_versions` counts versions across every entry. A probe
     with an edit and no `refusal` is named, and a null-edit probe is
     unnamed. One carrying a `refusal` is refused, whether `probe_refusal`,
-    its own touches/subject check, or `inert_edit` filed it (`SA-0396`,
+    the host's touches/subject refusal, or `inert_edit` filed it (`SA-0396`,
     `SA-0400`). `_unasked_tail` adds a further tail for a named probe its
     fresh cell left unasked. The last tail names, in entry order, the
     witness of each entry whose session never answered the schema."""

@@ -15987,8 +15987,9 @@ def test_a_criterion_probe_outside_the_specs_touches_is_refused_before_any_cell(
 ):
     """A criterion probe's own edit is refused, before the mutator, when its
     normalised file matches no `touches` glob and is not its own criterion's
-    `subject`. The check runs after `probe_refusal`, never on a wrong
-    version, and a refused pair joins no later step (`SA-0400`)."""
+    `subject`. The refusal runs after `probe_refusal`, never on a wrong
+    version, and a refused pair joins no later step. A second call with that
+    one refused pair alone enters no cell (`SA-0400`)."""
     from saffron.intake import Criterion
 
     touches_spec = _spec(touches=["src/*.py", "lib/one.py", "pkg/**"])
@@ -16105,29 +16106,18 @@ def test_a_criterion_probe_outside_the_specs_touches_is_refused_before_any_cell(
         "criterion probes: 7 named over 2 criteria, 0 unnamed, 8 refused"
     )
 
-
-def test_a_list_of_only_scope_refused_criterion_probes_enters_no_cell(monkeypatch):
-    """A `pairs` list left with nothing but touches/subject refusals never
-    reaches the mutator, so no cell is entered at all (`SA-0400`)."""
-    from saffron.intake import Criterion
-
-    touches_spec = _spec(touches=["src/*.py"])
-    criterion = Criterion(claim="claim a", witness="t.py::a")
-    pairs = [(criterion, {"edit": _scope_edit("other/s.py")})]
-
+    alone = [(no_subject, {"edit": _scope_edit("other/s.py")})]
     log, kwargs_log, _review_result, _created = _run_apply_criterion_probes(
         monkeypatch,
-        pairs,
-        enters=[],
+        alone,
+        enters=["unused"],
         run_gate=[],
         mutate=lambda *_a: (_ for _ in ()).throw(AssertionError("entered a cell")),
         spec=touches_spec,
     )
     assert log == []
     assert kwargs_log == []
-    (entry,) = (e for _c, e in pairs)
-    assert entry["outcome"] == "unproven"
-    assert entry["refusal"] == _touches_reason("other/s.py")
+    assert alone[0][1]["refusal"] == _touches_reason("other/s.py")
 
 
 def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_probes(

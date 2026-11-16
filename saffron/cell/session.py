@@ -2092,8 +2092,8 @@ def _apply_criterion_probes(
     criterion's witness (items b-2750d5, b-7e69d0, b-78a590, b-7c88f8). `pairs` holds
     one pair per probe of each criterion-probe entry, then each wrong version paired
     with its criterion. Writes each pair's outcome and summary in place. A refused
-    pair's reason sits under `refusal`, from `probe_refusal`, a probe's own
-    touches/subject check, or `inert_edit` (`SA-0400`). A stopped or unenterable cell is
+    pair's reason sits under `refusal`, from `probe_refusal`, the touches/subject
+    refusal, or `inert_edit` (`SA-0400`). A stopped or unenterable cell is
     entered once more for whatever pairs are left. One still left after that reads
     `error`, with its runtime error under `unasked`. Appends a survivor's `Finding` to
     `reviews`'s `adequacy` lens, and asks it a second time of the whole `tests` gate too
