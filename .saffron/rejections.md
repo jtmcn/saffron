@@ -3167,3 +3167,21 @@ critic's own, so they have no line.
 - `SA-0400` (#1228): three docstrings called the refusal a check, and one
   credited the probe with the host's refusal. **Bucket 2**. **Landed:** a
   review commit on #1228.
+
+## 2026-11-16, spec loop run 75 (#1232, #1233)
+
+- `SA-0401` (#1232): the witness checked a killed entry's reason only where
+  the record held one, so a copied recorded reason passed it. **Bucket 1**.
+  **Landed:** a review commit on #1232.
+- `SA-0401` (#1232): an entry witness named without its file passed, so a
+  witness on another file could be chosen. **Bucket 1**. **Landed:** a review
+  commit on #1232.
+- `SA-0401` (#1232): `names_file` read a non-ASCII letter as the end of a
+  path, and a diff `integrity` refuses raised out of the module. **Bucket 1**.
+  **Landed:** a review commit on #1232.
+- `SA-0402` (#1233): the witness read `parent-versions.json` field by field,
+  so dropped fields, a reversed order and a blank refusal summary passed it.
+  **Bucket 1**. **Landed:** a review commit on #1233.
+- `SA-0402` (#1233): a docstring named two sources of pairs where there are
+  three, one said "errored", and one comment pointed at the wrong line.
+  **Bucket 2**. **Landed:** a review commit on #1233.
