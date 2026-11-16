@@ -177,8 +177,9 @@ acceptance:
   - claim: >-
       `review_commit_diff` returns an empty string when `head` is the
       packaged commit or its rebased copy. The witness first asserts that
-      the first criterion's head returns a non-empty diff on the same
-      checkout. It then asserts empty for `head` equal to `pushed_sha`,
+      criterion 3's head returns a non-empty diff on the same checkout,
+      one builder making both that head and criterion 4's rebased copy.
+      It then asserts empty for `head` equal to `pushed_sha`,
       and for `head` equal to the rebased copy.
     witness: tests/test_regate.py::test_review_commit_diff_is_empty_for_a_head_that_is_the_packaged_commit
     wrong_versions:
@@ -188,8 +189,9 @@ acceptance:
       when the mirror holds no packaged commit `head` carries. That is a
       `pushed_sha` that is `None`, empty, forty zeros, or a commit the
       mirror holds that is neither an ancestor of `head` nor copied onto
-      its first-parent chain. The witness first asserts that the first
-      criterion's head returns a non-empty diff on the same checkout. It
+      its first-parent chain. That last is a commit on its own branch
+      from the base commit. The witness first asserts that criterion 3's
+      head returns a non-empty diff on the same checkout. It
       then asserts empty for each of the four.
     witness: tests/test_regate.py::test_review_commit_diff_is_empty_when_no_packaged_commit_is_on_head
     wrong_versions:
