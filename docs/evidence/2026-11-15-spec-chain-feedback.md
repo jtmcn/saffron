@@ -50,3 +50,35 @@ prototype.
     the case that also has the other.
 59. A claim that a path is normalised drives a spelling a prefix strip
     leaves alone.
+
+## SA-0401 and SA-0402 (b-9efbe2)
+
+The first draft measured 435 lines and `driver.py check` refused it, so it
+split into a parent and a child. The parent chooses a parent spec's killed
+wrong versions, and the child has REVIEW ask them. The host lost power
+during the child's draft, and only the committed prototype survived.
+
+**SA-0401, review 1: 4 concerns.** The writer revised. Each was a set
+driven through one member: the last diff block, a name-ordered unread
+list, a null edit, and a retired directory the spec never named missing.
+
+**SA-0401, review 2: 3 concerns.** The writer applied them, since only it
+held the prototype and its harness. One parent had one chosen criterion,
+an unreadable parent held no valid version, and the claim described less
+than the fixture built. Check 60 names the last class.
+
+**SA-0402, review 1: 1 blocker, 5 concerns.** The writer revised. The case
+with neither a pair nor an unread parent was driven only by an empty
+`depends_on`. The lone survivor was the first parent. The line counted
+refused pairs as asked.
+
+**SA-0402, review 2: 1 blocker, 1 concern.** The writer revised once more,
+and no third review ran. Every asserted line had equal counts, so a
+swapped slot passed. Check 61 names it.
+
+## Checks to build
+
+60. A claim states every fact of the fixture its witness builds that a
+    wrong version depends on.
+61. A line of several counts is asserted where each count differs from
+    every other.
