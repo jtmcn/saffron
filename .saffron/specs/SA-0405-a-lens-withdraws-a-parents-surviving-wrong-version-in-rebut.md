@@ -3,7 +3,7 @@ id: SA-0405
 title: A lens withdraws the host's blocker on a parent's surviving wrong version in REBUT
 type: feature
 priority: 3
-estimated_lines: 200
+estimated_lines: 214
 estimate_measured: true
 touches:
   - saffron/phases/rebut.py
@@ -44,23 +44,26 @@ acceptance:
   - claim: >-
       A `withdrawn` verdict on the host's survivor of a parent's wrong
       version never stands. A parent survivor is a blocker whose claim
-      starts with `review.HOST_FILED`, then the witness, then ` stayed green
-      with `, then a name other than `the spec`, then `'s wrong version `.
+      starts with `review.HOST_FILED`, then the witness, then the first
+      ` stayed green with `, then a name other than `the spec`, then `'s
+      wrong version `.
       Its witness need not be any criterion's in `acceptance`. The host
       reads the verdict as `confirmed`, with the parent sentence under
       **The reason** ahead of the lens's own reason. It records the refusal
       in `withdrawal_refusals` under its lens, with the same two keys as
       today. That holds for a first answer that is `fixed` with HEAD moved,
       `fixed` with HEAD unmoved, argued with HEAD moved or unmoved, or
-      missing. It holds for the claim's three tails, the witness-only one,
+      missing with HEAD moved or unmoved. It holds for the claim's three tails, the witness-only one,
       the whole `tests` gate killing, and the whole `tests` gate green. It
       holds for a parent named `SA-1` and one named `SP-2`, and for a
       version whose `repr` is single-quoted and one double-quoted. A
       parent survivor whose witness is a `preserves` criterion's is refused
-      the same way, with the parent sentence. Six withdrawals in the same
+      the same way, with the parent sentence. Seven withdrawals in the same
       call stand unchanged. They are the spec's own wrong version, a
       criterion's own edit whose claim quotes `SA-1's wrong version`, the
-      spec's own version whose text holds `SA-1's wrong version here`, a
+      spec's own version whose text holds `SA-1's wrong version here`, the
+      spec's own version whose text holds ` stayed green with SA-1's wrong
+      version `, a
       lens claim quoting a parent claim after a word, a parent claim with no
       `review.HOST_FILED`, and another lens's blocker. In the same call a
       `preserves` survivor answered `fixed` with HEAD moved stays withdrawn.
@@ -90,10 +93,13 @@ acceptance:
       - Only the first lens's verdicts are checked.
       - The name must be `SA-` then digits, so a parent named `SP-2` is not guarded.
       - The text after the name must be `wrong version '`, so a version whose `repr` is double-quoted is not guarded.
+      - The name is read after the last ` stayed green with ` in the claim, so the spec's own version holding that phrase is guarded.
+      - A parent survivor nobody answered keeps its withdrawal when HEAD did not move.
   - claim: >-
       A `withdrawn` verdict on the host's survivor of a `preserves`
-      criterion still stands only when the first answer is `fixed` and HEAD
-      moved. Its reason still opens with the `preserves` sentence.
+      criterion, other than a parent survivor (criterion 1), still stands
+      only when the first answer is `fixed` and HEAD moved. Its reason
+      still opens with the `preserves` sentence.
     witness: tests/test_rebut.py::test_a_withdrawn_host_filed_blocker_on_a_preserves_criterion_stands_only_after_a_committed_fix
     preserves: true
   - claim: >-
@@ -260,7 +266,7 @@ answer's argument is `_WITHDRAWAL_ARGUMENT`. Each verdict's reason is `r`
 then its finding number, as `_verdict(n, reason=str(n))` builds it. Both
 calls pass `acceptance=[preserved, plain]`.
 
-The first call has HEAD moved and these thirteen blockers in order.
+The first call has HEAD moved and these fourteen blockers in order.
 
 1. A parent survivor on `t.py::test_p`. Answered `fixed`, withdrawn.
 2. Blocker 1 with its claim passed through
@@ -284,6 +290,8 @@ The first call has HEAD moved and these thirteen blockers in order.
 11. `preserved`'s own-edit survivor. Answered `fixed`, withdrawn.
 12. `preserved`'s own-edit survivor. Argued, withdrawn.
 13. A `correctness` blocker from `_blocker`. Argued, withdrawn.
+14. `plain`'s survivor of the spec's own version
+    `x stayed green with SA-1's wrong version y`. Argued, withdrawn.
 
 The correctness lens verdicts first, so a check of the first lens alone
 fails. Assert these.
@@ -292,26 +300,28 @@ fails. Assert these.
 - `why` equals this line.
 
   ```
-  6 blocker(s) confirmed after the rebuttal, 9 argued — recorded disagreement, yours to adjudicate
+  6 blocker(s) confirmed after the rebuttal, 10 argued — recorded disagreement, yours to adjudicate
   ```
 
 - The correctness lens's verdicts equal one `Verdict`: finding 13,
   `withdrawn`, reason `r13`.
-- The adequacy lens's verdicts equal twelve `Verdict`s built by hand.
+- The adequacy lens's verdicts equal thirteen `Verdict`s built by hand.
   Findings 1 to 4 are `confirmed`, each reason the parent sentence then
   `r1` to `r4`. Finding 5 is `confirmed` with `r5`. Findings 6 to 11 are
   `withdrawn` with `r6` to `r11`. Finding 12 is `confirmed`, its reason
-  `_WITHDRAWAL_HOST_SENTENCE` then ` r12`.
+  `_WITHDRAWAL_HOST_SENTENCE` then ` r12`. Finding 14 is `withdrawn` with
+  `r14`.
 - In `as_dict`, keyed by lens, the correctness entry's
   `withdrawal_refusals` is empty. The adequacy entry's equals
   `{"finding": n, "withdrawn_reason": "rn"}` for n in 1, 2, 3, 4 and 12.
 
-The second call has HEAD unmoved and two parent survivors on
+The second call has HEAD unmoved and three parent survivors on
 `t.py::test_p`. The first is blocker 1 of the first call, answered `fixed`.
-The second passes `version="a sum that's off by one"` and
-`parent="SP-2"`, and is argued. The lens withdraws both. Assert that both verdicts are `confirmed` with the
-parent sentence then `r1` and `r2`. Assert that `withdrawal_refusals`
-holds both dicts.
+The second passes `version="a sum off by one"` and `parent="SP-2"`, and
+is argued. The third passes `version="a sum that's off by one"` and
+`parent="SA-1"`, and has no answer. The lens withdraws all three. Assert
+that each verdict is `confirmed` with the parent sentence then `r1` to
+`r3`. Assert that `withdrawal_refusals` holds the three dicts.
 
 Write the parent sentence and each expected `Verdict` as a literal in the
 test. Never build one from `rebut.py`'s own constant.
@@ -328,5 +338,5 @@ an em dash, a semicolon, a contraction, the perfect tense or a sentence
 over 25 words.
 
 **Size.** `size_gate` counted the prototype at 228 changed tokens outside
-`tests/` and 572 under it, against the `feature` ceiling of 3000.
+`tests/` and 626 under it, against the `feature` ceiling of 3000.
 `estimated_lines` is both over four. `rebut.py` is not in `elevate_on`.
