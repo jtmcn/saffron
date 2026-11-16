@@ -95,6 +95,7 @@ acceptance:
       - The text after the name must be `wrong version '`, so a version whose `repr` is double-quoted is not guarded.
       - The name is read after the last ` stayed green with ` in the claim, so the spec's own version holding that phrase is guarded.
       - A parent survivor nobody answered keeps its withdrawal when HEAD did not move.
+      - The `preserves` rule is checked first, so a parent survivor on a `preserves` witness that is not `fixed` with HEAD moved takes the `preserves` sentence.
   - claim: >-
       A `withdrawn` verdict on the host's survivor of a `preserves`
       criterion, other than a parent survivor (criterion 1), still stands
@@ -315,13 +316,15 @@ fails. Assert these.
   `withdrawal_refusals` is empty. The adequacy entry's equals
   `{"finding": n, "withdrawn_reason": "rn"}` for n in 1, 2, 3, 4 and 12.
 
-The second call has HEAD unmoved and three parent survivors on
-`t.py::test_p`. The first is blocker 1 of the first call, answered `fixed`.
-The second passes `version="a sum off by one"` and `parent="SP-2"`, and
-is argued. The third passes `version="a sum that's off by one"` and
-`parent="SA-1"`, and has no answer. The lens withdraws all three. Assert
-that each verdict is `confirmed` with the parent sentence then `r1` to
-`r3`. Assert that `withdrawal_refusals` holds the three dicts.
+The second call has HEAD unmoved and four parent survivors. The first
+three are on `t.py::test_p`. The first is blocker 1 of the first call,
+answered `fixed`. The second passes `version="a sum off by one"` and
+`parent="SP-2"`, and is argued. The third passes
+`version="a sum that's off by one"` and `parent="SA-1"`, and has no
+answer. The fourth is blocker 4 of the first call, on the `preserves`
+witness, and is argued. The lens withdraws all four. Assert that each
+verdict is `confirmed` with the parent sentence then `r1` to `r4`.
+Assert that `withdrawal_refusals` holds the four dicts.
 
 Write the parent sentence and each expected `Verdict` as a literal in the
 test. Never build one from `rebut.py`'s own constant.
