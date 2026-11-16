@@ -161,7 +161,7 @@ def describe_parent_versions(
     """REVIEW's own line for the asked parent pairs (`SA-0402`). Every entry
     counts as chosen. It then counts at most one more thing: `survived`, a
     `refusal` key read as refused, or an `unproven` outcome with neither. A
-    killed or errored entry counts only as chosen. The tail names, in
+    `killed` or `error` outcome counts only as chosen. The tail names, in
     `unread`'s own order, each parent whose record could not answer."""
     chosen = len(entries)
     survived = sum(1 for e in entries if e.get("outcome") == "survived")

@@ -14649,8 +14649,8 @@ def _parent_spec_text(spec_id: str, witness: str, claim: str) -> str:
 
 
 def _parent_killed(version: str, file: str, find: str) -> dict:
-    """One killed version entry, the shape a parent's own `wrong-versions
-    .json` record holds (`SA-0401`)."""
+    """One killed version entry, the shape a parent's own
+    `wrong-versions.json` record holds (`SA-0401`)."""
     return {
         "version": version,
         "edit": {"file": file, "find": find, "replace": "r"},
@@ -14883,22 +14883,66 @@ def test_a_parents_killed_wrong_version_its_witness_now_survives_is_rebutted_as_
     record = json.loads(
         (tmp_path / "out" / "SY-1" / "parent-versions.json").read_text()
     )
-    assert record["unread"] == ["SP-2", "SP-5"]
-    assert len(record["versions"]) == 8
-    by_version = {v["version"]: v for v in record["versions"]}
 
-    assert by_version["p-v1"]["outcome"] == "killed"
-    assert by_version["p-v1"]["parent"] == "SP-1"
-    assert by_version["p-v2"]["outcome"] == "killed"
-    assert by_version["v0"]["outcome"] == "survived"
-    assert by_version["v0"]["parent"] == "SP-3"
-    assert by_version["t-v0"]["outcome"] == "unproven"
-    assert by_version["t-v0"]["refusal"] is not None
-    assert by_version["u-v0"]["outcome"] == "unproven"
-    assert by_version["u-v0"]["refusal"] is not None
-    for name in ("g-v0", "g-v1", "g-v2"):
-        assert by_version[name]["outcome"] == "unproven"
-        assert "refusal" not in by_version[name]
+    def entry(parent, test, version, file, find, outcome, summary, refusal=None):
+        e = {
+            "parent": parent,
+            "witness": f"tests/test_p.py::{test}",
+            "version": version,
+            "edit": {"file": file, "find": find, "replace": "r"},
+            "reason": "",
+            "outcome": outcome,
+            "summary": summary,
+        }
+        return e if refusal is None else {**e, "refusal": refusal}
+
+    killed = "1 of 1 witness(es) died under their own wrong version"
+    gone = (
+        "no declared wrong version produced a trustworthy verdict \u2014 1 wrong "
+        "version(s) not proven: tests/test_p.py::test_gone (no such witness in "
+        "this tree)"
+    )
+    test_t = "spec/t.py is a test; a probe must target source"
+    test_u = "spec/u.py is a test; a probe must target source"
+    assert record == {
+        "versions": [
+            entry("SP-1", "test_guard", "p-v1", "src/p.py", "p1", "killed", killed),
+            entry("SP-1", "test_guard", "p-v2", "src/p.py", "p2", "killed", killed),
+            entry(
+                "SP-3",
+                "test_guard",
+                "v0",
+                "lib/q.py",
+                "x = 1",
+                "survived",
+                "1 of 1 witness(es) survived their own wrong version",
+            ),
+            entry(
+                "SP-3",
+                "test_guard",
+                "t-v0",
+                "spec/t.py",
+                "t1",
+                "unproven",
+                test_t,
+                test_t,
+            ),
+            entry(
+                "SP-3",
+                "test_guard",
+                "u-v0",
+                "spec/u.py",
+                "u1",
+                "unproven",
+                test_u,
+                test_u,
+            ),
+            entry("SP-6", "test_gone", "g-v0", "src/z.py", "z0", "unproven", gone),
+            entry("SP-6", "test_gone", "g-v1", "src/z.py", "z1", "unproven", gone),
+            entry("SP-6", "test_gone", "g-v2", "src/z.py", "z2", "unproven", gone),
+        ],
+        "unread": ["SP-2", "SP-5"],
+    }
 
     review_lines = [
         w for w in cell.watched if w.startswith("REVIEW: parent wrong versions:")
@@ -15004,7 +15048,7 @@ def test_review_records_parent_versions_only_when_a_pair_or_an_unread_parent_exi
         assert not (root / "out" / spec_id / "parent-versions.json").exists()
 
     # A wrongly `survived` outcome reads as `error` here, uncounted by the
-    # line above either way, so the entry itself must say `killed`.
+    # REVIEW line below either way, so the entry itself must say `killed`.
     record1 = json.loads(
         (outcomes[0][1] / "out" / "SY-1" / "parent-versions.json").read_text()
     )
