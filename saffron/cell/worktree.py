@@ -18,7 +18,7 @@ from pathlib import Path, PurePosixPath
 
 from saffron.cell import runtime
 from saffron.gates.core.witness import FindCount
-from saffron.intake import Mutant
+from saffron.intake import RETIRED_DIRNAME, Mutant
 
 WORKTREE_MOUNT = "/work"
 STATE_MOUNT = "/agent-state"
@@ -458,7 +458,7 @@ def porcelain_paths(stdout: str) -> list[str]:
     return sorted(paths)
 
 
-SPEC_ID_DIRS = (".saffron/specs", ".saffron/specs/done")
+SPEC_ID_DIRS = (".saffron/specs", f".saffron/specs/{RETIRED_DIRNAME}")
 
 
 def spec_ids(container: str) -> list[str]:

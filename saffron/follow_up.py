@@ -31,11 +31,12 @@ from saffron import end_review, intake, spec_review
 from saffron.agents.artifacts import hash_artifact
 from saffron.cell.worktree import DIFF_FLAGS, git_argv
 from saffron.gates.core.scope import matches
+from saffron.intake import RETIRED_DIRNAME
 from saffron.ledger import Ledger
 from saffron.phases import review
 from saffron.qualify import FollowUpGroup, Qualification, Qualified, graded_fields
 from saffron.repos.mirror import changed_files, file_at
-from saffron.scheduler import RETIRED_DIRNAME, Candidate
+from saffron.scheduler import Candidate
 
 # The share of `--budget` a stack batch holds back for the spec writer session (ADR 7).
 # `SA-0165` passes `--budget * WRITER_SHARE` in as `cap_usd`.

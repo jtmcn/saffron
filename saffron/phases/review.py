@@ -653,11 +653,11 @@ def describe_criterion_probes(entries: Sequence[Mapping[str, object]]) -> str:
     across every entry (backlog item b-78a590), the way
     `describe_wrong_versions` counts versions across every entry. A probe
     with an edit and no `refusal` is named, and a null-edit probe is
-    unnamed. One carrying a `refusal` is refused, whether `probe_refusal`
-    or `inert_edit` filed it (`SA-0396`). `_unasked_tail` adds a further
-    tail for a named probe its fresh cell left unasked. The last tail
-    names, in entry order, the witness of each entry whose session never
-    answered the schema."""
+    unnamed. One carrying a `refusal` is refused, whether `probe_refusal`,
+    the host's touches/subject refusal, or `inert_edit` filed it (`SA-0396`,
+    `SA-0400`). `_unasked_tail` adds a further tail for a named probe its
+    fresh cell left unasked. The last tail names, in entry order, the
+    witness of each entry whose session never answered the schema."""
     probes = [
         p for e in entries for p in cast("list[Mapping[str, object]]", e["probes"])
     ]

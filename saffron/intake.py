@@ -27,6 +27,9 @@ from pydantic import (
 SpecType = Literal["feature", "bug", "refactor", "test", "docs", "chore"]
 RiskTier = Literal["standard", "elevated"]
 
+# The one name for the directory the operator moves a retired spec to (b-e447ea).
+RETIRED_DIRNAME = "done"
+
 _FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?(.*)\Z", re.DOTALL)
 # A criterion is its marker line plus the *indented, non-marker* lines that
 # follow it. A blank line or a column-0 line ends it: `_CRITERIA_SECTION` stops

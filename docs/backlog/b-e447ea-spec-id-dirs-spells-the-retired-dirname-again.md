@@ -1,11 +1,12 @@
 ---
 id: b-e447ea
 title: "`SPEC_ID_DIRS` spells `done` again, because `RETIRED_DIRNAME` sits in a module `worktree` cannot import"
-status: open
+status: done
+closed: 2026-11-15
 tier: 3
 filed: 2026-11-15
 specs: [SA-0399]
-prs: []
+prs: [1227]
 commits: []
 cites: [§5.4]
 related: [b-249808]
@@ -30,3 +31,4 @@ moves three readers and misses this one.
 ## Record
 
 - 2026-11-15: filed from the spec loop's run 72, #1214.
+- 2026-11-15: done in the spec loop's run 74. `SA-0399` (#1227) moves `RETIRED_DIRNAME` to `saffron/intake.py`, and `SPEC_ID_DIRS` reads it.

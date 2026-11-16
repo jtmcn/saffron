@@ -15474,6 +15474,7 @@ def _run_apply_criterion_probes(
     mutate=None,
     read_at_head=None,
     gates=("tests",),
+    spec=None,
 ):
     """Calls `session._apply_criterion_probes` once, over `pairs`, with
     `session.critic_cell`, `runner.run_gate`, `worktree.source_mutated` and
@@ -15481,7 +15482,8 @@ def _run_apply_criterion_probes(
     flat list, consumed in call order, of either an answer or an exception
     to raise. Returns the ordered entry/exit log, the keyword dicts
     `critic_cell` was called with, the `adequacy` review and the `created`
-    set `_apply_criterion_probes` was given."""
+    set `_apply_criterion_probes` was given. `spec` defaults to `_spec()`,
+    so a caller checking the touches/subject refusal passes its own."""
     import saffron.gates.runner as runner_mod
     from saffron.cell import worktree as worktree_mod
 
@@ -15541,7 +15543,7 @@ def _run_apply_criterion_probes(
     reviews = [review.LensReview(lens="adequacy")]
     created: set[str] = set()
     session._apply_criterion_probes(
-        spec=_spec(),
+        spec=spec or _spec(),
         repo=Path("repo"),
         mirror=Path("mirror"),
         gates_dir=Path("gates"),
@@ -15968,6 +15970,154 @@ def test_a_second_stop_files_every_pair_left_as_an_error_naming_the_runtime_erro
     j_a = _outcome_of(pairs_j, "a")
     assert j_a["outcome"] == "unproven"
     assert "unasked" not in j_a
+
+
+def _scope_edit(file, replace="z"):
+    return {"file": file, "find": "assert x == 1", "replace": replace}
+
+
+def _touches_reason(normalised):
+    return (
+        f"{normalised} lies outside this spec's touches and off its criterion's subject"
+    )
+
+
+def test_a_criterion_probe_outside_the_specs_touches_is_refused_before_any_cell(
+    monkeypatch,
+):
+    """A criterion probe's own edit is refused, before the mutator, when its
+    normalised file matches no `touches` glob and is not its own criterion's
+    `subject`. The refusal runs after `probe_refusal`, never on a wrong
+    version, and a refused pair joins no later step. A second call with that
+    one refused pair alone enters no cell (`SA-0400`)."""
+    from saffron.intake import Criterion
+
+    touches_spec = _spec(touches=["src/*.py", "lib/one.py", "pkg/**"])
+    no_subject = Criterion(claim="claim a", witness="t.py::a")
+    with_subject = Criterion(claim="claim b", witness="t.py::b", subject="other/s.py")
+
+    survivor = _scope_edit("src/x.py")
+    rel_a = _scope_edit("./src/a.py")
+    lib_one = _scope_edit("lib/one.py")
+    pkg_deep_c = _scope_edit("pkg/deep/c.py")
+    deep_a = _scope_edit("src/deep/a.py")
+    one_pyc = _scope_edit("lib/one.pyc")
+    lib_two = _scope_edit("./lib/two.py")
+    other_s_unclaimed = _scope_edit("other/s.py")
+    pkg_up = _scope_edit("pkg/../other/u.py")
+    tests_t = _scope_edit("tests/t.py")
+    out_escape = _scope_edit("../out.py")
+
+    other_s = _scope_edit("other/s.py")
+    other_s_dot = _scope_edit("./other/s.py")
+    pkg_z = _scope_edit("pkg/z.py")
+    other_t = _scope_edit("other/t.py")
+
+    pairs_a = [
+        (no_subject, {"edit": survivor}),
+        (no_subject, {"edit": rel_a}),
+        (no_subject, {"edit": lib_one}),
+        (no_subject, {"edit": pkg_deep_c}),
+        (no_subject, {"edit": deep_a}),
+        (no_subject, {"edit": one_pyc}),
+        (no_subject, {"edit": lib_two}),
+        (no_subject, {"edit": other_s_unclaimed}),
+        (no_subject, {"edit": pkg_up}),
+        (no_subject, {"edit": tests_t}),
+        (no_subject, {"edit": out_escape}),
+    ]
+    pairs_b = [
+        (with_subject, {"edit": other_s}),
+        (with_subject, {"edit": other_s_dot}),
+        (with_subject, {"edit": pkg_z}),
+        (with_subject, {"edit": other_t}),
+    ]
+    wrong_version = (
+        no_subject,
+        {"edit": _scope_edit("elsewhere/w.py"), "version": "wv"},
+    )
+    pairs = pairs_a + pairs_b + [wrong_version]
+
+    recorded: list[str] = []
+
+    @contextlib.contextmanager
+    def _record_mutate(_container, edit):
+        recorded.append(edit.file)
+        yield None
+
+    log, _kwargs_log, review_result, _created = _run_apply_criterion_probes(
+        monkeypatch,
+        pairs,
+        enters=["gate-1"],
+        run_gate=[
+            GateResult(gate="tests", status="pass", tool="pytest 8.0"),
+            GateResult(gate="tests", status="pass", tool="pytest 8.0"),
+            GateResult(gate="tests", status="fail", tool="pytest 8.0"),
+            GateResult(gate="tests", status="fail", tool="pytest 8.0"),
+            GateResult(gate="tests", status="fail", tool="pytest 8.0"),
+            GateResult(gate="tests", status="fail", tool="pytest 8.0"),
+            GateResult(gate="tests", status="fail", tool="pytest 8.0"),
+            GateResult(gate="tests", status="fail", tool="pytest 8.0"),
+            GateResult(gate="tests", status="fail", tool="pytest 8.0"),
+        ],
+        mutate=_record_mutate,
+        spec=touches_spec,
+    )
+    assert log == ["enter:gate-1", "exit:gate-1"]
+    assert recorded == [
+        "src/x.py",
+        "src/x.py",
+        "./src/a.py",
+        "lib/one.py",
+        "pkg/deep/c.py",
+        "other/s.py",
+        "./other/s.py",
+        "pkg/z.py",
+        "elsewhere/w.py",
+    ]
+
+    survivor_entry = pairs_a[0][1]
+    assert survivor_entry["outcome"] == "survived"
+    assert len(review_result.findings) == 1
+
+    for _criterion, entry in pairs_a[1:4] + pairs_b[:3] + [wrong_version]:
+        assert entry["outcome"] == "killed"
+        assert "refusal" not in entry
+
+    for entry, reason in (
+        (pairs_a[4][1], _touches_reason("src/deep/a.py")),
+        (pairs_a[5][1], _touches_reason("lib/one.pyc")),
+        (pairs_a[6][1], _touches_reason("lib/two.py")),
+        (pairs_a[7][1], _touches_reason("other/s.py")),
+        (pairs_a[8][1], _touches_reason("other/u.py")),
+        (pairs_a[9][1], "tests/t.py is a test; a probe must target source"),
+        (pairs_a[10][1], "../out.py is not a relative path inside the tree"),
+        (pairs_b[3][1], _touches_reason("other/t.py")),
+    ):
+        assert entry["outcome"] == "unproven"
+        assert entry["summary"] == reason
+        assert entry["refusal"] == reason
+
+    entries = [
+        {"witness": "t.py::a", "probes": [e for _c, e in pairs_a]},
+        {"witness": "t.py::b", "probes": [e for _c, e in pairs_b]},
+    ]
+    assert review.describe_criterion_probes(entries) == (
+        "criterion probes: 7 named over 2 criteria, 0 unnamed, 8 refused"
+    )
+
+    alone = [(no_subject, {"edit": _scope_edit("other/s.py")})]
+    log, kwargs_log, _review_result, _created = _run_apply_criterion_probes(
+        monkeypatch,
+        alone,
+        enters=["unused"],
+        run_gate=[],
+        mutate=lambda *_a: (_ for _ in ()).throw(AssertionError("entered a cell")),
+        spec=touches_spec,
+    )
+    assert log == []
+    assert kwargs_log == []
+    assert alone[0][1]["refusal"] == _touches_reason("other/s.py")
 
 
 def test_every_wrong_version_is_recorded_with_its_outcome_beside_the_criterion_probes(

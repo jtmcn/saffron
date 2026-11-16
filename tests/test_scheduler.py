@@ -5041,6 +5041,10 @@ def test_no_real_spec_is_refused_on_its_own_acceptance_criteria(tmp_path, ledger
     # here so a future declaration lands in its own shape (b-e7898b).
     retired_first_shaped = [r for r in refusals if "retired_first" in r.reason]
     assert [r.path.name[:7] for r in retired_first_shaped] == []
+    # Promoted side by side, `SA-0151` and `SA-0399` both name
+    # `RETIRED_DIRNAME`. Production keeps both in `done/`.
+    shared_symbol = [r for r in refusals if "declare one a parent" in r.reason]
+    assert [r.path.name[:7] for r in shared_symbol] == ["SA-0399"]
     assert all(
         "depends_on" in r.reason
         for r in refusals
@@ -5048,4 +5052,5 @@ def test_no_real_spec_is_refused_on_its_own_acceptance_criteria(tmp_path, ledger
         and r not in claude_touching
         and r not in inline_mutant
         and r not in retired_first_shaped
+        and r not in shared_symbol
     )

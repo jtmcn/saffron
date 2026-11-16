@@ -38,3 +38,7 @@ the witness dies on the named case.
 ## Record
 
 - 2026-11-11: filed from the spec loop's run 63, #1158.
+- 2026-11-15: seen again in the spec loop's run 74, #1228 (`SA-0400`). REVIEW
+  filed wrong version 14 `killed`. Its edit also sent refused pairs to the
+  mutator, and the witness's sequence assert caught that. The Spec seat's own
+  edit, a refusal made inside the cell, passed the declared witness.

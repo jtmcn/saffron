@@ -46,6 +46,7 @@ from saffron.events import (
     describe,
     read_log,
 )
+from saffron.intake import RETIRED_DIRNAME
 from saffron.ledger import Ledger, TaskState
 from saffron.phases import implement, package, review
 from saffron.reconcile import HeadMoved, ReconcileResult
@@ -54,7 +55,7 @@ from saffron.record.memory import MemoryRecord
 from saffron.record.routed import RoutedRecord
 from saffron.repos.mirror import GitError
 from saffron.repos.policy import Policy, load_policy
-from saffron.scheduler import RETIRED_DIRNAME, Candidate, Refusal
+from saffron.scheduler import Candidate, Refusal
 from saffron.scheduler import _branch as spec_branch
 from tests.conftest import HostToolExecInTest
 from tests.test_batch import MintDouble
