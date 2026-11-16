@@ -3152,3 +3152,18 @@ critic's own, so they have no line.
 - `SA-0398` (#1219): the witness matched one exact `git grep` argv, so a
   drifted argv with no stub passed. **Bucket 1**. **Landed:** a review commit
   on #1219.
+- `SA-0399` (#1227): a detector that stripped each path part passed the
+  sample, so exact comparison was pinned by nothing. **Bucket 1**.
+  **Landed:** a review commit on #1227.
+- `SA-0399` (#1227): the tripwire assertion carried no message telling a
+  later author to narrow the test, as the spec asked. **Bucket 1**.
+  **Landed:** a review commit on #1227.
+- `SA-0399` (#1227): a comment said a retired spec ships to the directory,
+  where `CONTEXT.md` says the operator moves it there. **Bucket 2**.
+  **Landed:** a review commit on #1227.
+- `SA-0400` (#1228): the declared witness left out the claim's second call,
+  so a refusal made inside the probe cell passed it. **Bucket 1**.
+  **Landed:** a review commit on #1228.
+- `SA-0400` (#1228): three docstrings called the refusal a check, and one
+  credited the probe with the host's refusal. **Bucket 2**. **Landed:** a
+  review commit on #1228.

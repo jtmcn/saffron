@@ -1,11 +1,12 @@
 ---
 id: b-11e2ac
 title: A criterion probe of a test-only spec edits production code its witness never reads, and files the survivor as a blocker
-status: open
+status: done
+closed: 2026-11-15
 tier: 3
 filed: 2026-11-15
 specs: [SA-0400]
-prs: []
+prs: [1228]
 commits: []
 cites: [§5.4.1, §5.5]
 related: [b-7f6ce2, b-9ed36d]
@@ -34,3 +35,4 @@ reported as a note rather than a blocker.
 ## Record
 
 - 2026-11-15: filed from the spec loop's run 72, #1218 and #1219.
+- 2026-11-15: done in the spec loop's run 74. `SA-0400` (#1228) refuses a criterion probe outside `touches` and off its `subject`.

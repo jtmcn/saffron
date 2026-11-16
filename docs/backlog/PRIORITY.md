@@ -482,9 +482,9 @@ Each line keeps the order it was filed in.
   rename.
 - From run 70's review of #1203: ~~**b-7fc792**~~, a wrong version's edit that
   removes nothing.
-- From run 72's review of #1214: **b-e447ea**, `SPEC_ID_DIRS` spells `done`
+- From run 72's review of #1214: ~~**b-e447ea**~~, `SPEC_ID_DIRS` spells `done`
   again.
-- From run 72's review of #1218 and #1219: **b-11e2ac**, a criterion probe
+- From run 72's review of #1218 and #1219: ~~**b-11e2ac**~~, a criterion probe
   edits code a test-only witness never reads.
 - From the 2026-09-27 size pricing and spec loop run 32: **b-41664e**, **b-4b386f**,
   ~~**b-d96f14**~~, ~~**b-9b94c9**~~, **b-ff3141**, ~~**b-a99c76**~~, **b-3a8504**,
