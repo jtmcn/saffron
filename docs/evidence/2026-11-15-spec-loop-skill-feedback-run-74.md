@@ -38,7 +38,12 @@ no follow-up. The run spent about $28.25 of $172. Turns count every phase.
    Filling `REVIEW-PROMPT.md` and saving each seat's report are both still
    hand steps. My rebuilt saver first kept the hand-back's indent, so Jev
    refused the report until it was fixed.
-6. **The finish had no layer to link.** Finish 92 changed nothing, so run 72's
+6. **`driver.py bookkeeping` said the smoke test owed no change.** It
+   did owe one. The smoke test lays every retired spec out in one directory.
+   There `SA-0151` and `SA-0399` both name `RETIRED_DIRNAME`, so the scheduler
+   refused `SA-0399` for an undeclared parent. `make check` found it after
+   eleven minutes. A step 5 commit pins that refusal by id.
+7. **The finish had no layer to link.** Finish 92 changed nothing, so run 72's
    item 7 went unexercised.
 
 ## What the reviews found
@@ -88,8 +93,10 @@ no follow-up. The run spent about $28.25 of $172. Turns count every phase.
    change, the open half of b-b664d1.
 8. **`driver.py stack` links a finish's layer.** A tool change, with no
    item yet.
+9. **`bookkeeping` runs the smoke test's flat corpus.** A tool change, with
+   no item yet. Item 6 left it to the suite.
 
-This PR changes no skill text.
+This PR changes no skill text. It pins one smoke-test refusal.
 
 ## Next run
 
