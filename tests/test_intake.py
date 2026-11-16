@@ -1027,6 +1027,7 @@ _DONE_SAMPLE_LINES = [
     'F = "outside done/, found"',
     'G = "undone"',
     'H = "done_dir"',
+    'I = "specs/ done /x"',
 ]
 _DONE_SAMPLE = "\n".join(_DONE_SAMPLE_LINES) + "\n"
 
@@ -1052,7 +1053,9 @@ def test_only_intake_spells_the_retired_directory_in_saffron_source():
         for hits in [_done_hits(path.read_text())]
         if hits
     }
-    assert set(found) == {"saffron/intake.py"}
+    assert set(found) == {"saffron/intake.py"}, (
+        f"{sorted(found)}: if a hit is not the retired directory, narrow this test"
+    )
     [(line, value)] = found["saffron/intake.py"]
     assert value == "done"
 

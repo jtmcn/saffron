@@ -27,7 +27,7 @@ from pydantic import (
 SpecType = Literal["feature", "bug", "refactor", "test", "docs", "chore"]
 RiskTier = Literal["standard", "elevated"]
 
-# The one name for the directory a retired spec ships to (b-e447ea).
+# The one name for the directory the operator moves a retired spec to (b-e447ea).
 RETIRED_DIRNAME = "done"
 
 _FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n?(.*)\Z", re.DOTALL)
