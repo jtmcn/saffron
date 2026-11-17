@@ -35,3 +35,9 @@ stays unless every sibling also fails the witness.
 ## Record
 
 - 2026-11-13: filed from the spec loop's run 67.
+- 2026-11-17: backtested in the spec loop's run 77 on `SA-0381`. The
+  withdrawn probe was the criterion's own edit for `&`. Neither `#` nor `*`
+  is a declared wrong version. They appear only in the claim's prose. So the
+  host cannot name the siblings, and a model must. That is the shape of
+  b-f06097. The item's "every sibling also fails the witness" also waits on
+  the operator's witness-rule question from run 76.
