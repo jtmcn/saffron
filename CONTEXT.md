@@ -816,6 +816,8 @@ read a diff, and are sessions the host starts).
 spec, and the two lines disagree. The host reads one as `confirmed` when a quote is missing, is not in that spec,
 or equals the other. It also reads a `withdrawn` answer on its own survivor of a
 `preserves` criterion as `confirmed`, unless the first answer was `fixed` and HEAD moved.
+It reads a `withdrawn` answer on its survivor of a parent's wrong version as `confirmed`
+always (`SA-0405`).
 
 **Adjudication**: The operator's agree-or-disagree with a finding. Distinct from
 the critic's verdict, and the basis of the critic-ROI question.
