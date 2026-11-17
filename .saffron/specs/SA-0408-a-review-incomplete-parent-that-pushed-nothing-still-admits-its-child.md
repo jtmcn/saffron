@@ -49,7 +49,7 @@ forbidden:
   - tests/test_batch.py
 budget_usd: 64
 max_attempts: 3
-max_turns: 290
+max_turns: 300
 risk: standard
 acceptance:
   - claim: >-
@@ -60,7 +60,9 @@ acceptance:
       names `REBUTTAL_UNJUDGED`. The witness drives three rows in both `gh`
       modes: no push, a stale push, and no push on a row newer than a pushed
       `READY_FOR_REVIEW` row. A row that pushed in the state stacks on the
-      fetched head of a branch a review fix moved, in both `gh` modes. With
+      fetched head of a branch a review fix moved, in both `gh` modes. So
+      does a newer `READY_FOR_REVIEW` row that pushed over an older stale
+      `REVIEW_INCOMPLETE` row, in both `gh` modes. With
       no `gh`, a stale row beside a `MERGED` row, one whose older row pushed
       `base_sha` itself, and one retired at `base_sha` each stack on their
       branch. A stale row that carries a pull request refuses when a `gh`
@@ -81,6 +83,7 @@ acceptance:
       - The oldest waiting row decides, so an older pushed row rescues a newer row with none.
       - The check runs after `_fetch_parent_head`, so an `unstacked` line prints before the refusal.
       - A row GitHub could not be asked about is not refused.
+      - Any stale waiting row refuses, so an older stale row refuses a child whose newest row pushed.
       - '`reconcile` still skips the state, so a merged pull request on the parent leaves its child refused.'
   - claim: >-
       With two or more `depends_on` entries, `_resolve_multi_parent` refuses
@@ -111,12 +114,15 @@ acceptance:
       merge it or rerun it. The witness drives three rows that carry a pull
       request: a stale push, no push, and a stale row newer than a pushed
       `READY_FOR_REVIEW` row. A row that pushed in the state is the one
-      candidate, with that row as its stack base.
+      candidate, with that row as its stack base. A newer
+      `READY_FOR_REVIEW` row that pushed over an older stale
+      `REVIEW_INCOMPLETE` row qualifies as the stack base.
     witness: tests/test_scheduler.py::test_a_stack_order_refuses_a_child_whose_review_incomplete_stack_base_pushed_nothing
     wrong_versions:
       - The stack base path still reads `REBUTTAL_UNJUDGED` alone, so a stale `REVIEW_INCOMPLETE` row with a pull request becomes the base.
       - The reason keeps the literal `REBUTTAL_UNJUDGED`.
       - The oldest waiting row decides, so an older pushed row qualifies in place of a newer stale one.
+      - Any stale waiting row refuses, so an older stale row disqualifies a newer row that pushed.
       - The check follows the pushed-sha check, so a row with no push gets a reason that never names its latest run.
       - The remedy tells the operator to run the parent to a pull request, which it already carries.
   - claim: >-
@@ -265,11 +271,11 @@ base, so `retired_first` is empty.
    reader of `pushed_in_state`, so point that entry at the new name.
 3. **The reasons.** Each of the three reasons names the row's own state
    rather than a literal. The one-parent and stack base reasons keep their
-   shape otherwise. The multi-parent reason names each refused parent as
-   `<id> is <state>`, the shape the one-parent reason has, then `its` or
-   `their latest run pushed nothing` as today.
+   shape otherwise. The multi-parent reason keeps its `depends_on ` prefix,
+   names each refused parent as `<id> is <state>`, the shape the one-parent
+   reason has, then `its` or `their latest run pushed nothing` as today.
 4. **`reconcile`.** `MERGE_ONLY_STATES` reads the set, beside `EXHAUSTED` and
-   `NOT_IMPLEMENTED`. Nothing else in `reconcile` changes.
+   `NOT_IMPLEMENTED`. Nothing else in `reconcile`'s logic changes.
 5. **The push guard.** The other-row guard in `push_unpackaged_work` refuses
    for a row in the set that carries a pull request, beside `EXHAUSTED`,
    `CHANGES_REQUESTED` and `APPROVED`. `READY_FOR_REVIEW` keeps its own rule.
@@ -366,5 +372,5 @@ and pushed after is a push in the state.
 witnesses passed, and each failed with the source reverted, never at
 collection. Every wrong version above was applied as an edit, and each
 failed its own witness. The source diff measured 171 changed tokens against
-the `bug` ceiling of 1300, and 1681 tokens under the test paths. The whole
+the `bug` ceiling of 1300, and 1767 tokens under the test paths. The whole
 suite passed on it, 5342 tests.
