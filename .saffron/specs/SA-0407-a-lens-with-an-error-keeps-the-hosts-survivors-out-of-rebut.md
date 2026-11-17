@@ -4,7 +4,7 @@ title: "A lens with an error keeps the host's survivors out of REBUT, and the lo
 type: feature
 priority: 3
 risk: elevated
-estimated_lines: 340
+estimated_lines: 373
 estimate_measured: true
 depends_on: [SA-0406]
 consumes:
@@ -70,13 +70,16 @@ acceptance:
       REBUT line and `rebuttal.json`'s `state` and `why` carry that state
       and `review.incomplete_after_rebut(reviews, entries)`. `entries` is
       the list `_rebut_gates` wrote to `rebut-probes.json`, or empty when
-      it wrote none. The witness drives three cells. In one, adequacy's
+      it wrote none. The witness drives four cells. In one, adequacy's
       output is not the schema twice. In one, adequacy's session fails. In
       both, adequacy holds both survivors. In the third, correctness's
-      session fails, contract files a blocker of its own, and adequacy
-      holds both survivors with no `error`. REBUT ends `READY_FOR_REVIEW`
-      with no verdict, `REBUTTAL_UNJUDGED` on a fix claimed and not
-      committed, and `READY_FOR_REVIEW` on two lenses' verdicts. The two
+      session fails and adequacy's output is not the schema twice, so two
+      lenses have an `error` and neither gets a verdict session. In the
+      fourth, correctness's session fails, contract files a blocker of its
+      own, and adequacy holds both survivors with no `error`. REBUT ends
+      `READY_FOR_REVIEW` with no verdict in the first and third,
+      `REBUTTAL_UNJUDGED` on a fix claimed and not committed in the second,
+      and `READY_FOR_REVIEW` on two lenses' verdicts in the fourth. The two
       survivors are of a criterion's own edit and of the spec's own wrong
       version. Their fates are killed, survived, and not asked again
       because HEAD did not move.
@@ -94,12 +97,14 @@ acceptance:
       - REVIEW's line stays the line `review_state` returned.
       - N counts only the survivors a lens with an `error` holds.
       - N counts every blocker `anchored_blockers` returns.
+      - The session passes only the first lens with an `error` as `unreviewed`.
   - claim: >-
       Beside a lens with an `error`, REBUT's own `EXHAUSTED` and
       `GATE_ERROR` stand. The outcome, the ledger row, the REBUT line and
       `rebuttal.json`'s `state` and `why` carry REBUT's own state and line.
-      The witness drives `EXHAUSTED` from a red gate re-run and from a probe
-      cell that refuses the post-rebuttal patch. It drives `GATE_ERROR`
+      The witness drives `EXHAUSTED` from a red gate re-run, from a probe
+      cell that refuses the post-rebuttal patch, and from REBUT's own
+      critic cell refusing it. It drives `GATE_ERROR`
       from a gate re-run whose `tests` gate reports `error`. A rebuttal
       turn that REBUT's cap cuts ends the task `REVIEW_INCOMPLETE`, never
       `EXHAUSTED`. Its REBUT line and `rebuttal.json` carry criterion 1's
@@ -112,6 +117,7 @@ acceptance:
       - A gate re-run whose gate errors ends `REVIEW_INCOMPLETE` too.
       - A REBUT cap cut still turns the outcome to `EXHAUSTED`.
       - A REBUT cap cut ends `REVIEW_INCOMPLETE` but still clears `rebut_result`.
+      - Only a stop `_rebut_gates` returned stands, so a critic cell refusing the post-rebuttal patch ends `REVIEW_INCOMPLETE`.
   - claim: >-
       A REVIEW whose pool could not cover the wrong-version session sends
       nothing to REBUT, even beside a lens with an `error` and a host-filed
@@ -140,12 +146,12 @@ Backlog item **b-f7a591**, which cites `DESIGN.md` §5.5. A lens returned no
 findings on `SA-0259`, and the host's two survived criterion probes under it
 never reached REBUT. `SA-0406`, this spec's parent, adds the helpers. This
 spec wires them into `_drive_cell`. Every `saffron/cell/session.py` and
-`saffron/task.py` line number below was read at `cb15ea09`. `SA-0406`
+`saffron/task.py` line number below was read at `82430dfd`. `SA-0406`
 changes `saffron/phases/review.py` and `saffron/phases/rebut.py`, so those
 are cited by name.
 
 **What `SA-0406` gives this spec.** None of the three helpers exists at
-`cb15ea09`. They are `consumes` entries, and `run_task` resolves each one
+`82430dfd`. They are `consumes` entries, and `run_task` resolves each one
 at this spec's tree base. `review.host_survivors(reviews)` returns each
 host-filed survivor `anchored_blockers` keeps, in its order.
 `review.rebuts_despite_errors(reviews, cut)` holds when `cut` is `None`,
@@ -168,7 +174,9 @@ before it counts a blocker. The host appends every survivor to the
 **What `_rebut_gates` records.** It asks each blocker whose probe survived
 again, but only when HEAD moved (`saffron/cell/session.py:3760-3767`,
 `3779`). It writes the entries to `rebut-probes.json`
-(`saffron/cell/session.py:3814-3816`). Nothing after it reads them.
+(`saffron/cell/session.py:3814-3816`). Only `_rebut_gates` itself reads
+them, for its killed set and its probe-infrastructure check
+(`saffron/cell/session.py:3818-3836`). Nothing reads them once it returns.
 
 **How REBUT's outcome is written.** `run_rebut` is called at
 `saffron/cell/session.py:3929-3960`. A REBUT cap cut is
@@ -210,11 +218,14 @@ log names none of them. Send them to REBUT and name each one after it.
    after every other override of `result.why` and before `rebuttal.json`
    is written. A REBUT cap cut on this path ends here too, and keeps its
    `rebut_result`.
-5. **The docstring.** `review_state`'s docstring ends its paragraph on a
-   lens with an `error` with "and there is no finding set to rebut
-   against". That clause goes false here. Drop it, and keep the sentence
-   before it, "An unrun lens must not read as a clean review". Change
-   nothing else in `saffron/phases/review.py`.
+5. **The docstring.** `review_state`'s docstring says a lens that errored
+   "*is* a stop", and that "there is no finding set to rebut against".
+   Both go false here. Reword them to say it returns `REVIEW_INCOMPLETE`
+   for a lens with an `error`. Keep the reason, that an unrun lens must not
+   read as a clean review. Name `rebuts_despite_errors` as
+   what decides whether REBUT still takes the host's survivors. Keep the
+   docstring within ten lines, and change nothing else in
+   `saffron/phases/review.py`.
 
 ## Out of scope
 
@@ -236,8 +247,8 @@ log names none of them. Send them to REBUT and name each one after it.
   passes the entries through unread, and the witness here drives killed,
   survived and not asked again.
 - **The other ways in.** The witness drives one or two of each set. Left
-  undriven are three more `EXHAUSTED` ends: a repair turn that left the
-  gates red, a critic cell that refuses the patch, and an empty patch.
+  undriven are two more `EXHAUSTED` ends: a repair turn that left the
+  gates red, and an empty patch.
   So are five `GATE_ERROR` ends: a drifted re-run, a probe-infrastructure
   block, either binary patch, and a verdict lens that never started. The
   `REBUTTAL_UNJUDGED` of a verdict session with an `error` is undriven, as
@@ -257,7 +268,8 @@ log names none of them. Send them to REBUT and name each one after it.
 - **A `retired_first`.** This adds no refusal of a spec.
 - **A new term.** "Host-filed survivor" is `CONTEXT.md`'s own phrase.
 - **Hand edits, already amended in this spec's pull request.** Two
-  replace one sentence, and five end a paragraph or an entry. Each new
+  replace one sentence, and five end a paragraph or an entry. One more
+  edits §3.3's state legend. Each new
   sentence is quoted on a line of its own.
 
   `DESIGN.md` §5.5, the paragraph opening **A lens that produced no
@@ -308,11 +320,14 @@ log names none of them. Send them to REBUT and name each one after it.
 
   > Beside a lens with an error in REVIEW, a REBUT that would end here ends `REVIEW_INCOMPLETE` instead, cut or not (`SA-0407`).
 
+  `DESIGN.md` §3.3's task state machine legend now also reaches
+  `REVIEW_INCOMPLETE` from `REBUTTING`, beside a lens with an error.
+
 ## Notes for the agent
 
 **New or edit.** Criteria 1 to 3 build new behaviour, so they declare
 witnesses and no mutant, and `witness` reports `skip` for them. Criterion 4
-is `preserves`, and its witness exists and passes at `cb15ea09`. Each
+is `preserves`, and its witness exists and passes at `82430dfd`. Each
 wrong version under a criterion is one its witness must fail. REVIEW turns
 each into an edit and asks the witness. Do not ask them yourself.
 
@@ -336,6 +351,10 @@ own file contents, with `None` for `_CRITIC_CONTAINER`.
   One whose session fails takes one `implement.AgentFailed`.
 - A REBUT cap cut is a rebuttal turn raising `implement.AgentFailed` with
   `_cut_off_turn(cost=10.25)`, HEAD unmoved.
+- For REBUT's own critic cell refusing the patch, stand in for
+  `session.critic_cell` the same way. The probe cell is built by
+  `critic_cell` too, so keep HEAD unmoved and argue both blockers. No
+  probe is then asked again, and only REBUT's critic cell sees the patch.
 - For a probe cell that refuses the patch, stand in for
   `session.probe_findings`. Raise `CriticPatchRejected` for a `patch` of
   `_GROWN_PATCH`, and call the real one for any other. Import the class
@@ -366,9 +385,11 @@ with an em dash, a semicolon, a contraction, the perfect tense or a
 sentence over 25 words. The errored-lens line's em dash is today's text
 and stays.
 
-**Size.** `size_gate` counted this spec's own changes over `SA-0406`'s at
-1360 tokens: 109 in `saffron/cell/session.py`, 11 in
-`saffron/phases/review.py` and 1240 in `tests/test_session.py`. That is
-against the `feature` ceiling of 3000. `estimated_lines` is that over
-four. `saffron/cell/session.py` is in `elevate_on`, so this spec runs
+**Size.** `size_gate` leaves out every block under `tests/**`
+(`.saffron/policy.yaml:70`, `saffron/gates/core/size.py:286-292`). Over
+`SA-0406`'s prototype it counted 144 tokens outside `tests/`: 109 in
+`saffron/cell/session.py` and 35 in `saffron/phases/review.py`. That is
+against the `feature` ceiling of 3000. `tests/test_session.py` adds 1348
+tokens the gate does not count. `estimated_lines` is all 1492 over four,
+since `driver.py check` prices tests and source together. `saffron/cell/session.py` is in `elevate_on`, so this spec runs
 `elevated`.
