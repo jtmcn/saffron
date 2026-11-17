@@ -71,6 +71,8 @@ acceptance:
     witness: tests/test_review.py::test_a_lens_with_an_error_routes_to_rebut_only_beside_a_host_survivor_and_no_cut
     wrong_versions:
       - "`rebuts_despite_errors` ignores `cut`."
+      - "`rebuts_despite_errors` ignores whether any lens has an `error`."
+      - "`rebuts_despite_errors` ignores whether `host_survivors` returns any."
       - "`rebuts_despite_errors` reads only the first lens's `error`."
       - "`rebuts_despite_errors` reads only the last lens's `error`."
       - "`rebuts_despite_errors` is true only when a lens with no `error` holds a host-filed survivor."
@@ -103,6 +105,7 @@ acceptance:
     witness: tests/test_review.py::test_the_incomplete_line_names_what_the_rebuttal_left_of_each_survivor_under_a_lens_with_an_error
     wrong_versions:
       - A killed fate names only the first failure.
+      - A killed fate sorts its failures.
       - An unproven fate leaves out its reason.
       - A survived entry reads not asked again.
       - The line names only the first lens with an `error`.
@@ -125,8 +128,8 @@ acceptance:
       blocker a healthy lens withdraws is still refused under its own
       number. The witness names `adequacy` alone in a list, `correctness`
       alone in a tuple, `correctness` and `contract` in a set, and
-      `correctness`, `contract` and `adequacy` in a list. The lens left to
-      verdict is `correctness` or `adequacy`. `conventions` holds no
+      `correctness`, `contract` and `adequacy` in a list. In each case but
+      the last, the lens left to verdict is `correctness` or `adequacy`. `conventions` holds no
       blocker in the witness.
     witness: tests/test_rebut.py::test_a_lens_named_unreviewed_gets_no_verdict_session_and_keeps_its_numbers
     wrong_versions:
@@ -247,11 +250,11 @@ prototype of this spec alone, the `dead` gate failed on exactly those two.
    lens in the verdict loop alone. Leave `blockers`, their numbering, the
    rebuttal turn and the guard as they are. Document the keyword in a
    comment beside it, since the docstring is at its limit.
-5. **`review_state`'s docstring.** Drop "and there is no finding set to
-   rebut against". Nothing calls `rebuts_despite_errors` at this spec's
-   head, so the new words say what it decides and never that a caller sends
-   anything to REBUT. The docstring is at its ten-line limit, so the new
-   words take no extra line. Leave `review_state`'s code and return alone.
+5. **`review_state` itself.** Leave its return and its docstring alone.
+   Its code changes only to build its line from item 3's shared helper.
+   Its docstring's "and there is no finding set to rebut against" stays
+   true at this spec's head, since nothing routes differently yet.
+   `SA-0407` drops it with the `DESIGN.md` and `CONTEXT.md` edits.
 
 ## Out of scope
 
@@ -266,7 +269,7 @@ prototype of this spec alone, the `dead` gate failed on exactly those two.
   criterion here pins `state` or `why` for it.
 - **Which name `unreviewed` matches.** The verdict loop matches
   `unreviewed` against each blocker's `Finding.lens`
-  (`saffron/phases/rebut.py:1015`). The line names the holding
+  (`saffron/phases/rebut.py:1014-1016`). The line names the holding
   `LensReview.lens`. The two agree in production, since the host appends
   every survivor to the `adequacy` `LensReview`
   (`saffron/cell/session.py:2176`). Keeping them consistent when they
