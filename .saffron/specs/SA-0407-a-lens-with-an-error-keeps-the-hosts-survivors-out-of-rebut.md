@@ -4,7 +4,7 @@ title: "A lens with an error keeps the host's survivors out of REBUT, and the lo
 type: feature
 priority: 3
 risk: elevated
-estimated_lines: 373
+estimated_lines: 380
 estimate_measured: true
 depends_on: [SA-0406]
 consumes:
@@ -73,8 +73,9 @@ acceptance:
       it wrote none. The witness drives four cells. In one, adequacy's
       output is not the schema twice. In one, adequacy's session fails. In
       both, adequacy holds both survivors. In the third, correctness's
-      session fails and adequacy's output is not the schema twice, so two
-      lenses have an `error` and neither gets a verdict session. In the
+      and conventions's sessions fail and adequacy's output is not the
+      schema twice. Adequacy sits between the other two in `review.LENSES`.
+      The line names all three lenses, and none gets a verdict session. In the
       fourth, correctness's session fails, contract files a blocker of its
       own, and adequacy holds both survivors with no `error`. REBUT ends
       `READY_FOR_REVIEW` with no verdict in the first and third,
@@ -98,13 +99,16 @@ acceptance:
       - N counts only the survivors a lens with an `error` holds.
       - N counts every blocker `anchored_blockers` returns.
       - The session passes only the first lens with an `error` as `unreviewed`.
+      - The session passes only the last lens with an `error` as `unreviewed`.
   - claim: >-
       Beside a lens with an `error`, REBUT's own `EXHAUSTED` and
       `GATE_ERROR` stand. The outcome, the ledger row, the REBUT line and
       `rebuttal.json`'s `state` and `why` carry REBUT's own state and line.
       The witness drives `EXHAUSTED` from a red gate re-run, from a probe
       cell that refuses the post-rebuttal patch, and from REBUT's own
-      critic cell refusing it. It drives `GATE_ERROR`
+      critic cell refusing it. In that last cell correctness's session
+      fails, contract files a blocker of its own, and adequacy holds both
+      survivors with no `error`. It drives `GATE_ERROR`
       from a gate re-run whose `tests` gate reports `error`. A rebuttal
       turn that REBUT's cap cuts ends the task `REVIEW_INCOMPLETE`, never
       `EXHAUSTED`. Its REBUT line and `rebuttal.json` carry criterion 1's
@@ -351,16 +355,19 @@ own file contents, with `None` for `_CRITIC_CONTAINER`.
   One whose session fails takes one `implement.AgentFailed`.
 - A REBUT cap cut is a rebuttal turn raising `implement.AgentFailed` with
   `_cut_off_turn(cost=10.25)`, HEAD unmoved.
-- For REBUT's own critic cell refusing the patch, stand in for
-  `session.critic_cell` the same way. The probe cell is built by
-  `critic_cell` too, so keep HEAD unmoved and argue both blockers. No
-  probe is then asked again, and only REBUT's critic cell sees the patch.
 - For a probe cell that refuses the patch, stand in for
   `session.probe_findings`. Raise `CriticPatchRejected` for a `patch` of
   `_GROWN_PATCH`, and call the real one for any other. Import the class
   from `saffron.cell.worktree`, since
   `tests/test_rebut.py::test_the_critic_patch_exceptions_are_imported_from_worktree_alone`
   fails on `session.CriticPatchRejected`.
+- For REBUT's own critic cell refusing the patch, stand in for
+  `session.critic_cell` the same way. The probe cell is built by
+  `critic_cell` too, so keep HEAD unmoved and argue every blocker. No
+  probe is then asked again, and only REBUT's critic cell sees the patch.
+  Keep a lens that still verdicts, as the fourth cell of criterion 1 does.
+  `SA-0406` does not pin whether `run_rebut` builds its critic cell when
+  `unreviewed` names every lens holding a blocker.
 - `tests/test_session.py` already defines `_task_state`. A second `def` of
   a name there replaces the first for every test, so search before naming
   a helper. The prototype's first whole suite failed six tests this way.
@@ -389,7 +396,7 @@ and stays.
 (`.saffron/policy.yaml:70`, `saffron/gates/core/size.py:286-292`). Over
 `SA-0406`'s prototype it counted 144 tokens outside `tests/`: 109 in
 `saffron/cell/session.py` and 35 in `saffron/phases/review.py`. That is
-against the `feature` ceiling of 3000. `tests/test_session.py` adds 1348
-tokens the gate does not count. `estimated_lines` is all 1492 over four,
+against the `feature` ceiling of 3000. `tests/test_session.py` adds 1375
+tokens the gate does not count. `estimated_lines` is all 1519 over four,
 since `driver.py check` prices tests and source together. `saffron/cell/session.py` is in `elevate_on`, so this spec runs
 `elevated`.
