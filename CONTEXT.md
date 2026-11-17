@@ -197,7 +197,7 @@ _Avoid_: "parent" (that is a `depends_on` entry, and a predecessor need not be o
 
 **Stack base**: A parent outside a stack order whose newest waiting task has a
 pushed branch and a pull request, from an earlier batch or cell. A `REBUTTAL_UNJUDGED`
-task whose latest run pushed nothing does not qualify (`SA-0330`). A stack batch stacks its first layer
+or `REVIEW_INCOMPLETE` task whose latest run pushed nothing does not qualify (`SA-0330`, `SA-0408`). A stack batch stacks its first layer
 on that branch, and links nothing. An order has at most one. It is the qualifying parent whose
 chain holds the most other parents outside the order, counted across the whole order. Its
 chain's branches are exempt from the overlap refusal (`SA-0265`, `SA-0267`, `SA-0312`).
@@ -921,8 +921,8 @@ lens never reads as a clean review. Without a REVIEW pool cut, the host-filed
 survivors still go to REBUT first (`SA-0407`). The task then ends here unless REBUT
 ends `EXHAUSTED` or `GATE_ERROR`. No pull
 request opens. The cell's branch is pushed as a `REBUTTAL_UNJUDGED` task's is,
-and a dependent stacks on the branch of a recorded push. It is cut from `base_sha`
-when the row records none. A stack batch counts the task a miss and refuses its
+and its dependent is refused the same way. A row that carries a pull request keeps
+it, and only a merge of that pull request moves it to `MERGED` (`SA-0408`). A stack batch counts the task a miss and refuses its
 children.
 
 **`ORPHANED`**: A task whose cell was killed or crashed, awaiting reclamation by
