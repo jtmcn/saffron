@@ -541,52 +541,99 @@ _WITHDRAWAL_REFUSED_REASON = (
     "over the whole file, and no committed fix answered it. The lens withdrew it:"
 )
 
+# The host's own sentence for a parent's surviving wrong version: no answer
+# ever lifts this one (`SA-0405`).
+_PARENT_WITHDRAWAL_REFUSED_REASON = (
+    "The host kept this blocker: a parent's wrong version survived its "
+    "witness, and a lens cannot withdraw that. The lens withdrew it:"
+)
+
+_STAYED_GREEN_WITH = " stayed green with "
+_POSSESSIVE = "'s "
+_WRONG_VERSION = "wrong version "
+
+
+def _parent_survivor_name(claim: str) -> str | None:
+    """The parent's id if `claim` is a host-filed survivor of a *parent's*
+    wrong version, read from the text alone (`SA-0405`).
+
+    `claim` must open with `review.HOST_FILED`, then carry the first
+    `' stayed green with '`. The text after that, up to the first `'s `,
+    is the name. The result is `None` when there is no such name or it
+    reads `the spec`. It is also `None` when the text right after `'s `
+    does not open with `'wrong version '`.
+    """
+    if not claim.startswith(review.HOST_FILED):
+        return None
+    marker = claim.find(_STAYED_GREEN_WITH)
+    if marker == -1:
+        return None
+    tail = claim[marker + len(_STAYED_GREEN_WITH) :]
+    possessive = tail.find(_POSSESSIVE)
+    if possessive == -1:
+        return None
+    name = tail[:possessive]
+    if name == "the spec":
+        return None
+    after = tail[possessive + len(_POSSESSIVE) :]
+    if not after.startswith(_WRONG_VERSION):
+        return None
+    return name
+
 
 def _guarded_blockers(
     numbered: Sequence[tuple[int, Finding]], acceptance: Sequence[Criterion]
-) -> set[int]:
-    """Blocker numbers whose claim opens with a `preserves` criterion's own
-    guard text: `review.HOST_FILED`, that criterion's witness, then
-    `' stayed green with '`. `survivor_finding` writes that exact prefix for
-    the criterion's own edit and for a wrong version alike. A shared witness
-    still guards a survivor of the other criterion. Nothing here tells the
-    two apart, and keeping a blocker is the safe direction.
+) -> dict[int, str]:
+    """Blocker numbers a withdrawal can never clear, mapped to the host's
+    own sentence for it.
+
+    A parent survivor, read by `_parent_survivor_name`, takes
+    `_PARENT_WITHDRAWAL_REFUSED_REASON` whatever `acceptance` holds. A
+    blocker whose claim opens with a `preserves` criterion's own guard
+    text, `review.HOST_FILED` then `' stayed green with '`, takes
+    `_WITHDRAWAL_REFUSED_REASON` instead.
     """
     prefixes = tuple(
-        f"{review.HOST_FILED}{criterion.witness} stayed green with "
+        f"{review.HOST_FILED}{criterion.witness}{_STAYED_GREEN_WITH}"
         for criterion in acceptance
         if criterion.preserves
     )
-    return {
-        n
-        for n, finding in numbered
-        if any(finding.claim.startswith(prefix) for prefix in prefixes)
-    }
+    guarded: dict[int, str] = {}
+    for n, finding in numbered:
+        if _parent_survivor_name(finding.claim) is not None:
+            guarded[n] = _PARENT_WITHDRAWAL_REFUSED_REASON
+        elif any(finding.claim.startswith(prefix) for prefix in prefixes):
+            guarded[n] = _WITHDRAWAL_REFUSED_REASON
+    return guarded
 
 
 def _check_withdrawal_refusals(
     lens_verdicts: LensVerdicts,
     *,
-    guarded: set[int],
+    guarded: Mapping[int, str],
     answers: Mapping[int, Rebuttal],
     moved: bool,
 ) -> None:
     """Every `withdrawn` verdict in `lens_verdicts` on a guarded blocker,
-    checked and mutated in place. It stands only when the blocker's first
-    answer was `fixed` and HEAD moved. Every other one becomes `confirmed`,
-    the host's sentence ahead of the lens's own reason and no quotes. The
-    refusal is recorded in `lens_verdicts.withdrawal_refusals` under this
-    lens (backlog b-cd5fd2)."""
+    checked and mutated in place. A blocker guarded under
+    `_PARENT_WITHDRAWAL_REFUSED_REASON` is refused whatever the first answer
+    was. One guarded under `_WITHDRAWAL_REFUSED_REASON` stands only when the
+    first answer was `fixed` and HEAD moved. Every refused verdict becomes
+    `confirmed`, its own sentence ahead of the lens's own reason and no
+    quotes. The refusal is recorded in `lens_verdicts.withdrawal_refusals`
+    under this lens (backlog b-cd5fd2, `SA-0405`)."""
     kept: list[Verdict] = []
     refusals: list[dict] = []
     for verdict in lens_verdicts.verdicts:
-        if verdict.verdict != "withdrawn" or verdict.finding not in guarded:
+        sentence = guarded.get(verdict.finding)
+        if verdict.verdict != "withdrawn" or sentence is None:
             kept.append(verdict)
             continue
-        answer = answers.get(verdict.finding)
-        if moved and answer is not None and answer.action == "fixed":
-            kept.append(verdict)
-            continue
+        if sentence == _WITHDRAWAL_REFUSED_REASON:
+            answer = answers.get(verdict.finding)
+            if moved and answer is not None and answer.action == "fixed":
+                kept.append(verdict)
+                continue
         refusals.append(
             {"finding": verdict.finding, "withdrawn_reason": verdict.reason}
         )
@@ -594,7 +641,7 @@ def _check_withdrawal_refusals(
             Verdict(
                 finding=verdict.finding,
                 verdict="confirmed",
-                reason=f"{_WITHDRAWAL_REFUSED_REASON} {verdict.reason}",
+                reason=f"{sentence} {verdict.reason}",
             )
         )
     lens_verdicts.verdicts = kept
