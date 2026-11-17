@@ -878,6 +878,7 @@ informative outcome about the spec or the codebase. Five more ways in share the 
 The spend ceiling stops the task before its next turn. Its gates go red after the
 rebuttal. A REBUT that would end `REBUTTAL_UNJUDGED` is cut short by its $10.00 cap, or its extraction or verdict by the reserve each draws on. Its exported patch
 does not apply or commit in a Gate-only or critic cell, or its commits net to no change.
+Beside a lens with an error in REVIEW, a REBUT pool cut ends `REVIEW_INCOMPLETE` instead.
 
 **`RATE_LIMITED`**: The provider refused the turn. The ceiling it hit is the provider's, not the task's.
 Says nothing about the spec, and the only thing it asks for is a retry after the
@@ -910,12 +911,15 @@ A row whose latest run's push was refused can carry an earlier run's
 counts the task a miss and refuses its children. A REBUT that one of its pools cut
 short ends `EXHAUSTED` instead.
 A row that carries a pull request keeps it, and only a merge of that pull
-request moves it to `MERGED`.
+request moves it to `MERGED`. Beside a lens with an error in REVIEW, a REBUT that would
+end here ends `REVIEW_INCOMPLETE` instead, cut or not (`SA-0407`).
 
 **`REVIEW_INCOMPLETE`**: A task whose REVIEW ended with a lens that produced no
 findings, because its session failed or its output was not the schema. A REVIEW
 session its pool could not cover ends the task here too. An unrun
-lens never reads as a clean review, and no finding set exists to rebut. No pull
+lens never reads as a clean review. Without a REVIEW pool cut, the host-filed
+survivors still go to REBUT first (`SA-0407`). The task then ends here unless REBUT
+ends `EXHAUSTED` or `GATE_ERROR`. No pull
 request opens. The cell's branch is pushed as a `REBUTTAL_UNJUDGED` task's is,
 and a dependent stacks on the branch of a recorded push. It is cut from `base_sha`
 when the row records none. A stack batch counts the task a miss and refuses its
