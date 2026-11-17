@@ -4,7 +4,7 @@ title: A `REVIEW_INCOMPLETE` parent whose push was refused still admits its chil
 status: open
 tier: 2
 filed: 2026-10-30
-specs: []
+specs: [SA-0408]
 prs: []
 commits: []
 cites: [§4.2, §5.5]

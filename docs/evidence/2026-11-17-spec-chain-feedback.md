@@ -49,11 +49,22 @@ covered a sentence the change makes false, and the caller landed all seven
 plus §3.3. `driver.py check` blocks on size at 2676 tokens. The estimate
 counts test tokens, and the cell's own size gate counts 144.
 
+## SA-0408 (b-e9dd4c)
+
+One writer, no split. It priced the change at 171 tokens against the bug
+ceiling. Round 1 filed no blocker. Its first concern named a wrong version
+the reviewer did not run: any stale waiting row refuses. The caller ran it
+on both witnesses, and it survived both, so it became a blocker. Each
+witness put the decisive row last. An older stale row under a newer pushed
+row now separates the readings, and the caller re-ran both probes. Round 2
+found four notes and no blocker. The caller read the live ledger to settle
+the empty `retired_first`, which the reviewer could not reach.
+
 ## What the reviews keep finding
 
 Every blocker and three concerns were one class. A claim names a set, and
 its witness drives one member, or puts the member that matters at an edge
-where a first-only or last-only reading also passes. Check 65 names it.
+where a first-only or last-only reading also passes. Check 65 names it. `SA-0408`'s blocker was the same class.
 
 ## Checks to build
 
