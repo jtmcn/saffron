@@ -526,12 +526,23 @@ def test_the_tasks_own_killed_versions_are_paired_for_each_witness_its_diff_edit
 
     criterion, entry = pairs[1]
     assert criterion.claim == "c1"
-    assert entry["version"] == "k2"
+    assert entry == {
+        "parent": "SP-1",
+        "witness": "tests/test_a.py::test_one",
+        "version": "k2",
+        "edit": {"file": "a.py", "find": "f3", "replace": "r"},
+        "reason": "",
+    }
 
     criterion, entry = pairs[2]
     assert criterion.claim == "c4"
-    assert entry["parent"] == "SP-1"
-    assert entry["version"] == "k4"
+    assert entry == {
+        "parent": "SP-1",
+        "witness": "tests/test_c.py::test_four",
+        "version": "k4",
+        "edit": {"file": "c.py", "find": "f4", "replace": "r"},
+        "reason": "",
+    }
 
 
 def test_the_tasks_own_record_that_cannot_be_read_is_reported_and_pairs_nothing(

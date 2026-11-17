@@ -1901,7 +1901,6 @@ class CommitDiffFixture:
     the checkout itself as its mirror."""
 
     work: Path
-    base_sha: str
     baseline_sha: str
     pushed_sha: str
     ordinary_head: str
@@ -1917,8 +1916,8 @@ _PACKAGED_MESSAGE = "packaged commit"
 
 
 def _build_commit_diff_fixture(tmp_path: Path) -> CommitDiffFixture:
-    """A base commit, a moved `main`, and a packaged commit with three
-    heads. One carries a review commit merged with `main`. One merges
+    """A base commit, a moved `main`, two packaged commits sharing one
+    message, and three heads. One carries a review commit merged with `main`. One merges
     `main` with no review commit at all. One restacks a second, separate
     packaged commit onto the moved `main`, then adds its own review
     commit. That review commit reverts one file, so a wrong range start
@@ -1987,8 +1986,8 @@ def _build_commit_diff_fixture(tmp_path: Path) -> CommitDiffFixture:
     _git(work, "rebase", "-q", "--onto", baseline_sha, base_sha, "restacked")
     restacked_copy = _git(work, "rev-parse", "HEAD")
     (work / "tests" / "test_w.py").write_text("packaged w\nrestack review edit\n")
-    # Reverted to `main_moved`'s own value, as the ordinary case's own
-    # review commit reverts it above.
+    # Reverted to its base text, which `main` never changed, as the
+    # ordinary case's review commit reverts it above.
     (work / "src" / "q.py").write_text("base q\n")
     _git(work, "add", "-A")
     _git(work, "commit", "-q", "-m", "review commit (restack)")
@@ -2002,7 +2001,6 @@ def _build_commit_diff_fixture(tmp_path: Path) -> CommitDiffFixture:
 
     return CommitDiffFixture(
         work=work,
-        base_sha=base_sha,
         baseline_sha=baseline_sha,
         pushed_sha=pushed_sha,
         ordinary_head=ordinary_head,
@@ -2086,7 +2084,11 @@ def test_review_commit_diff_is_empty_for_a_head_that_is_the_packaged_commit(tmp_
     non_empty = review_commit_diff(
         fixture.work, fixture.pushed_sha, fixture.baseline_sha, fixture.ordinary_head
     )
-    assert non_empty != ""
+    assert _changed_paths_in(non_empty) == [
+        "tests/test_new.py",
+        "tests/test_old.py",
+        "tests/test_w.py",
+    ]
 
     assert (
         review_commit_diff(
