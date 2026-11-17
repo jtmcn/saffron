@@ -4,7 +4,7 @@ title: "Nothing decides whether REBUT takes the host's survivors beside a lens w
 type: feature
 priority: 3
 risk: standard
-estimated_lines: 281
+estimated_lines: 300
 estimate_measured: true
 pending_symbols:
   - saffron/phases/review.py::rebuts_despite_errors
@@ -50,9 +50,9 @@ forbidden:
   - tests/test_agent_runner.py
   - tests/test_queued_specs.py
   - tests/test_scheduler.py
-budget_usd: 48
+budget_usd: 50
 max_attempts: 3
-max_turns: 230
+max_turns: 240
 acceptance:
   - claim: >-
       `review.host_survivors(reviews)` returns each blocker
@@ -91,9 +91,15 @@ acceptance:
       in any one of the three does not match. A killed entry names every
       failure, in order. An unproven entry names its reason. A survivor
       with no matching entry reads not asked again. Two survivors of one
-      edit each get a clause, with the same fate. The line names every
-      lens with an `error`. A survivor held by a lens with no `error` gets
-      no clause.
+      edit each get a clause, with the same fate. Each clause names the
+      `lens` of the `LensReview` that holds the survivor, never the
+      survivor's own `Finding.lens`. The line names every lens with an
+      `error`. A survivor held by a lens with no `error` gets no clause,
+      whatever its `Finding.lens`. The witness puts a survivor under a
+      `correctness` lens with an `error`, and one under a `contract` lens
+      with none beside an `adequacy` lens with an `error`. Callers check
+      `rebuts_despite_errors` first, so a REVIEW with no lens holding an
+      `error` lies outside the claim.
     witness: tests/test_review.py::test_the_incomplete_line_names_what_the_rebuttal_left_of_each_survivor_under_a_lens_with_an_error
     wrong_versions:
       - A killed fate names only the first failure.
@@ -108,6 +114,8 @@ acceptance:
       - The line also names the survivors a lens with no `error` holds.
       - The line gives one clause per distinct edit, so two survivors of one edit share one clause.
       - The clauses are sorted by file and line.
+      - A clause names the survivor's `Finding.lens`, so the `correctness` holder's survivor reads `adequacy`.
+      - A survivor is chosen by its `Finding.lens` being a lens with an `error`, so the `contract` holder's survivor gets a clause.
   - claim: >-
       `rebut.run_rebut` takes a keyword `unreviewed`, a collection of lens
       names that defaults to empty. A lens it names gets no verdict
@@ -116,9 +124,10 @@ acceptance:
       keeps the number its place in `blockers` gives it. So a guarded
       blocker a healthy lens withdraws is still refused under its own
       number. The witness names `adequacy` alone in a list, `correctness`
-      alone in a tuple, `correctness` and `contract` in a set, and all three
-      lenses in a list. The lens left to verdict is `correctness` or
-      `adequacy`.
+      alone in a tuple, `correctness` and `contract` in a set, and
+      `correctness`, `contract` and `adequacy` in a list. The lens left to
+      verdict is `correctness` or `adequacy`. `conventions` holds no
+      blocker in the witness.
     witness: tests/test_rebut.py::test_a_lens_named_unreviewed_gets_no_verdict_session_and_keeps_its_numbers
     wrong_versions:
       - "`run_rebut` ignores `unreviewed`."
@@ -179,8 +188,9 @@ lens's findings in order (`saffron/phases/review.py:982-998`). `review.probe_key
 (`saffron/phases/rebut.py:916`) and hands every one to the rebuttal turn.
 It then gives each lens in `review.LENSES` that holds a blocker its own
 verdict session (`saffron/phases/rebut.py:1013-1036`). `review.LENSES`
-names `correctness`, `contract` and `adequacy`
-(`saffron/phases/review.py:41-45`). The withdrawal guard is read over that
+names `correctness`, `contract`, `adequacy` and `conventions`
+(`saffron/phases/review.py:41-46`). The loop matches each blocker's own
+`Finding.lens` (`saffron/phases/rebut.py:1014-1016`). The withdrawal guard is read over that
 same numbering (`saffron/phases/rebut.py:1041`). `run_rebut`'s docstring is
 ten lines (`saffron/phases/rebut.py:903-912`), the `prose` gate's limit. `run_rebut`
 has four callers: `saffron/cell/session.py:3929`,
@@ -218,9 +228,13 @@ prototype of this spec alone, the `dead` gate failed on exactly those two.
    from one shared helper that
    `review_state` uses too, so the two cannot drift. When a lens with an
    `error` holds a host survivor, append a period and one clause per such
-   survivor. Each clause is one space, then the lens,
-   ` host-filed survivor `, its file, `:`, its line, `: `, its fate and a
-   period. The four fates, each exactly as written:
+   survivor. Each clause names the `LensReview` holding the survivor by
+   its `lens`. It is one space, that name, ` host-filed survivor `, its file, `:`, its line, `: `, its fate and a
+   period. `survivor_finding` sets every survivor's own `Finding.lens` to
+   `adequacy` (`saffron/phases/review.py:928`), so that field names no
+   holder. Callers check `rebuts_despite_errors` first, and the function
+   needs no rule for a REVIEW with no lens holding an `error`. The four
+   fates, each exactly as written:
 
    ```
    killed after the rebuttal by <every failure in the entry, joined by ", ">
@@ -250,6 +264,13 @@ prototype of this spec alone, the `dead` gate failed on exactly those two.
   withdrawn by its own lens" (`saffron/phases/rebut.py:721`). That line is
   false on this path. `SA-0407` overrides the state and line there, and no
   criterion here pins `state` or `why` for it.
+- **Which name `unreviewed` matches.** The verdict loop matches
+  `unreviewed` against each blocker's `Finding.lens`
+  (`saffron/phases/rebut.py:1015`). The line names the holding
+  `LensReview.lens`. The two agree in production, since the host appends
+  every survivor to the `adequacy` `LensReview`
+  (`saffron/cell/session.py:2176`). Keeping them consistent when they
+  differ is `SA-0407`'s question.
 - **Two entries for one edit.** `probe_findings` writes one entry per
   distinct edit, so no witness drives a duplicate entry. The first match
   decides.
@@ -279,7 +300,8 @@ The reverted source then fails at the call, never at collection.
 `review.survivor_finding` over `Criterion` and `Mutant` from
 `saffron.intake`, never as a hand-written claim. Build one of each kind:
 the criterion's own edit, a wrong version, and a parent's wrong version.
-Mark one unanchored. Build each entry as a dict with `probe` (the edit's
+It returns them unanchored, so mark the two wrong-version survivors
+anchored. Build each entry as a dict with `probe` (the edit's
 `model_dump()`), `probe_verdict`, and `failures` or `reason` where needed.
 For the field match, give three entries that each differ from one
 survivor's edit in one field alone. Write each expected line as a literal
@@ -312,6 +334,6 @@ witnesses, and the whole suite passed on it (5340 tests). With `saffron/phases/`
 new witness failed in its body. Each wrong version above was applied to the
 prototype, and its own criterion's witness failed on every one.
 
-**Size.** `size_gate` counted the prototype at 305 changed tokens outside
-`tests/` and 818 under it, against the `feature` ceiling of 3000.
+**Size.** `size_gate` counted the prototype at 316 changed tokens outside
+`tests/` and 884 under it, against the `feature` ceiling of 3000.
 `estimated_lines` is the sum over four.
