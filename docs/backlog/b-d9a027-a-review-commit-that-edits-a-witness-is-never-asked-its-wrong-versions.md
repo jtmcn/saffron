@@ -4,7 +4,7 @@ title: A review commit that edits a witness is never asked the wrong versions th
 status: open
 tier: 2
 filed: 2026-11-16
-specs: [SA-0403, SA-0405]
+specs: [SA-0403, SA-0404, SA-0405]
 prs: []
 commits: []
 cites: [§5.4, §5.5]
