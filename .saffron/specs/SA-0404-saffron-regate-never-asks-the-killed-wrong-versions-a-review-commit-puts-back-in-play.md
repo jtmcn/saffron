@@ -197,7 +197,7 @@ commits make, kept to the paths the baseline-to-head diff changes too. It
 returns empty for a `pushed_sha` that is `None`, empty, forty zeros or on
 no head. Both are `consumes` entries here. `parent_version_pairs` returns
 each parent's pairs and the names it could not read
-(`saffron/parent_versions.py:124`). Each pair's entry names its spec in
+(`saffron/parent_versions.py:126-157`). Each pair's entry names its spec in
 `parent` (`saffron/parent_versions.py:113`).
 
 **What `run_regate` reads now**. `_TASK_ROW` selects no `pushed_sha`
@@ -282,7 +282,7 @@ raise in every witness.
 - **A record of the outcomes**. The re-gate writes no wrong-version file
   and files no finding. The survivor lines are its only record.
 - **A second parent**. `parent_version_pairs` reads every `depends_on`
-  entry (`saffron/parent_versions.py:124`). The witnesses' task names one
+  entry (`saffron/parent_versions.py:126-157`). The witnesses' task names one
   parent, so no witness drives a second.
 - **The line's summary**. Criterion 2's witness checks each line ends
   `)`, and no witness pins the summary's text.
@@ -320,9 +320,9 @@ only merges `main`. Against `main` the review diff is empty. Against
 declares a wrong version. So none of them asks a pair or enters a cell.
 
 **The fixture needs four things the module lacks**. `_write_policy`
-declares no test paths (`tests/test_regate.py:95-103`), and the new
+declares no test paths (`tests/test_regate.py:100-109`), and the new
 policy must. `_fake_reverify` returns no `tests` result
-(`tests/test_regate.py:333`), and the new fake must carry one that
+(`tests/test_regate.py:334-342`), and the new fake must carry one that
 collects every witness but one. A survivor needs `read_at_head` to return
 text holding its edit's `find`, or its outcome turns `error`. Each
 version's `replace` decides what the stubbed `tests` gate says under it.
