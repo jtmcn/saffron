@@ -3,7 +3,9 @@
 A parent's REVIEW already ran each declared wrong version once, against its
 own criterion's witness. When a child edits that witness, the wrong versions
 it once caught are worth asking again. This module chooses the pairs and
-states the one line their asking earns. `SA-0402` runs them.
+states the one line their asking earns. `SA-0402` runs them. A task's own
+review commit puts its own killed versions back in play the same way
+(`b-d9a027`), through `own_version_pairs`.
 """
 
 from __future__ import annotations
@@ -153,6 +155,27 @@ def parent_version_pairs(
         except _Unreadable:
             unreadable.append(name)
     return pairs, unreadable
+
+
+def own_version_pairs(
+    *, spec: Spec, out_dir: Path, diff: str
+) -> tuple[list[tuple[Criterion, dict]], bool]:
+    """Which of `spec`'s own already-recorded killed wrong versions a review
+    commit in `diff` puts back in play (`b-d9a027`).
+
+    `spec` is the task's own spec, and the record is read from
+    `out_dir / spec.id / wrong-versions.json`, the same file REVIEW wrote.
+    No criterion chosen by `diff`'s changed paths returns no pair and
+    `False` without reading the record at all. An unreadable record returns
+    no pair and `True`. `SA-0404` asks these pairs.
+    """
+    criteria = _chosen_criteria(spec, _changed_paths(diff))
+    if not criteria:
+        return [], False
+    try:
+        return _parent_pairs(spec.id, criteria, _load_record(out_dir, spec.id)), False
+    except _Unreadable:
+        return [], True
 
 
 def describe_parent_versions(

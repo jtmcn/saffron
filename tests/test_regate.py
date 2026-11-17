@@ -5,6 +5,9 @@ checkout commits a base, forks a parent branch and a packaged commit, then
 adds a review commit. That commit merges a moved default branch into the
 task's branch, the way GitHub's "update branch" does. `reverify`, the probe
 and `gh` are faked. The mirror, the fetches and the merge base stay real git.
+`review_commit_diff`'s own witnesses build only a checkout, with no bare
+origin, ledger or `gh` fake, since the function reads a plain mirror
+directly.
 """
 
 from __future__ import annotations
@@ -14,6 +17,7 @@ import errno
 import hashlib
 import json
 import os
+import re
 import signal
 import subprocess
 from dataclasses import dataclass
@@ -23,6 +27,7 @@ import pytest
 
 from saffron import cli, preflight
 from saffron.cell import runtime
+from saffron.cell.worktree import DIFF_FLAGS
 from saffron.gates.baseline import NewFailure
 from saffron.gates.contract import Failure, GateResult
 from saffron.gates.core.revert import revert_gate
@@ -1887,3 +1892,236 @@ def test_regate_stopped_by_sigterm_exits_143(monkeypatch, tmp_path):
     assert result == 143
     assert heard == []
     assert restored == _record
+
+
+@dataclass
+class CommitDiffFixture:
+    """Every sha `review_commit_diff`'s own witnesses need, from one shared
+    checkout with no bare origin, ledger or `gh` fake: the function reads
+    the checkout itself as its mirror."""
+
+    work: Path
+    base_sha: str
+    baseline_sha: str
+    pushed_sha: str
+    ordinary_head: str
+    merge_only_head: str
+    restacked_copy: str
+    restacked_head: str
+    stray_sha: str
+
+
+# Shared by both packaged commits, so `_rebased_copy` matches the restacked
+# copy by message alone, whichever sha a case passes as `pushed_sha`.
+_PACKAGED_MESSAGE = "packaged commit"
+
+
+def _build_commit_diff_fixture(tmp_path: Path) -> CommitDiffFixture:
+    """A base commit, a moved `main`, and a packaged commit with three
+    heads. One carries a review commit merged with `main`. One merges
+    `main` with no review commit at all. One restacks a second, separate
+    packaged commit onto the moved `main`, then adds its own review
+    commit. That review commit reverts one file, so a wrong range start
+    or an unfiltered path set changes the restacked head's own result.
+    A fourth, unrelated branch stands for a stray commit naming neither."""
+    work = tmp_path / "work"
+    subprocess.run(["git", "init", "-q", str(work)], check=True)
+    _git(work, "config", "user.email", "t@example.com")
+    _git(work, "config", "user.name", "T")
+    _git(work, "symbolic-ref", "HEAD", "refs/heads/main")
+
+    (work / "tests").mkdir(parents=True)
+    (work / "tests" / "test_old.py").write_text(
+        "\n".join(f"# old test file content, line {n}" for n in range(1, 21)) + "\n"
+    )
+    (work / "src").mkdir()
+    (work / "src" / "q.py").write_text("base q\n")
+    (work / "src" / "r.py").write_text("r line1\nr line2\nr line3\n")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-q", "-m", "base")
+    base_sha = _git(work, "rev-parse", "HEAD")
+
+    (work / "main.txt").write_text("main moved\n")
+    (work / "src" / "r.py").write_text("r line1\nr line2\nr line3 main\n")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-q", "-m", "main moved")
+    baseline_sha = _git(work, "rev-parse", "HEAD")
+
+    _git(work, "checkout", "-q", "-b", "saffron/SA-0005", base_sha)
+    (work / "src" / "p.py").write_text("packaged p\n")
+    (work / "src" / "q.py").write_text("packaged q\n")
+    (work / "tests" / "test_w.py").write_text("packaged w\n")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-q", "-m", _PACKAGED_MESSAGE)
+    pushed_sha = _git(work, "rev-parse", "HEAD")
+    # Kept reachable after the restack below, as `tests/test_commit_review.py`
+    # keeps the original packaged commit reachable after its own rebase.
+    _git(work, "branch", "keeps-the-original", pushed_sha)
+
+    _git(work, "checkout", "-q", "-b", "ordinary", pushed_sha)
+    (work / "tests" / "test_w.py").write_text("packaged w\nreview edit\n")
+    (work / "src" / "q.py").write_text("base q\n")
+    _git(work, "mv", "tests/test_old.py", "tests/test_new.py")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-q", "-m", "review commit (ordinary)")
+    _git(work, "merge", "-q", "--no-ff", "-m", "Merge main (update branch)", "main")
+    ordinary_head = _git(work, "rev-parse", "HEAD")
+
+    _git(work, "checkout", "-q", "-b", "merge-only", pushed_sha)
+    _git(work, "merge", "-q", "--no-ff", "-m", "Merge main (update branch)", "main")
+    merge_only_head = _git(work, "rev-parse", "HEAD")
+
+    # A sibling of `pushed_sha`, so a wrong range start changes the
+    # restacked head's own answer rather than coincide with the right one.
+    _git(work, "checkout", "-q", "-b", "restack-packaged", base_sha)
+    (work / "src" / "p.py").write_text("packaged p\n")
+    (work / "src" / "q.py").write_text("packaged q\n")
+    (work / "tests" / "test_w.py").write_text("packaged w\n")
+    (work / "src" / "r.py").write_text("r line1 restack\nr line2\nr line3\n")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-q", "-m", _PACKAGED_MESSAGE)
+    restack_pushed_sha = _git(work, "rev-parse", "HEAD")
+    _git(work, "branch", "keeps-the-restack-original", restack_pushed_sha)
+
+    _git(work, "checkout", "-q", "-b", "restacked", restack_pushed_sha)
+    _git(work, "rebase", "-q", "--onto", baseline_sha, base_sha, "restacked")
+    restacked_copy = _git(work, "rev-parse", "HEAD")
+    (work / "tests" / "test_w.py").write_text("packaged w\nrestack review edit\n")
+    # Reverted to `main_moved`'s own value, as the ordinary case's own
+    # review commit reverts it above.
+    (work / "src" / "q.py").write_text("base q\n")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-q", "-m", "review commit (restack)")
+    restacked_head = _git(work, "rev-parse", "HEAD")
+
+    _git(work, "checkout", "-q", "-b", "stray", base_sha)
+    (work / "stray.txt").write_text("stray\n")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-q", "-m", "stray commit, unrelated")
+    stray_sha = _git(work, "rev-parse", "HEAD")
+
+    return CommitDiffFixture(
+        work=work,
+        base_sha=base_sha,
+        baseline_sha=baseline_sha,
+        pushed_sha=pushed_sha,
+        ordinary_head=ordinary_head,
+        merge_only_head=merge_only_head,
+        restacked_copy=restacked_copy,
+        restacked_head=restacked_head,
+        stray_sha=stray_sha,
+    )
+
+
+def _changed_paths_in(diff: str) -> list[str]:
+    return sorted(re.findall(r"^diff --git a/(\S+) b/\S+$", diff, re.MULTILINE))
+
+
+def _raw_diff(work: Path, start: str, head: str, paths: list[str]) -> str:
+    return subprocess.run(
+        [
+            "git",
+            "-C",
+            str(work),
+            "-c",
+            "core.quotePath=false",
+            "--literal-pathspecs",
+            "diff",
+            *DIFF_FLAGS,
+            start,
+            head,
+            "--",
+            *paths,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
+def test_review_commit_diff_keeps_the_review_commits_paths_the_task_also_changed(
+    tmp_path,
+):
+    from saffron.regate import review_commit_diff
+
+    fixture = _build_commit_diff_fixture(tmp_path)
+
+    diff = review_commit_diff(
+        fixture.work, fixture.pushed_sha, fixture.baseline_sha, fixture.ordinary_head
+    )
+    paths = _changed_paths_in(diff)
+    assert paths == ["tests/test_new.py", "tests/test_old.py", "tests/test_w.py"]
+    assert diff == _raw_diff(
+        fixture.work, fixture.pushed_sha, fixture.ordinary_head, paths
+    )
+
+    empty = review_commit_diff(
+        fixture.work, fixture.pushed_sha, fixture.baseline_sha, fixture.merge_only_head
+    )
+    assert empty == ""
+
+
+def test_review_commit_diff_starts_a_restacked_branch_at_the_packaged_commits_copy(
+    tmp_path,
+):
+    from saffron.regate import review_commit_diff
+
+    fixture = _build_commit_diff_fixture(tmp_path)
+
+    diff = review_commit_diff(
+        fixture.work, fixture.pushed_sha, fixture.baseline_sha, fixture.restacked_head
+    )
+    paths = _changed_paths_in(diff)
+    assert paths == ["tests/test_w.py"]
+    assert diff == _raw_diff(
+        fixture.work, fixture.restacked_copy, fixture.restacked_head, paths
+    )
+
+
+def test_review_commit_diff_is_empty_for_a_head_that_is_the_packaged_commit(tmp_path):
+    from saffron.regate import review_commit_diff
+
+    fixture = _build_commit_diff_fixture(tmp_path)
+
+    non_empty = review_commit_diff(
+        fixture.work, fixture.pushed_sha, fixture.baseline_sha, fixture.ordinary_head
+    )
+    assert non_empty != ""
+
+    assert (
+        review_commit_diff(
+            fixture.work, fixture.pushed_sha, fixture.baseline_sha, fixture.pushed_sha
+        )
+        == ""
+    )
+    assert (
+        review_commit_diff(
+            fixture.work,
+            fixture.pushed_sha,
+            fixture.baseline_sha,
+            fixture.restacked_copy,
+        )
+        == ""
+    )
+
+
+def test_review_commit_diff_is_empty_when_no_packaged_commit_is_on_head(tmp_path):
+    from saffron.regate import review_commit_diff
+
+    fixture = _build_commit_diff_fixture(tmp_path)
+
+    non_empty = review_commit_diff(
+        fixture.work, fixture.pushed_sha, fixture.baseline_sha, fixture.ordinary_head
+    )
+    assert non_empty != ""
+
+    for bad_pushed_sha in (None, "", "0" * 40, fixture.stray_sha):
+        assert (
+            review_commit_diff(
+                fixture.work,
+                bad_pushed_sha,
+                fixture.baseline_sha,
+                fixture.ordinary_head,
+            )
+            == ""
+        )
