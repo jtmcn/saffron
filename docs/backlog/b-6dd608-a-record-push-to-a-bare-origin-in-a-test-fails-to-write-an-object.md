@@ -47,3 +47,5 @@ push on an unchanged branch.
   The test passed alone.
 - 2026-11-12: a sixth hit, in `test_qualify` during the spec loop's run 65.
   The test passed alone.
+- 2026-11-17: a seventh hit, in `test_end_review` during the spec loop's run 76.
+  The test passed alone three times.
