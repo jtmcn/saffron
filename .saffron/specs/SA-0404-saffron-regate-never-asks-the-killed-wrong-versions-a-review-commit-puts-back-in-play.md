@@ -4,7 +4,7 @@ title: "`saffron regate` never asks the killed wrong versions a review commit pu
 type: feature
 priority: 3
 risk: standard
-estimated_lines: 337
+estimated_lines: 464
 estimate_measured: true
 depends_on: [SA-0403]
 consumes:
@@ -54,7 +54,7 @@ acceptance:
       After `reverify`, `run_regate` asks the task's own chosen pairs and
       then each parent's in one `session._apply_criterion_probes` call. It
       reads `pushed_sha` from the task's row and passes it to
-      `review_commit_diff` with the baseline and `head`. It hands that
+      `review_commit_diff` with the mirror, the baseline and `head`. It hands that
       diff to `own_version_pairs`, and to `parent_version_pairs` with the
       spec's `depends_on` and the export's `.saffron/specs`. The call's
       `CellSpec` holds the task's spec id and the baseline as `base_sha`.
@@ -66,15 +66,19 @@ acceptance:
       the comparison `reverify` returned. The witness's task `SA-0005`
       depends on `SA-0003`. Its base commit holds both specs and a policy
       declaring `tests/**` as test paths, one inert pattern and one gate
-      env entry. `main`
-      then moves one commit, so the baseline is not the task's
-      `base_sha`. The packaged commit edits src/a.py, tests/test_w.py,
+      env entry. `main` then moves one commit. The packaged commit edits src/a.py, tests/test_w.py,
       tests/test_p.py and tests/test_x.py, and adds a binary file. The
-      review commit edits tests/test_w.py and tests/test_p.py again. The
-      own record kills two versions under a tests/test_w.py witness, the
+      review commit edits tests/test_w.py and tests/test_p.py again.
+      `main` then moves again, editing tests/test_m.py, which a declared
+      witness names and the task never changes. The head merges `main`
+      as GitHub's update branch does. So the baseline is `main`'s second
+      head, not the task's `base_sha`. The checkout `saffron regate` is
+      given is a transport clone of `main` alone, holding no commit of
+      the task's branch. The own record kills two versions under a tests/test_w.py witness, the
       first killed again and the second surviving. It kills one under a
       second tests/test_w.py witness that the head's `tests` result does
-      not collect. It kills one under a tests/test_x.py witness. The
+      not collect. It kills one under a tests/test_x.py witness, and one
+      under the tests/test_m.py witness, which that result collects. The
       parent's record kills three under a tests/test_p.py witness. They
       are one that survives, one the inert pattern refuses, and one under
       which the `tests` gate errors. The witness stubs the cell at
@@ -90,6 +94,8 @@ acceptance:
     witness: tests/test_regate.py::test_regate_asks_the_tasks_own_and_each_parents_killed_versions_in_one_probe_cell
     wrong_versions:
       - The `CellSpec` built on the task's own `base_sha`, so `tree_base` is not the baseline.
+      - The review diff read from the task's `base_sha` rather than the baseline, so the tests/test_m.py version is applied.
+      - The review diff read from the checkout rather than the mirror, so no pair is chosen and no cell is entered.
       - The patch read from `pushed_sha` to `head`, so it lacks src/a.py's packaged edit.
       - The patch read without `--binary`, so the binary file arrives as a stub.
       - The patch read without `--full-index`, so each `index` line is abbreviated.
@@ -109,14 +115,14 @@ acceptance:
       parentheses. The spec id is the entry's `parent`
       key, the task's own id for its own pairs. Each `survived` pair adds
       one to the new-failure count. That count is the one `run_regate`
-      prints in its last line and passes to `record_regate`, and any
-      survivor makes the exit 1. An `unproven` or `error` pair adds
-      nothing. The witness reads criterion 1's fixture, with `reverify`
+      prints in its last line and passes to `record_regate`. An
+      `unproven` or `error` pair adds nothing. The witness reads criterion 1's fixture, with `reverify`
       returning one new failure. It asserts the text before ` (` of each
       line starting `regate: SA-` is exactly these, in order. They are
       `SA-0005`'s survivor and its uncollected version (`unproven`), then
       `SA-0003`'s survivor, its inert version (`unproven`) and its errored
-      version (`error`). It asserts the gate failure's own line, the last
+      version (`error`). It asserts each such line ends `)`. It asserts
+      the gate failure's own line, the last
       line's `3 new failures`, a recorded row naming `head` with
       `new_failures` 3, and exit 1.
     witness: tests/test_regate.py::test_regate_counts_each_surviving_wrong_version_as_a_new_failure_and_names_its_spec
@@ -127,21 +133,24 @@ acceptance:
       - Every pair that was not killed counted, so the count is 6.
       - A parent's survivor printed under the task's own id, so its line names `SA-0005`.
       - Only survivors printed, so the `unproven` and `error` lines are missing.
+      - The line ending at the version, so no line ends `)`.
       - The pairs chosen from the baseline-to-head diff, so tests/test_x.py's version gets a line too.
   - claim: >-
       `run_regate` prints `regate: no wrong-version record read for <id>`
       for the task's own record when `own_version_pairs` reports it
       unreadable, and then for each parent `parent_version_pairs` names
       unread. Neither fails the re-gate, and either side's readable pairs
-      are still asked. With no pair to ask, no probe cell is entered. The
+      are still asked. A survivor makes the exit 1 with no gate failure.
+      With no pair to ask, no probe cell is entered. The
       witness reads criterion 1's fixture and invokes `saffron regate`
       four times, counting cells through one `session.critic_cell` stub.
       First the own record is broken JSON. The own line prints and the
-      parent's does not, the parent survivor's line prints, and one cell
-      is entered. Then the own record is restored and the parent's is
+      parent's does not, the parent survivor's line prints, one cell is
+      entered and the exit is 1. Then the own record is restored and the parent's is
       deleted. The parent line prints and the own does not, the own
-      survivor's line prints, and a second cell is entered. Then the own
-      record is broken again. Both lines print, no pair line prints, no
+      survivor's line prints, a second cell is entered and the exit is 1.
+      Then the own record is broken again. Both lines print, the own
+      line first, no pair line prints, no
       cell is entered, the last line says `green` and the exit is 0.
       Last, both records are restored and the task's `pushed_sha` is
       recorded as `head`. No record line and no pair line print, no cell
@@ -151,6 +160,8 @@ acceptance:
       - The own record's line never printed, so the first and third invocations lack it.
       - The unread parent's line never printed, so the second and third invocations lack it.
       - An unreadable record counted as a new failure, so the third invocation exits 1.
+      - The exit read from the gate failures alone, so the first invocation exits 0.
+      - The parent lines printed before the own line, so the third invocation prints them out of order.
       - Any unreadable record ending the ask, so the first invocation enters no cell.
       - The pairs chosen from the baseline-to-head diff, so the last invocation enters a cell.
 ---
@@ -228,8 +239,7 @@ Wire the asking into `run_regate`, as the criteria state.
   "adequacy")]` and drop it afterwards. Pass a fresh `created` set and a
   `note` that prints `regate: <detail>`.
 - Print each pair line after the call. Add the survivors to the count
-  before `record_regate`, so `reconcile` and `adopt` read the re-gate as
-  failed.
+  before `record_regate`, so `reconcile` reads the re-gate as failed.
 
 No agent session runs and no token is read, as before.
 `tests/test_regate.py:41`'s autouse fixture already makes an agent path
@@ -248,7 +258,13 @@ raise in every witness.
   leave `_apply_criterion_probes` and `run_regate` alike. The caller exits
   2 and no row is recorded. No witness drives it.
 - **An `error` or `unproven` pair**. It prints and does not fail the
-  re-gate. So `adopt` can move a task on with a version nobody asked.
+  re-gate. A probe cell that cannot be entered twice turns every pair
+  `error`. The re-gate then records a green row and exits 0 with no
+  version asked.
+- **`saffron adopt`'s re-gate**. `adopt` records `head` as the pushed sha
+  (`saffron/cli.py:3264`) before it calls `run_regate`
+  (`saffron/cli.py:3268`). `review_commit_diff` is then empty, so that
+  re-gate asks nothing.
 - **The `note` callback**. It fires only when a removal leaves something
   behind. No witness drives it.
 - **A record of the outcomes**. The re-gate writes no wrong-version file
@@ -256,8 +272,8 @@ raise in every witness.
 - **A second parent**. `parent_version_pairs` reads every `depends_on`
   entry (`saffron/parent_versions.py:124`). The witnesses' task names one
   parent, so no witness drives a second.
-- **The line's summary**. Criterion 2's witness reads each line up to its
-  summary, so no witness pins the summary's text.
+- **The line's summary**. Criterion 2's witness checks each line ends
+  `)`, and no witness pins the summary's text.
 - **`DIFF_FLAGS` in the patch**. The fixture holds no rename, so a patch
   read without `DIFF_FLAGS` equals the witness's own. No witness drives it.
 - **What `reconcile` prints**. Its count includes survivors and names
@@ -301,12 +317,15 @@ version's `replace` decides what the stubbed `tests` gate says under it.
 `tests/test_session.py:15916` stubs the same four names. Criterion 3's
 last step records the push through `_seeding_ledger`, as `_seed_task`'s
 callers do, so the fold `saffron regate` reads holds it. The `types`
-gate reads a stub's status as a `GateStatus`, so annotate it.
+gate reads a stub's status as a `GateStatus`, so annotate it. A plain
+`git clone` of a local path copies every object, so the checkout needs
+`--no-local` to lack the task's branch (measured).
 
 **The `prose` gate** counts each new comment and docstring from zero.
 Write none with an em dash, a semicolon, a contraction, the perfect tense
 or a sentence over 25 words. `run_regate`'s docstring sits at ten lines
 already, so a line added there is a hit.
 
-**Size**. A prototype on `SA-0403`'s diff measured 247 changed tokens
-outside `tests/` and 1098 under it, about 337 changed lines.
+**Size**. A prototype on `SA-0403`'s diff changed 464 lines, 110 in
+`saffron/regate.py` and 354 in `tests/test_regate.py`. The `size` gate
+counts only the 247 changed tokens outside `tests/`.
