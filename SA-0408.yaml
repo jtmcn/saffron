@@ -1,0 +1,25 @@
+tests/test_cli.py::test_a_child_of_a_review_incomplete_parent_stacks_only_on_its_latest_runs_push:
+  file: saffron/task.py
+  find: newest = waiting[-1]
+  replace: newest = waiting[0]
+  case: a stale REVIEW_INCOMPLETE row newer than a pushed READY_FOR_REVIEW row, with no gh
+tests/test_cli.py::test_a_multi_parent_child_is_refused_for_any_open_review_incomplete_parent_that_pushed_nothing:
+  file: saffron/task.py
+  find: stack_rows[dep] = newest
+  replace: pass
+  case: an open REVIEW_INCOMPLETE parent that pushed nothing among two or more parents
+tests/test_scheduler.py::test_a_stack_order_refuses_a_child_whose_review_incomplete_stack_base_pushed_nothing:
+  file: saffron/scheduler.py
+  find: newest = waiting[-1]
+  replace: newest = waiting[0]
+  case: a stale REVIEW_INCOMPLETE stack base newer than a pushed READY_FOR_REVIEW row
+tests/test_reconcile.py::test_a_review_incomplete_row_is_asked_and_moves_on_no_answer_but_a_merge:
+  file: saffron/reconcile.py
+  find: state not in PR_PENDING_STATES and state not in MERGE_ONLY_STATES
+  replace: state not in PR_PENDING_STATES
+  case: a merged pull request on a REVIEW_INCOMPLETE row
+tests/test_package.py::test_another_review_incomplete_row_with_a_pull_request_keeps_that_branch:
+  file: saffron/phases/package.py
+  find: 'others = [row for row in task_rows if row["task_id"] != outcome.task_id]'
+  replace: others = []
+  case: another REVIEW_INCOMPLETE row of the spec that carries a pull request
