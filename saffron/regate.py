@@ -12,18 +12,19 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from saffron import end_review, mutants, preflight
-from saffron.cell import runtime
-from saffron.cell.worktree import DIFF_FLAGS
+from saffron import end_review, mutants, parent_versions, preflight
+from saffron.cell import runtime, session
+from saffron.cell.worktree import DIFF_FLAGS, GATES_MOUNT
 from saffron.intake import SpecError, load_spec, parse_spec
 from saffron.ledger import Ledger
 from saffron.phases import package as package_phase
+from saffron.phases import review
 from saffron.repos import image as repo_image
 from saffron.repos import mirror as git_mirror
 from saffron.repos.policy import load_policy
 
 _TASK_ROW = """
-    SELECT t.task_id, t.spec_id, t.spec_sha, t.branch, t.pr_url,
+    SELECT t.task_id, t.spec_id, t.spec_sha, t.branch, t.pr_url, t.pushed_sha,
            r.run_id, r.base_sha, r.repo_id
     FROM tasks t JOIN runs r ON r.run_id = t.run_id
     WHERE t.task_id = ?
@@ -240,6 +241,76 @@ def run_regate(
     for gate, failure in comparison.new_failures:
         print(f"regate: {gate} {failure.code} {failure.file}")
     count = len(comparison.new_failures)
+
+    # A review commit on `head` can revive an already-killed wrong version.
+    # A survivor of that second ask counts as one more new failure (`b-d9a027`, `SA-0404`).
+    diff = review_commit_diff(mirror, row["pushed_sha"], baseline_sha, head)
+    own_pairs, own_unreadable = parent_versions.own_version_pairs(
+        spec=spec, out_dir=out_dir, diff=diff
+    )
+    if own_unreadable:
+        print(f"regate: no wrong-version record read for {row['spec_id']}")
+    parent_pairs, parent_unread = parent_versions.parent_version_pairs(
+        depends_on=spec.depends_on,
+        specs_dir=exported / ".saffron" / "specs",
+        out_dir=out_dir,
+        diff=diff,
+    )
+    for name in parent_unread:
+        print(f"regate: no wrong-version record read for {name}")
+
+    pairs = own_pairs + parent_pairs
+    if pairs:
+        patch = git_mirror._git(
+            mirror,
+            "-c",
+            "core.quotePath=false",
+            "--literal-pathspecs",
+            "diff",
+            *DIFF_FLAGS,
+            "--binary",
+            "--full-index",
+            baseline_sha,
+            head,
+            strip=False,
+        )
+        probe_spec = session.CellSpec(
+            spec_id=row["spec_id"],
+            spec_sha=row["spec_sha"],
+            branch=row["branch"],
+            base_sha=baseline_sha,
+            touches=spec.touches,
+            spec_type=spec.spec_type,
+            body=spec.body,
+        )
+        session._apply_criterion_probes(
+            spec=probe_spec,
+            repo=repo,
+            mirror=mirror,
+            gates_dir=exported,
+            thread_env=policy.thread_env,
+            test_paths=policy.integrity.test_paths,
+            gates=policy.gate_executables(Path(GATES_MOUNT)),
+            patch=patch,
+            pairs=pairs,
+            diff=diff,
+            gate_comparison=comparison,
+            reviews=[review.LensReview(lens="adequacy")],
+            created=set(),
+            note=lambda _step, _ok, detail: print(f"regate: {detail}"),
+            inert_patterns=policy.probes.inert,
+        )
+        for _criterion, entry in pairs:
+            outcome = entry["outcome"]
+            if outcome == "killed":
+                continue
+            print(
+                f"regate: {entry['parent']} wrong version {outcome}: "
+                f"{entry['version']} ({entry['summary']})"
+            )
+            if outcome == "survived":
+                count += 1
+
     ledger.record_regate(
         task_id, head_sha=head, baseline_sha=baseline_sha, new_failures=count
     )
