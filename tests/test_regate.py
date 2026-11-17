@@ -29,7 +29,7 @@ from saffron import cli, preflight
 from saffron.cell import runtime
 from saffron.cell.worktree import DIFF_FLAGS, GATES_MOUNT
 from saffron.gates.baseline import NewFailure
-from saffron.gates.contract import Failure, GateResult
+from saffron.gates.contract import Failure, GateResult, GateStatus
 from saffron.gates.core.revert import revert_gate
 from saffron.gates.suite import SuiteComparison, SuiteRun
 from saffron.ledger import Ledger
@@ -2158,7 +2158,7 @@ _WV_W2_WITNESS = "tests/test_w.py::test_w2"
 _WV_X_WITNESS = "tests/test_x.py::test_x1"
 _WV_M_WITNESS = "tests/test_m.py::test_m1"
 _WV_P_WITNESS = "tests/test_p.py::test_p1"
-_WV_COLLECTED = [_WV_W1_WITNESS, _WV_X_WITNESS, _WV_P_WITNESS]
+_WV_COLLECTED = [_WV_W1_WITNESS, _WV_X_WITNESS, _WV_P_WITNESS, _WV_M_WITNESS]
 
 
 def _wv_killed(version: str, file: str, find: str, replace: str) -> dict:
@@ -2205,24 +2205,30 @@ def _wv_parent_spec_text(*, with_wrong_versions: bool) -> str:
     return body + "---\n"
 
 
-def _write_wv_policy(work: Path, *, env_value: str) -> None:
+def _write_wv_policy(work: Path, *, moved: bool = False) -> None:
     """One declared test path, one inert pattern (so `pv3` below is refused
-    before any cell) and one gate env entry, as the witness names."""
+    before any cell) and one gate env entry, as the witness names. `moved`
+    changes every member, so a member read from the checkout is caught."""
     gates_dir = work / ".saffron" / "gates"
     gates_dir.mkdir(parents=True, exist_ok=True)
     tests_gate = gates_dir / "tests"
     if not tests_gate.exists():
         tests_gate.write_text('#!/bin/sh\necho "{}"\n')
         tests_gate.chmod(0o755)
+    gate, paths, inert, env = (
+        ("checks", "spec/**", "# never: {name}", "2")
+        if moved
+        else ("tests", "tests/**", "\\s*# noop: {name}", "1")
+    )
     (work / ".saffron" / "policy.yaml").write_text(
         "gates:\n"
-        "  tests: {blocking: true}\n"
+        f"  {gate}: {{blocking: true}}\n"
         "integrity:\n"
-        "  test_paths: ['tests/**']\n"
+        f"  test_paths: ['{paths}']\n"
         "probes:\n"
-        "  inert: ['\\s*# noop: {name}']\n"
+        f"  inert: ['{inert}']\n"
         "thread_env:\n"
-        f"  SOME_ENV: '{env_value}'\n"
+        f"  SOME_ENV: '{env}'\n"
     )
 
 
@@ -2251,7 +2257,7 @@ def _build_wrong_version_fixture(tmp_path: Path) -> WrongVersionFixture:
     `tests/test_p.py`, merged with a `main` that moved once first.
 
     The review range and the baseline range then share only
-    `tests/test_w.py` and `tests/test_p.py` (`SA-0404`'s own narrowing).
+    `tests/test_w.py` and `tests/test_p.py` (`SA-0403`'s narrowing).
     `main` moves once more afterward: `tests/test_m.py` again, the
     policy's own gate env, and the parent spec losing its wrong versions.
     None of that reaches the task's own base, read from the export."""
@@ -2263,7 +2269,7 @@ def _build_wrong_version_fixture(tmp_path: Path) -> WrongVersionFixture:
     _git(work, "config", "user.name", "T")
     _git(work, "symbolic-ref", "HEAD", "refs/heads/main")
 
-    _write_wv_policy(work, env_value="1")
+    _write_wv_policy(work)
     specs_dir = work / ".saffron" / "specs"
     specs_dir.mkdir(parents=True, exist_ok=True)
     (specs_dir / _WV_SPEC_FILENAME).write_text(_wv_child_spec_text())
@@ -2303,7 +2309,7 @@ def _build_wrong_version_fixture(tmp_path: Path) -> WrongVersionFixture:
     # baseline, and its own files disagree with the export at `base_sha`.
     _git(work, "checkout", "-q", "main")
     (work / "tests" / "test_m.py").write_text("m test v2\n")
-    _write_wv_policy(work, env_value="2")
+    _write_wv_policy(work, moved=True)
     (specs_dir / "SA-0003-parent.md").write_text(
         _wv_parent_spec_text(with_wrong_versions=False)
     )
@@ -2452,7 +2458,7 @@ def _wv_full_results() -> list[GateResult]:
         gate="tests", status="pass", tool="pytest 1", collected=_WV_COLLECTED
     )
 
-    def _plain(status):
+    def _plain(status: GateStatus) -> GateResult:
         return GateResult(gate="tests", status=status, tool="pytest 1")
 
     return [
@@ -2542,7 +2548,6 @@ def test_regate_asks_the_tasks_own_and_each_parents_killed_versions_in_one_probe
             str(mirror_path),
             "-c",
             "core.quotePath=false",
-            "--literal-pathspecs",
             "diff",
             *DIFF_FLAGS,
             "--binary",
@@ -2605,7 +2610,7 @@ def test_regate_counts_each_surviving_wrong_version_as_a_new_failure_and_names_i
         assert line.endswith(")")
 
     assert "regate: lint E1 x.py" in out
-    assert "4 new failures" in out
+    assert "4 new failures" in out.splitlines()[-1]
     assert len(logs["reverify_calls"]) == 1
 
     ledger = Ledger(home / "ledger.db")
@@ -2698,7 +2703,7 @@ def test_regate_prints_each_record_it_cannot_read_and_enters_no_cell_without_a_p
     assert own_index < parent_index
     assert not any("wrong version" in line for line in lines_3)
     assert logs_3["kwargs_log"] == []
-    assert "green" in out_3
+    assert "green" in out_3.splitlines()[-1]
     assert result_3 == 0
 
     # Fourth: both restored, with the task's own `pushed_sha` now `head`.

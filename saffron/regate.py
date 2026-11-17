@@ -265,7 +265,6 @@ def run_regate(
             mirror,
             "-c",
             "core.quotePath=false",
-            "--literal-pathspecs",
             "diff",
             *DIFF_FLAGS,
             "--binary",
