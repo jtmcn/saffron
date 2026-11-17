@@ -589,9 +589,10 @@ def _guarded_blockers(
 
     A parent survivor, read by `_parent_survivor_name`, takes
     `_PARENT_WITHDRAWAL_REFUSED_REASON` whatever `acceptance` holds. A
-    blocker whose claim opens with a `preserves` criterion's own guard
-    text, `review.HOST_FILED` then `' stayed green with '`, takes
-    `_WITHDRAWAL_REFUSED_REASON` instead.
+    blocker whose claim opens with a `preserves` criterion's guard text,
+    `review.HOST_FILED`, its witness, then `' stayed green with '`, takes
+    `_WITHDRAWAL_REFUSED_REASON`. A shared witness still guards the other
+    criterion's survivor, which is the safe direction.
     """
     prefixes = tuple(
         f"{review.HOST_FILED}{criterion.witness}{_STAYED_GREEN_WITH}"

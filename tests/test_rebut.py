@@ -2454,7 +2454,7 @@ def test_a_withdrawn_parent_survivor_is_kept_confirmed_whatever_its_answer():
     """Criterion 1: a lens cannot withdraw the host's survivor of a parent's
     wrong version. The host refuses that withdrawal whatever the first
     answer was. The `preserves` rule still governs any other guarded
-    blocker the same way it always has."""
+    blocker as before."""
     from saffron import probe
     from saffron.intake import Criterion, Mutant
 
@@ -2508,7 +2508,7 @@ def test_a_withdrawn_parent_survivor_is_kept_confirmed_whatever_its_answer():
     b12 = _own_edit(preserved)
     b13 = _blocker()
     # Split so the embedded citation-shaped text is not read as a real one
-    # (`.saffron/gates/integrity`, `unknown-spec-id`).
+    # (`saffron/gates/core/integrity.py`, `unknown-spec-id`).
     embedded_version = "x stayed green with " + "SA-1" + "'s wrong version y"
     b14 = review.survivor_finding(plain, edit, content, version=embedded_version)
     blockers_1 = [b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14]
