@@ -305,7 +305,8 @@ Design notes:
                        or commit in the Gate-only or critic cell, or the
                        attempt's commits net to no change (§5.5).
                        Also from REBUTTING: a REBUT pool refused a session
-                       and the rebuttal was left unjudged.
+                       and the rebuttal was left unjudged, save beside a
+                       lens with an error, which ends REVIEW_INCOMPLETE.
                        Its blockers stand (§5.6). Leaves for `MERGED`,
                        when `reconcile` reads that the draft PACKAGE opened
                        for it, or a pull request `saffron adopt` attached,
@@ -334,13 +335,17 @@ Design notes:
                        row can carry an older push. A `--stack` night counts it a
                        miss and refuses its children (§4.2, §5.6, ADR 7).
                        Leaves for `MERGED`, when `reconcile` reads a merge of
-                       a pull request the row carries
+                       a pull request the row carries. Beside a lens with an
+                       error, such a REBUT ends REVIEW_INCOMPLETE instead
   REVIEW_INCOMPLETE ◀── from REVIEWING: a lens produced no findings, because its
                        session failed or its output was not the schema. No
                        pull request opens, and the branch is pushed as a
                        REBUTTAL_UNJUDGED task's is. A dependent stacks on the
                        branch of a recorded push, and is cut from `base_sha`
-                       when the row records none (§4.2, §5.5)
+                       when the row records none (§4.2, §5.5). Also from
+                       REBUTTING, beside a lens with an error: the host-filed
+                       survivors went to REBUT, and any end but REBUT's own
+                       EXHAUSTED or GATE_ERROR lands here (§5.5, `SA-0407`)
 ```
 
 Terminal states that reach you: `SCOPE_REVIEW`, `PLAN_REJECTED`, `SPEC_WITHHELD`, `EXHAUSTED`, `READY_FOR_REVIEW`, `MERGE_FAILED`, `PREFLIGHT_FAILED`, `NOT_IMPLEMENTED`, `GATE_ERROR`, `RATE_LIMITED`, `PROVIDER_UNREACHABLE`, `SPEC_DRAFTED`, `REBUTTAL_UNJUDGED`, `REVIEW_INCOMPLETE`. Everything else is internal. `NOT_IMPLEMENTED`, `GATE_ERROR`, `RATE_LIMITED` and `PROVIDER_UNREACHABLE` are named rather than folded into a neighbour. Folded, an abort or an attempt that produced nothing reads as an ordinary task outcome. That is principle 34 wearing a state name.
