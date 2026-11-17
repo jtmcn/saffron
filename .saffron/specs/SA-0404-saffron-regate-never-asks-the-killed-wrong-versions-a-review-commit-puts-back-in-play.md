@@ -4,7 +4,7 @@ title: "`saffron regate` never asks the killed wrong versions a review commit pu
 type: feature
 priority: 3
 risk: standard
-estimated_lines: 464
+estimated_lines: 468
 estimate_measured: true
 depends_on: [SA-0403]
 consumes:
@@ -58,6 +58,8 @@ acceptance:
       diff to `own_version_pairs`, and to `parent_version_pairs` with the
       spec's `depends_on` and the export's `.saffron/specs`. The call's
       `CellSpec` holds the task's spec id and the baseline as `base_sha`.
+      Its `repo` is the checkout the command was given, and its `mirror`
+      is the mirror.
       Its patch is `git diff` from the baseline to `head` with
       `--binary` and `--full-index` besides `DIFF_FLAGS`. Its gates are the
       exported policy's executables under `GATES_MOUNT`, and its
@@ -71,10 +73,13 @@ acceptance:
       review commit edits tests/test_w.py and tests/test_p.py again.
       `main` then moves again, editing tests/test_m.py, which a declared
       witness names and the task never changes. The head merges `main`
-      as GitHub's update branch does. So the baseline is `main`'s second
-      head, not the task's `base_sha`. The checkout `saffron regate` is
-      given is a transport clone of `main` alone, holding no commit of
-      the task's branch. The own record kills two versions under a tests/test_w.py witness, the
+      as GitHub's update branch does. `main` then moves a third time.
+      That commit edits tests/test_m.py again, changes the policy's gate
+      env, and drops the parent spec's wrong versions. So the baseline is
+      `main`'s second head, neither the task's `base_sha` nor the base
+      branch's tip. The checkout `saffron regate` is given is a transport
+      clone of `main` alone, holding no commit of the task's branch. Its
+      policy and parent spec differ from the export's. The own record kills two versions under a tests/test_w.py witness, the
       first killed again and the second surviving. It kills one under a
       second tests/test_w.py witness that the head's `tests` result does
       not collect. It kills one under a tests/test_x.py witness, and one
@@ -85,8 +90,8 @@ acceptance:
       `session.critic_cell`, `runner.run_gate`, `worktree.source_mutated`
       and `worktree.read_at_head`, so the real `_apply_criterion_probes`
       decides each outcome. It asserts exactly one cell is entered, with
-      the spec id, the baseline as `tree_base`, the mirror, the export
-      and the policy's gate env. It asserts the patch equals its own such diff. It
+      the spec id, the baseline as `tree_base`, the checkout as `repo`,
+      the mirror, the export and the export policy's gate env. It asserts the patch equals its own such diff. It
       asserts every `tests` gate executable is the one
       `gate_executables` maps under `GATES_MOUNT`. It asserts the edits applied, in
       order, are the own killed version, the own survivor twice, the
@@ -96,6 +101,13 @@ acceptance:
       - The `CellSpec` built on the task's own `base_sha`, so `tree_base` is not the baseline.
       - The review diff read from the task's `base_sha` rather than the baseline, so the tests/test_m.py version is applied.
       - The review diff read from the checkout rather than the mirror, so no pair is chosen and no cell is entered.
+      - The base branch's fetched tip used as the baseline for the `CellSpec`, the patch and the review diff alike, so `tree_base` is not the baseline.
+      - The base branch's tip used as the `CellSpec`'s `base_sha` alone, so `tree_base` is not the baseline.
+      - The base branch's tip used as the patch's start alone, so the patch differs from the witness's own.
+      - The base branch's tip passed to `review_commit_diff` alone, so the tests/test_m.py version is applied.
+      - The mirror passed as the call's `repo`, so the cell's `repo` is not the checkout.
+      - The parents read from the checkout's `.saffron/specs`, so no parent version is applied.
+      - The policy read from the checkout rather than the export, so the cell's env holds the checkout's entry.
       - The patch read from `pushed_sha` to `head`, so it lacks src/a.py's packaged edit.
       - The patch read without `--binary`, so the binary file arrives as a stub.
       - The patch read without `--full-index`, so each `index` line is abbreviated.
@@ -174,7 +186,7 @@ REVIEW. A review commit reaches no REVIEW. In the spec loop's 70th pass a
 review commit on #1202 rewrote `SA-0389`'s clause, and the spec's own
 wrong version 8 then passed the witness. This spec is the second of two.
 `SA-0403` chooses the pairs. This spec asks them from `saffron regate`.
-Every line number below was read at `264299a4`, which carries
+Every line number below was read at `6c24afda`, which carries
 `SA-0403`'s spec but not its code.
 
 **What `SA-0403` adds**. `parent_versions.own_version_pairs(*, spec,
@@ -262,8 +274,8 @@ raise in every witness.
   `error`. The re-gate then records a green row and exits 0 with no
   version asked.
 - **`saffron adopt`'s re-gate**. `adopt` records `head` as the pushed sha
-  (`saffron/cli.py:3264`) before it calls `run_regate`
-  (`saffron/cli.py:3268`). `review_commit_diff` is then empty, so that
+  (`saffron/cli.py:3265`) before it calls `run_regate`
+  (`saffron/cli.py:3269`). `review_commit_diff` is then empty, so that
   re-gate asks nothing.
 - **The `note` callback**. It fires only when a removal leaves something
   behind. No witness drives it.
@@ -318,14 +330,16 @@ version's `replace` decides what the stubbed `tests` gate says under it.
 last step records the push through `_seeding_ledger`, as `_seed_task`'s
 callers do, so the fold `saffron regate` reads holds it. The `types`
 gate reads a stub's status as a `GateStatus`, so annotate it. A plain
-`git clone` of a local path copies every object, so the checkout needs
-`--no-local` to lack the task's branch (measured).
+`git clone` of a local path copies every object. So the checkout is
+cloned with `--no-local`, `--single-branch` and `--branch main`. It then
+holds `main` and lacks the task's head, measured on the host's git 2.54.
+The cell image's git 2.39.5 was not measured.
 
 **The `prose` gate** counts each new comment and docstring from zero.
 Write none with an em dash, a semicolon, a contraction, the perfect tense
 or a sentence over 25 words. `run_regate`'s docstring sits at ten lines
 already, so a line added there is a hit.
 
-**Size**. A prototype on `SA-0403`'s diff changed 464 lines, 110 in
-`saffron/regate.py` and 354 in `tests/test_regate.py`. The `size` gate
+**Size**. A prototype on `SA-0403`'s diff changed 468 lines, 110 in
+`saffron/regate.py` and 358 in `tests/test_regate.py`. The `size` gate
 counts only the 247 changed tokens outside `tests/`.
