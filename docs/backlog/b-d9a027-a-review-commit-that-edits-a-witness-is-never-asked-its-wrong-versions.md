@@ -1,11 +1,12 @@
 ---
 id: b-d9a027
 title: A review commit that edits a witness is never asked the wrong versions that witness killed
-status: open
+status: done
+closed: 2026-11-17
 tier: 2
 filed: 2026-11-16
 specs: [SA-0403, SA-0404, SA-0405]
-prs: []
+prs: [1236, 1237, 1238, 1239, 1240, 1241]
 commits: []
 cites: [§5.4, §5.5]
 related: [b-9efbe2, b-60317d]
@@ -37,3 +38,7 @@ names its spec and version. REBUT cannot withdraw a parent survivor's blocker.
 
 - 2026-11-16: filed from the spec loop's run 75, from the out-of-scope
   sections of `SA-0401` and `SA-0402`.
+- 2026-11-17: closed by the spec loop's run 76. `SA-0403` (#1239) chooses
+  the versions, `SA-0404` (#1240) asks them in `saffron regate`, and
+  `SA-0405` (#1241) refuses a withdrawn parent survivor in REBUT. The
+  review left b-988eb9 and b-c1259f.

@@ -42,3 +42,9 @@ the witness dies on the named case.
   filed wrong version 14 `killed`. Its edit also sent refused pairs to the
   mutator, and the witness's sequence assert caught that. The Spec seat's own
   edit, a refusal made inside the cell, passed the declared witness.
+- 2026-11-17: backtested in the spec loop's run 76 on `SA-0371` version 7
+  and `SA-0400` version 14. Each REVIEW edit changed a call that more cases
+  share than the version names. No arm the host can decide separates either
+  edit from the seat's narrower one. Two arms are left. One is a prompt change,
+  which needs a measured pass by hand. The other is a second model turn per
+  version. Which arm to take is the operator's call.
