@@ -4,7 +4,7 @@ title: "A lens that errors drops the host's criterion-probe blockers filed under
 status: open
 tier: 2
 filed: 2026-10-11
-specs: [SA-0406]
+specs: [SA-0406, SA-0407]
 prs: []
 commits: []
 cites: [§5.5]
