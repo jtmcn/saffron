@@ -358,7 +358,8 @@ place and keep each at its base length. `_StackingRefused` has room. The module 
 
 **Fixtures.** `_pushed_saffron_repo`, `_push_stacked_branch`,
 `_chain_spec_text`, `_mirror_of`, `_seed_repo`, `_seed_task`, `_namespace`,
-`_ceiling_spec` and `_gh_open` in `tests/test_cli.py`. `_pushed_saffron_repo`
+`_ceiling_spec`, `_gh_open`, `_fake_gh_unreachable_for` and
+`_fake_gh_says_merged` in `tests/test_cli.py`. `_pushed_saffron_repo`
 takes `retired_specs` for a parent retired at `base_sha`. `_task_at`,
 `set_task_package`, `_write_spec` and `_spec_dir` in `tests/test_scheduler.py`,
 whose spec ids need digits, such as `TB-40`. `_task`, `_repo`, `_FakeGh`,
