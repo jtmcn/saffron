@@ -5,6 +5,9 @@ checkout commits a base, forks a parent branch and a packaged commit, then
 adds a review commit. That commit merges a moved default branch into the
 task's branch, the way GitHub's "update branch" does. `reverify`, the probe
 and `gh` are faked. The mirror, the fetches and the merge base stay real git.
+`review_commit_diff`'s own witnesses build only a checkout, with no bare
+origin, ledger or `gh` fake, since the function reads a plain mirror
+directly.
 """
 
 from __future__ import annotations
@@ -14,6 +17,7 @@ import errno
 import hashlib
 import json
 import os
+import re
 import signal
 import subprocess
 from dataclasses import dataclass
@@ -23,8 +27,9 @@ import pytest
 
 from saffron import cli, preflight
 from saffron.cell import runtime
+from saffron.cell.worktree import DIFF_FLAGS, GATES_MOUNT
 from saffron.gates.baseline import NewFailure
-from saffron.gates.contract import Failure, GateResult
+from saffron.gates.contract import Failure, GateResult, GateStatus
 from saffron.gates.core.revert import revert_gate
 from saffron.gates.suite import SuiteComparison, SuiteRun
 from saffron.ledger import Ledger
@@ -101,6 +106,7 @@ def _write_policy(work, marker: str) -> None:
         tests_gate.chmod(0o755)
     (work / ".saffron" / "policy.yaml").write_text(
         f"gates:\n  tests: {{blocking: true}}\nprotected:\n  - {marker}.marker\n"
+        "integrity:\n  test_paths: ['tests/**']\n"
     )
 
 
@@ -326,11 +332,31 @@ def _gh_pr_view(expected_pr_url: str, state: str, base_ref: str, calls: list):
     return _gh
 
 
-def _fake_reverify(calls: list, new_failures=()):
+def _fake_reverify(
+    calls: list, new_failures=(), tests_collected: list[str] | None = None
+):
+    """A `reverify` stand-in. With `tests_collected` given, the comparison's
+    own suite carries one green `tests` `GateResult` enumerating exactly
+    those node ids, for `_apply_criterion_probes`'s own `collected` check
+    (`b-d9a027`). Left `None`, the suite carries no results at all, exactly
+    as every witness predating that wiring expects."""
+
     def _reverify(**kwargs):
         calls.append(kwargs)
+        results = (
+            []
+            if tests_collected is None
+            else [
+                GateResult(
+                    gate="tests",
+                    status="pass",
+                    tool="pytest 1",
+                    collected=tests_collected,
+                )
+            ]
+        )
         run = SuiteRun(
-            results=[], effective_risk="standard", advisory_gates=frozenset()
+            results=results, effective_risk="standard", advisory_gates=frozenset()
         )
         return SuiteComparison(run=run, new_failures=tuple(new_failures))
 
@@ -1887,3 +1913,817 @@ def test_regate_stopped_by_sigterm_exits_143(monkeypatch, tmp_path):
     assert result == 143
     assert heard == []
     assert restored == _record
+
+
+@dataclass
+class CommitDiffFixture:
+    """Every sha `review_commit_diff`'s own witnesses need, from one shared
+    checkout with no bare origin, ledger or `gh` fake: the function reads
+    the checkout itself as its mirror."""
+
+    work: Path
+    baseline_sha: str
+    pushed_sha: str
+    ordinary_head: str
+    merge_only_head: str
+    restacked_copy: str
+    restacked_head: str
+    stray_sha: str
+
+
+# Shared by both packaged commits, so `_rebased_copy` matches the restacked
+# copy by message alone, whichever sha a case passes as `pushed_sha`.
+_PACKAGED_MESSAGE = "packaged commit"
+
+
+def _build_commit_diff_fixture(tmp_path: Path) -> CommitDiffFixture:
+    """A base commit, a moved `main`, two packaged commits sharing one
+    message, and three heads. One carries a review commit merged with `main`. One merges
+    `main` with no review commit at all. One restacks a second, separate
+    packaged commit onto the moved `main`, then adds its own review
+    commit. That review commit reverts one file, so a wrong range start
+    or an unfiltered path set changes the restacked head's own result.
+    A fourth, unrelated branch stands for a stray commit naming neither."""
+    work = tmp_path / "work"
+    subprocess.run(["git", "init", "-q", str(work)], check=True)
+    _git(work, "config", "user.email", "t@example.com")
+    _git(work, "config", "user.name", "T")
+    _git(work, "symbolic-ref", "HEAD", "refs/heads/main")
+
+    (work / "tests").mkdir(parents=True)
+    (work / "tests" / "test_old.py").write_text(
+        "\n".join(f"# old test file content, line {n}" for n in range(1, 21)) + "\n"
+    )
+    (work / "src").mkdir()
+    (work / "src" / "q.py").write_text("base q\n")
+    (work / "src" / "r.py").write_text("r line1\nr line2\nr line3\n")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-q", "-m", "base")
+    base_sha = _git(work, "rev-parse", "HEAD")
+
+    (work / "main.txt").write_text("main moved\n")
+    (work / "src" / "r.py").write_text("r line1\nr line2\nr line3 main\n")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-q", "-m", "main moved")
+    baseline_sha = _git(work, "rev-parse", "HEAD")
+
+    _git(work, "checkout", "-q", "-b", "saffron/SA-0005", base_sha)
+    (work / "src" / "p.py").write_text("packaged p\n")
+    (work / "src" / "q.py").write_text("packaged q\n")
+    (work / "tests" / "test_w.py").write_text("packaged w\n")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-q", "-m", _PACKAGED_MESSAGE)
+    pushed_sha = _git(work, "rev-parse", "HEAD")
+    # Kept reachable after the restack below, as `tests/test_commit_review.py`
+    # keeps the original packaged commit reachable after its own rebase.
+    _git(work, "branch", "keeps-the-original", pushed_sha)
+
+    _git(work, "checkout", "-q", "-b", "ordinary", pushed_sha)
+    (work / "tests" / "test_w.py").write_text("packaged w\nreview edit\n")
+    (work / "src" / "q.py").write_text("base q\n")
+    _git(work, "mv", "tests/test_old.py", "tests/test_new.py")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-q", "-m", "review commit (ordinary)")
+    _git(work, "merge", "-q", "--no-ff", "-m", "Merge main (update branch)", "main")
+    ordinary_head = _git(work, "rev-parse", "HEAD")
+
+    _git(work, "checkout", "-q", "-b", "merge-only", pushed_sha)
+    _git(work, "merge", "-q", "--no-ff", "-m", "Merge main (update branch)", "main")
+    merge_only_head = _git(work, "rev-parse", "HEAD")
+
+    # A sibling of `pushed_sha`, so a wrong range start changes the
+    # restacked head's own answer rather than coincide with the right one.
+    _git(work, "checkout", "-q", "-b", "restack-packaged", base_sha)
+    (work / "src" / "p.py").write_text("packaged p\n")
+    (work / "src" / "q.py").write_text("packaged q\n")
+    (work / "tests" / "test_w.py").write_text("packaged w\n")
+    (work / "src" / "r.py").write_text("r line1 restack\nr line2\nr line3\n")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-q", "-m", _PACKAGED_MESSAGE)
+    restack_pushed_sha = _git(work, "rev-parse", "HEAD")
+    _git(work, "branch", "keeps-the-restack-original", restack_pushed_sha)
+
+    _git(work, "checkout", "-q", "-b", "restacked", restack_pushed_sha)
+    _git(work, "rebase", "-q", "--onto", baseline_sha, base_sha, "restacked")
+    restacked_copy = _git(work, "rev-parse", "HEAD")
+    (work / "tests" / "test_w.py").write_text("packaged w\nrestack review edit\n")
+    # Reverted to its base text, which `main` never changed, as the
+    # ordinary case's review commit reverts it above.
+    (work / "src" / "q.py").write_text("base q\n")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-q", "-m", "review commit (restack)")
+    restacked_head = _git(work, "rev-parse", "HEAD")
+
+    _git(work, "checkout", "-q", "-b", "stray", base_sha)
+    (work / "stray.txt").write_text("stray\n")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-q", "-m", "stray commit, unrelated")
+    stray_sha = _git(work, "rev-parse", "HEAD")
+
+    return CommitDiffFixture(
+        work=work,
+        baseline_sha=baseline_sha,
+        pushed_sha=pushed_sha,
+        ordinary_head=ordinary_head,
+        merge_only_head=merge_only_head,
+        restacked_copy=restacked_copy,
+        restacked_head=restacked_head,
+        stray_sha=stray_sha,
+    )
+
+
+def _changed_paths_in(diff: str) -> list[str]:
+    return sorted(re.findall(r"^diff --git a/(\S+) b/\S+$", diff, re.MULTILINE))
+
+
+def _raw_diff(work: Path, start: str, head: str, paths: list[str]) -> str:
+    return subprocess.run(
+        [
+            "git",
+            "-C",
+            str(work),
+            "-c",
+            "core.quotePath=false",
+            "--literal-pathspecs",
+            "diff",
+            *DIFF_FLAGS,
+            start,
+            head,
+            "--",
+            *paths,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
+def test_review_commit_diff_keeps_the_review_commits_paths_the_task_also_changed(
+    tmp_path,
+):
+    from saffron.regate import review_commit_diff
+
+    fixture = _build_commit_diff_fixture(tmp_path)
+
+    diff = review_commit_diff(
+        fixture.work, fixture.pushed_sha, fixture.baseline_sha, fixture.ordinary_head
+    )
+    paths = _changed_paths_in(diff)
+    assert paths == ["tests/test_new.py", "tests/test_old.py", "tests/test_w.py"]
+    assert diff == _raw_diff(
+        fixture.work, fixture.pushed_sha, fixture.ordinary_head, paths
+    )
+
+    empty = review_commit_diff(
+        fixture.work, fixture.pushed_sha, fixture.baseline_sha, fixture.merge_only_head
+    )
+    assert empty == ""
+
+
+def test_review_commit_diff_starts_a_restacked_branch_at_the_packaged_commits_copy(
+    tmp_path,
+):
+    from saffron.regate import review_commit_diff
+
+    fixture = _build_commit_diff_fixture(tmp_path)
+
+    diff = review_commit_diff(
+        fixture.work, fixture.pushed_sha, fixture.baseline_sha, fixture.restacked_head
+    )
+    paths = _changed_paths_in(diff)
+    assert paths == ["tests/test_w.py"]
+    assert diff == _raw_diff(
+        fixture.work, fixture.restacked_copy, fixture.restacked_head, paths
+    )
+
+
+def test_review_commit_diff_is_empty_for_a_head_that_is_the_packaged_commit(tmp_path):
+    from saffron.regate import review_commit_diff
+
+    fixture = _build_commit_diff_fixture(tmp_path)
+
+    non_empty = review_commit_diff(
+        fixture.work, fixture.pushed_sha, fixture.baseline_sha, fixture.ordinary_head
+    )
+    assert _changed_paths_in(non_empty) == [
+        "tests/test_new.py",
+        "tests/test_old.py",
+        "tests/test_w.py",
+    ]
+
+    assert (
+        review_commit_diff(
+            fixture.work, fixture.pushed_sha, fixture.baseline_sha, fixture.pushed_sha
+        )
+        == ""
+    )
+    assert (
+        review_commit_diff(
+            fixture.work,
+            fixture.pushed_sha,
+            fixture.baseline_sha,
+            fixture.restacked_copy,
+        )
+        == ""
+    )
+
+
+def test_review_commit_diff_is_empty_when_no_packaged_commit_is_on_head(tmp_path):
+    from saffron.regate import review_commit_diff
+
+    fixture = _build_commit_diff_fixture(tmp_path)
+
+    non_empty = review_commit_diff(
+        fixture.work, fixture.pushed_sha, fixture.baseline_sha, fixture.ordinary_head
+    )
+    assert non_empty != ""
+
+    for bad_pushed_sha in (None, "", "0" * 40, fixture.stray_sha):
+        assert (
+            review_commit_diff(
+                fixture.work,
+                bad_pushed_sha,
+                fixture.baseline_sha,
+                fixture.ordinary_head,
+            )
+            == ""
+        )
+
+
+# --- wrong-version re-asking (`b-d9a027`, `SA-0404`) -----------------------
+
+_WV_SPEC_FILENAME = "SA-0005-wrong-version.md"
+_WV_W1_WITNESS = "tests/test_w.py::test_w1"
+_WV_W2_WITNESS = "tests/test_w.py::test_w2"
+_WV_X_WITNESS = "tests/test_x.py::test_x1"
+_WV_M_WITNESS = "tests/test_m.py::test_m1"
+_WV_P_WITNESS = "tests/test_p.py::test_p1"
+_WV_COLLECTED = [_WV_W1_WITNESS, _WV_X_WITNESS, _WV_P_WITNESS, _WV_M_WITNESS]
+
+
+def _wv_killed(version: str, file: str, find: str, replace: str) -> dict:
+    return {
+        "version": version,
+        "edit": {"file": file, "find": find, "replace": replace},
+        "reason": "",
+        "outcome": "killed",
+        "summary": "",
+    }
+
+
+def _wv_child_spec_text() -> str:
+    return (
+        "---\n"
+        "id: SA-0005\n"
+        "title: wrong version re-ask\n"
+        "type: bug\n"
+        "depends_on: ['SA-0003']\n"
+        "acceptance:\n"
+        f"  - claim: c1\n    witness: {_WV_W1_WITNESS}\n"
+        "    wrong_versions:\n      - v1\n"
+        f"  - claim: c2\n    witness: {_WV_W2_WITNESS}\n"
+        "    wrong_versions:\n      - v2\n"
+        f"  - claim: c3\n    witness: {_WV_X_WITNESS}\n"
+        "    wrong_versions:\n      - v3\n"
+        f"  - claim: c4\n    witness: {_WV_M_WITNESS}\n"
+        "    wrong_versions:\n      - v4\n"
+        "---\n"
+    )
+
+
+def _wv_parent_spec_text(*, with_wrong_versions: bool) -> str:
+    body = (
+        "---\n"
+        "id: SA-0003\n"
+        "title: wrong version parent\n"
+        "type: bug\n"
+        "acceptance:\n"
+        f"  - claim: cp\n    witness: {_WV_P_WITNESS}\n"
+    )
+    if with_wrong_versions:
+        body += "    wrong_versions:\n      - vp\n"
+    return body + "---\n"
+
+
+def _write_wv_policy(work: Path, *, moved: bool = False) -> None:
+    """One declared test path, one inert pattern (so `pv3` below is refused
+    before any cell) and one gate env entry, as the witness names. `moved`
+    changes every member, so a member read from the checkout is caught."""
+    gates_dir = work / ".saffron" / "gates"
+    gates_dir.mkdir(parents=True, exist_ok=True)
+    tests_gate = gates_dir / "tests"
+    if not tests_gate.exists():
+        tests_gate.write_text('#!/bin/sh\necho "{}"\n')
+        tests_gate.chmod(0o755)
+    gate, paths, inert, env = (
+        ("checks", "spec/**", "# never: {name}", "2")
+        if moved
+        else ("tests", "tests/**", "\\s*# noop: {name}", "1")
+    )
+    (work / ".saffron" / "policy.yaml").write_text(
+        "gates:\n"
+        f"  {gate}: {{blocking: true}}\n"
+        "integrity:\n"
+        f"  test_paths: ['{paths}']\n"
+        "probes:\n"
+        f"  inert: ['{inert}']\n"
+        "thread_env:\n"
+        f"  SOME_ENV: '{env}'\n"
+    )
+
+
+@dataclass
+class WrongVersionFixture:
+    """Every sha and path the wrong-version witnesses need.
+
+    `checkout` is a transport clone holding `main` alone. It lacks the
+    task's own branch, so a mutation that reads the review diff from it,
+    rather than the mirror, is distinguishable. `main`'s own tip keeps
+    moving after `head` is cut, so the base branch's fetched tip is never
+    the baseline (`b-d9a027`)."""
+
+    checkout: Path
+    base_sha: str
+    baseline_sha: str
+    packaged_sha: str
+    review_sha: str
+    origin_url: str
+    spec_sha: str
+
+
+def _build_wrong_version_fixture(tmp_path: Path) -> WrongVersionFixture:
+    """A packaged commit adds a binary file and `tests/test_x.py`, neither
+    edited again. A review commit then adds `tests/test_w.py` and
+    `tests/test_p.py`, merged with a `main` that moved once first.
+
+    The review range and the baseline range then share only
+    `tests/test_w.py` and `tests/test_p.py` (`SA-0403`'s narrowing).
+    `main` moves once more afterward: `tests/test_m.py` again, the
+    policy's own gate env, and the parent spec losing its wrong versions.
+    None of that reaches the task's own base, read from the export."""
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+    work = tmp_path / "work"
+    subprocess.run(["git", "clone", "-q", str(origin), str(work)], check=True)
+    _git(work, "config", "user.email", "t@example.com")
+    _git(work, "config", "user.name", "T")
+    _git(work, "symbolic-ref", "HEAD", "refs/heads/main")
+
+    _write_wv_policy(work)
+    specs_dir = work / ".saffron" / "specs"
+    specs_dir.mkdir(parents=True, exist_ok=True)
+    (specs_dir / _WV_SPEC_FILENAME).write_text(_wv_child_spec_text())
+    (specs_dir / "SA-0003-parent.md").write_text(
+        _wv_parent_spec_text(with_wrong_versions=True)
+    )
+    (work / "src").mkdir()
+    (work / "src" / "b.py").write_text("def g():\n    return 2\n")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-q", "-m", "base")
+    base_sha = _git(work, "rev-parse", "HEAD")
+    spec_sha = hashlib.sha256((specs_dir / _WV_SPEC_FILENAME).read_bytes()).hexdigest()
+
+    (work / "main.txt").write_text("main moved\n")
+    (work / "tests").mkdir(exist_ok=True)
+    (work / "tests" / "test_m.py").write_text("m test\n")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-q", "-m", "main moved")
+    baseline_sha = _git(work, "rev-parse", "HEAD")
+
+    _git(work, "checkout", "-q", "-b", "saffron/SA-0005", base_sha)
+    (work / "tests").mkdir(exist_ok=True)
+    (work / "tests" / "test_x.py").write_text("x test\n")
+    (work / "image.bin").write_bytes(b"\x00\x01\x02binary")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-q", "-m", "packaged commit")
+    packaged_sha = _git(work, "rev-parse", "HEAD")
+
+    (work / "tests" / "test_w.py").write_text("w test\n")
+    (work / "tests" / "test_p.py").write_text("p test\n")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-q", "-m", "review commit")
+    _git(work, "merge", "-q", "--no-ff", "-m", "Merge main (update branch)", "main")
+    review_sha = _git(work, "rev-parse", "HEAD")
+
+    # `main` keeps moving after `head` is cut: its own tip is never the
+    # baseline, and its own files disagree with the export at `base_sha`.
+    _git(work, "checkout", "-q", "main")
+    (work / "tests" / "test_m.py").write_text("m test v2\n")
+    _write_wv_policy(work, moved=True)
+    (specs_dir / "SA-0003-parent.md").write_text(
+        _wv_parent_spec_text(with_wrong_versions=False)
+    )
+    _git(work, "add", "-A")
+    _git(work, "commit", "-q", "-m", "main moved again")
+
+    _git(work, "push", "-q", "origin", "main")
+    _git(work, "push", "-q", "origin", "saffron/SA-0005")
+    origin_url = _git(work, "remote", "get-url", "origin")
+
+    checkout = tmp_path / "checkout"
+    subprocess.run(
+        [
+            "git",
+            "clone",
+            "-q",
+            "--no-local",
+            "--single-branch",
+            "--branch",
+            "main",
+            origin_url,
+            str(checkout),
+        ],
+        check=True,
+    )
+
+    return WrongVersionFixture(
+        checkout=checkout,
+        base_sha=base_sha,
+        baseline_sha=baseline_sha,
+        packaged_sha=packaged_sha,
+        review_sha=review_sha,
+        origin_url=origin_url,
+        spec_sha=spec_sha,
+    )
+
+
+def _wv_own_record() -> list[dict]:
+    return [
+        {
+            "witness": _WV_W1_WITNESS,
+            "claim": "c1",
+            "versions": [
+                _wv_killed("v1", "src/a.py", "X1", "Y1"),
+                _wv_killed("v2", "src/a.py", "X2", "Y2"),
+                _wv_killed("v1b", "src/a.py", "X1b", "Y1b"),
+            ],
+        },
+        {
+            "witness": _WV_W2_WITNESS,
+            "claim": "c2",
+            "versions": [_wv_killed("v3", "src/a.py", "X3", "Y3")],
+        },
+        {
+            "witness": _WV_X_WITNESS,
+            "claim": "c3",
+            "versions": [_wv_killed("vx", "src/d.py", "X4", "Y4")],
+        },
+        {
+            "witness": _WV_M_WITNESS,
+            "claim": "c4",
+            "versions": [_wv_killed("vm", "src/e.py", "Xm", "Ym")],
+        },
+    ]
+
+
+def _wv_parent_record() -> list[dict]:
+    # Order matches the printed line order the witness names: the survivor,
+    # then the inert version, then the errored one.
+    return [
+        {
+            "witness": _WV_P_WITNESS,
+            "claim": "cp",
+            "versions": [
+                _wv_killed("pv1", "src/c.py", "Xp1", "Yp1"),
+                _wv_killed("pv3", "src/b.py", "return 2", "return 2\n    # noop: zzz"),
+                _wv_killed("pv2", "src/c.py", "Xp2", "Yp2"),
+            ],
+        }
+    ]
+
+
+def _seed_wv_task(ledger: Ledger, fixture: WrongVersionFixture, mirror_path) -> int:
+    return _seed_task(
+        ledger,
+        origin_url=fixture.origin_url,
+        mirror_path=mirror_path,
+        base_sha=fixture.base_sha,
+        spec_sha=fixture.spec_sha,
+        branch="saffron/SA-0005",
+        pr_url="https://github.com/o/r/pull/9",
+        pushed_sha=fixture.packaged_sha,
+    )
+
+
+def _install_wrong_version_stubs(monkeypatch, results: list):
+    """Stubs `session.critic_cell`, `runner.run_gate`, `worktree.source_mutated`
+    and `worktree.read_at_head`, so the real `_apply_criterion_probes` decides
+    each pair's outcome from `results`, consumed in call order. Returns the
+    ordered `critic_cell` keyword logs, the edits mutated (named by their
+    own `replace` text) and the `run_gate` calls."""
+    from saffron.cell import session as session_mod
+    from saffron.cell import worktree as worktree_mod
+    from saffron.gates import runner as runner_mod
+
+    kwargs_log: list = []
+
+    @contextlib.contextmanager
+    def _critic_cell(**kwargs):
+        kwargs_log.append(kwargs)
+        yield "gate-1"
+
+    monkeypatch.setattr(session_mod, "critic_cell", _critic_cell)
+
+    mutate_log: list = []
+
+    @contextlib.contextmanager
+    def _source_mutated(_container, edit):
+        mutate_log.append(edit.replace)
+        yield None
+
+    monkeypatch.setattr(worktree_mod, "source_mutated", _source_mutated)
+    monkeypatch.setattr(
+        worktree_mod,
+        "read_at_head",
+        lambda _container, _path: "X1 X2 X3 X1b Xp1 Xp2 content\n",
+    )
+
+    run_gate_calls: list = []
+    results_iter = iter(results)
+
+    def _run_gate(name, executable, cwd, *, subset=None, executor=None, **kw):
+        run_gate_calls.append({"executable": executable, "subset": subset})
+        return next(results_iter)
+
+    monkeypatch.setattr(runner_mod, "run_gate", _run_gate)
+
+    return kwargs_log, mutate_log, run_gate_calls
+
+
+def _wv_full_results() -> list[GateResult]:
+    """The eight `tests` gate results the full own+parent scenario asks, in
+    call order: the own killed version, each own survivor's two asks, each
+    parent survivor's two asks, then the parent's errored version."""
+    collected = GateResult(
+        gate="tests", status="pass", tool="pytest 1", collected=_WV_COLLECTED
+    )
+
+    def _plain(status: GateStatus) -> GateResult:
+        return GateResult(gate="tests", status=status, tool="pytest 1")
+
+    return [
+        _plain("fail"),
+        _plain("pass"),
+        collected,
+        _plain("pass"),
+        collected,
+        _plain("pass"),
+        collected,
+        GateResult(gate="tests", status="error", tool="pytest 1", summary="boom"),
+    ]
+
+
+def _prepare_wrong_version_run(
+    monkeypatch, checkout: Path, results: list, new_failures: tuple = ()
+) -> dict:
+    """Everything but the own/parent record files: `gh`, the image build, the
+    probe and `reverify`, so the `cli.main` call under test reaches the
+    wrong-version asking and the probe cell alone."""
+    monkeypatch.setattr(cli, "run_gh", _gh_pr_view("unused", "OPEN", "main", []))
+    monkeypatch.setattr(repo_image, "build_cell_image", lambda repo: "fake-image:tag")
+    _install_probe_fakes(monkeypatch, [])
+    reverify_calls: list = []
+    monkeypatch.setattr(
+        package_phase,
+        "reverify",
+        _fake_reverify(
+            reverify_calls, new_failures=new_failures, tests_collected=_WV_COLLECTED
+        ),
+    )
+    monkeypatch.chdir(checkout)
+    kwargs_log, mutate_log, run_gate_calls = _install_wrong_version_stubs(
+        monkeypatch, results
+    )
+    return {
+        "kwargs_log": kwargs_log,
+        "mutate_log": mutate_log,
+        "run_gate_calls": run_gate_calls,
+        "reverify_calls": reverify_calls,
+    }
+
+
+def _seed_wv_records(home: Path) -> None:
+    own_dir = home / "batches" / "v0" / "SA-0005"
+    parent_dir = home / "batches" / "v0" / "SA-0003"
+    own_dir.mkdir(parents=True)
+    parent_dir.mkdir(parents=True)
+    (own_dir / "wrong-versions.json").write_text(json.dumps(_wv_own_record()))
+    (parent_dir / "wrong-versions.json").write_text(json.dumps(_wv_parent_record()))
+
+
+def test_regate_asks_the_tasks_own_and_each_parents_killed_versions_in_one_probe_cell(
+    monkeypatch, tmp_path, capsys
+):
+    fixture = _build_wrong_version_fixture(tmp_path)
+    home = tmp_path / "home"
+    checkout = fixture.checkout.resolve()
+    mirror_path = cli._mirror_path(checkout, home)
+
+    ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
+    task_id = _seed_wv_task(ledger, fixture, mirror_path)
+    ledger.close()
+    _seed_wv_records(home)
+
+    logs = _prepare_wrong_version_run(monkeypatch, checkout, _wv_full_results())
+    result = cli.main(["--home", str(home), "regate", str(task_id), "--repo", "."])
+    capsys.readouterr()
+    assert result == 1
+
+    kwargs_log = logs["kwargs_log"]
+    assert len(kwargs_log) == 1
+    call = kwargs_log[0]
+    assert call["spec"].spec_id == "SA-0005"
+    assert call["spec"].tree_base == fixture.baseline_sha
+    assert call["repo"] == checkout
+    assert call["mirror"] == mirror_path
+    assert (
+        call["gates_dir"] == home / "batches" / "v0" / "regate" / str(task_id) / "gates"
+    )
+    assert call["env"] == {"SOME_ENV": "1"}
+
+    expected_patch = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(mirror_path),
+            "-c",
+            "core.quotePath=false",
+            "diff",
+            *DIFF_FLAGS,
+            "--binary",
+            "--full-index",
+            fixture.baseline_sha,
+            fixture.review_sha,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert call["patch"] == expected_patch
+
+    for entry in logs["run_gate_calls"]:
+        assert entry["executable"] == Path(GATES_MOUNT) / ".saffron" / "gates" / "tests"
+
+    assert logs["mutate_log"] == [
+        "Y1",
+        "Y2",
+        "Y2",
+        "Y1b",
+        "Y1b",
+        "Yp1",
+        "Yp1",
+        "Yp2",
+    ]
+
+
+def test_regate_counts_each_surviving_wrong_version_as_a_new_failure_and_names_its_spec(
+    monkeypatch, tmp_path, capsys
+):
+    fixture = _build_wrong_version_fixture(tmp_path)
+    home = tmp_path / "home"
+    checkout = fixture.checkout.resolve()
+    mirror_path = cli._mirror_path(checkout, home)
+
+    ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
+    task_id = _seed_wv_task(ledger, fixture, mirror_path)
+    ledger.close()
+    _seed_wv_records(home)
+
+    gate_failure = (NewFailure("lint", Failure(file="x.py", code="E1", message="m1")),)
+    logs = _prepare_wrong_version_run(
+        monkeypatch, checkout, _wv_full_results(), new_failures=gate_failure
+    )
+    result = cli.main(["--home", str(home), "regate", str(task_id), "--repo", "."])
+    out = capsys.readouterr().out
+
+    lines = [line for line in out.splitlines() if line.startswith("regate: SA-")]
+    before_parens = [line.split(" (", 1)[0] for line in lines]
+    assert before_parens == [
+        "regate: SA-0005 wrong version survived: v2",
+        "regate: SA-0005 wrong version survived: v1b",
+        "regate: SA-0005 wrong version unproven: v3",
+        "regate: SA-0003 wrong version survived: pv1",
+        "regate: SA-0003 wrong version unproven: pv3",
+        "regate: SA-0003 wrong version error: pv2",
+    ]
+    for line in lines:
+        assert line.endswith(")")
+
+    assert "regate: lint E1 x.py" in out
+    assert "4 new failures" in out.splitlines()[-1]
+    assert len(logs["reverify_calls"]) == 1
+
+    ledger = Ledger(home / "ledger.db")
+    row = ledger.regate(task_id)
+    assert row is not None
+    assert row["head_sha"] == fixture.review_sha
+    assert row["new_failures"] == 4
+    ledger.close()
+    assert result == 1
+
+
+def test_regate_prints_each_record_it_cannot_read_and_enters_no_cell_without_a_pair(
+    monkeypatch, tmp_path, capsys
+):
+    fixture = _build_wrong_version_fixture(tmp_path)
+    home = tmp_path / "home"
+    checkout = fixture.checkout.resolve()
+    mirror_path = cli._mirror_path(checkout, home)
+
+    ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
+    task_id = _seed_wv_task(ledger, fixture, mirror_path)
+    ledger.close()
+
+    own_path = home / "batches" / "v0" / "SA-0005" / "wrong-versions.json"
+    parent_path = home / "batches" / "v0" / "SA-0003" / "wrong-versions.json"
+    own_path.parent.mkdir(parents=True)
+    parent_path.parent.mkdir(parents=True)
+
+    # First: own broken, parent readable. Only the parent's pairs get asked,
+    # in one cell. The parent survivor's line prints and the exit is 1.
+    own_path.write_text("not json")
+    parent_path.write_text(json.dumps(_wv_parent_record()))
+    results_1 = [
+        GateResult(gate="tests", status="pass", tool="pytest 1"),
+        GateResult(
+            gate="tests", status="pass", tool="pytest 1", collected=_WV_COLLECTED
+        ),
+        GateResult(gate="tests", status="error", tool="pytest 1", summary="boom"),
+    ]
+    logs_1 = _prepare_wrong_version_run(monkeypatch, checkout, results_1)
+    result_1 = cli.main(["--home", str(home), "regate", str(task_id), "--repo", "."])
+    out_1 = capsys.readouterr().out
+    assert "regate: no wrong-version record read for SA-0005" in out_1
+    assert "regate: no wrong-version record read for SA-0003" not in out_1
+    assert "regate: SA-0003 wrong version survived: pv1" in out_1
+    assert len(logs_1["kwargs_log"]) == 1
+    assert result_1 == 1
+
+    # Second: own restored, parent deleted. Only the own pairs get asked, in
+    # one cell. The own survivors' lines print and the exit is 1.
+    own_path.write_text(json.dumps(_wv_own_record()))
+    parent_path.unlink()
+    collected = GateResult(
+        gate="tests", status="pass", tool="pytest 1", collected=_WV_COLLECTED
+    )
+    results_2 = [
+        GateResult(gate="tests", status="fail", tool="pytest 1"),
+        GateResult(gate="tests", status="pass", tool="pytest 1"),
+        collected,
+        GateResult(gate="tests", status="pass", tool="pytest 1"),
+        collected,
+    ]
+    logs_2 = _prepare_wrong_version_run(monkeypatch, checkout, results_2)
+    result_2 = cli.main(["--home", str(home), "regate", str(task_id), "--repo", "."])
+    out_2 = capsys.readouterr().out
+    assert "regate: no wrong-version record read for SA-0005" not in out_2
+    assert "regate: no wrong-version record read for SA-0003" in out_2
+    assert "regate: SA-0005 wrong version survived: v2" in out_2
+    assert "regate: SA-0005 wrong version survived: v1b" in out_2
+    assert len(logs_2["kwargs_log"]) == 1
+    assert result_2 == 1
+
+    # Third: own broken again, parent still deleted. Both lines print, own
+    # first. No pair line prints, no cell is entered, and the exit is 0.
+    own_path.write_text("not json")
+    logs_3 = _prepare_wrong_version_run(monkeypatch, checkout, [])
+    result_3 = cli.main(["--home", str(home), "regate", str(task_id), "--repo", "."])
+    out_3 = capsys.readouterr().out
+    lines_3 = out_3.splitlines()
+    own_index = next(
+        i
+        for i, line in enumerate(lines_3)
+        if line == "regate: no wrong-version record read for SA-0005"
+    )
+    parent_index = next(
+        i
+        for i, line in enumerate(lines_3)
+        if line == "regate: no wrong-version record read for SA-0003"
+    )
+    assert own_index < parent_index
+    assert not any("wrong version" in line for line in lines_3)
+    assert logs_3["kwargs_log"] == []
+    assert "green" in out_3.splitlines()[-1]
+    assert result_3 == 0
+
+    # Fourth: both restored, with the task's own `pushed_sha` now `head`.
+    # The review diff is then empty, so neither line nor cell appears.
+    own_path.write_text(json.dumps(_wv_own_record()))
+    parent_path.write_text(json.dumps(_wv_parent_record()))
+    push_ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
+    push_ledger.record_push(task_id, fixture.review_sha)
+    push_ledger.close()
+
+    logs_4 = _prepare_wrong_version_run(monkeypatch, checkout, [])
+    result_4 = cli.main(["--home", str(home), "regate", str(task_id), "--repo", "."])
+    out_4 = capsys.readouterr().out
+    assert "no wrong-version record read" not in out_4
+    assert "wrong version" not in out_4
+    assert logs_4["kwargs_log"] == []
+    assert result_4 == 0
+
+    ledger = Ledger(home / "ledger.db")
+    row = ledger.regate(task_id)
+    assert row is not None
+    assert row["new_failures"] == 0
+    ledger.close()

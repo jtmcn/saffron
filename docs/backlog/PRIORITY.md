@@ -322,7 +322,7 @@ writes a false package fact for an adopted row.
 cell deleted its parent's witness setup, and the parent's own wrong version
 then passed it. No gate re-runs a parent's wrong versions.
 
-**Placed 2026-11-16**, from the spec loop's run 75: **b-d9a027**. `SA-0402`
+**Placed 2026-11-16**, from the spec loop's run 75: ~~**b-d9a027**~~. `SA-0402`
 asks a parent's wrong versions in a cell. A review commit is still never asked
 them, and REBUT can withdraw a parent survivor's blocker.
 
@@ -490,6 +490,9 @@ Each line keeps the order it was filed in.
   again.
 - From run 72's review of #1218 and #1219: ~~**b-11e2ac**~~, a criterion probe
   edits code a test-only witness never reads.
+- From run 76's review of #1241: **b-988eb9**, `integrity` reads a spec id
+  inside a test's string literal as a citation. Then **b-c1259f**, a
+  `preserves` witness that never moves HEAD.
 - From the 2026-09-27 size pricing and spec loop run 32: **b-41664e**, **b-4b386f**,
   ~~**b-d96f14**~~, ~~**b-9b94c9**~~, **b-ff3141**, ~~**b-a99c76**~~, **b-3a8504**,
   ~~**b-7f105f**~~ and ~~**b-8c17dc**~~.

@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from saffron.intake import RETIRED_DIRNAME
+from saffron.intake import RETIRED_DIRNAME, Spec, parse_spec
 
 DIFF = """\
 diff --git a/tests/test_a.py b/tests/test_a.py
@@ -421,6 +421,278 @@ def test_a_parent_whose_record_cannot_be_read_is_named_and_pairs_nothing(tmp_pat
     )
 
     assert unreadable == ["SP-9", "SP-5", "SP-6", "SP-7", "SP-8", "SP-13"]
+    assert len(pairs) == 1
+    criterion, entry = pairs[0]
+    assert criterion.claim == "claim for SP-99"
+    assert entry == {
+        "parent": "SP-99",
+        "witness": "tests/test_a.py",
+        "version": "v99",
+        "edit": {"file": "x.py", "find": "foo99", "replace": "r"},
+        "reason": "",
+    }
+
+
+def test_the_tasks_own_killed_versions_are_paired_for_each_witness_its_diff_edits(
+    tmp_path,
+):
+    from saffron.parent_versions import own_version_pairs
+
+    out_dir = tmp_path / "out"
+    criteria = [
+        {
+            "claim": "c1",
+            "witness": "tests/test_a.py::test_one",
+            "wrong_versions": ["v1"],
+        },
+        {
+            "claim": "c2",
+            "witness": "tests/test_a.pyi::test_two",
+            "wrong_versions": ["v2"],
+        },
+        {
+            "claim": "c3",
+            "witness": "tests/test_b.py::test_three",
+            "wrong_versions": ["v3"],
+        },
+        {
+            "claim": "c4",
+            "witness": "tests/test_c.py::test_four",
+            "wrong_versions": ["v4"],
+        },
+        {"claim": "c5", "witness": "tests/test_a.py::test_five"},
+    ]
+    spec = parse_spec(_spec_text("SP-1", criteria))
+
+    (out_dir / "SP-1").mkdir(parents=True)
+    record = [
+        {
+            "witness": "tests/test_c.py::test_four",
+            "claim": "c4",
+            "versions": [_killed("k4", "c.py", "f4")],
+        },
+        {
+            "witness": "tests/test_a.py::test_one",
+            "claim": "c1",
+            "versions": [
+                _killed("k1", "a.py", "f1"),
+                {
+                    "version": "surv",
+                    "edit": {"file": "a.py", "find": "f2", "replace": "r"},
+                    "reason": "",
+                    "outcome": "survived",
+                    "summary": "s",
+                },
+                _killed("k2", "a.py", "f3"),
+            ],
+        },
+        {
+            "witness": "tests/test_a.pyi::test_two",
+            "claim": "c2",
+            "versions": [_killed("k_pyi", "a.pyi", "f5")],
+        },
+        {
+            "witness": "tests/test_b.py::test_three",
+            "claim": "c3",
+            "versions": [_killed("k_b", "b.py", "f6")],
+        },
+        {
+            "witness": "tests/test_a.py::test_five",
+            "claim": "c5",
+            "versions": [_killed("k5", "a.py", "f7")],
+        },
+        {
+            "witness": "tests/test_a.py::test_old",
+            "claim": "cold",
+            "versions": [_killed("k_old", "a.py", "f8")],
+        },
+    ]
+    (out_dir / "SP-1" / "wrong-versions.json").write_text(json.dumps(record))
+
+    pairs, unreadable = own_version_pairs(spec=spec, out_dir=out_dir, diff=DIFF)
+
+    assert unreadable is False
+    assert len(pairs) == 3
+
+    criterion, entry = pairs[0]
+    assert criterion.claim == "c1"
+    assert entry == {
+        "parent": "SP-1",
+        "witness": "tests/test_a.py::test_one",
+        "version": "k1",
+        "edit": {"file": "a.py", "find": "f1", "replace": "r"},
+        "reason": "",
+    }
+
+    criterion, entry = pairs[1]
+    assert criterion.claim == "c1"
+    assert entry == {
+        "parent": "SP-1",
+        "witness": "tests/test_a.py::test_one",
+        "version": "k2",
+        "edit": {"file": "a.py", "find": "f3", "replace": "r"},
+        "reason": "",
+    }
+
+    criterion, entry = pairs[2]
+    assert criterion.claim == "c4"
+    assert entry == {
+        "parent": "SP-1",
+        "witness": "tests/test_c.py::test_four",
+        "version": "k4",
+        "edit": {"file": "c.py", "find": "f4", "replace": "r"},
+        "reason": "",
+    }
+
+
+def test_the_tasks_own_record_that_cannot_be_read_is_reported_and_pairs_nothing(
+    tmp_path,
+):
+    from saffron.parent_versions import own_version_pairs
+
+    out_dir = tmp_path / "out"
+    src_only_diff = (
+        "diff --git a/src/a.py b/src/a.py\n"
+        "index 1111111..2222222 100644\n"
+        "--- a/src/a.py\n"
+        "+++ b/src/a.py\n"
+        "@@ -1,1 +1,1 @@\n"
+        "-old\n"
+        "+new\n"
+    )
+
+    def spec_with(spec_id: str, wrong_versions: list[str] | None) -> Spec:
+        criterion = {"claim": f"claim for {spec_id}", "witness": "tests/test_a.py"}
+        if wrong_versions:
+            criterion["wrong_versions"] = wrong_versions
+        return parse_spec(_spec_text(spec_id, [criterion]))
+
+    # SP-5: no record directory at all.
+    sp5 = spec_with("SP-5", ["v5"])
+
+    (out_dir / "SP-6").mkdir(parents=True)
+    (out_dir / "SP-6" / "wrong-versions.json").write_text("not json")
+    sp6 = spec_with("SP-6", ["v6"])
+
+    (out_dir / "SP-7").mkdir(parents=True)
+    (out_dir / "SP-7" / "wrong-versions.json").write_text(json.dumps({"not": "a list"}))
+    sp7 = spec_with("SP-7", ["v7"])
+
+    (out_dir / "SP-8").mkdir(parents=True)
+    (out_dir / "SP-8" / "wrong-versions.json").write_text(
+        json.dumps([{"witness": "tests/test_a.py", "claim": "c8"}])
+    )
+    sp8 = spec_with("SP-8", ["v8"])
+
+    (out_dir / "SP-9").mkdir(parents=True)
+    (out_dir / "SP-9" / "wrong-versions.json").write_text(
+        json.dumps(
+            [
+                {
+                    "witness": "tests/test_a.py",
+                    "claim": "c9",
+                    "versions": [
+                        {
+                            "version": "v9",
+                            "edit": None,
+                            "reason": "",
+                            "outcome": "killed",
+                            "summary": "s",
+                        }
+                    ],
+                }
+            ]
+        )
+    )
+    sp9 = spec_with("SP-9", ["v9"])
+
+    (out_dir / "SP-13").mkdir(parents=True)
+    (out_dir / "SP-13" / "wrong-versions.json").write_text(
+        json.dumps(
+            [
+                {
+                    "witness": "tests/test_a.py",
+                    "claim": "c13",
+                    "versions": [
+                        _killed("v13a", "x.py", "foo"),
+                        {
+                            "version": "v13b",
+                            "edit": {"file": "x.py", "replace": "bar"},
+                            "reason": "",
+                            "outcome": "killed",
+                            "summary": "s",
+                        },
+                    ],
+                }
+            ]
+        )
+    )
+    sp13 = spec_with("SP-13", ["v13a", "v13b"])
+
+    for spec in (sp5, sp6, sp7, sp8, sp9, sp13):
+        pairs, unreadable = own_version_pairs(spec=spec, out_dir=out_dir, diff=DIFF)
+        assert pairs == [], spec.id
+        assert unreadable is True, spec.id
+
+    (out_dir / "SP-10").mkdir(parents=True)
+    (out_dir / "SP-10" / "wrong-versions.json").write_text("not json")
+    sp10 = spec_with("SP-10", ["v10"])
+    pairs, unreadable = own_version_pairs(
+        spec=sp10, out_dir=out_dir, diff=src_only_diff
+    )
+    assert pairs == []
+    assert unreadable is False
+
+    sp11 = spec_with("SP-11", None)
+    pairs, unreadable = own_version_pairs(spec=sp11, out_dir=out_dir, diff=DIFF)
+    assert pairs == []
+    assert unreadable is False
+
+    (out_dir / "SP-12").mkdir(parents=True)
+    (out_dir / "SP-12" / "wrong-versions.json").write_text("not json either")
+    sp12 = spec_with("SP-12", ["v12"])
+    pairs, unreadable = own_version_pairs(spec=sp12, out_dir=out_dir, diff="")
+    assert pairs == []
+    assert unreadable is False
+
+    (out_dir / "SP-99").mkdir(parents=True)
+    (out_dir / "SP-99" / "wrong-versions.json").write_text(
+        json.dumps(
+            [
+                {
+                    "witness": "tests/test_a.py",
+                    "claim": "c99",
+                    "versions": [
+                        _killed("v99", "x.py", "foo99"),
+                        {
+                            "version": "v99b",
+                            "edit": None,
+                            "reason": "",
+                            "outcome": "unproven",
+                            "summary": "s",
+                        },
+                    ],
+                },
+                {"witness": "other-witness-1", "claim": "cO1"},
+                {
+                    "witness": "other-witness-2",
+                    "claim": "cO2",
+                    "versions": [
+                        {
+                            "version": "vO2",
+                            "edit": None,
+                            "reason": "",
+                            "outcome": "killed",
+                            "summary": "s",
+                        }
+                    ],
+                },
+            ]
+        )
+    )
+    sp99 = spec_with("SP-99", ["v99"])
+    pairs, unreadable = own_version_pairs(spec=sp99, out_dir=out_dir, diff=DIFF)
+    assert unreadable is False
     assert len(pairs) == 1
     criterion, entry = pairs[0]
     assert criterion.claim == "claim for SP-99"

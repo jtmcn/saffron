@@ -2442,6 +2442,195 @@ def test_a_lens_blocker_quoting_the_host_text_mid_claim_stays_withdrawn():
     assert adequacy_dict["withdrawal_refusals"] == []
 
 
+# The host's own sentence for a parent's surviving wrong version
+# (`SA-0405`), written here as its own literal, never read from `rebut.py`.
+_PARENT_SENTENCE = (
+    "The host kept this blocker: a parent's wrong version survived its witness, "
+    "and a lens cannot withdraw that. The lens withdrew it:"
+)
+
+
+def test_a_withdrawn_parent_survivor_is_kept_confirmed_whatever_its_answer():
+    """Criterion 1: a lens cannot withdraw the host's survivor of a parent's
+    wrong version. The host refuses that withdrawal whatever the first
+    answer was. The `preserves` rule still governs any other guarded
+    blocker as before."""
+    from saffron import probe
+    from saffron.intake import Criterion, Mutant
+
+    preserved = Criterion(
+        claim="the total is unchanged", witness="t.py::test_a", preserves=True
+    )
+    plain = Criterion(claim="the total stays sorted", witness="t.py::test_c")
+    parent_criterion = Criterion(claim="the sum holds", witness="t.py::test_p")
+    edit = Mutant(file="src/gap.py", find="if amount < 0:", replace="if False:")
+    content = "if amount < 0:\n"
+
+    def _parent(criterion, *, version="a sum that skips zero", parent="SA-1"):
+        return review.survivor_finding(
+            criterion, edit, content, version=version, parent=parent
+        )
+
+    def _own_edit(criterion):
+        return review.survivor_finding(criterion, edit, content)
+
+    b1 = _parent(parent_criterion)
+    b2 = b1.model_copy(
+        update={
+            "claim": review.survivor_claim_with_suite_verdict(
+                b1.claim,
+                probe.ProbeResult(
+                    verdict="killed", reason="a kill", failures=("t.py::test_b",)
+                ),
+            )
+        }
+    )
+    b3 = b1.model_copy(
+        update={
+            "claim": review.survivor_claim_with_suite_verdict(
+                b1.claim, probe.ProbeResult(verdict="survived", reason="a survival")
+            )
+        }
+    )
+    b4 = _parent(preserved)
+    b5 = _parent(parent_criterion)
+    b6 = review.survivor_finding(plain, edit, content, version="a total left unsorted")
+    quoting_criterion = Criterion(
+        claim="SA-1's wrong version 'v' stays killed", witness="t.py::test_c"
+    )
+    b7 = _own_edit(quoting_criterion)
+    b8 = review.survivor_finding(
+        plain, edit, content, version="SA-1's wrong version here"
+    )
+    b9 = _blocker(lens="adequacy", claim="see " + b1.claim)
+    b10 = _blocker(lens="adequacy", claim=b1.claim.removeprefix(review.HOST_FILED))
+    b11 = _own_edit(preserved)
+    b12 = _own_edit(preserved)
+    b13 = _blocker()
+    # Split so the embedded citation-shaped text is not read as a real one
+    # (`saffron/gates/core/integrity.py`, `unknown-spec-id`).
+    embedded_version = "x stayed green with " + "SA-1" + "'s wrong version y"
+    b14 = review.survivor_finding(plain, edit, content, version=embedded_version)
+    blockers_1 = [b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14]
+
+    result_1 = _run(
+        "I have answered every finding.",
+        _rebuttals(
+            _fixed(1, "fixed it"),
+            _argued(2, _WITHDRAWAL_ARGUMENT),
+            _fixed(4, "fixed it"),
+            _argued(5, _WITHDRAWAL_ARGUMENT),
+            _argued(6, _WITHDRAWAL_ARGUMENT),
+            _argued(7, _WITHDRAWAL_ARGUMENT),
+            _argued(8, _WITHDRAWAL_ARGUMENT),
+            _argued(9, _WITHDRAWAL_ARGUMENT),
+            _argued(10, _WITHDRAWAL_ARGUMENT),
+            _fixed(11, "fixed it"),
+            _argued(12, _WITHDRAWAL_ARGUMENT),
+            _argued(13, _WITHDRAWAL_ARGUMENT),
+            _argued(14, _WITHDRAWAL_ARGUMENT),
+        ),
+        _verdicts(_verdict(13, reason="13")),
+        _verdicts(
+            _verdict(1, reason="1"),
+            _verdict(2, reason="2"),
+            _verdict(3, reason="3"),
+            _verdict(4, reason="4"),
+            _verdict(5, verdict="confirmed", reason="5"),
+            _verdict(6, reason="6"),
+            _verdict(7, reason="7"),
+            _verdict(8, reason="8"),
+            _verdict(9, reason="9"),
+            _verdict(10, reason="10"),
+            _verdict(11, reason="11"),
+            _verdict(12, reason="12"),
+            _verdict(14, reason="14"),
+        ),
+        blockers=blockers_1,
+        acceptance=[preserved, plain],
+        moved=True,
+    )
+
+    assert result_1.state == "READY_FOR_REVIEW"
+    assert result_1.why == (
+        "6 blocker(s) confirmed after the rebuttal, 10 argued — recorded "
+        "disagreement, yours to adjudicate"
+    )
+
+    correctness_1 = next(v for v in result_1.verdicts if v.lens == "correctness")
+    assert correctness_1.verdicts == [
+        rebut.Verdict(finding=13, verdict="withdrawn", reason="r13")
+    ]
+
+    adequacy_1 = next(v for v in result_1.verdicts if v.lens == "adequacy")
+    assert adequacy_1.verdicts == [
+        rebut.Verdict(finding=1, verdict="confirmed", reason=f"{_PARENT_SENTENCE} r1"),
+        rebut.Verdict(finding=2, verdict="confirmed", reason=f"{_PARENT_SENTENCE} r2"),
+        rebut.Verdict(finding=3, verdict="confirmed", reason=f"{_PARENT_SENTENCE} r3"),
+        rebut.Verdict(finding=4, verdict="confirmed", reason=f"{_PARENT_SENTENCE} r4"),
+        rebut.Verdict(finding=5, verdict="confirmed", reason="r5"),
+        rebut.Verdict(finding=6, verdict="withdrawn", reason="r6"),
+        rebut.Verdict(finding=7, verdict="withdrawn", reason="r7"),
+        rebut.Verdict(finding=8, verdict="withdrawn", reason="r8"),
+        rebut.Verdict(finding=9, verdict="withdrawn", reason="r9"),
+        rebut.Verdict(finding=10, verdict="withdrawn", reason="r10"),
+        rebut.Verdict(finding=11, verdict="withdrawn", reason="r11"),
+        rebut.Verdict(
+            finding=12,
+            verdict="confirmed",
+            reason=f"{_WITHDRAWAL_HOST_SENTENCE} r12",
+        ),
+        rebut.Verdict(finding=14, verdict="withdrawn", reason="r14"),
+    ]
+
+    as_dict_1 = result_1.as_dict(blockers_1)
+    by_lens_1 = {v["lens"]: v for v in as_dict_1["verdicts"]}
+    assert by_lens_1["correctness"]["withdrawal_refusals"] == []
+    assert by_lens_1["adequacy"]["withdrawal_refusals"] == [
+        {"finding": n, "withdrawn_reason": f"r{n}"} for n in (1, 2, 3, 4, 12)
+    ]
+
+    # Run 2, HEAD unmoved: every parent survivor is refused regardless.
+    blockers_2 = [
+        b1,
+        _parent(parent_criterion, version="a sum off by one", parent="SP-2"),
+        _parent(parent_criterion, version="a sum that's off by one", parent="SA-1"),
+        b4,
+    ]
+    result_2 = _run(
+        "Here is my second answer.",
+        _rebuttals(
+            _fixed(1, "fixed it"),
+            _argued(2, _WITHDRAWAL_ARGUMENT),
+            _argued(4, _WITHDRAWAL_ARGUMENT),
+        ),
+        _verdicts(
+            _verdict(1, reason="1"),
+            _verdict(2, reason="2"),
+            _verdict(3, reason="3"),
+            _verdict(4, reason="4"),
+        ),
+        blockers=blockers_2,
+        acceptance=[preserved, plain],
+        moved=False,
+    )
+
+    (adequacy_2,) = result_2.verdicts
+    assert adequacy_2.lens == "adequacy"
+    assert adequacy_2.verdicts == [
+        rebut.Verdict(finding=1, verdict="confirmed", reason=f"{_PARENT_SENTENCE} r1"),
+        rebut.Verdict(finding=2, verdict="confirmed", reason=f"{_PARENT_SENTENCE} r2"),
+        rebut.Verdict(finding=3, verdict="confirmed", reason=f"{_PARENT_SENTENCE} r3"),
+        rebut.Verdict(finding=4, verdict="confirmed", reason=f"{_PARENT_SENTENCE} r4"),
+    ]
+
+    as_dict_2 = result_2.as_dict(blockers_2)
+    (adequacy_2_dict,) = as_dict_2["verdicts"]
+    assert adequacy_2_dict["withdrawal_refusals"] == [
+        {"finding": n, "withdrawn_reason": f"r{n}"} for n in range(1, 5)
+    ]
+
+
 def _between(text: str, start: str, end: str) -> str:
     begin = text.index(start) + len(start)
     stop = text.index(end, begin)

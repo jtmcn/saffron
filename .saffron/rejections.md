@@ -3185,3 +3185,27 @@ critic's own, so they have no line.
 - `SA-0402` (#1233): a docstring named two sources of pairs where there are
   three, one said "errored", and one comment pointed at the wrong line.
   **Bucket 2**. **Landed:** a review commit on #1233.
+
+## 2026-11-17, spec loop run 76 (#1239, #1240, #1241)
+
+- `SA-0403` (#1239): the own-pairs witness compared one of three pairs whole,
+  so a pair carrying another criterion's witness passed it. **Bucket 1**.
+  **Landed:** a review commit on #1239.
+- `SA-0403` (#1239): a fixture comment named a field the fixture lacks, a
+  fixture field went unread, and a docstring miscounted the packaged
+  commits. **Bucket 2**. **Landed:** a review commit on #1239.
+- `SA-0404` (#1240): the main witness never collected the `test_m` witness, so
+  REBUT's canary worked only in another test, and two declared wrong versions
+  passed it. **Bucket 1**. **Landed:** a review commit on #1240.
+- `SA-0404` (#1240): the checkout's policy differed from the export's in env
+  alone, so test paths, inert patterns or gates read from the checkout passed.
+  **Bucket 1**. **Landed:** a review commit on #1240.
+- `SA-0404` (#1240): the output asserts searched the whole output, not the last
+  line, and a stub went unannotated. **Bucket 1**. **Landed:** a review commit
+  on #1240.
+- `SA-0405` (#1241): a docstring dropped the witness from the guard text the
+  code still builds, and a comment cited a file that does not exist.
+  **Bucket 2**. **Landed:** a review commit on #1241.
+- `SA-0405` (#1241): a fixture literal was split so `integrity` would not read
+  `SA-1` as a citation. The operator kept it. **Bucket 1**. **Open:** filed
+  as b-988eb9.
