@@ -60,11 +60,24 @@ row now separates the readings, and the caller re-ran both probes. Round 2
 found four notes and no blocker. The caller read the live ledger to settle
 the empty `retired_first`, which the reviewer could not reach.
 
+## SA-0409 (b-d0fed8)
+
+One writer, no split, 100 counted tokens. Each round found one witness
+blocker, and both were the same class. A held stop let later steps run or
+print, and the witness never looked. Round 1's version ran readiness and the
+scan after a held reclaim stop. Round 2's version printed a false stop line,
+since no case read stdout. The writer measured each one surviving before
+the fix. Recording stubs and a stdout check per case now kill both. A
+fourth stop point, inside the readiness temp dir's exit, came with round 2.
+
 ## What the reviews keep finding
 
 Every blocker and three concerns were one class. A claim names a set, and
 its witness drives one member, or puts the member that matters at an edge
 where a first-only or last-only reading also passes. Check 65 names it. `SA-0408`'s blocker was the same class.
+
+`SA-0409` adds a second class. A witness that asserts only an outcome
+misses steps run after it. Check 67 names it.
 
 ## Checks to build
 
@@ -75,3 +88,5 @@ where a first-only or last-only reading also passes. Check 65 names it. `SA-0408
     two others.
 66. `driver.py check` prices a spec's size from its non-test tokens, as the
     size gate counts them.
+67. A claim that a step stops further work observes each later step as not
+    run, through a recording stub or the output it would print.

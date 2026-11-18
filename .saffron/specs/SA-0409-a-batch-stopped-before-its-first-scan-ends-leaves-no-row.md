@@ -3,7 +3,7 @@ id: SA-0409
 title: A batch stopped before its first scan ends exits 143 and leaves no batch row
 type: bug
 priority: 2
-estimated_lines: 111
+estimated_lines: 131
 estimate_measured: true
 touches:
   - saffron/cli.py
@@ -43,22 +43,25 @@ max_turns: 135
 risk: standard
 acceptance:
   - claim: >-
-      A `saffron batch` sent SIGTERM at each of three points, inside its
-      build cache reclaim, inside its readiness check and inside its first
-      queue scan, exits 143. Each is driven for a plain batch and for a
-      `--stack` one, six batches in all. Each leaves exactly one batch row.
+      A `saffron batch` sent SIGTERM at each of four points exits 143. The
+      points are inside its build cache reclaim, inside its readiness check,
+      inside the readiness scratch directory's cleanup after the check
+      returned, and inside its first queue scan. Each is driven for a plain
+      batch and for a `--stack` one, eight batches in all. None prints a
+      `batch:` line. Each leaves exactly one batch row.
       That row is closed `INFRASTRUCTURE` with an `ended_at`. It carries the
       batch's own `--budget` and the `until_ts` its `--until` resolves to,
       and reads a spend of `0.0`, never NULL. No step after the stop runs. A
       stop in the reclaim calls neither readiness nor the scan, and one in
-      readiness never calls the scan. A readiness check that raises a plain
+      readiness or its cleanup never calls the scan. A readiness check that raises a plain
       exception still exits 2 through `main`'s catch-all and leaves no row.
     witness: tests/test_sigterm.py::test_a_batch_stopped_before_its_first_scan_ends_leaves_one_closed_row
     wrong_versions:
       - The readiness check is guarded and the first queue scan is not, so a signal inside the scan leaves no row.
       - The reclaim and the scan are guarded and the readiness check is not, so a signal inside readiness leaves no row.
       - The build cache reclaim stays outside the guard, so a signal inside it leaves no row.
-      - The reclaim's interrupt is held in its own guard and readiness and the scan still run, so a `--stack` batch below its total would exit 2 at the refusal with no row.
+      - The reclaim's interrupt is held in its own guard and readiness and the scan still run, so the recording stubs see both called.
+      - The readiness guard holds the interrupt but leaves `readiness` as the check returned it, so a stop in the cleanup after an ok still runs the scan.
       - The guard catches `Exception`, which `KeyboardInterrupt` is not, so no stop point leaves a row.
       - The guard catches `BaseException`, so a plain exception from readiness is carried into the loop and leaves a row.
       - The interrupt is caught and dropped, so the batch closes its row and exits 2, not 143.
@@ -68,6 +71,7 @@ acceptance:
       - "`_batch` writes and closes its own row with a budget of `0.0`, not the batch's `--budget`."
       - "`_batch` writes and closes its own row with the budget and no `until_ts`."
       - "`_batch` writes and closes its own row and then still enters the batch loop, which writes a second one."
+      - "`_readiness_or_raise` returns a failed `Readiness` when an interrupt is held, so the loop closes the row and `_batch` prints `batch: readiness failed at ...` or `batch: infrastructure failed` before it re-raises."
   - claim: >-
       A batch sent SIGTERM while its first task holds a live child still
       exits 143 and still leaves exactly one row, closed `INFRASTRUCTURE`.
@@ -155,13 +159,17 @@ and spends nothing.
 
 ## Out of scope
 
-- **A stop between those calls, or after the scan returns.** The
-  statements between readiness and the scan bind defaults and the pinned
-  base (`saffron/cli.py:2464-2516`). After the scan, `_batch` prints the
+- **A stop between those calls, or after the scan returns.** Next after the
+  reclaim, `_batch` resolves the repo path and the `--until` bound. It then
+  takes the stack's admission shares (`saffron/cli.py:2438-2446`). A
+  stop there takes the base path, exiting 143 with no row. The statements
+  between readiness and the scan bind defaults and the pinned base
+  (`saffron/cli.py:2464-2516`). After the scan, `_batch` prints the
   plan, rewrites the queue page and builds the stack's closures
   (`saffron/cli.py:2530-2669`). A signal in either stretch still leaves no
-  row. Guarding the second re-indents some 140 lines. No witness drives
-  either, and the doc sentence names the three calls this spec guards.
+  row. Guarding the last stretch re-indents some 140 lines. No witness
+  drives any of them, and the doc sentence names the three calls this spec
+  guards.
 - **A stop before the reclaim.** `runtime.unattended_refusal` reads the
   selected dialect and returns (`saffron/cli.py:2429-2432`). Its refusal
   writes no row, for backlog item 108 (`saffron/cli.py:2427-2428`).
@@ -189,7 +197,11 @@ interrupt in a local beside `resolution_error`, and raise it first in
 line that resolves `--until` (`saffron/cli.py:2434-2441`). Then guard readiness, and
 call it only when the reclaim was not stopped. When either is stopped, bind
 `readiness` to a failed `preflight.Readiness`, so the scan is skipped too.
-Nothing prints it, since the loop re-raises before `_batch` reads it. A
+Rebind it inside the readiness guard's own `except` as well. A stop can land
+in the scratch directory's cleanup after the check returned an ok
+`Readiness`, and an unrebound one would run the scan. Nothing prints the
+stand-in, since `_readiness_or_raise` raises the held interrupt rather than
+returning it, so `_batch` never reaches its stop lines. A
 held interrupt the code still runs past ignores the next SIGTERM, since the
 handler has set `SIG_IGN` (`saffron/cli.py:661`). So a later step's own
 stop would never fire. Leave `saffron/batch.py` alone.
@@ -200,32 +212,37 @@ One helper sends
 SIGTERM to the test's own process with `os.kill`, then sleeps, then fails
 if the sleep returns. Two recording stubs append to one list. One stands
 for `check_readiness` and returns a passing `Readiness`. The other stands
-for `cli._resolve_queue` and raises a `RuntimeError`. Loop over the three
-points and the two modes. Each pass clears the list and installs a no-op
-`runtime.reclaim_build_cache` and both stubs with `monkeypatch.setattr`.
-Then it puts the helper in place of the one point under test. Give each
+for `cli._resolve_queue` and raises a `RuntimeError`. Loop over the four
+points and the two modes. Each case clears the list and installs a no-op
+`runtime.reclaim_build_cache`, the real `cli.tempfile.TemporaryDirectory`
+and both stubs with `monkeypatch.setattr`. Then it puts the helper in place
+of the one point under test. For the cleanup point, that is a stand-in
+`TemporaryDirectory` class whose `__exit__` calls the helper. Give each
 batch its own `--home` under `tmp_path`, `--repo tmp_path`, `--budget 37`
 and `--until 23:59`. Add `--stack --partial` for the stack mode. Assert
-`cli.main(argv) == 143`. Assert the list is empty for the reclaim and
-readiness passes, and holds readiness alone for the scan pass. The scan
-pass is the positive case that shows the stubs record. Then read `status`,
+`cli.main(argv) == 143`. Drain `capsys` before and after the call, and
+assert no stdout line starts with `batch:`. Assert the list is empty for
+the reclaim and readiness cases, and holds readiness alone for the cleanup
+and scan cases. Those two are the positive case that shows the stubs
+record. Then read `status`,
 `ended_at`, `spent_usd_est`, `budget_usd` and `until_ts` from every row of
 `batches` under that home. Assert one row and the five values. Compute the
 expected `until_ts` with `cli._resolve_until("23:59", datetime.now())`, in
 UTC as `%Y-%m-%d %H:%M:%S`, before and after the call. Accept either, so a
-pass across midnight holds. Put the point and the mode in each assertion's
+case across midnight holds. Put the point and the mode in each assertion's
 message.
 
 After the loop, the same test installs a `check_readiness` that raises a
 `RuntimeError` and drives a plain batch once more. Assert exit 2, the line
 `saffron: RuntimeError: <its text>` on stdout, and no row under that home.
-The loop's row reads are the positive case for that query.
+The loop's row reads are the positive case for that query. Its stdout
+assertion is the positive case for the `capsys` reads in the loop.
 Import `preflight` from `saffron` at module scope, as the batch script
 string in that file already does. It exists at base.
 
 **Witness red at base.** Measured at `1d574d39`: each of the six batches
-already exits 143 and leaves no row. So it fails on the row count of the
-first, the reclaim pass of a plain batch.
+of the first review's witness already exits 143 and leaves no row. So this
+one fails on the row count of the first, the reclaim case of a plain batch.
 
 **The doc sentence.** In `docs/HOST-HARDENING.md:209-210`, after "closes
 `INFRASTRUCTURE`.", add this.
@@ -237,17 +254,20 @@ the readiness check or the first queue scan has one too.
 
 **Measured on a prototype, 2026-11-17.** The change above and the witness
 were built at `1d574d39`. The witness failed with `saffron/cli.py`
-reverted. Each of the 13 wrong versions under criterion 1 was applied as one
+reverted. Each of the 15 wrong versions under criterion 1 was applied as one
 edit to `saffron/cli.py`, and each failed the witness on an assertion. The
 held-reclaim version passed an earlier witness with no recording stubs. The
 scan stub raised under the ignored signal, the scan's `except Exception`
-caught it, and the held interrupt still gave one closed row. The five
+caught it, and the held interrupt still gave one closed row. The version
+that returns a failed `Readiness` passed a later witness that read no
+stdout. It printed `batch: readiness failed at interrupted: stopped`. The
+five
 witnesses passed together. `ruff check`, `ruff format --check` and `ty
 check` passed on both Python files. `python3 hooks/prose_limit.py --file`
 read 0 new hits on each. A comment placed right under the 7-line readiness
 comment made one 9-line block, which `prose` counted as a hit. By
-`size_gate` the diff counted 444 changed tokens, 361 of them in the test.
-With the policy's `tests/**` test paths declared, it counts 83.
+`size_gate` the diff counted 522 changed tokens, 422 of them in the test.
+With the policy's `tests/**` test paths declared, it counts 100.
 
 **The `prose` gate** reads every new comment and docstring. Write none
 with an em dash, a semicolon, a contraction, the perfect tense or a
