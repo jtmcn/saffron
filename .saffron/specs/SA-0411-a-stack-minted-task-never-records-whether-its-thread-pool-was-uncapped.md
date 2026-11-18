@@ -223,15 +223,15 @@ reaches a pull request in an earlier batch, this spec waits for merges
 must change. The mint now reads the mirror at the pinned `base_sha`, and
 `file_at` raises `GitError` there.
 `test_the_stack_mint_opens_a_run_at_the_pinned_base_and_a_task_per_call`
-(`tests/test_cli.py:10050`) and
+(`tests/test_cli.py:10821-10914`) and
 `test_the_stack_mint_records_the_declared_tier_and_null_where_none`
-(`tests/test_cli.py:10146`) pass `tmp_path / "m.git"`, which does not
+(`tests/test_cli.py:10917-10967`) pass `tmp_path / "m.git"`, which does not
 exist, with `base_sha="a" * 40`. Give each a real repo from
 `_repo_with_commit` and its `HEAD` as the base. The first also asserts
 each row's `base_sha` equals `"a" * 40` (`tests/test_cli.py:10104`). Make
 that the real commit.
 `test_the_stack_mint_records_the_mutants_refs_commit_and_null_without_one`
-(`tests/test_cli.py:10235`) inits a bare mirror and pins `"a" * 40`. Give it
+(`tests/test_cli.py:11006-11058`) inits a bare mirror and pins `"a" * 40`. Give it
 one commit of the empty tree on that mirror, from `git mktree` and
 `git commit-tree`, and pin that. None of the three commits holds a policy,
 so each mint files `None` and nothing else those tests assert moves.
