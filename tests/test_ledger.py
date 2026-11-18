@@ -1157,7 +1157,7 @@ _TASKS_COLUMN_READERS: dict[str, str] = {
     "updated_at": "saffron/ledger.py::Ledger.newest_tasks_in_states",
     "record_key": "saffron/ledger.py::Ledger.record_key",
     "merged_head_sha": "saffron/reconcile.py::reconcile",
-    "pushed_in_state": "saffron/scheduler.py::_stale_rebuttal_unjudged",
+    "pushed_in_state": "saffron/scheduler.py::_stale_push_state",
     "mutants_commit": "saffron/ledger.py::Ledger.task_mutants_commit",
 }
 

@@ -3228,3 +3228,29 @@ critic's own, so they have no line.
   on #1250.
 - `SA-0412` (#1252): the `prose` gate's perfect-tense rule passes "has run".
   **Bucket 1**. **Open:** filed as b-6b8896.
+
+## 2026-11-18, spec loop run 79 (#1258, #1259, #1260, #1261, #1262)
+
+- `SA-0408` (#1258): four witnesses left a claimed arrangement undriven. One
+  used ids the chain check cannot parse, three cases ran without a `gh`, one
+  seeded a single row, and one never read the moved head. **Bucket 1**.
+  **Landed:** a review commit on #1258.
+- `SA-0408` (#1258): a push-guard witness cited `SA-0330` for a rule
+  `SA-0331` owns. **Bucket 2**. **Landed:** a review commit on #1258.
+- `SA-0409` (#1259): an em-dash rewrite dropped the quotes that made a case
+  name read as one phrase. **Bucket 2**. **Landed:** a review commit on #1259.
+- `SA-0410` (#1260): no witness pinned `--literal-pathspecs`, which keeps a
+  `touches` path that starts with `:` literal. Its docstring named a bracket
+  instead. **Bucket 1**. **Landed:** a review commit on #1260.
+- `SA-0411` (#1261): a comment said no row exists before the policy read,
+  though `upsert_repo` writes one first. **Bucket 2**. **Landed:** a review
+  commit on #1261.
+- `SA-0411` (#1261): the third copy of the policy read at a commit.
+  **Bucket 2**. **Open:** filed as b-8d3de1.
+- `SA-0414` (#1262): criterion 2's witness never folded a bare task after a
+  `run_finished`-only task and never read a bare row's `ended_at`.
+  **Bucket 1**. **Landed:** a review commit on #1262.
+- `SA-0414` (#1262): the diff deleted a `ponytail:` comment whose shortcut is
+  still live. **Bucket 2**. **Landed:** a review commit on #1262.
+- `SA-0414` (#1262): a task with no run fact folds onto the first row at its
+  `base_sha`. **Bucket 1**. **Open:** filed as b-15c480.

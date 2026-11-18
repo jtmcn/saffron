@@ -1,11 +1,12 @@
 ---
 id: b-d0fed8
 title: "A batch sent SIGTERM during readiness or its first queue scan exits 143 with no ledger row"
-status: open
+status: done
+closed: 2026-11-18
 tier: 2
 filed: 2026-10-11
 specs: [SA-0409]
-prs: []
+prs: [1259]
 commits: []
 cites: [§4.2.1]
 related: [95, b-5df2a7]
@@ -35,3 +36,5 @@ signal inside `check_readiness` and reads the ledger.
 ## Record
 
 - 2026-10-11: filed from the spec loop's run 34 (#812).
+- 2026-11-18: closed by #1259 (`SA-0409`). A batch stopped before its first
+  scan ends exits 143 with one closed `INFRASTRUCTURE` row.

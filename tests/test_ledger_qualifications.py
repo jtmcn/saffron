@@ -188,7 +188,13 @@ def test_a_qualification_is_one_fact_and_one_row_numbered_within_its_task(
     ]
 
     kinds1 = [f.kind for f in record.read(key1)]
-    assert kinds1 == ["task_created", "qualification", "qualification", "qualification"]
+    assert kinds1 == [
+        "task_created",
+        "run_created",
+        "qualification",
+        "qualification",
+        "qualification",
+    ]
 
 
 def test_the_fold_rebuilds_each_tasks_qualifications_and_drops_one_task_alone(

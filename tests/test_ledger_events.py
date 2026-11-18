@@ -25,6 +25,8 @@ from saffron.spec_review import SpecReviewFinding
 # write method appends (SA-0336's notes).
 _ALL_KINDS = (
     "task_created",
+    "run_created",
+    "run_finished",
     "task_state",
     "attempt_opened",
     "attempt_closed",
@@ -95,7 +97,7 @@ def _find(
 
 
 def _drive_every_kind(ledger: Ledger) -> tuple[str, str, int]:
-    """Every one of the twenty fact kinds the ledger appends, across two
+    """Every one of the twenty-two fact kinds the ledger appends, across two
     tasks under two spec ids in one batch. Both tasks are created first,
     then a fact lands on the first task. A spec id read from the newest
     task, rather than the fact's own, would then name the wrong one.
@@ -183,6 +185,7 @@ def _drive_every_kind(ledger: Ledger) -> tuple[str, str, int]:
     ledger.record_regate(
         task1, head_sha="h" * 40, baseline_sha="a" * 40, new_failures=0
     )
+    ledger.finish_run(run1, "COMPLETE")
 
     return _key(ledger, task1), _key(ledger, task2), batch_id
 
@@ -213,8 +216,8 @@ def test_each_fact_the_ledger_appends_emits_one_event_naming_its_kind_and_key(
     assert {f.kind for f in facts} == set(_ALL_KINDS)
 
     # Every fact `_drive_every_kind` writes lands, every one, and twice
-    # for `task_created` and `finding`.
-    assert len(facts) == 22
+    # for `task_created`, `run_created` and `finding`.
+    assert len(facts) == 25
     finding_claims = [f.payload["claim"] for f in facts if f.kind == "finding"]
     assert finding_claims == ["claim one", "claim two"]
     assert len([f for f in facts if f.kind == "spec_finding"]) == 1
@@ -241,10 +244,10 @@ def test_an_append_the_record_refuses_emits_no_event(tmp_path: Path) -> None:
     task_id = ledger_a.create_task(
         run_id, spec_id="SA-1", spec_sha="s" * 64, branch="b"
     )
-    assert len(captured_a) == 1
+    assert len(captured_a) == 2
     with pytest.raises(RecordError):
         ledger_a.set_task_state(task_id, "IMPLEMENTING")
-    assert len(captured_a) == 1
+    assert len(captured_a) == 2
     ledger_a.close()
 
     # `record_findings`' own per-fact loop: its second fact refused, its
@@ -287,6 +290,67 @@ def test_an_append_the_record_refuses_emits_no_event(tmp_path: Path) -> None:
     ledger_b.close()
 
 
+def test_a_refused_run_finished_raises_after_the_runs_status_is_written(
+    tmp_path: Path,
+) -> None:
+    calls = {"run_finished": 0}
+
+    def _refuse_second(fact: Fact) -> bool:
+        if fact.kind != "run_finished":
+            return False
+        calls["run_finished"] += 1
+        return calls["run_finished"] == 2
+
+    captured: list[RecordAppend] = []
+    record = _RecordingRecord(_refuse_second)
+    ledger = Ledger(tmp_path / "l.db", record=record, events=captured.append)
+    repo_id = ledger.upsert_repo("saffron", "https://o", "/m.git", policy_sha="p" * 64)
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+    ledger.create_task(run_id, spec_id="SA-1", spec_sha="s" * 64, branch="b")
+
+    def _status() -> str:
+        return ledger._db.execute(
+            "SELECT status FROM runs WHERE run_id = ?", (run_id,)
+        ).fetchone()["status"]
+
+    before = len(captured)
+    ledger.finish_run(run_id, "COMPLETE")
+    assert _status() == "COMPLETE"
+    assert len(captured) == before + 1
+    assert captured[-1].fact_kind == "run_finished"
+
+    with pytest.raises(RecordError):
+        ledger.finish_run(run_id, "ABORTED")
+    assert _status() == "ABORTED"
+    assert len(captured) == before + 1
+    ledger.close()
+
+
+def test_a_refused_run_created_still_leaves_the_task_created(tmp_path: Path) -> None:
+    """A documented gap, not a fix here: `create_task`'s row and its
+    `task_created` fact are already committed when `run_created` is
+    appended. A refusal there still raises, and the task stays live with
+    its record missing the fact that marks its row its own (item b-cafacd)."""
+    captured: list[RecordAppend] = []
+    refuse_run_created = _RecordingRecord(lambda fact: fact.kind == "run_created")
+    ledger = Ledger(
+        tmp_path / "l.db", record=refuse_run_created, events=captured.append
+    )
+    repo_id = ledger.upsert_repo("saffron", "https://o", "/m.git", policy_sha="p" * 64)
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+
+    with pytest.raises(RecordError):
+        ledger.create_task(run_id, spec_id="SA-1", spec_sha="s" * 64, branch="b")
+
+    row = ledger._db.execute(
+        "SELECT spec_id FROM tasks WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    assert row["spec_id"] == "SA-1"
+    assert [f.kind for f in refuse_run_created.taken] == ["task_created"]
+    assert len(captured) == 1
+    ledger.close()
+
+
 def test_a_ledger_with_no_record_emits_no_event(tmp_path: Path) -> None:
     no_record_events: list[RecordAppend] = []
     ledger_no_record = Ledger(tmp_path / "no-record.db", events=no_record_events.append)
@@ -294,7 +358,7 @@ def test_a_ledger_with_no_record_emits_no_event(tmp_path: Path) -> None:
     assert no_record_events == []
     ledger_no_record.close()
 
-    # Proof the drive does reach all twenty kinds: the same drive, on a
+    # Proof the drive does reach all twenty-two kinds: the same drive, on a
     # ledger with a record, fills the sink with every one of them.
     with_record_events: list[RecordAppend] = []
     ledger_with_record = Ledger(

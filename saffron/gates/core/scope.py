@@ -40,6 +40,17 @@ def matches(path: str, pattern: str) -> bool:
     return _to_regex(pattern).match(path) is not None
 
 
+def literal_touches(touches: list[str], changed_files: list[str]) -> list[str]:
+    """`touches` entries worth asking the tree base about: no glob token,
+    outside `changed_files`, in touches order.
+
+    A glob names no literal path to look up, and the diff itself already
+    answers for a changed file.
+    """
+    changed = set(changed_files)
+    return [t for t in touches if t not in changed and not _TOKENS.search(t)]
+
+
 def scope_gate(
     changed_files: list[str],
     touches: list[str],
@@ -47,6 +58,9 @@ def scope_gate(
     diff: str | None = None,
     forbidden: list[str] | None = None,
     protected: list[str] | None = None,
+    # Literal touches entries the caller found absent at the tree base,
+    # already excluding changed files. Named on a pass alone.
+    absent: list[str] | None = None,
 ) -> GateResult:
     """Changed files ⊆ touches, and ⊄ forbidden/protected, judged against the
     diff those paths came from.
@@ -107,10 +121,18 @@ def scope_gate(
     ]
 
     if not escaped and not forbidden_hits and not protected_hits:
+        summary = f"{len(changed_files)} changed files within touches"
+        if absent:
+            # Each literal touches entry the diff never created, named for
+            # the reviewer in touches order.
+            summary += (
+                "; touches entries absent at the tree base and never created: "
+                + ", ".join(absent)
+            )
         return GateResult(
             gate="scope",
             status="pass",
-            summary=f"{len(changed_files)} changed files within touches",
+            summary=summary,
         )
 
     # The failure line is the whole channel to the agent (§5.4), and none of

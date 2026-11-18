@@ -1,11 +1,12 @@
 ---
 id: b-e9153f
 title: "A task a `--stack` batch mints never records whether its thread pool was uncapped"
-status: open
+status: done
+closed: 2026-11-18
 tier: 2
 filed: 2026-10-11
 specs: [SA-0411]
-prs: []
+prs: [1261]
 commits: []
 cites: [§5.1]
 related: [b-0569f7]
@@ -33,3 +34,6 @@ test drives `_stack_mint` and reads the value from the task's facts.
 ## Record
 
 - 2026-10-11: filed from the review of `SA-0282`.
+- 2026-11-18: closed by #1261 (`SA-0411`). A stack mint records
+  `thread_pool_uncapped` through the rule the cell uses. b-8d3de1 holds the
+  third copy of the policy read it adds.

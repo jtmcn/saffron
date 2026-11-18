@@ -4,7 +4,7 @@ Now true of what runs: every command's shared `Ledger` is constructed with a
 `RoutedRecord` (backlog item 170 step 3). No row here is derived from one,
 and §4.6 rule 1 holds as written. The record design reverses that: the
 ledger becomes a store folded out of `refs/saffron/*` by
-`saffron/record/fold.py`, deletable at any time. Only the twenty kinds
+`saffron/record/fold.py`, deletable at any time. Only the twenty-two kinds
 `_append` writes fold back, so even then it stays authoritative for the
 rest. That reversal waits on the batch and run folds. §4.6 and `CONTEXT.md`
 §8 are amended with it rather than ahead of it.
@@ -74,6 +74,9 @@ TaskState = Literal[
     "ORPHANED",
     "MERGE_TRAIN",
 ]
+
+# A task holding either names a row that is its own, never shared by `base_sha`.
+_RUN_FACT_KINDS = frozenset({"run_created", "run_finished"})
 
 # The closed set `set_run_preflight` writes; the `CHECK` below is built from it.
 RUN_PREFLIGHT_OUTCOMES = ("PASSED", "FAILED")
@@ -704,13 +707,36 @@ class Ledger:
         self._append(fact)
         return result
 
-    def fold_task(self, key: str, facts: Sequence[Fact]) -> None:
+    def fold_task(
+        self,
+        key: str,
+        facts: Sequence[Fact],
+        *,
+        run_fact_keys: frozenset[str] | None = None,
+    ) -> None:
         """Drop the task `key` names, apply every fact through `_apply`,
-        commit once. No state carried between facts."""
+        commit once. `run_fact_keys` names every task across the whole
+        record whose own facts hold a run fact. It is read ahead by
+        `fold()`'s own first pass, so a bare task's shared row is never
+        one of theirs (item b-cafacd). The `task_created` fact's own run
+        id is resolved before anything is dropped, since a run-fact
+        task's reuse check reads the row this key currently holds."""
+        created = next((f for f in facts if f.kind == "task_created"), None)
+        holds_run_fact = any(f.kind in _RUN_FACT_KINDS for f in facts)
+        resolved_run_id = None
+        if created is not None:
+            if holds_run_fact:
+                resolved_run_id = self._own_run_for(key, created)
+            else:
+                exclude = (run_fact_keys or frozenset()) - {key}
+                resolved_run_id = self._run_for(created, exclude_keys=exclude)
         with self._db:
             self._drop_task_rows(key)
             for fact in facts:
-                self._apply(fact)
+                if fact.kind == "task_created":
+                    self._apply(fact, run_id=resolved_run_id)
+                else:
+                    self._apply(fact)
 
     def _drop_task_rows(self, key: str) -> None:
         """Delete every row under `record_key = key`, task row last. Makes
@@ -754,35 +780,78 @@ class Ledger:
             (value, at, task_id),
         )
 
-    def _run_for(self, fact: Fact) -> int:
-        """The repo and run a `task_created` fact names, by SQL alone since
-        `_apply` cannot call a committing write method."""
+    def _upsert_repo_for_fact(self, fact: Fact) -> int:
+        """The repo id a `task_created` fact names. `repos.policy_sha` is
+        nobody's fact, so a fold never writes it."""
         payload = fact.payload
-        # `repos.policy_sha` is nobody's fact, so a fold never writes it.
         self._db.execute(
             "INSERT INTO repos (name, origin, mirror_path) VALUES (?, ?, ?) "
             "ON CONFLICT(origin) DO UPDATE SET name=excluded.name, mirror_path=excluded.mirror_path",
             (fact.repo, payload["origin"], payload["mirror_path"]),
         )
-        repo_id = int(
+        return int(
             self._db.execute(
                 "SELECT repo_id FROM repos WHERE origin = ?", (payload["origin"],)
             ).fetchone()["repo_id"]
         )
-        found = self._db.execute(
-            "SELECT run_id FROM runs WHERE repo_id = ? AND base_sha = ?",
-            (repo_id, payload["base_sha"]),
-        ).fetchone()
-        if found is not None:
-            return int(found["run_id"])
-        # ponytail: §5 identifies a run by batch and repo, but `batch_key` is
-        # NULL on every stored task, so `base_sha` stands in and collapses some.
+
+    def _insert_run(self, repo_id: int, fact: Fact) -> int:
+        """A fresh `runs` row, started `RUNNING` at the fact's own time."""
         cursor = self._db.execute(
             """INSERT INTO runs (repo_id, base_sha, started_at, status)
                VALUES (?, ?, ?, 'RUNNING')""",
-            (repo_id, payload["base_sha"], _ledger_time(fact.at)),
+            (repo_id, fact.payload["base_sha"], _ledger_time(fact.at)),
         )
         return _inserted_id(cursor)
+
+    def _run_for(
+        self, fact: Fact, *, exclude_keys: frozenset[str] = frozenset()
+    ) -> int:
+        """The repo and run a `task_created` fact names, by SQL alone since
+        `_apply` cannot call a committing write method. A bare task shares
+        a row by `base_sha` (item b-cafacd). `exclude_keys` names every
+        task whose own facts hold a run fact, so that row is never one of
+        theirs."""
+        payload = fact.payload
+        repo_id = self._upsert_repo_for_fact(fact)
+        # ponytail: a task with no run fact shares a row by `base_sha`, since
+        # `batch_key` is NULL on every stored task.
+        if exclude_keys:
+            placeholders = ", ".join("?" for _ in exclude_keys)
+            found = self._db.execute(
+                f"""SELECT run_id FROM runs WHERE repo_id = ? AND base_sha = ?
+                      AND run_id NOT IN (
+                          SELECT run_id FROM tasks WHERE record_key IN ({placeholders})
+                      )""",
+                (repo_id, payload["base_sha"], *exclude_keys),
+            ).fetchone()
+        else:
+            found = self._db.execute(
+                "SELECT run_id FROM runs WHERE repo_id = ? AND base_sha = ?",
+                (repo_id, payload["base_sha"]),
+            ).fetchone()
+        if found is not None:
+            return int(found["run_id"])
+        return self._insert_run(repo_id, fact)
+
+    def _own_run_for(self, key: str, created: Fact) -> int:
+        """A task whose own facts hold a run fact never shares a row by
+        `base_sha` (item b-cafacd). Reuse the row this task's own record
+        key already held, read before `fold_task` drops it, but only when
+        no other task also holds it. Mint a fresh one otherwise."""
+        row = self._db.execute(
+            "SELECT run_id FROM tasks WHERE record_key = ?", (key,)
+        ).fetchone()
+        if row is not None:
+            run_id = int(row["run_id"])
+            other = self._db.execute(
+                "SELECT 1 FROM tasks WHERE run_id = ? AND record_key != ?",
+                (run_id, key),
+            ).fetchone()
+            if other is None:
+                return run_id
+        repo_id = self._upsert_repo_for_fact(created)
+        return self._insert_run(repo_id, created)
 
     def _attempt_for(self, task_id: int, payload: dict[str, Any]) -> int:
         """The attempt a fact names by `(phase, n)`, scoped to its own task."""
@@ -825,7 +894,8 @@ class Ledger:
 
     def _apply(self, fact: Fact, *, run_id: int | None = None) -> int | None:
         """Turn one task fact into rows. Commits nothing. `run_id` is a live
-        writer's own run. The fold passes none and falls back to `_run_for`."""
+        writer's own run, or one `fold_task` resolved. With neither, `_run_for`
+        finds it."""
         payload = fact.payload
         at = _ledger_time(fact.at)
         if fact.kind == "task_created":
@@ -1134,6 +1204,19 @@ class Ledger:
                 ),
             )
             return None
+        if fact.kind == "run_created":
+            # `fold_task` already resolved this task's row while placing
+            # `task_created`, so there is nothing left to apply here.
+            return None
+        if fact.kind == "run_finished":
+            run_row = self._db.execute(
+                "SELECT run_id FROM tasks WHERE task_id = ?", (task_id,)
+            ).fetchone()
+            self._db.execute(
+                "UPDATE runs SET status = ?, ended_at = ? WHERE run_id = ?",
+                (payload["status"], at, run_row["run_id"]),
+            )
+            return None
         raise ValueError(f"fold cannot place fact kind {fact.kind!r}")
 
     def upsert_repo(
@@ -1287,11 +1370,23 @@ class Ledger:
         return _inserted_id(cursor)
 
     def finish_run(self, run_id: int, status: str) -> None:
-        self._db.execute(
-            "UPDATE runs SET status = ?, ended_at = datetime('now') WHERE run_id = ?",
-            (status, run_id),
-        )
-        self._db.commit()
+        """The row's status is written whatever its tasks say, and whether
+        it holds one task, two, or none. The append to each task it holds
+        comes after that commit, so a refused one raises with the status
+        already written (item b-cafacd)."""
+        with self._db:
+            self._db.execute(
+                "UPDATE runs SET status = ?, ended_at = datetime('now') WHERE run_id = ?",
+                (status, run_id),
+            )
+            task_ids = [
+                int(row["task_id"])
+                for row in self._db.execute(
+                    "SELECT task_id FROM tasks WHERE run_id = ?", (run_id,)
+                )
+            ]
+        for task_id in task_ids:
+            self._append(self._build_fact(task_id, "run_finished", {"status": status}))
 
     def set_run_preflight(self, run_id: int, outcome: str) -> None:
         """Record a run's preflight outcome, one of `RUN_PREFLIGHT_OUTCOMES`.
@@ -1569,7 +1664,11 @@ class Ledger:
                 **self._run_facts(run_id),
             },
         )
-        return cast(int, self._commit_and_append(fact, run_id=run_id))
+        task_id = cast(int, self._commit_and_append(fact, run_id=run_id))
+        # Marks the row this task was minted on as its own (item b-cafacd),
+        # which no fact before this one said.
+        self._append(self._build_fact(task_id, "run_created", {}))
+        return task_id
 
     def _run_facts(self, run_id: int) -> dict[str, Any]:
         """What the fold needs to rebuild the `repos` and `runs` rows this task

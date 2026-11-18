@@ -894,3 +894,35 @@ def changed_files(target: str | VolumeTarget, base_sha: str) -> list[str]:
     if done.returncode != 0:
         raise runtime.CellRuntimeError(f"diff --name-only failed: {done.stderr}")
     return [path for path in done.stdout.split("\0") if path.strip()]
+
+
+def absent_at(
+    target: str | VolumeTarget, tree_base: str, paths: Sequence[str]
+) -> list[str]:
+    """Each of `paths` with no entry in `tree_base`'s own tree, in the order
+    given.
+
+    One `ls-tree` answers for every path at once. Literal pathspecs keep a
+    path that starts with `:` from being read as pathspec magic. A
+    directory pathspec is printed by its own name, never descended. A
+    failed read raises `runtime.CellRuntimeError` carrying git's stderr, so
+    a refused read is never taken as an empty tree.
+    """
+    paths = list(paths)
+    if not paths:
+        return []
+    done = _git(
+        target,
+        "--literal-pathspecs",
+        "ls-tree",
+        "-z",
+        "--name-only",
+        "--full-tree",
+        tree_base,
+        "--",
+        *paths,
+    )
+    if done.returncode != 0:
+        raise runtime.CellRuntimeError(f"ls-tree failed: {done.stderr.strip()}")
+    present = {name for name in done.stdout.split("\0") if name}
+    return [path for path in paths if path not in present]

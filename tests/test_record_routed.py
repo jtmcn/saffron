@@ -66,8 +66,8 @@ def test_each_fact_lands_in_the_mirror_of_the_repo_its_task_ran_against(tmp_path
 
     facts_a = RefsRecord(mirror_a).read(key_a)
     facts_b = RefsRecord(mirror_b).read(key_b)
-    assert [f.kind for f in facts_a] == ["task_created", "task_state"]
-    assert [f.kind for f in facts_b] == ["task_created", "task_state"]
+    assert [f.kind for f in facts_a] == ["task_created", "run_created", "task_state"]
+    assert [f.kind for f in facts_b] == ["task_created", "run_created", "task_state"]
 
     # Neither mirror holds the other task's ref at all.
     assert RefsRecord(mirror_a).read(key_b) == []
@@ -301,7 +301,7 @@ def test_two_origins_sharing_a_mirror_each_fetch_from_their_own(tmp_path):
     command.set_task_state(task_b, "DIAGNOSING")
 
     kinds = [fact.kind for fact in RefsRecord(mirror).read(key_b)]
-    assert kinds == ["task_created", "task_state"]
+    assert kinds == ["task_created", "run_created", "task_state"]
 
 
 def test_a_ledger_without_a_routed_record_pushes_nothing(tmp_path):
@@ -421,8 +421,8 @@ def test_the_exit_push_carries_each_appended_key_once_to_its_own_origin(
     key_kinds = ledger.record_key(task_kinds)
     assert key_kinds is not None
     for kind in KINDS:
-        if kind == "task_created":
-            continue  # `create_task` above already wrote this one.
+        if kind in ("task_created", "run_created"):
+            continue  # `create_task` above already wrote both of these.
         record.append(key_kinds, _direct_fact(key_kinds, kind, "b"))
 
     calls: list[list[str]] = []
@@ -461,7 +461,14 @@ def test_the_exit_push_carries_each_appended_key_once_to_its_own_origin(
         key_earlier
     )
     assert RefsRecord(origin_b).read(key_kinds) == RefsRecord(mirror_b).read(key_kinds)
-    assert [fact.kind for fact in RefsRecord(mirror_b).read(key_kinds)] == list(KINDS)
+    # `create_task` writes `task_created` then `run_created` back to back, ahead
+    # of every other kind the loop above appends in `KINDS`' own order.
+    expected_order = ["task_created", "run_created"] + [
+        kind for kind in KINDS if kind not in ("task_created", "run_created")
+    ]
+    assert [
+        fact.kind for fact in RefsRecord(mirror_b).read(key_kinds)
+    ] == expected_order
 
     calls.clear()
     second = record.push_unpushed()

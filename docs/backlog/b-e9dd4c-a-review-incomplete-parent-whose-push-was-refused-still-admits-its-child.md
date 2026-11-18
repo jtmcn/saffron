@@ -1,11 +1,12 @@
 ---
 id: b-e9dd4c
 title: A `REVIEW_INCOMPLETE` parent whose push was refused still admits its child
-status: open
+status: done
+closed: 2026-11-18
 tier: 2
 filed: 2026-10-30
 specs: [SA-0408]
-prs: []
+prs: [1258]
 commits: []
 cites: [§4.2, §5.5]
 related: [b-f603c9]
@@ -40,3 +41,6 @@ A merged pull request on such a row moves it to `MERGED`.
 
 - 2026-10-30: filed from `SA-0330`'s first review. The merge gap comes from
   `SA-0331`'s second review.
+- 2026-11-18: closed by #1258 (`SA-0408`). `REVIEW_INCOMPLETE` shares
+  `REBUTTAL_UNJUDGED`'s refusals and merge-only reconcile. b-ce832b holds
+  three texts that still name the older state alone.

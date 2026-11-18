@@ -1,11 +1,12 @@
 ---
 id: b-cafacd
 title: A run's status reaches no fact, so a ledger folded from the record loses SA-0126's cap on cut retries
-status: open
+status: done
+closed: 2026-11-18
 tier: 2
 filed: 2026-09-22
 specs: [SA-0414]
-prs: []
+prs: [1262]
 commits: []
 cites: [§4.1, §4.2.1]
 related: [170, b-36b551, b-149df3]
@@ -48,3 +49,6 @@ authoritative, and this is one more thing a fold would lose.
 rebuilds `runs.status` from it. Then `SA-0126`'s cap reads the same answer
 from a folded ledger as from the live one. Or a task fact carries why a task
 ended `ORPHANED`, and the cap keys on that instead.
+- 2026-11-18: closed by #1262 (`SA-0414`). `run_created` and `run_finished`
+  reach the record, and the fold rebuilds each run's status. b-15c480 and
+  b-2cf94c hold what the review left.

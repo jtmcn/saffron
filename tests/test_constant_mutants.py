@@ -72,6 +72,20 @@ class _GitTree:
         out = self._read("diff", *DIFF_FLAGS, "--name-only", "-z", f"{base}..HEAD")
         return [path for path in out.split("\0") if path]
 
+    def absent_at(self, tree_base: str, paths) -> list[str]:
+        out = self._read(
+            "--literal-pathspecs",
+            "ls-tree",
+            "-z",
+            "--name-only",
+            "--full-tree",
+            tree_base,
+            "--",
+            *paths,
+        )
+        present = {name for name in out.split("\0") if name}
+        return [path for path in paths if path not in present]
+
     def patch(self, base: str) -> str:
         return self._read("diff", *DIFF_FLAGS, f"{base}..HEAD")
 
