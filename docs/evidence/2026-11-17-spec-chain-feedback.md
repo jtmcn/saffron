@@ -92,6 +92,17 @@ closure, each survived before their fixes. Round 2 found no blocker. The
 caller fixed its scheduler wording by hand and re-ran one harness row,
 which died where its wrong version said.
 
+## SA-0414 (b-cafacd)
+
+The spec took its id twice. The writer began at SA-0412, and batch 95's
+finish minted a follow-up under it. It moved to SA-0413, and the finish
+minted a second follow-up there mid-chain. `next-id` reserves nothing
+while a batch mints. Round 1's blocker: a fold into a surviving ledger
+moved each task off its live run row. Round 2's blocker: a bare task
+could join a run-fact task's unfinished row, so the row count changed
+between two folds of one record. The writer measured both before their
+fixes. The fix reads which tasks hold run facts from the record itself.
+
 ## What the reviews keep finding
 
 Every blocker and three concerns were one class. A claim names a set, and
@@ -114,3 +125,5 @@ misses steps run after it. Check 67 names it.
     run, through a recording stub or the output it would print.
 68. A hand edit to a protected document names the commit a check reads by
     its `CONTEXT.md` term, never bare "base".
+69. A spec id is reserved when a writer takes it, so a batch's follow-up
+    cannot mint the same id mid-chain.

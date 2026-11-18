@@ -4,7 +4,7 @@ title: A run's status reaches no fact, so a ledger folded from the record loses 
 status: open
 tier: 2
 filed: 2026-09-22
-specs: []
+specs: [SA-0414]
 prs: []
 commits: []
 cites: [§4.1, §4.2.1]
