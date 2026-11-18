@@ -1052,6 +1052,103 @@ def test_a_rebuttal_unjudged_row_is_asked_and_moves_on_no_answer_but_a_merge(led
     assert Regated(moved, _FIXED, 3) in again.regated
 
 
+# --- A `REVIEW_INCOMPLETE` row carrying a pull request (`SA-0330`, `b-e9dd4c`) ---
+
+
+def test_a_review_incomplete_row_is_asked_and_moves_on_no_answer_but_a_merge(ledger):
+    """`reconcile` asks about a `REVIEW_INCOMPLETE` row carrying a pull
+    request, and a merge is the one answer that moves it: `MERGED`, with
+    the merged head recorded. A row a crash left with its merged head on
+    the ledger completes with no `gh` call. Every other answer leaves the
+    row `REVIEW_INCOMPLETE`: the six `_next_state` reads other than a
+    merge, and the three `_pr_status` turns into `None`. A null and an
+    empty `pr_url` are never asked."""
+    repo_id = _repo(ledger)
+
+    def _reviewing(spec_id, url):
+        task_id = _task(ledger, repo_id, spec_id=spec_id, state="REVIEWING")
+        ledger.set_task_package(
+            task_id,
+            "REVIEW_INCOMPLETE",
+            branch=f"saffron/{spec_id}",
+            pushed_sha=_PUSHED,
+            pr_url=url,
+        )
+        return task_id
+
+    merged_url = "https://github.com/jtmcn/saffron/pull/900"
+    merged_task = _reviewing("SA-9901", merged_url)
+    crashed_url = "https://github.com/jtmcn/saffron/pull/901"
+    crashed_task = _reviewing("SA-9902", crashed_url)
+    ledger.record_merged_head(crashed_task, _FIXED)
+
+    claimed = {
+        "closed": ({"state": "CLOSED", "reviewDecision": None}, "SA-9911"),
+        "changes-requested": (
+            {"state": "OPEN", "reviewDecision": "CHANGES_REQUESTED"},
+            "SA-9912",
+        ),
+        "marked-ready": (
+            {"state": "OPEN", "reviewDecision": None, "isDraft": False},
+            "SA-9913",
+        ),
+        "open-draft": (
+            {"state": "OPEN", "reviewDecision": None, "isDraft": True},
+            "SA-9914",
+        ),
+        "open-no-isdraft-field": ({"state": "OPEN", "reviewDecision": None}, "SA-9915"),
+        "unrecognised-state": (
+            {"state": "SOMETHING_NEW", "reviewDecision": None},
+            "SA-9916",
+        ),
+    }
+    answers: dict[str, dict | str | list | None] = {
+        merged_url: {"state": "MERGED", "reviewDecision": None, "headRefOid": _FIXED}
+    }
+    task_ids: dict[str, int] = {}
+    for i, (label, (pr, spec_id)) in enumerate(claimed.items()):
+        url = f"https://github.com/jtmcn/saffron/pull/{910 + i}"
+        task_ids[label] = _reviewing(spec_id, url)
+        answers[url] = pr
+
+    unanswerable = {
+        "nonzero-exit": (None, "SA-9920"),
+        "unparseable": ("not json", "SA-9921"),
+        "wrong-shape": ([], "SA-9922"),
+    }
+    for i, (label, (answer, spec_id)) in enumerate(unanswerable.items()):
+        url = f"https://github.com/jtmcn/saffron/pull/{930 + i}"
+        task_ids[label] = _reviewing(spec_id, url)
+        answers[url] = answer
+
+    no_pr_null = _task(ledger, repo_id, spec_id="SA-9930", state="REVIEW_INCOMPLETE")
+    no_pr_empty = _task(
+        ledger, repo_id, spec_id="SA-9931", state="REVIEW_INCOMPLETE", pr_url=""
+    )
+
+    gh = _FakeGh(answers)
+    result = reconcile(ledger, repo_id, gh=gh)
+
+    assert set(result.merged) == {merged_task, crashed_task}
+    assert _state(ledger, merged_task) == "MERGED"
+    assert _state(ledger, crashed_task) == "MERGED"
+    assert _merged_head(ledger, merged_task) == _FIXED
+    assert crashed_url not in gh.calls
+
+    for label in claimed:
+        task_id = task_ids[label]
+        assert _state(ledger, task_id) == "REVIEW_INCOMPLETE"
+        assert task_id not in result.unasked
+    for label in unanswerable:
+        task_id = task_ids[label]
+        assert _state(ledger, task_id) == "REVIEW_INCOMPLETE"
+        assert task_id in result.unasked
+    assert result.rejected == result.changes_requested == result.approved == []
+    assert sorted(gh.calls) == sorted(answers)
+    assert _state(ledger, no_pr_null) == "REVIEW_INCOMPLETE"
+    assert _state(ledger, no_pr_empty) == "REVIEW_INCOMPLETE"
+
+
 # --- `saffron adopt`'s row: a `NOT_IMPLEMENTED` task with a by-hand pull
 # request named onto it (b-a7e5f3) ---
 

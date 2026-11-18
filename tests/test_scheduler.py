@@ -3181,7 +3181,7 @@ def test_a_stack_order_refuses_a_child_whose_stack_base_pushed_nothing_in_its_la
     runs ahead of its pushed-sha check, so a row with no push names its
     latest run. A row resumed and pushed in the state qualifies. So does
     every other waiting state carrying an older push, since the new rule
-    reads only `REBUTTAL_UNJUDGED`.
+    reads only `STALE_PUSH_STATES`.
     """
     from saffron.scheduler import (
         _MERGE_OR_RERUN,
@@ -3339,8 +3339,8 @@ def test_a_stack_order_refuses_a_child_whose_stack_base_pushed_nothing_in_its_la
     )
 
     # Every other waiting state still qualifies with a push recorded in an
-    # earlier state: the new rule reads only `REBUTTAL_UNJUDGED`.
-    for state in ("READY_FOR_REVIEW", "APPROVED", "MERGE_TRAIN", "REVIEW_INCOMPLETE"):
+    # earlier state: the new rule reads only `STALE_PUSH_STATES`.
+    for state in ("READY_FOR_REVIEW", "APPROVED", "MERGE_TRAIN"):
         spec_id = f"TB-OLD-{state}"
         other = _task_at(
             ledger, repo_id, spec_id=spec_id, spec_sha="s", state="READY_FOR_REVIEW"
@@ -3360,6 +3360,219 @@ def test_a_stack_order_refuses_a_child_whose_stack_base_pushed_nothing_in_its_la
         assert result == StackBase(
             spec_id=spec_id, task_id=other, branch=f"saffron/{spec_id}"
         ), state
+
+
+def test_a_stack_order_refuses_a_child_whose_review_incomplete_stack_base_pushed_nothing(
+    tmp_path, ledger
+):
+    """`_stack_base_candidate` refuses a newest waiting row that is
+    `REVIEW_INCOMPLETE` with no push after that state (`SA-0330`,
+    `b-e9dd4c`). The reason names the parent and `REVIEW_INCOMPLETE`. It
+    says its latest run pushed nothing, never `REBUTTAL_UNJUDGED`, and
+    ends on the remedy to merge it or rerun it. A row resumed and pushed
+    in the state qualifies. So does a newer `READY_FOR_REVIEW` push over
+    an older stale `REVIEW_INCOMPLETE` row.
+    """
+    from saffron.scheduler import (
+        _MERGE_OR_RERUN,
+        StackBase,
+        _stack_base_candidate,
+    )
+
+    directory = _spec_dir(tmp_path)
+    repo_id = _repo(ledger)
+
+    _write_spec(
+        directory,
+        "dep-revstale.md",
+        id="TB-40",
+        touches=["tbs5.py"],
+        depends_on=["TB-REVSTALE"],
+    )
+    _write_spec(
+        directory,
+        "dep-revnopush.md",
+        id="TB-41",
+        touches=["tbs6.py"],
+        depends_on=["TB-REVNOPUSH"],
+    )
+    _write_spec(
+        directory,
+        "dep-revnewest.md",
+        id="TB-42",
+        touches=["tbs7.py"],
+        depends_on=["TB-REVNEWEST"],
+    )
+    _write_spec(
+        directory,
+        "dep-revresumed.md",
+        id="TB-43",
+        touches=["tbs8.py"],
+        depends_on=["TB-REVRESUMED"],
+    )
+
+    # TB-REVSTALE: carries a pull request, pushed while `READY_FOR_REVIEW`
+    # and never pushed again after moving to `REVIEW_INCOMPLETE`.
+    stale = _task_at(
+        ledger, repo_id, spec_id="TB-REVSTALE", spec_sha="s", state="READY_FOR_REVIEW"
+    )
+    set_task_package(
+        ledger,
+        stale,
+        "READY_FOR_REVIEW",
+        branch="saffron/TB-REVSTALE",
+        pushed_sha="1" * 40,
+        pr_url="https://example.invalid/revstale",
+    )
+    ledger.set_task_state(stale, "REVIEW_INCOMPLETE")
+
+    # TB-REVNOPUSH: `REVIEW_INCOMPLETE`, never pushed at all.
+    _task_at(
+        ledger,
+        repo_id,
+        spec_id="TB-REVNOPUSH",
+        spec_sha="s",
+        state="REVIEW_INCOMPLETE",
+    )
+
+    # TB-REVNEWEST: an older, fully-qualifying row is hidden by a newer
+    # `REVIEW_INCOMPLETE` row with a stale push. The newest row decides.
+    older = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TB-REVNEWEST",
+        spec_sha="older",
+        state="READY_FOR_REVIEW",
+    )
+    set_task_package(
+        ledger,
+        older,
+        "READY_FOR_REVIEW",
+        branch="saffron/TB-REVNEWEST",
+        pushed_sha="2" * 40,
+        pr_url="https://example.invalid/revnewest-older",
+    )
+    newer = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TB-REVNEWEST",
+        spec_sha="newer",
+        state="READY_FOR_REVIEW",
+    )
+    set_task_package(
+        ledger,
+        newer,
+        "READY_FOR_REVIEW",
+        branch="saffron/TB-REVNEWEST",
+        pushed_sha="3" * 40,
+        pr_url="https://example.invalid/revnewest-newer",
+    )
+    ledger.set_task_state(newer, "REVIEW_INCOMPLETE")
+
+    # TB-REVRESUMED: pushed stale, resumed, and pushed again while
+    # `REVIEW_INCOMPLETE`. The second push is current, so it qualifies.
+    resumed = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TB-REVRESUMED",
+        spec_sha="s",
+        state="READY_FOR_REVIEW",
+    )
+    set_task_package(
+        ledger,
+        resumed,
+        "READY_FOR_REVIEW",
+        branch="saffron/TB-REVRESUMED",
+        pushed_sha="4" * 40,
+        pr_url="https://example.invalid/revresumed",
+    )
+    ledger.set_task_state(resumed, "REVIEWING")
+    ledger.set_task_state(resumed, "REVIEW_INCOMPLETE")
+    ledger.record_push(resumed, "5" * 40)
+
+    candidates, refusals = build_queue(directory, repo_id, ledger, stack=True)
+    reasons = {r.path.name: r.reason for r in refusals}
+
+    assert set(reasons) == {
+        "dep-revstale.md",
+        "dep-revnopush.md",
+        "dep-revnewest.md",
+    }
+
+    assert "TB-REVSTALE" in reasons["dep-revstale.md"]
+    assert (
+        "TB-REVSTALE's newest waiting task is REVIEW_INCOMPLETE and its "
+        "latest run pushed nothing" in reasons["dep-revstale.md"]
+    )
+    assert "REBUTTAL_UNJUDGED" not in reasons["dep-revstale.md"]
+    assert reasons["dep-revstale.md"].endswith(_MERGE_OR_RERUN)
+
+    assert "TB-REVNOPUSH" in reasons["dep-revnopush.md"]
+    assert (
+        "TB-REVNOPUSH's newest waiting task is REVIEW_INCOMPLETE and its "
+        "latest run pushed nothing" in reasons["dep-revnopush.md"]
+    )
+    assert "REBUTTAL_UNJUDGED" not in reasons["dep-revnopush.md"]
+    assert reasons["dep-revnopush.md"].endswith(_MERGE_OR_RERUN)
+
+    assert "TB-REVNEWEST" in reasons["dep-revnewest.md"]
+    assert (
+        "TB-REVNEWEST's newest waiting task is REVIEW_INCOMPLETE and its "
+        "latest run pushed nothing" in reasons["dep-revnewest.md"]
+    )
+    assert "REBUTTAL_UNJUDGED" not in reasons["dep-revnewest.md"]
+    assert reasons["dep-revnewest.md"].endswith(_MERGE_OR_RERUN)
+
+    by_id = {c.spec.id: c for c in candidates}
+    assert set(by_id) == {"TB-43"}
+    assert by_id["TB-43"].stack_base == StackBase(
+        spec_id="TB-REVRESUMED", task_id=resumed, branch="saffron/TB-REVRESUMED"
+    )
+
+    # TB-REVNEWERPUSHED: an older row goes stale at `REVIEW_INCOMPLETE`, but a newer `READY_FOR_REVIEW` row pushed over it.
+    # The newest row decides, and it is read directly, since an order holds at most one stack base.
+    older_stale = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TB-REVNEWERPUSHED",
+        spec_sha="older",
+        state="READY_FOR_REVIEW",
+    )
+    set_task_package(
+        ledger,
+        older_stale,
+        "READY_FOR_REVIEW",
+        branch="saffron/TB-REVNEWERPUSHED",
+        pushed_sha="7" * 40,
+        pr_url="https://example.invalid/revnewerpushed-older",
+    )
+    ledger.set_task_state(older_stale, "REVIEW_INCOMPLETE")
+    newer_pushed = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TB-REVNEWERPUSHED",
+        spec_sha="newer",
+        state="READY_FOR_REVIEW",
+    )
+    set_task_package(
+        ledger,
+        newer_pushed,
+        "READY_FOR_REVIEW",
+        branch="saffron/TB-REVNEWERPUSHED",
+        pushed_sha="8" * 40,
+        pr_url="https://example.invalid/revnewerpushed-newer",
+    )
+    result = _stack_base_candidate(
+        ledger,
+        repo_id,
+        "TB-REVNEWERPUSHED",
+        {newer_pushed: "https://example.invalid/revnewerpushed-newer"},
+    )
+    assert result == StackBase(
+        spec_id="TB-REVNEWERPUSHED",
+        task_id=newer_pushed,
+        branch="saffron/TB-REVNEWERPUSHED",
+    )
 
 
 def test_a_stack_order_stacks_on_one_earlier_pull_request_and_refuses_a_spec_naming_another(

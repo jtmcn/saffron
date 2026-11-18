@@ -29,8 +29,9 @@ What stays outside, deliberately, except the refusals named below:
   at `base_sha`. The scan never reads it, so `run_task` re-runs the gate 0
   refusals that need no GitHub against it, keyed on `task_id`. The open-PR
   and dependency refusals are not re-run.
-- **A stale parent.** No scan reads whether a `REBUTTAL_UNJUDGED` parent's
-  latest run pushed, so `_resolve_stacked_on` refuses that child (`SA-0330`).
+- **A stale parent.** No scan reads whether a `STALE_PUSH_STATES` parent's
+  latest run pushed, so `_resolve_stacked_on` refuses that child (`SA-0330`,
+  `b-e9dd4c`).
 - **`CELL_EXIT`.** An exit code is the process contract `saffron cell` owes a
   script, not a fact about a task; `run_batch` would have to ignore it.
 - **The `CLAUDE_CODE_OAUTH_TOKEN` read.** Scoped to the invocation
@@ -114,7 +115,7 @@ from saffron.scheduler import (
     _deepest_open_parent,
     _entry_subject,
     _retired_ids,
-    _stale_rebuttal_unjudged,
+    _stale_push_state,
     _unmatched_criterion_path,
     protected_touch_refusal,
     retirement_refusal,
@@ -218,9 +219,10 @@ class _StackingRefused(Exception):
     """Raised inside `_resolve_stacked_on` when two or more open parents
     lie on no one chain (b-1572e7). Also raised when an on-chain
     parent's fetched head is not an ancestor of the deepest parent's.
-    Also raised for an open `REBUTTAL_UNJUDGED` parent with no push in
-    that state, unless it already landed (`SA-0330`). `run_task` catches
-    this and returns `Refused` before any cell starts."""
+    Also raised for an open parent whose state is one `STALE_PUSH_STATES`
+    names, with no push in that same state, unless it already landed
+    (`SA-0330`, `b-e9dd4c`). `run_task` catches this and returns `Refused`
+    before any cell starts."""
 
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
@@ -333,7 +335,7 @@ def _parent_landed(
     """Whether `parent_id` already landed: a `MERGED` row among `rows`,
     a retirement at `base_sha`, or a row's push already an ancestor of it.
     These are `_resolve_multi_parent`'s own three readings, read here for
-    the one-parent path's exception to refusing a stale `REBUTTAL_UNJUDGED`
+    the one-parent path's exception to refusing a stale `STALE_PUSH_STATES`
     row. A landed parent keeps the path it takes today (`SA-0330`).
 
     `base_sha` is read only to reach this point. A caller with none, and
@@ -373,7 +375,7 @@ def _resolve_multi_parent(
     A parent with no task counts for nothing, the gap the module
     docstring names. Once one remains, `.saffron` is exported at
     `base_sha` to read every live spec's `depends_on` and `specs/done/`.
-    A stale `REBUTTAL_UNJUDGED` parent refuses on its own (`SA-0330`).
+    A stale `STALE_PUSH_STATES` parent refuses on its own (`SA-0330`).
     Every other open parent must lie on the deepest one's chain, or this
     raises `_StackingRefused`, as must each fetched head against it.
     """
@@ -434,16 +436,12 @@ def _resolve_multi_parent(
 
     # Ahead of the chain check, so an off-chain stale parent is named for
     # this reason, not the chain one (SA-0330). Landed parents never reach here.
-    stale = sorted(
-        dep for dep, row in stack_rows.items() if _stale_rebuttal_unjudged(row)
-    )
+    stale = sorted(dep for dep, row in stack_rows.items() if _stale_push_state(row))
     if stale:
-        names = ", ".join(stale)
-        verb = "is" if len(stale) == 1 else "are"
+        named = ", ".join(f"{dep} is {stack_rows[dep]['state']}" for dep in stale)
         pronoun = "its" if len(stale) == 1 else "their"
         raise _StackingRefused(
-            f"depends_on {names} {verb} REBUTTAL_UNJUDGED, and "
-            f"{pronoun} latest run pushed nothing"
+            f"depends_on {named}, and {pronoun} latest run pushed nothing"
         )
 
     open_set = frozenset(stack_rows)
@@ -517,7 +515,7 @@ def _resolve_stacked_on(
     is exactly the defect `SA-0026` closed.
 
     One entry stacks on its own newest waiting row, or refuses a stale
-    `REBUTTAL_UNJUDGED` one (`SA-0330`). Two or more apply `_resolve_multi_parent`'s
+    `STALE_PUSH_STATES` one (`SA-0330`). Two or more apply `_resolve_multi_parent`'s
     rule instead (b-1572e7), which needs `base_sha` once any entry has a task. Raises
     `_StackingRefused`, which `run_task` turns into `Refused` before any cell starts.
     """
@@ -587,11 +585,11 @@ def _resolve_stacked_on(
             )
     # Ahead of the fetch, in both `gh` modes (SA-0330): a stale row has
     # nothing worth fetching unless its parent already landed by another row.
-    if _stale_rebuttal_unjudged(newest) and not _parent_landed(
+    if _stale_push_state(newest) and not _parent_landed(
         rows, parent_id, mirror=mirror, base_sha=base_sha
     ):
         raise _StackingRefused(
-            f"{parent_id} is REBUTTAL_UNJUDGED and its latest run pushed nothing"
+            f"{parent_id} is {newest['state']} and its latest run pushed nothing"
         )
     # The branch is fetched rather than `pushed_sha` trusted, since a review
     # fix moves the branch past the recorded push.
@@ -614,7 +612,7 @@ class Refused:
     not read it there. Or a `removes` entry's reader at the tree base lies
     outside `touches`. Or, for a task holding a stack batch's recorded spec
     text (ADR 7), a gate 0 refusal that needs no GitHub refused that text.
-    Or an open parent is `REBUTTAL_UNJUDGED` with no push in that state,
+    Or an open parent's state is in `STALE_PUSH_STATES` with no push there,
     unless it already landed (`SA-0330`). Carries only `reason`, the same
     text `run_task` prints on the refused line. No run and no task row
     exist for a caller to read anything else back from."""
@@ -766,7 +764,7 @@ def run_task(
     rebinds `spec`, `spec_sha` and `ceilings` to the recorded text (ADR 7).
     `state` on the outcome is PACKAGE's own. `Refused` comes before any cell: an
     unresolved `consumes`, a refused recorded text, open parents on no one chain,
-    or a stale `REBUTTAL_UNJUDGED` parent (`SA-0330`). So does a `removes`
+    or a stale `STALE_PUSH_STATES` parent (`SA-0330`). So does a `removes`
     reader outside `touches`, or a mutant that is inline, disclosed or unreadable on the
     ref (`SA-0338`). A base the mirror lacks raises `GitError`."""
     if task_id is not None:

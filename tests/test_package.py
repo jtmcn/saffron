@@ -3800,9 +3800,10 @@ def test_an_exhausted_package_leaves_the_branch_of_a_carried_pull_request_unmove
 def test_another_row_with_a_standing_pull_request_keeps_that_branch(packageable):
     """Another row of this spec, carrying a pull request, refuses a
     rerun's push at `READY_FOR_REVIEW`, `EXHAUSTED`, `CHANGES_REQUESTED`,
-    `APPROVED` and `REBUTTAL_UNJUDGED` (`SA-0331`). Every other state lets
-    the push through, and so does an empty `pr_url` on any of the five.
-    This holds on either side of the outcome's own task id."""
+    `APPROVED`, `REBUTTAL_UNJUDGED` and `REVIEW_INCOMPLETE` (`SA-0331`,
+    `b-e9dd4c`). Every other state lets the push through, and so does an
+    empty `pr_url` on any of the six. This holds on either side of the
+    outcome's own task id."""
     import typing
 
     from saffron.ledger import TaskState
@@ -3816,6 +3817,7 @@ def test_another_row_with_a_standing_pull_request_keeps_that_branch(packageable)
         "CHANGES_REQUESTED",
         "APPROVED",
         "REBUTTAL_UNJUDGED",
+        "REVIEW_INCOMPLETE",
     }
     git(work, "push", "-q", "origin", f"{packageable.base}:refs/heads/saffron/SA-0005")
 
@@ -3860,6 +3862,62 @@ def test_another_row_with_a_standing_pull_request_keeps_that_branch(packageable)
                 assert result.pushed is True, state
         # Left harmless: a loop over a set ends on an arbitrary member, and
         # a trailing `READY_FOR_REVIEW` would refuse every later call too.
+        packageable.ledger.set_task_state(other_id, "MERGED")
+
+    # The other row above the outcome's own task id.
+    above = _another_row(packageable, "DRAFT", packageable.base)
+    _drive(above)
+
+    # The fixture's own row becomes the other row below the outcome's,
+    # recorded at wherever the branch sits once the outcome moves on.
+    below = packageable.task_id
+    current_head = remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=work)
+    new_outcome_id = _another_row(packageable, "DRAFT", current_head)
+    packageable.outcome.task_id = new_outcome_id
+    _drive(below)
+
+
+def test_another_review_incomplete_row_with_a_pull_request_keeps_that_branch(
+    packageable,
+):
+    """Another row of this spec at `REVIEW_INCOMPLETE` that carries a pull
+    request refuses a rerun's unpackaged push, whatever state the outcome
+    itself holds (`SA-0330`, `b-e9dd4c`). The remote branch stays where it
+    was. An empty `pr_url` on that row lets the push through, and the
+    branch moves. This holds on either side of the outcome's own task id."""
+    import typing
+
+    from saffron.ledger import TaskState
+    from saffron.phases.package import push_unpackaged_work
+
+    work = packageable.work
+    pr_url = "https://github.com/o/r/pull/99"
+    git(work, "push", "-q", "origin", f"{packageable.base}:refs/heads/saffron/SA-0005")
+
+    def _drive(other_id):
+        packageable.ledger.adopt_pull_request(other_id, pr_url)
+        packageable.ledger.set_task_state(other_id, "REVIEW_INCOMPLETE")
+        own_state = packageable.outcome.state
+        before = remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=work)
+        for outcome_state in typing.get_args(TaskState):
+            packageable.outcome.state = outcome_state
+            result = push_unpackaged_work(
+                packageable.outcome, **packageable.unpackaged_kwargs
+            )
+            assert result.pushed is False, outcome_state
+            assert "awaiting review or a merge" in result.note, outcome_state
+            assert "not ours to replace" in result.note, outcome_state
+        assert (
+            remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=work) == before
+        )
+        packageable.outcome.state = own_state
+
+        # An empty `pr_url` lets the push through, and the branch moves.
+        packageable.ledger.adopt_pull_request(other_id, "")
+        result = push_unpackaged_work(
+            packageable.outcome, **packageable.unpackaged_kwargs
+        )
+        assert result.pushed is True
         packageable.ledger.set_task_state(other_id, "MERGED")
 
     # The other row above the outcome's own task id.

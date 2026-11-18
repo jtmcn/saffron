@@ -42,6 +42,7 @@ from saffron.report import pr_body
 from saffron.report.pr_body import neutralize
 from saffron.repos import mirror as mirror_ops
 from saffron.repos.policy import PolicyError, load_policy
+from saffron.scheduler import STALE_PUSH_STATES
 
 # Anchored on a real remote URL — a scheme or the SCP-like `user@host:` form.
 # A filesystem path that merely contains github.com (a GOPATH checkout, a
@@ -1231,12 +1232,12 @@ def push_unpackaged_work(
         )
     others = [row for row in task_rows if row["task_id"] != outcome.task_id]
     # Another row keeps its branch at `READY_FOR_REVIEW`, or carrying a pull
-    # request at `EXHAUSTED`, `CHANGES_REQUESTED`, `APPROVED` or `REBUTTAL_UNJUDGED`.
+    # request at `EXHAUSTED`, `CHANGES_REQUESTED`, `APPROVED`, or in `STALE_PUSH_STATES`.
     if any(
         row["state"] == "READY_FOR_REVIEW"
         or (
             row["state"]
-            in ("EXHAUSTED", "CHANGES_REQUESTED", "APPROVED", "REBUTTAL_UNJUDGED")
+            in ({"EXHAUSTED", "CHANGES_REQUESTED", "APPROVED"} | STALE_PUSH_STATES)
             and row["pr_url"]
         )
         for row in others

@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from typing import NamedTuple
 
 from saffron.ledger import Ledger
+from saffron.scheduler import STALE_PUSH_STATES
 
 GhRunner = Callable[[list[str]], subprocess.CompletedProcess[str]]
 
@@ -44,7 +45,7 @@ PR_PENDING_STATES = frozenset({"READY_FOR_REVIEW", "APPROVED", "CHANGES_REQUESTE
 
 # A merge is the one answer that moves a settled task in these states,
 # however PACKAGE or `saffron adopt` attached its pull request.
-MERGE_ONLY_STATES = frozenset({"EXHAUSTED", "NOT_IMPLEMENTED", "REBUTTAL_UNJUDGED"})
+MERGE_ONLY_STATES = frozenset({"EXHAUSTED", "NOT_IMPLEMENTED"}) | STALE_PUSH_STATES
 
 # §4.2.1: a corpse only at a batch scan's own premise (one batch runs at a
 # time). Neither `queue` nor `reconcile` is a batch scan, so this is
@@ -174,8 +175,8 @@ def reconcile(
 
     for row in rows:
         state, pr_url = row["state"], row["pr_url"]
-        # `EXHAUSTED`, `NOT_IMPLEMENTED` and `REBUTTAL_UNJUDGED` are askable
-        # too, below, through `MERGE_ONLY_STATES`.
+        # `EXHAUSTED`, `NOT_IMPLEMENTED`, `REBUTTAL_UNJUDGED` and
+        # `REVIEW_INCOMPLETE` are askable too, below, through `MERGE_ONLY_STATES`.
         if not pr_url or (
             state not in PR_PENDING_STATES and state not in MERGE_ONLY_STATES
         ):
