@@ -3209,3 +3209,22 @@ critic's own, so they have no line.
 - `SA-0405` (#1241): a fixture literal was split so `integrity` would not read
   `SA-1` as a citation. The operator kept it. **Bucket 1**. **Open:** filed
   as b-988eb9.
+
+## 2026-11-17, spec loop run 78 (#1247, #1250, #1252)
+
+- `SA-0406` (#1247): the `unreviewed` witness drove the guarded blocker only
+  at number 1, so a guard renumbered after the drop passed it. REBUT's fix
+  was a spy on a private helper. **Bucket 1**. **Landed:** a review commit on
+  #1247.
+- `SA-0406` (#1247): `_probe_entry` restated `probe_key`'s identity tuple by
+  hand. **Bucket 2**. **Landed:** a review commit on #1247.
+- `SA-0406` (#1247): three witness docstrings named the wrong criterion
+  number. **Bucket 2**. **Landed:** a review commit on #1247.
+- `SA-0407` (#1250): five witness cases asserted a state but not the line or
+  record the claim names, so five wrong versions survived. **Bucket 1**.
+  **Landed:** a review commit on #1250.
+- `SA-0407` (#1250): a witness docstring said REBUT's end is always
+  overridden, against criterion 2. **Bucket 2**. **Landed:** a review commit
+  on #1250.
+- `SA-0412` (#1252): the `prose` gate's perfect-tense rule passes "has run".
+  **Bucket 1**. **Open:** filed as b-6b8896.

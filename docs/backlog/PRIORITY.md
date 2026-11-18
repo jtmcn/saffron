@@ -367,6 +367,9 @@ its child refused. A fix to the plan checkpoint could not pass it. A lost
 connection after a completed turn ended `NOT_IMPLEMENTED`. A cell cited the
 wrong spec at 20 sites.
 
+**Placed 2026-11-17**, from the spec loop's run 78: **b-90c8fa**. A spec id
+a writer takes is not reserved, so a batch's follow-up minted it twice.
+
 **Closed since they were placed here.** Each id stays so its record's tier still resolves.
 - ~~**36**~~, ~~**37**~~, ~~**38**~~, ~~**48**~~, ~~**52**~~, ~~**60**~~, ~~**72**~~, ~~**103**~~, ~~**104**~~, ~~**113**~~, ~~**135**~~, ~~**138**~~, ~~**142**~~, ~~**144**~~, ~~**146**~~, ~~**147**~~, ~~**148**~~, ~~**149**~~, ~~**152**~~, ~~**153**~~.
 - ~~**158**~~, ~~**159**~~, ~~**168**~~, ~~**169**~~, ~~**171**~~, ~~**177**~~, ~~**b-122686**~~, ~~**b-606ea3**~~, ~~**b-60732c**~~, ~~**b-7c41e0**~~, ~~**b-afec7c**~~, ~~**b-b5f379**~~, ~~**b-f2a9d1**~~, ~~**b-044ae7**~~, ~~**b-08a36a**~~, ~~**b-17fb8b**~~, ~~**b-1c7019**~~, ~~**b-3e0dbe**~~, ~~**b-461729**~~, ~~**b-5d5b56**~~.
@@ -493,6 +496,8 @@ Each line keeps the order it was filed in.
 - From run 76's review of #1241: **b-988eb9**, `integrity` reads a spec id
   inside a test's string literal as a citation. Then **b-c1259f**, a
   `preserves` witness that never moves HEAD.
+- From run 78's end review of #1250: **b-6b8896**, the `prose` gate's
+  perfect-tense rule misses an irregular participle.
 - From the 2026-09-27 size pricing and spec loop run 32: **b-41664e**, **b-4b386f**,
   ~~**b-d96f14**~~, ~~**b-9b94c9**~~, **b-ff3141**, ~~**b-a99c76**~~, **b-3a8504**,
   ~~**b-7f105f**~~ and ~~**b-8c17dc**~~.

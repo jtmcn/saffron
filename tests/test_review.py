@@ -2754,6 +2754,189 @@ def test_a_host_filed_survivor_is_a_blocker_whether_or_not_it_anchors():
     assert review.review_state(stayed_out)[0] == "READY_FOR_REVIEW"
 
 
+def test_a_lens_with_an_error_routes_to_rebut_only_beside_a_host_survivor_and_no_cut():
+    """Criterion 1 of SA-0406's `review.py` witness (backlog b-f7a591).
+    `host_survivors` keeps every host-filed blocker `anchored_blockers`
+    returns, in its order. `rebuts_despite_errors` is true only with no
+    cut, some lens holding an `error`, and at least one such survivor.
+    Both hold whichever lens holds the `error`, and whether or not it is
+    the one holding the survivors. The survivors here are an unanchored
+    one from a criterion's own edit, and two anchored ones from the
+    spec's own and a parent's wrong version. Beside them, `review_state`
+    still reads `REVIEW_INCOMPLETE` with today's errored-lens line."""
+    criterion = Criterion(
+        claim="the guard rejects a negative amount", witness="t.py::a"
+    )
+    content = "def f(x):\n    if x < 0:\n        raise ValueError\n"
+    edit_z = Mutant(file="src/z.py", find="if x < 0:", replace="if False:")
+    edit_a = Mutant(file="src/a.py", find="if x < 0:", replace="if False:")
+    edit_m = Mutant(file="src/m.py", find="if x < 0:", replace="if False:")
+
+    own_edit = review.survivor_finding(criterion, edit_z, content)
+    wrong_version = review.survivor_finding(
+        criterion, edit_a, content, version="the guard is removed"
+    ).model_copy(update={"anchored": True})
+    parent_version = review.survivor_finding(
+        criterion, edit_m, content, version="the guard is removed", parent="PA-0001"
+    ).model_copy(update={"anchored": True})
+    lens_own_survivor = Finding(
+        lens="adequacy",
+        severity="blocker",
+        file="z.py",
+        line=5,
+        claim="the adequacy lens's own claim",
+        anchored=True,
+        probe=Mutant(file="z.py", find="a", replace="b"),
+        probe_verdict="survived",
+    )
+
+    holding = LensReview(
+        lens="adequacy",
+        findings=[own_edit, wrong_version, parent_version, lens_own_survivor],
+    )
+    errored = LensReview(lens="correctness", error="not the schema")
+
+    error_before = [errored, holding]
+    error_after = [holding, errored]
+    error_holds_them = [
+        LensReview(
+            lens="correctness",
+            error="not the schema",
+            findings=[own_edit, wrong_version, parent_version, lens_own_survivor],
+        )
+    ]
+
+    for reviews in (error_before, error_after, error_holds_them):
+        survivors = review.host_survivors(reviews)
+        assert survivors == [own_edit, wrong_version, parent_version]
+        assert review.rebuts_despite_errors(reviews) is True
+        assert review.rebuts_despite_errors(reviews, cut="correctness") is False
+        state, why = review.review_state(reviews)
+        assert state == "REVIEW_INCOMPLETE"
+        assert why == "['correctness'] produced no findings — the review is incomplete"
+
+    no_error_at_all = [
+        LensReview(
+            lens="adequacy",
+            findings=[own_edit, wrong_version, parent_version],
+        )
+    ]
+    assert review.rebuts_despite_errors(no_error_at_all) is False
+
+    error_with_no_survivor = [
+        LensReview(lens="correctness", error="not the schema"),
+        LensReview(lens="adequacy", findings=[lens_own_survivor]),
+    ]
+    assert review.host_survivors(error_with_no_survivor) == []
+    assert review.rebuts_despite_errors(error_with_no_survivor) is False
+
+
+def test_the_incomplete_line_names_what_the_rebuttal_left_of_each_survivor_under_a_lens_with_an_error():
+    """Criterion 2 of SA-0406's `review.py` witness (backlog b-f7a591).
+    `incomplete_after_rebut` extends `review_state`'s errored-lens line
+    with one clause per host-filed survivor a lens with an `error` holds.
+    Each clause names the holding `LensReview`'s own `lens`, never the
+    survivor's own `Finding.lens`, which `survivor_finding` always files
+    as `adequacy`. A survivor a healthy lens holds gets no clause, and a
+    line with no clause keeps no trailing period."""
+    criterion = Criterion(claim="the guard holds", witness="t.py::a")
+    content = "def f(x):\n    if x < 0:\n        raise ValueError\n"
+
+    def _survivor(file):
+        edit = Mutant(file=file, find="if x < 0:", replace="if False:")
+        return review.survivor_finding(criterion, edit, content)
+
+    def _probe_dict(file, find, replace):
+        return {"file": file, "find": find, "replace": replace}
+
+    y_survivor = _survivor("src/y.py")
+    x_survivor = _survivor("src/x.py")
+    x_survivor_twin = _survivor("src/x.py")
+    z_survivor = _survivor("src/z.py")
+    v_survivor = _survivor("src/v.py")
+    w_survivor = _survivor("src/w.py")
+
+    # Three near misses of `x_survivor`'s own edit, each off by one field.
+    # A fate matched on fewer than all three would read one of these.
+    near_miss_replace = {
+        "probe": _probe_dict("src/x.py", "if x < 0:", "not the real edit"),
+        "probe_verdict": "survived",
+    }
+    near_miss_find = {
+        "probe": _probe_dict("src/x.py", "not the real find", "if False:"),
+        "probe_verdict": "unproven",
+        "reason": "wrong entry",
+    }
+    near_miss_file = {
+        "probe": _probe_dict("src/other.py", "if x < 0:", "if False:"),
+        "probe_verdict": "unproven",
+        "reason": "wrong entry",
+    }
+    x_entry = {
+        "probe": _probe_dict("src/x.py", "if x < 0:", "if False:"),
+        "probe_verdict": "killed",
+        "failures": ["t.py::k2", "t.py::k1"],
+    }
+    y_entry = {
+        "probe": _probe_dict("src/y.py", "if x < 0:", "if False:"),
+        "probe_verdict": "unproven",
+        "reason": "the gate reported skip, so nothing could be subtracted",
+    }
+    z_entry = {
+        "probe": _probe_dict("src/z.py", "if x < 0:", "if False:"),
+        "probe_verdict": "survived",
+    }
+    v_entry = {
+        "probe": _probe_dict("src/v.py", "if x < 0:", "if False:"),
+        "probe_verdict": "survived",
+    }
+    entries = [
+        near_miss_replace,
+        near_miss_find,
+        near_miss_file,
+        x_entry,
+        y_entry,
+        z_entry,
+        v_entry,
+    ]
+
+    reviews = [
+        LensReview(
+            lens="correctness",
+            error="not the schema",
+            findings=[y_survivor, x_survivor, x_survivor_twin],
+        ),
+        LensReview(lens="contract", findings=[z_survivor]),
+        LensReview(
+            lens="adequacy", error="max turns", findings=[w_survivor, v_survivor]
+        ),
+    ]
+
+    line = review.incomplete_after_rebut(reviews, entries)
+    assert line == (
+        "['correctness', 'adequacy'] produced no findings — the review is "
+        "incomplete."
+        " correctness host-filed survivor src/y.py:2: unproven after the "
+        "rebuttal, the gate reported skip, so nothing could be subtracted."
+        " correctness host-filed survivor src/x.py:2: killed after the "
+        "rebuttal by t.py::k2, t.py::k1."
+        " correctness host-filed survivor src/x.py:2: killed after the "
+        "rebuttal by t.py::k2, t.py::k1."
+        " adequacy host-filed survivor src/w.py:2: not asked again after "
+        "the rebuttal."
+        " adequacy host-filed survivor src/v.py:2: survived the probe "
+        "after the rebuttal."
+    )
+
+    no_clause_reviews = [
+        LensReview(lens="correctness", error="not the schema"),
+        LensReview(lens="contract", findings=[z_survivor]),
+    ]
+    assert review.incomplete_after_rebut(no_clause_reviews, entries) == (
+        "['correctness'] produced no findings — the review is incomplete"
+    )
+
+
 def test_the_wrong_version_line_counts_refused_versions_apart_from_expressed_ones():
     """b-34d743: `expressed` counts every version with an edit except one
     carrying a `refusal` key. `refused` reads that key, never its

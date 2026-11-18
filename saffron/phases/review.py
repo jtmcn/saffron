@@ -998,6 +998,25 @@ def anchored_blockers(reviews: Sequence[LensReview]) -> list[Finding]:
     ]
 
 
+def host_survivors(reviews: Sequence[LensReview]) -> list[Finding]:
+    """Host-filed survivors among `anchored_blockers`, in its order
+    (backlog b-f7a591). Every host-filed survivor is already a blocker, so
+    `anchored_blockers`' filter never drops one here."""
+    return [f for f in anchored_blockers(reviews) if f.claim.startswith(HOST_FILED)]
+
+
+def rebuts_despite_errors(
+    reviews: Sequence[LensReview], cut: str | None = None
+) -> bool:
+    """True when REVIEW's pool cut nothing, some lens carries an `error`,
+    and `host_survivors` still returns one (backlog b-f7a591). This is the
+    one case where a lens with an `error` must not stop REBUT from running
+    on the host's own findings."""
+    return (
+        cut is None and any(r.error for r in reviews) and bool(host_survivors(reviews))
+    )
+
+
 def rebut_concerns(reviews: Sequence[LensReview]) -> list[Finding]:
     """Anchored concerns, in order. ORDER IS LOAD-BEARING, the same way as
     for `anchored_blockers`. `rebut.py` numbers this on from the last
@@ -1076,6 +1095,12 @@ def anchored_concerns(reviews: Sequence[LensReview]) -> int:
     return len(rebut_concerns(reviews))
 
 
+def _errored_lens_line(errored: Sequence[str]) -> str:
+    """The line `review_state` shows for a lens with an `error`, also used
+    by `incomplete_after_rebut`, so the two texts cannot drift apart."""
+    return f"{errored} produced no findings — the review is incomplete"
+
+
 def review_state(
     reviews: Sequence[LensReview], cut: str | None = None
 ) -> tuple[str, str]:
@@ -1083,9 +1108,9 @@ def review_state(
 
     Any single anchored blocker routes to REBUT (§5.5), so `REBUTTING` here is
     a phase to run, not a stop. So does a host-filed survivor, anchored or
-    not: the host already ran its own edit. A lens that errored *is* a stop,
-    at `REVIEW_INCOMPLETE`. An unrun lens must not read as a clean review,
-    and there is no finding set to rebut against.
+    not: the host already ran its own edit. It returns `REVIEW_INCOMPLETE` for
+    a lens with an `error`: an unrun lens must not read as a clean review.
+    `rebuts_despite_errors` decides whether REBUT still takes the host's survivors.
 
     `cut` is REVIEW's own `ReviewPool.cut`, checked first and worded apart
     from the errored-lens line below."""
@@ -1095,12 +1120,72 @@ def review_state(
             f"REVIEW's pool could not cover {cut} — the review was cut at its budget",
         )
     if errored := [r.lens for r in reviews if r.error]:
-        return (
-            "REVIEW_INCOMPLETE",
-            f"{errored} produced no findings — the review is incomplete",
-        )
+        return "REVIEW_INCOMPLETE", _errored_lens_line(errored)
     blockers = anchored_blockers(reviews)
     if blockers:
         return "REBUTTING", f"{len(blockers)} blocker(s) — the implementer rebuts"
     concerns = anchored_concerns(reviews)
     return "READY_FOR_REVIEW", f"no blockers, {concerns} concern(s)"
+
+
+def _holding_lens(reviews: Sequence[LensReview], survivor: Finding) -> str:
+    """The `LensReview.lens` that holds `survivor`, found by identity rather
+    than `Finding.lens`. `survivor_finding` always files under `adequacy`,
+    so that field names no holder here (backlog b-f7a591)."""
+    return next(r.lens for r in reviews if any(f is survivor for f in r.findings))
+
+
+def _probe_entry(
+    survivor: Finding, entries: Sequence[Mapping[str, object]]
+) -> Mapping[str, object] | None:
+    """The `entries` item whose `probe` matches `survivor`'s probe on file,
+    find and replace together, first match only. `None` when none matches,
+    which `_survivor_fate` reads as never asked again."""
+    assert survivor.probe is not None  # every host survivor carries one
+    key = probe_key(survivor.probe)
+    for entry in entries:
+        if probe_key(Mutant.model_validate(entry["probe"])) == key:
+            return entry
+    return None
+
+
+def _survivor_fate(entry: Mapping[str, object] | None) -> str:
+    """One of `incomplete_after_rebut`'s four fates, read from `entry`. A
+    `None` entry means the survivor was never asked again. A killed fate
+    names every failure in order. An unproven one names its reason."""
+    if entry is None:
+        return "not asked again after the rebuttal"
+    verdict = entry["probe_verdict"]
+    if verdict == "killed":
+        failures = cast("list[str]", entry["failures"])
+        return f"killed after the rebuttal by {', '.join(failures)}"
+    if verdict == "survived":
+        return "survived the probe after the rebuttal"
+    return f"unproven after the rebuttal, {entry['reason']}"
+
+
+def incomplete_after_rebut(
+    reviews: Sequence[LensReview], entries: Sequence[Mapping[str, object]]
+) -> str:
+    """REVIEW's errored-lens line, extended for REBUT (backlog b-f7a591).
+    When a lens with an `error` holds no host-filed survivor, this is that
+    line unchanged. Otherwise it appends a period, then one clause per
+    such survivor in `host_survivors` order: the holding lens, the
+    survivor's file and line, and its fate from `entries`,
+    `rebut-probes.json`'s own shape. A survivor a healthy lens holds gets
+    no clause, whatever its own `Finding.lens` names."""
+    errored = [r.lens for r in reviews if r.error]
+    errored_lenses = set(errored)
+    line = _errored_lens_line(errored)
+    clauses = []
+    for survivor in host_survivors(reviews):
+        holder = _holding_lens(reviews, survivor)
+        if holder not in errored_lenses:
+            continue
+        fate = _survivor_fate(_probe_entry(survivor, entries))
+        clauses.append(
+            f" {holder} host-filed survivor {survivor.file}:{survivor.line}: {fate}."
+        )
+    if not clauses:
+        return line
+    return line + "." + "".join(clauses)
