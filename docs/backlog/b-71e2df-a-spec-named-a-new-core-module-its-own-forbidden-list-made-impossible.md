@@ -4,7 +4,7 @@ title: A spec named a new module under `saffron/gates/core/` that its own `forbi
 status: open
 tier: 2
 filed: 2026-10-19
-specs: []
+specs: [SA-0410]
 prs: []
 commits: []
 cites: [§3.2, §5.4]
@@ -34,3 +34,10 @@ The spec review, or a check before a cell, refuses a new module under
 ## Record
 
 - 2026-10-19: filed from the spec loop's run 44.
+- 2026-11-17: `SA-0410` queued for the second arm. A passing `scope` result
+  at head names each literal `touches` entry absent at base that the diff
+  never created. It is reported, never failed. The item stays partial on the
+  first arm, a refusal of a new module under `saffron/gates/core/` that is not
+  a gate. That is this repo's own rule, read by
+  `tests/ontology/test_vocabulary_agrees_with_code.py`, so core cannot hold it
+  (§2.1).
