@@ -8,14 +8,17 @@ import os
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
+from types import TracebackType
 from typing import Any
 
 import pytest
 
-from saffron import cli, task
+from saffron import cli, preflight, task
 from saffron.cell import runtime
 from saffron.ledger import Ledger
 from tests.test_session import (
@@ -413,3 +416,199 @@ def test_a_batch_sent_sigterm_exits_143_with_its_log_flushed(tmp_path):
         assert row["ended_at"] is not None
     finally:
         ledger.close()
+
+
+def _hang_after_sigterm() -> None:
+    """Send this process its own SIGTERM, then hang. The installed handler
+    raises `KeyboardInterrupt` out of the sleep, so returning here at all
+    means the stop was not carried where it needed to go."""
+    os.kill(os.getpid(), signal.SIGTERM)
+    time.sleep(5)
+    pytest.fail("SIGTERM did not interrupt the sleep")
+
+
+_REAL_TEMPORARY_DIRECTORY = tempfile.TemporaryDirectory
+
+
+class _StopDuringCleanup:
+    """Stands in for `tempfile.TemporaryDirectory`. Runs the real directory's
+    cleanup, then stops, the way a signal landing in that cleanup would."""
+
+    def __init__(self) -> None:
+        # The name captured above, not `tempfile.TemporaryDirectory` read
+        # fresh here, which names this same class while it is installed.
+        self._real: tempfile.TemporaryDirectory[str] = _REAL_TEMPORARY_DIRECTORY()
+
+    def __enter__(self) -> str:
+        return self._real.__enter__()
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self._real.__exit__(exc_type, exc_value, traceback)
+        _hang_after_sigterm()
+
+
+def _recording_check_readiness(recorded: list[str]) -> Any:
+    def _stub(
+        repo: Path, mirror_path: Path, *, scratch: Path, home: Path, token: str | None
+    ):
+        recorded.append("readiness")
+        return preflight.Readiness(
+            ok=True,
+            mirror=mirror_path,
+            url="https://github.com/o/r.git",
+            base_sha="c" * 40,
+        )
+
+    return _stub
+
+
+def _recording_resolve_queue(recorded: list[str]) -> Any:
+    def _stub(
+        repo: Path,
+        home: Path,
+        ledger: Ledger,
+        *,
+        stamp_orphaned: bool,
+        pinned=None,
+        stack=False,
+    ):
+        recorded.append("scan")
+        raise RuntimeError("the scan raised")
+
+    return _stub
+
+
+_STOP_POINTS = ("reclaim", "readiness", "cleanup", "scan")
+
+
+def test_a_batch_stopped_before_its_first_scan_ends_leaves_one_closed_row(
+    monkeypatch, tmp_path, capsys
+):
+    """A SIGTERM in the build cache reclaim, the readiness check, its
+    scratch cleanup, or the first queue scan must still leave one row.
+    That row closes `INFRASTRUCTURE`, for a plain batch and a `--stack`
+    one alike (backlog item b-d0fed8)."""
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-test")
+    recorded: list[str] = []
+
+    for point in _STOP_POINTS:
+        for mode in ("plain", "stack"):
+            recorded.clear()
+            monkeypatch.setattr(runtime, "reclaim_build_cache", lambda *a, **k: None)
+            monkeypatch.setattr(
+                cli.tempfile, "TemporaryDirectory", _REAL_TEMPORARY_DIRECTORY
+            )
+            monkeypatch.setattr(
+                preflight, "check_readiness", _recording_check_readiness(recorded)
+            )
+            monkeypatch.setattr(
+                cli, "_resolve_queue", _recording_resolve_queue(recorded)
+            )
+
+            if point == "reclaim":
+                monkeypatch.setattr(
+                    runtime,
+                    "reclaim_build_cache",
+                    lambda *a, **k: _hang_after_sigterm(),
+                )
+            elif point == "readiness":
+                monkeypatch.setattr(
+                    preflight, "check_readiness", lambda *a, **k: _hang_after_sigterm()
+                )
+            elif point == "cleanup":
+                monkeypatch.setattr(
+                    cli.tempfile, "TemporaryDirectory", _StopDuringCleanup
+                )
+            else:
+                monkeypatch.setattr(
+                    cli, "_resolve_queue", lambda *a, **k: _hang_after_sigterm()
+                )
+
+            home = tmp_path / f"home-{point}-{mode}"
+            argv = [
+                "--home",
+                str(home),
+                "batch",
+                "--repo",
+                str(tmp_path),
+                "--budget",
+                "37",
+                "--until",
+                "23:59",
+            ]
+            if mode == "stack":
+                argv += ["--stack", "--partial"]
+
+            label = f"{point}/{mode}"
+            capsys.readouterr()
+            before = cli._resolve_until("23:59", datetime.now())
+            result = cli.main(argv)
+            after = cli._resolve_until("23:59", datetime.now())
+            out = capsys.readouterr().out
+
+            assert result == 143, f"{label}: expected exit 143, got {result!r}"
+            assert not any(line.startswith("batch:") for line in out.splitlines()), (
+                f"{label}: a batch: line was printed: {out!r}"
+            )
+            if point in ("reclaim", "readiness"):
+                assert recorded == [], f"{label}: expected nothing recorded"
+            else:
+                assert recorded == ["readiness"], f"{label}: expected readiness alone"
+
+            ledger = Ledger(home / "ledger.db")
+            try:
+                rows = ledger._db.execute(
+                    "SELECT status, ended_at, spent_usd_est, budget_usd, "
+                    "until_ts FROM batches"
+                ).fetchall()
+            finally:
+                ledger.close()
+            assert len(rows) == 1, f"{label}: expected one batches row, got {rows}"
+            (row,) = rows
+            assert row["status"] == "INFRASTRUCTURE", f"{label}: {dict(row)}"
+            assert row["ended_at"] is not None, f"{label}: {dict(row)}"
+            assert row["spent_usd_est"] == 0.0, f"{label}: {dict(row)}"
+            assert row["budget_usd"] == 37.0, f"{label}: {dict(row)}"
+            expected_until = {
+                before.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S"),
+                after.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S"),
+            }
+            assert row["until_ts"] in expected_until, f"{label}: {dict(row)}"
+
+    def _raising_check_readiness(
+        repo: Path, mirror_path: Path, *, scratch: Path, home: Path, token: str | None
+    ):
+        raise RuntimeError("the readiness probe raised")
+
+    monkeypatch.setattr(runtime, "reclaim_build_cache", lambda *a, **k: None)
+    monkeypatch.setattr(cli.tempfile, "TemporaryDirectory", _REAL_TEMPORARY_DIRECTORY)
+    monkeypatch.setattr(preflight, "check_readiness", _raising_check_readiness)
+    home = tmp_path / "home-readiness-raised"
+    capsys.readouterr()
+    result = cli.main(
+        [
+            "--home",
+            str(home),
+            "batch",
+            "--repo",
+            str(tmp_path),
+            "--budget",
+            "37",
+            "--until",
+            "23:59",
+        ]
+    )
+    out = capsys.readouterr().out
+    assert result == 2
+    assert "saffron: RuntimeError: the readiness probe raised" in out
+    ledger = Ledger(home / "ledger.db")
+    try:
+        rows = ledger._db.execute("SELECT * FROM batches").fetchall()
+    finally:
+        ledger.close()
+    assert rows == []

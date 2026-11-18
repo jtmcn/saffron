@@ -2431,9 +2431,14 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         print(f"batch: refused — {refusal}")
         return 2
 
+    interrupt: KeyboardInterrupt | None = None  # held for `_readiness_or_raise` below
+
     # Dead weight a night does not need to keep (backlog b-2bc0d5), freed
     # before readiness asks about disk headroom.
-    _reclaim_build_cache()
+    try:
+        _reclaim_build_cache()
+    except KeyboardInterrupt as exc:
+        interrupt = exc
 
     repo = args.repo.resolve()
     until = (
@@ -2452,14 +2457,25 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     # traceback, and no `batches` row exists at all for the night that was
     # attempted. Which is the outcome the readiness-close inside `run_batch`
     # was written to prevent.
-    with tempfile.TemporaryDirectory() as scratch:
-        readiness = preflight.check_readiness(
-            repo,
-            _mirror_path(repo, args.home),
-            scratch=Path(scratch),
-            home=args.home,
-            token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
-        )
+    if interrupt is not None:
+        # The reclaim was stopped: readiness pays no token or disk cost for a
+        # night whose row the loop below will open and close on its own.
+        readiness = preflight.Readiness(ok=False)
+    else:
+        try:
+            with tempfile.TemporaryDirectory() as scratch:
+                readiness = preflight.check_readiness(
+                    repo,
+                    _mirror_path(repo, args.home),
+                    scratch=Path(scratch),
+                    home=args.home,
+                    token=os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
+                )
+        except KeyboardInterrupt as exc:
+            # Wraps the whole `with`: the cleanup below can stop too, after
+            # an ok check, and an unrebound `readiness` would still scan.
+            interrupt = exc
+            readiness = preflight.Readiness(ok=False)
 
     candidates: list[Candidate] = []
     runner: Callable[[Candidate], CellOutcome | Refused] = _no_candidate_should_run
@@ -2523,6 +2539,10 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                 pinned=pinned,
                 stack=args.stack,
             )
+        except KeyboardInterrupt as exc:
+            # Held the same way as the reclaim and readiness above, so the
+            # `else` below, the stack total's refusal included, never runs.
+            interrupt = exc
         except Exception as exc:
             # A discovery refusal (`SA-0065`), a mirror fetch, a reconcile:
             # all real work, none of it readiness.
@@ -2669,8 +2689,12 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
                 )
 
     def _readiness_or_raise() -> preflight.Readiness:
-        # Raised inside the batch loop's `try`, so its `finally` closes the row
-        # `INFRASTRUCTURE` — the "readiness probe that raised" case it names.
+        # Raised inside the batch loop's `try`, so its `finally` closes the
+        # row `INFRASTRUCTURE`: the readiness probe that raised case it names.
+        if interrupt is not None:
+            # Reached here from the reclaim, readiness or the scan above,
+            # all before this row existed, so it is raised first.
+            raise interrupt
         if resolution_error is not None:
             raise resolution_error
         return readiness
