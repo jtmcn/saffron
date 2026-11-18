@@ -185,7 +185,7 @@ sequence crosses tiers, and each item keeps its own.
 First **170**, then **b-2e0b97**, then **108** and ~~**b-ca3bc6**~~. Then
 ~~**b-0569f7**~~, **b-da550a** and last **b-a9ec4b**.
 
-**Placed 2026-10-11**, from reviewing `SA-0282`: **b-e9153f**, after b-0569f7.
+**Placed 2026-10-11**, from reviewing `SA-0282`: ~~**b-e9153f**~~, after b-0569f7.
 A task a `--stack` batch mints never records whether its thread pool was uncapped.
 
 **Placed 2026-10-10**, from writing `SA-0245` and `SA-0258`: ~~**b-52e670**~~. A
@@ -199,7 +199,7 @@ this order: **43**, **66**, ~~**67**~~, **98**, ~~**157**~~, ~~**172**~~, **b-ea
 item 141's close left. The Gate-only cell's suite is in a file because the
 ledger has no owner column that fits it.
 
-**Placed 2026-09-22**: **b-cafacd**, filed revising `SA-0126`. It is 170's
+**Placed 2026-09-22**: ~~**b-cafacd**~~, filed revising `SA-0126`. It is 170's
 neighbour. A run's status reaches no fact, so a folded ledger loses the cap
 on a cut spec's retries.
 
@@ -307,7 +307,7 @@ alone, so a blocker another test kills stands after REBUT. A stack batch's
 follow-ups are pooled for their own `depends_on`.
 
 **Placed 2026-10-11**, from the spec loop's run 34: **b-f7a591**,
-**b-d0fed8**, **b-2f4746**, then ~~**b-e7b6a2**~~. A lens that errors drops the
+~~**b-d0fed8**~~, **b-2f4746**, then ~~**b-e7b6a2**~~. A lens that errors drops the
 host's own probe blockers filed under it. A batch stopped before its row
 exists leaves no row. A stack batch at a threshold spends into its shares.
 `watch` cannot follow the follow-up writer or the end review.
@@ -353,7 +353,7 @@ skip a layer. A rebuttal's suppression ends a green task. An adopted task
 gets no end review. A stack batch refuses a spec that meets an earlier
 batch's open layer.
 
-**Placed 2026-10-30**, from `SA-0330`'s first review: **b-e9dd4c**. A
+**Placed 2026-10-30**, from `SA-0330`'s first review: ~~**b-e9dd4c**~~. A
 `REVIEW_INCOMPLETE` parent whose push was refused still admits its child.
 
 **Placed 2026-11-02**, from the spec loop's run 52: **b-b664d1**, then
@@ -498,6 +498,10 @@ Each line keeps the order it was filed in.
   `preserves` witness that never moves HEAD.
 - From run 78's end review of #1250: **b-6b8896**, the `prose` gate's
   perfect-tense rule misses an irregular participle.
+- From run 79's reviews: **b-15c480**, a task with no run fact folds onto the
+  first row at its `base_sha`. Then **b-2cf94c**, a refused `run_created`
+  append, **b-ce832b**, three texts that name `REBUTTAL_UNJUDGED` alone, and
+  **b-8d3de1**, the policy read at a commit in three places.
 - From the 2026-09-27 size pricing and spec loop run 32: **b-41664e**, **b-4b386f**,
   ~~**b-d96f14**~~, ~~**b-9b94c9**~~, **b-ff3141**, ~~**b-a99c76**~~, **b-3a8504**,
   ~~**b-7f105f**~~ and ~~**b-8c17dc**~~.

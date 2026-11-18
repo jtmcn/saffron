@@ -1,11 +1,11 @@
 ---
 id: b-71e2df
 title: A spec named a new module under `saffron/gates/core/` that its own `forbidden` list made impossible, and no review or check saw it
-status: open
+status: partial
 tier: 2
 filed: 2026-10-19
 specs: [SA-0410]
-prs: []
+prs: [1260]
 commits: []
 cites: [§3.2, §5.4]
 related: [b-281f0a]
@@ -41,3 +41,6 @@ The spec review, or a check before a cell, refuses a new module under
   a gate. That is this repo's own rule, read by
   `tests/ontology/test_vocabulary_agrees_with_code.py`, so core cannot hold it
   (§2.1).
+- 2026-11-18: the second arm landed in #1260 (`SA-0410`). The review added a
+  witness for a `touches` path that starts with `:`. The first arm stays
+  open as recorded above.
