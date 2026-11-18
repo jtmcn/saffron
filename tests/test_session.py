@@ -18269,9 +18269,9 @@ def test_a_lens_with_an_error_still_sends_the_hosts_survivors_to_rebut_and_ends_
 ):
     """Beside a lens with an `error`, REVIEW's pool cut nothing and the
     host's own two survivors still route to `REBUTTING`. A lens named in
-    `unreviewed` gets no verdict session, and REBUT's own end is overridden
-    to `REVIEW_INCOMPLETE` on `incomplete_after_rebut`'s own line, whatever
-    REBUT itself decided."""
+    `unreviewed` gets no verdict session. REBUT's end becomes
+    `REVIEW_INCOMPLETE` on `incomplete_after_rebut`'s own line, unless REBUT
+    itself ended `EXHAUSTED` or `GATE_ERROR`."""
     spec = _spec(acceptance=_host_survivor_criteria())
 
     # Cell 1: adequacy's output is not the schema twice. HEAD moves, so the
@@ -18496,6 +18496,11 @@ def test_beside_a_lens_with_an_error_rebuts_own_stops_stand_and_a_cut_ends_incom
     assert rebuttal1["state"] == "EXHAUSTED"
     assert "the gates are red after the rebuttal" in rebuttal1["why"]
     assert _task_state(ledger1) == "EXHAUSTED"
+    assert rebuttal1["state"] == "EXHAUSTED"
+    assert [line for line in cell1.watched if line.startswith("REBUT:")][
+        -1
+    ] == f"REBUT: {rebuttal1['why']}"
+    assert "host-filed survivor" not in rebuttal1["why"]
 
     # Cell 2: the probe cell refuses the post-rebuttal patch, ending
     # `EXHAUSTED` the way REVIEW's own probe-cell fault does.
@@ -18527,6 +18532,11 @@ def test_beside_a_lens_with_an_error_rebuts_own_stops_stand_and_a_cut_ends_incom
     )
     assert "did not apply" in rebuttal2["why"]
     assert _task_state(ledger2) == "EXHAUSTED"
+    assert rebuttal2["state"] == "EXHAUSTED"
+    assert [line for line in cell2.watched if line.startswith("REBUT:")][
+        -1
+    ] == f"REBUT: {rebuttal2['why']}"
+    assert "host-filed survivor" not in rebuttal2["why"]
 
     # Cell 3: REBUT's own critic cell refuses the post-rebuttal patch. HEAD
     # stays unmoved, so no probe is asked again, and only this cell sees it.
@@ -18558,6 +18568,11 @@ def test_beside_a_lens_with_an_error_rebuts_own_stops_stand_and_a_cut_ends_incom
     )
     assert "refused the patch" in rebuttal3["why"]
     assert _task_state(ledger3) == "EXHAUSTED"
+    assert rebuttal3["state"] == "EXHAUSTED"
+    assert [line for line in cell3.watched if line.startswith("REBUT:")][
+        -1
+    ] == f"REBUT: {rebuttal3['why']}"
+    assert "host-filed survivor" not in rebuttal3["why"]
 
     # Cell 4: the `tests` gate itself errors on the re-run, ending
     # `GATE_ERROR` rather than `EXHAUSTED`.
@@ -18580,6 +18595,14 @@ def test_beside_a_lens_with_an_error_rebuts_own_stops_stand_and_a_cut_ends_incom
     assert outcome4.state == "GATE_ERROR"
     assert outcome4.rebut_result is not None
     assert _task_state(ledger4) == "GATE_ERROR"
+    rebuttal4 = json.loads(
+        (tmp_path / "cell4" / "out" / "SY-1" / "rebuttal.json").read_text()
+    )
+    assert rebuttal4["state"] == "GATE_ERROR"
+    assert rebuttal4["why"] == "the gate re-run ended GATE_ERROR"
+    assert [line for line in cell4.watched if line.startswith("REBUT:")][
+        -1
+    ] == f"REBUT: {rebuttal4['why']}"
 
     # Cell 5: REBUT's own cap cuts the rebuttal turn short. The task ends
     # `REVIEW_INCOMPLETE`, never `EXHAUSTED`, and keeps its `rebut_result`.
@@ -18598,6 +18621,7 @@ def test_beside_a_lens_with_an_error_rebuts_own_stops_stand_and_a_cut_ends_incom
     )
     assert outcome5.state == "REVIEW_INCOMPLETE"
     assert outcome5.rebut_result is not None
+    assert outcome5.rebut_result.state == "REVIEW_INCOMPLETE"
     rebuttal5 = json.loads(
         (tmp_path / "cell5" / "out" / "SY-1" / "rebuttal.json").read_text()
     )
@@ -18632,8 +18656,8 @@ def test_a_review_cut_at_its_pool_or_left_no_survivor_sends_nothing_to_rebut(
             _turn(),
             _turn(_EMPTY, cost=2.0),
             _turn(_EMPTY, cost=2.0),
-            implement.AgentFailed("conventions crashed"),
             _turn(_EMPTY, cost=1.9),
+            implement.AgentFailed("conventions crashed"),
             _turn(
                 _probe_answer(
                     _HOST_SURVIVOR_ANCHOR, "removing the guard lets a negative through"
@@ -18648,11 +18672,12 @@ def test_a_review_cut_at_its_pool_or_left_no_survivor_sends_nothing_to_rebut(
         gates=("tests",),
     )
     assert outcome1.state == "REVIEW_INCOMPLETE"
-    cut_line, _why = review.review_state(outcome1.reviews, cut="t.py::b")
-    assert cut_line == "REVIEW_INCOMPLETE"
+    cut_state, cut_line = review.review_state(outcome1.reviews, cut="t.py::b")
+    assert cut_state == "REVIEW_INCOMPLETE"
     review_lines1 = [line for line in cell1.watched if line.startswith("REVIEW:")]
     assert review_lines1[-1].startswith("REVIEW: REVIEW's pool could not cover")
     assert "host-filed survivor" not in review_lines1[-1]
+    assert review_lines1[-1] == f"REVIEW: {cut_line}"
     assert not any(line.startswith("REBUT:") for line in cell1.watched)
     assert not (tmp_path / "cell1" / "out" / "SY-1" / "rebuttal.json").exists()
     findings1 = json.loads(
@@ -18713,3 +18738,4 @@ def test_a_review_cut_at_its_pool_or_left_no_survivor_sends_nothing_to_rebut(
     assert not (tmp_path / "cell3" / "out" / "SY-1" / "rebuttal.json").exists()
     review_lines3 = [line for line in cell3.watched if line.startswith("REVIEW:")]
     assert review_lines3[-1] == f"REVIEW: {review._errored_lens_line(['conventions'])}"
+    assert not any(line.startswith("REBUT:") for line in cell3.watched)

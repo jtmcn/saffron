@@ -3674,8 +3674,8 @@ def _drive_cell(
                     errored_lenses = [r.lens for r in reviews if r.error]
                     if review.rebuts_despite_errors(reviews, review_pool.cut):
                         outcome = "REBUTTING"
-                        survivors = len(review.host_survivors(reviews))
-                        why += f", and {survivors} host-filed survivor(s) go to REBUT"
+                        n_survivors = len(review.host_survivors(reviews))
+                        why += f", and {n_survivors} host-filed survivor(s) go to REBUT"
                     _phase_start("REVIEW", "REVIEW", why)
 
         # Same reasoning as `reviews` above: bound only inside the REBUTTING
@@ -3992,8 +3992,8 @@ def _drive_cell(
             # is still red, so run_rebut's "does not re-enter" line is wrong here.
             if repair_turn_why is not None:
                 result.why = repair_turn_why
-            # Beside a lens with an `error`, REBUT's own EXHAUSTED or GATE_ERROR stands.
-            # Any other end, a pool cut included, becomes REVIEW_INCOMPLETE (b-f7a591).
+            # Beside a lens with an `error`, REBUT's own `EXHAUSTED` or `GATE_ERROR`
+            # stands. Any other end, a REBUT pool cut included, is `REVIEW_INCOMPLETE`.
             if errored_lenses and result.state not in ("EXHAUSTED", "GATE_ERROR"):
                 result.state = "REVIEW_INCOMPLETE"
                 result.why = review.incomplete_after_rebut(reviews, rebut_probe_entries)
