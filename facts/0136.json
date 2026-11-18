@@ -1,0 +1,1 @@
+{"at": "2026-11-18T18:36:53.541084+00:00", "batch_key": "96", "kind": "stack_finish", "payload": {"branch": "saffron/batch-96-finish", "head_sha": "f04fc5b78c4b41b4944df3f989eec367db554b0c", "pr_url": "https://github.com/jtmcn/saffron/pull/1263"}, "repo": "saffron", "task_key": "4c676db04facf6cccb5dde38627bb461"}
