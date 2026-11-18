@@ -523,22 +523,8 @@ def revert_gate(
             + clause,
         )
 
-    # `criteria._side`'s readability guard, which the naive form of this
-    # verdict drops. Both halves are `_side`'s, for `_side`'s measured reason:
-    # this repo's own `tests` gate keys `failures[].code` on the caught
-    # exception type on its common path and reaches node ids only through a
-    # fallback, so `failed` can be a set of strings no node id ever equals.
-    # Read that way, every genuinely-failing reverted test stays out of
-    # `failed` while remaining in `collected` and reads as a clean pass — a
-    # false `fail` on a correct, source-dependent test, which is the expensive
-    # direction. `criteria` degrades to `skip` rather than report `pass` on a
-    # field it could not read; this gate degrades the same way rather than
-    # report `fail`.
-    #
-    # `collected is None` (did not enumerate), not `not collected`: a run that
-    # enumerated and found nothing is readable, and it is the ordinary answer
-    # when every reverted test fails at import — which is a `pass` here, not a
-    # skip.
+    # `criteria._side`'s guard, measured when this repo's `tests` gate lost node
+    # ids (b-bba47a). A run that enumerated nothing is still readable.
     if reverted_result.collected is None:
         return GateResult(
             gate="revert",
