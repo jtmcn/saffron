@@ -70,6 +70,18 @@ since no case read stdout. The writer measured each one surviving before
 the fix. Recording stubs and a stdout check per case now kill both. A
 fourth stop point, inside the readiness temp dir's exit, came with round 2.
 
+## SA-0410 (b-71e2df)
+
+One writer, scoped to the item's repo-agnostic arm. Each round found a
+witness blocker of check 65's class, and the writer measured every named
+version surviving before its fix. Round 1: `absent_at` claimed an order
+over one absent path, and a read at HEAD passed. Round 2: the only `[`
+entry was present, so a `[`-as-glob test passed. Round 2 also found my
+`DESIGN.md` hand edit said `base_sha` where the code reads the tree base.
+The caller measured `ls-tree` in the cell image, whose git is 2.47.3 and
+not the 2.39.5 the spec first claimed. The writer had listed 15 wrong
+versions while its harness held 13. All 20 now run from one harness.
+
 ## What the reviews keep finding
 
 Every blocker and three concerns were one class. A claim names a set, and
@@ -90,3 +102,5 @@ misses steps run after it. Check 67 names it.
     size gate counts them.
 67. A claim that a step stops further work observes each later step as not
     run, through a recording stub or the output it would print.
+68. A hand edit to a protected document names the commit a check reads by
+    its `CONTEXT.md` term, never bare "base".
