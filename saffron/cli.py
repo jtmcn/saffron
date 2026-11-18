@@ -2690,7 +2690,7 @@ def _batch(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
 
     def _readiness_or_raise() -> preflight.Readiness:
         # Raised inside the batch loop's `try`, so its `finally` closes the
-        # row `INFRASTRUCTURE`: the readiness probe that raised case it names.
+        # row `INFRASTRUCTURE`, the "readiness probe that raised" case it names.
         if interrupt is not None:
             # Reached here from the reclaim, readiness or the scan above,
             # all before this row existed, so it is raised first.
