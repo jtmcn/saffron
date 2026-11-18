@@ -4,7 +4,7 @@ title: "A task a `--stack` batch mints never records whether its thread pool was
 status: open
 tier: 2
 filed: 2026-10-11
-specs: []
+specs: [SA-0411]
 prs: []
 commits: []
 cites: [§5.1]

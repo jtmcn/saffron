@@ -82,6 +82,16 @@ The caller measured `ls-tree` in the cell image, whose git is 2.47.3 and
 not the 2.39.5 the spec first claimed. The writer had listed 15 wrong
 versions while its harness held 13. All 20 now run from one harness.
 
+## SA-0411 (b-e9153f)
+
+The writer measured the gap first: a stack-minted task recorded `None`.
+Every file the fix edits is queued, so it has three parents. Round 1's
+blocker was a claim that named podman's dialect false while calling it
+true. Two witness gaps, an empty policy and a read hoisted out of the
+closure, each survived before their fixes. Round 2 found no blocker. The
+caller fixed its scheduler wording by hand and re-ran one harness row,
+which died where its wrong version said.
+
 ## What the reviews keep finding
 
 Every blocker and three concerns were one class. A claim names a set, and
