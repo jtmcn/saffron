@@ -242,7 +242,7 @@ an "always false" build passes any case left on it. Set
 `runtime._selected` and `runtime._admitted` with `monkeypatch` per case, as
 `tests/test_session.py:5058-5059` does. Define two local stub dialects in
 `tests/test_cli.py`, shaped as `_UnprovenVM` and `_OtherSharedKernel` are
-(`tests/test_session.py:5018-5028`, `tests/test_session.py:5032-5037`).
+(`tests/test_session.py:5019-5029`, `tests/test_session.py:5033-5038`).
 Import neither from `test_session.py`. Import `podman` beside `apple`
 from `saffron.cell.runtimes` at module scope. It exists at base. Reference
 the new function nowhere in the test, so the witness collects with the
