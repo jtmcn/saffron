@@ -2420,7 +2420,9 @@ def test_a_withdrawn_host_filed_blocker_on_a_preserves_criterion_stands_only_aft
     ]
 
 
-def test_a_lens_named_unreviewed_gets_no_verdict_session_and_keeps_its_numbers():
+def test_a_lens_named_unreviewed_gets_no_verdict_session_and_keeps_its_numbers(
+    monkeypatch,
+):
     """Criterion 3 of SA-0406's `rebut.py` witness (backlog b-f7a591).
     `run_rebut`'s `unreviewed` keyword skips a named lens's own verdict
     session, and its own default verdicts every lens. `blockers`, their
@@ -2434,6 +2436,17 @@ def test_a_lens_named_unreviewed_gets_no_verdict_session_and_keeps_its_numbers()
     guarded = review.survivor_finding(preserved, edit, "return series\n")
     healthy = _blocker(lens="correctness", claim="a real defect")
     blockers = [guarded, healthy]
+
+    # The real guard builder, wrapped to record each call's own numbering
+    # size before delegating, so the full list reaching it is checked.
+    real_guarded_blockers = rebut._guarded_blockers
+    guard_calls: list[int] = []
+
+    def _spy_guarded_blockers(numbered, acceptance):
+        guard_calls.append(len(numbered))
+        return real_guarded_blockers(numbered, acceptance)
+
+    monkeypatch.setattr(rebut, "_guarded_blockers", _spy_guarded_blockers)
 
     # `conventions` holds no blocker here: it is never the lens left to
     # verdict, whatever `unreviewed` names.
@@ -2526,6 +2539,10 @@ def test_a_lens_named_unreviewed_gets_no_verdict_session_and_keeps_its_numbers()
             finding=2, verdict="confirmed", reason=f"{_WITHDRAWAL_HOST_SENTENCE} r2"
         )
     ]
+
+    # Every call the four cases, `result_default` and `reordered` make
+    # reaches the guard with both blockers, never a lens-trimmed subset.
+    assert guard_calls == [len(blockers)] * 6
 
 
 def test_a_lens_blocker_quoting_the_host_text_mid_claim_stays_withdrawn():
