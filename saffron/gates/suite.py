@@ -24,7 +24,7 @@ from saffron.gates.core.committed import committed_gate
 from saffron.gates.core.criteria import criteria_gate
 from saffron.gates.core.integrity import integrity_gate
 from saffron.gates.core.revert import revert_gate
-from saffron.gates.core.scope import scope_gate
+from saffron.gates.core.scope import literal_touches, scope_gate
 from saffron.gates.core.size import size_gate
 from saffron.gates.core.witness import constant_mutants
 from saffron.intake import Criterion, Mutant
@@ -64,6 +64,7 @@ class Tree(Protocol):
     @property
     def executor(self) -> runner.GateExecutor: ...
     def changed_files(self, base: str) -> list[str]: ...
+    def absent_at(self, tree_base: str, paths: Sequence[str]) -> list[str]: ...
     def patch(self, base: str) -> str: ...
     def dirty_paths(self) -> list[str]: ...
     def spec_ids(self) -> list[str]: ...
@@ -87,6 +88,9 @@ class CellTree:
 
     def changed_files(self, base: str) -> list[str]:
         return worktree.changed_files(self.container, base)
+
+    def absent_at(self, tree_base: str, paths: Sequence[str]) -> list[str]:
+        return worktree.absent_at(self.container, tree_base, paths)
 
     def patch(self, base: str) -> str:
         return worktree.export_patch(self.container, base)
@@ -155,15 +159,30 @@ class GateSuite:
         self, tree: Tree, baseline: SuiteRun, *, exempt: Sequence[str] = ()
     ) -> SuiteComparison:
         return _compare(
-            self._run(tree, prior=baseline.results, exempt=exempt), baseline
+            self._run(
+                tree, prior=baseline.results, exempt=exempt, check_tree_base=True
+            ),
+            baseline,
         )
 
     def _run(
-        self, tree: Tree, *, prior: list[GateResult], exempt: Sequence[str] = ()
+        self,
+        tree: Tree,
+        *,
+        prior: list[GateResult],
+        exempt: Sequence[str] = (),
+        # Only `against` asks the tree base, so the baseline call keeps
+        # naming nothing and reading nothing beyond what it already reads.
+        check_tree_base: bool = False,
     ) -> SuiteRun:
         spec, policy = self.spec, self.policy
         changed = tree.changed_files(self.diff_base)
         diff = tree.patch(self.diff_base)
+        absent = None
+        if check_tree_base:
+            candidates = literal_touches(spec.touches, changed)
+            if candidates:
+                absent = tree.absent_at(self.diff_base, candidates)
         # §5.6: from this run's own changed files, never a second read of the diff.
         tier = effective_risk(spec.risk, changed, policy.elevate_on)
         advisory = _advisory(tier, policy)
@@ -218,6 +237,7 @@ class GateSuite:
                 diff=diff,
                 forbidden=spec.forbidden,
                 protected=policy.protected,
+                absent=absent,
             ),
             integrity_gate(
                 diff,

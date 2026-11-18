@@ -1336,6 +1336,171 @@ def _exec_in(repo: Path):
     return exec_
 
 
+def _absence_fixture(repo_dir, monkeypatch, touches):
+    """A real git tree for criteria 1 and 2 of b-71e2df's scope absence line.
+
+    Writes five base paths, takes a `GateSuite` baseline over `touches`,
+    then edits one file, adds one and deletes two before judging `against`.
+    Returns the baseline, the comparison, and the commands each call sent.
+    """
+    from saffron.cell.session import CellSpec
+    from saffron.gates.suite import CellTree, GateSuite
+    from saffron.repos.policy import Policy
+
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo_dir)], check=True)
+
+    def write(rel, content):
+        path = repo_dir / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+
+    write("src/a.py", "a = 1\n")
+    write("src/x[1].py", "x = 1\n")
+    write("docs/guide.md", "guide\n")
+    write("old.py", "old = 1\n")
+    write("lib/old/only.py", "only = 1\n")
+
+    commands: list[list[str]] = []
+    inner = _exec_in(repo_dir)
+
+    def spy(container, command, *, workdir=None, timeout_s=900):
+        commands.append(list(command))
+        return inner(container, command, workdir=workdir, timeout_s=timeout_s)
+
+    monkeypatch.setattr(worktree.runtime, "exec_", spy)
+    base = _commit(repo_dir, "base")
+
+    spec = CellSpec(
+        spec_id="SA-0001",
+        spec_sha="a" * 40,
+        branch="b",
+        base_sha=base,
+        touches=touches,
+        spec_type="feature",
+        body="",
+    )
+    suite = GateSuite(gates={}, spec=spec, policy=Policy(gates={}), diff_base=base)
+    tree = CellTree("unused", cwd=repo_dir)
+
+    baseline = suite.baseline(tree)
+    base_commands = list(commands)
+
+    write("src/a.py", "a = 2\n")
+    write("src/made.py", "made = 1\n")
+    (repo_dir / "old.py").unlink()
+    (repo_dir / "lib" / "old" / "only.py").unlink()
+    _commit(repo_dir, "head")
+
+    commands.clear()
+    comparison = suite.against(tree, baseline)
+    head_commands = list(commands)
+
+    return baseline, comparison, base_commands, head_commands
+
+
+_TWELVE_TOUCHES = [
+    "src/a.py",
+    "src/gone/deep.py",
+    "src/x[1].py",
+    "lib/**",
+    "lib/old",
+    "src/y[2].py",
+    "docs",
+    "src/made.py",
+    "new_top.py",
+    "old.py",
+    "lib/*.py",
+    "README?.md",
+]
+
+
+def test_a_passing_scope_names_each_touches_entry_the_diff_never_created(
+    tmp_path, monkeypatch
+):
+    """Criterion 1 (b-71e2df). A passing `scope` result at head names its
+    count, then each literal `touches` entry the diff never answered for.
+    Absent at the tree base, outside the changed files, in `touches` order."""
+    from saffron.phases.review import gate_summary
+
+    baseline, comparison, _, _ = _absence_fixture(
+        tmp_path, monkeypatch, _TWELVE_TOUCHES
+    )
+
+    scope_head = next(r for r in comparison.run.results if r.gate == "scope")
+    assert (scope_head.status, scope_head.failures, scope_head.summary) == (
+        "pass",
+        [],
+        "4 changed files within touches; touches entries absent at the tree "
+        "base and never created: src/gone/deep.py, src/y[2].py, new_top.py",
+    )
+
+    line = next(
+        line
+        for line in gate_summary(comparison.run.results).splitlines()
+        if line.startswith("- scope:")
+    )
+    assert line == f"- scope: pass (no tool reported) — {scope_head.summary}"
+
+    scope_base = next(r for r in baseline.results if r.gate == "scope")
+    assert scope_base.summary == "0 changed files within touches"
+
+
+def test_a_scope_with_no_literal_entry_left_to_ask_reads_nothing_more(
+    tmp_path, monkeypatch
+):
+    """Criterion 2 (b-71e2df): a `touches` set with a literal entry left to
+    ask about sends the cell more at head than at its baseline. One left with
+    none, every entry either a glob or already changed, sends the same
+    commands both times."""
+    with_literal = tmp_path / "with-literal"
+    with_literal.mkdir()
+    _, _, base_cmds, head_cmds = _absence_fixture(
+        with_literal, monkeypatch, _TWELVE_TOUCHES
+    )
+    assert len(head_cmds) > len(base_cmds)
+
+    all_answered = tmp_path / "all-answered"
+    all_answered.mkdir()
+    _, _, base_cmds2, head_cmds2 = _absence_fixture(
+        all_answered,
+        monkeypatch,
+        ["src/**", "old.py", "src/made.py", "lib/**", "lib/*.py", "README?.md"],
+    )
+    assert head_cmds2 == base_cmds2
+
+
+def test_a_failed_read_of_the_tree_base_raises_rather_than_naming_every_path(
+    monkeypatch,
+):
+    """Criterion 3 (b-71e2df): `worktree.absent_at` answers every path at
+    once, in the order given. A refused read raises rather than reading as
+    an empty tree."""
+    calls: list[list[str]] = []
+    answers = iter(
+        [
+            runtime.Completed(0, "docs\0", ""),
+            runtime.Completed(128, "", "fatal: not a valid object name deadbeef"),
+        ]
+    )
+
+    def exec_(container, command, *, workdir=None, timeout_s=900):
+        calls.append(command)
+        return next(answers)
+
+    monkeypatch.setattr(worktree.runtime, "exec_", exec_)
+
+    assert worktree.absent_at("c", "deadbeef", ["z.py", "docs", "a.py"]) == [
+        "z.py",
+        "a.py",
+    ]
+    assert "deadbeef" in calls[0]
+
+    with pytest.raises(runtime.CellRuntimeError, match="not a valid object name"):
+        worktree.absent_at("c", "deadbeef", ["z.py", "docs", "a.py"])
+
+
 def _porcelain(tmp_path):
     return subprocess.run(
         ["git", "status", "--porcelain"],

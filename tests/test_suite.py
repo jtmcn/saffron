@@ -47,6 +47,9 @@ class _Tree:
     def changed_files(self, base):
         return list(self.changed)
 
+    def absent_at(self, tree_base, paths):
+        return []
+
     def patch(self, base):
         return self._patch
 
