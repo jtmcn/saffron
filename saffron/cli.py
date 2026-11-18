@@ -66,7 +66,7 @@ from saffron.report.index import accept_rate_header, orphan_rows
 from saffron.report.stack import write_stack_view
 from saffron.repos import image as repo_image
 from saffron.repos import mirror as git_mirror
-from saffron.repos.policy import Policy, PolicyError, load_policy
+from saffron.repos.policy import Policy, PolicyError, load_policy, parse_policy
 from saffron.scheduler import (
     Candidate,
     GhRunner,
@@ -1609,6 +1609,16 @@ def _stack_mint(
         repo_id = ledger.upsert_repo(
             repo.name, pinned.url, str(pinned.mirror), policy_sha=None
         )
+        # Read before any row exists, so a broken policy raises here rather
+        # than into a half-open run (b-e9153f).
+        raw_policy = git_mirror.file_at(
+            pinned.mirror, pinned.base_sha, ".saffron/policy.yaml"
+        )
+        if raw_policy is None:
+            thread_pool_uncapped = None
+        else:
+            policy = parse_policy(raw_policy.encode())
+            thread_pool_uncapped = runtime.thread_pool_uncapped(policy.thread_env)
         run_id = ledger.create_run(repo_id, pinned.base_sha)
         # Read fresh on each mint, never cached by `_stack_mint` itself: a
         # writer can move the ref between two specs of the same batch.
@@ -1621,6 +1631,7 @@ def _stack_mint(
             risk=candidate.spec.declared_risk,
             budget_usd=candidate.spec.budget_usd,
             prompt_sha=context.prompt_sha(),
+            thread_pool_uncapped=thread_pool_uncapped,
             mutants_commit=mutants_commit,
         )
 

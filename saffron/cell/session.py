@@ -2410,7 +2410,7 @@ def _drive_cell(
 
     # A shared kernel with no thread_env entry leaves a pool sized from the
     # host's CPU count, not the cell's (§5.1).
-    thread_pool_uncapped = runtime.dialect().shares_kernel and not policy.thread_env
+    thread_pool_uncapped = runtime.thread_pool_uncapped(policy.thread_env)
     if thread_pool_uncapped:
         _preflight(
             "thread_env",

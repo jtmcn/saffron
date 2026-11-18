@@ -86,6 +86,16 @@ def dialect() -> Dialect:
     return _selected
 
 
+def thread_pool_uncapped(thread_env: Mapping[str, str]) -> bool:
+    """Whether the selected dialect leaves a task's thread pool sized from the
+    host's CPU count rather than `thread_env` (ADR 10 principle 7, §5.1).
+
+    True only on a shared kernel whose policy names no `thread_env` entry.
+    Reads `dialect()` itself, since a process selects exactly one.
+    """
+    return dialect().shares_kernel and not thread_env
+
+
 # Module attributes resolved through `dialect()`, so reading one is a use, not an import.
 # `proxy.py` and `image.py` read RUNTIME; only the cell-marked image test reads CPU_OFFSET.
 if TYPE_CHECKING:

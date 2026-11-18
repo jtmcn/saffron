@@ -14,7 +14,7 @@ import subprocess
 import tempfile
 import typing
 from contextlib import contextmanager
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -35,7 +35,7 @@ from saffron.agents import context
 from saffron.agents.findings import Finding
 from saffron.batch import StopReason
 from saffron.cell import proxy, runtime, session
-from saffron.cell.runtimes import apple
+from saffron.cell.runtimes import apple, podman
 from saffron.cell.session import CellOutcome
 from saffron.cli import main
 from saffron.events import (
@@ -10888,8 +10888,10 @@ def test_the_stack_mint_opens_a_run_at_the_pinned_base_and_a_task_per_call(tmp_p
     older_task = ledger.create_task(older_run, "SY-1", "s" * 64, "saffron/SY-1")
     ledger.set_task_state(older_task, "RATE_LIMITED")
 
+    mirror = _repo_with_commit(tmp_path / "m")
+    base_sha = _rev_parse(mirror, "HEAD")
     pinned = task.PinnedBase(
-        mirror=tmp_path / "m.git", url="https://github.com/o/r.git", base_sha="a" * 40
+        mirror=mirror, url="https://github.com/o/r.git", base_sha=base_sha
     )
     mint = cli._stack_mint(pinned=pinned, repo=tmp_path / "checkout", ledger=ledger)
 
@@ -10927,7 +10929,7 @@ def test_the_stack_mint_opens_a_run_at_the_pinned_base_and_a_task_per_call(tmp_p
         assert row["state"] == "QUEUED"
         assert row["policy_sha"] is None
         assert row["prompt_sha"] == context.prompt_sha()
-        assert row["base_sha"] == "a" * 40
+        assert row["base_sha"] == base_sha
         assert row["batch_id"] is None
         assert row["repo_id"] == repo_id
     assert row1["budget_usd"] == 7.5 and row1["risk"] == "elevated"
@@ -10976,8 +10978,11 @@ def test_the_stack_mint_records_the_declared_tier_and_null_where_none(tmp_path):
     record folds into reads the same (item 170)."""
     record = MemoryRecord()
     ledger = Ledger(tmp_path / "l.db", record=record)
+    mirror = _repo_with_commit(tmp_path / "m")
     pinned = task.PinnedBase(
-        mirror=tmp_path / "m.git", url="https://github.com/o/r.git", base_sha="a" * 40
+        mirror=mirror,
+        url="https://github.com/o/r.git",
+        base_sha=_rev_parse(mirror, "HEAD"),
     )
     mint = cli._stack_mint(pinned=pinned, repo=tmp_path / "checkout", ledger=ledger)
 
@@ -11068,8 +11073,33 @@ def test_the_stack_mint_records_the_mutants_refs_commit_and_null_without_one(tmp
     subprocess.run(
         ["git", "init", "-q", "--bare", str(mirror)], check=True, capture_output=True
     )
+    empty_tree = subprocess.run(
+        ["git", "-C", str(mirror), "mktree"],
+        input="",
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    base_sha = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(mirror),
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=T",
+            "commit-tree",
+            empty_tree,
+            "-m",
+            "base",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
     pinned = task.PinnedBase(
-        mirror=mirror, url="https://github.com/o/r.git", base_sha="a" * 40
+        mirror=mirror, url="https://github.com/o/r.git", base_sha=base_sha
     )
     mint = cli._stack_mint(pinned=pinned, repo=tmp_path / "checkout", ledger=ledger)
 
@@ -11109,6 +11139,174 @@ def test_the_stack_mint_records_the_mutants_refs_commit_and_null_without_one(tmp
     _git(mirror, "update-ref", "refs/saffron/mutants", commit_2)
     task_second = _mint_one("SY-3")
     assert _recorded_commit(task_second) == commit_2
+
+    ledger.close()
+
+
+@dataclass(frozen=True)
+class _UnprovenVM(apple.Apple):
+    """apple/container's own spellings, with unattended never proven."""
+
+    @property
+    def unattended(self) -> bool:
+        return False
+
+
+@dataclass(frozen=True)
+class _OtherSharedKernel(podman.Podman):
+    """podman's dialect under another binary."""
+
+    @property
+    def binary(self) -> str:
+        return "other"
+
+
+def _policy_commits(repo_dir: Path, texts: list[str | None]) -> list[str]:
+    """One commit per entry of `texts`, each returning the new HEAD sha.
+
+    `None` leaves `.saffron/policy.yaml` absent for that commit. A
+    `marker.txt` counter keeps every commit non-empty even when the
+    policy text repeats across commits or a removal leaves nothing
+    else to stage."""
+    repo_dir.mkdir()
+    _git(repo_dir, "init", "-q")
+    policy_dir = repo_dir / ".saffron"
+    policy_dir.mkdir()
+    policy_path = policy_dir / "policy.yaml"
+    shas = []
+    for i, text in enumerate(texts):
+        (repo_dir / "marker.txt").write_text(str(i))
+        if text is None:
+            policy_path.unlink(missing_ok=True)
+        else:
+            policy_path.write_text(text)
+        _git(repo_dir, "add", "-A")
+        _git(
+            repo_dir,
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=T",
+            "commit",
+            "-qm",
+            f"c{i}",
+        )
+        shas.append(_rev_parse(repo_dir, "HEAD"))
+    return shas
+
+
+# `_THREAD_POOL_CASES` pairs each dialect with a pinned policy and the
+# policy its three other commits hold, chosen to answer differently.
+_ENTRY_POLICY = 'gates: {}\nthread_env:\n  OMP_NUM_THREADS: "1"\n'
+_EMPTY_ENV_POLICY = "gates: {}\n"
+_EXPLICIT_EMPTY_ENV_POLICY = "thread_env: {}\n"
+_EMPTY_FILE_POLICY = ""
+
+_THREAD_POOL_CASES = [
+    (apple.Apple(), _EMPTY_ENV_POLICY, _EMPTY_ENV_POLICY, False),
+    (_UnprovenVM(), _EMPTY_ENV_POLICY, _EMPTY_ENV_POLICY, False),
+    (podman.Podman(), _ENTRY_POLICY, _EMPTY_ENV_POLICY, False),
+    (podman.Podman(), _EMPTY_ENV_POLICY, _ENTRY_POLICY, True),
+    (_OtherSharedKernel(), _EMPTY_ENV_POLICY, _ENTRY_POLICY, True),
+    (podman.Podman(), _EXPLICIT_EMPTY_ENV_POLICY, _ENTRY_POLICY, True),
+    (podman.Podman(), _EMPTY_FILE_POLICY, _ENTRY_POLICY, True),
+    (_OtherSharedKernel(), _EXPLICIT_EMPTY_ENV_POLICY, _ENTRY_POLICY, True),
+    (podman.Podman(), None, _EMPTY_ENV_POLICY, None),
+    (apple.Apple(), None, _EMPTY_ENV_POLICY, None),
+]
+
+_BROKEN_POLICIES = [
+    "gates: [\n",
+    "gates: {}\nthread_env: [1]\n",
+    "nope: 1\n",
+]
+
+
+def test_the_stack_mint_records_whether_the_thread_pool_is_uncapped_from_the_policy_at_the_pinned_base(
+    tmp_path, monkeypatch
+):
+    """`cli._stack_mint` files `thread_pool_uncapped` on its own
+    `task_created` fact, read from `.saffron/policy.yaml` at the pinned
+    `base_sha`, never from the mirror's `HEAD` or that commit's parent.
+    A policy that does not validate raises `cli.PolicyError` out of the
+    mint before any run or task row exists."""
+    record = MemoryRecord()
+    ledger = Ledger(tmp_path / "l.db", record=record)
+
+    def _counts():
+        runs = ledger._db.execute("SELECT COUNT(*) AS n FROM runs").fetchone()["n"]
+        tasks = ledger._db.execute("SELECT COUNT(*) AS n FROM tasks").fetchone()["n"]
+        return runs, tasks
+
+    for i, (dialect, pinned_text, other_text, expected) in enumerate(
+        _THREAD_POOL_CASES
+    ):
+        monkeypatch.setattr(runtime, "_selected", dialect)
+        monkeypatch.setattr(runtime, "_admitted", True)
+        mirror = tmp_path / f"case-{i}"
+        shas = _policy_commits(
+            mirror, [other_text, other_text, pinned_text, other_text]
+        )
+        pinned = task.PinnedBase(
+            mirror=mirror, url="https://github.com/o/r.git", base_sha=shas[2]
+        )
+        mint = cli._stack_mint(
+            pinned=pinned, repo=tmp_path / f"checkout-{i}", ledger=ledger
+        )
+        spec_id = f"SY-{i}"
+        candidate = Candidate(
+            path=Path(f"{spec_id}.md"),
+            spec=intake.parse_spec(f"---\nid: {spec_id}\ntitle: t\ntype: chore\n---\n"),
+            spec_sha="c" * 64,
+            task_id=None,
+        )
+
+        before = _counts()
+        task_id = mint(candidate)
+        after = _counts()
+        assert after[0] == before[0] + 1, i
+        assert after[1] == before[1] + 1, i
+
+        key = ledger.record_key(task_id)
+        assert key is not None
+        created = next(f for f in record.read(key) if f.kind == "task_created")
+        assert created.payload["thread_pool_uncapped"] is expected, i
+
+    for d, dialect in enumerate((podman.Podman(), apple.Apple())):
+        for b, broken_policy in enumerate(_BROKEN_POLICIES):
+            monkeypatch.setattr(runtime, "_selected", dialect)
+            monkeypatch.setattr(runtime, "_admitted", True)
+            mirror = tmp_path / f"broken-{d}-{b}"
+            shas = _policy_commits(
+                mirror,
+                [
+                    _EMPTY_ENV_POLICY,
+                    _EMPTY_ENV_POLICY,
+                    broken_policy,
+                    _EMPTY_ENV_POLICY,
+                ],
+            )
+            pinned = task.PinnedBase(
+                mirror=mirror, url="https://github.com/o/r.git", base_sha=shas[2]
+            )
+            mint = cli._stack_mint(
+                pinned=pinned, repo=tmp_path / f"broken-checkout-{d}-{b}", ledger=ledger
+            )
+            spec_id = f"SB-{d * len(_BROKEN_POLICIES) + b}"
+            candidate = Candidate(
+                path=Path(f"{spec_id}.md"),
+                spec=intake.parse_spec(
+                    f"---\nid: {spec_id}\ntitle: t\ntype: chore\n---\n"
+                ),
+                spec_sha="c" * 64,
+                task_id=None,
+            )
+
+            before = _counts()
+            with pytest.raises(cli.PolicyError):
+                mint(candidate)
+            after = _counts()
+            assert after == before, (d, b)
 
     ledger.close()
 
