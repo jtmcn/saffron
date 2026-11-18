@@ -1001,7 +1001,7 @@ def anchored_blockers(reviews: Sequence[LensReview]) -> list[Finding]:
 def host_survivors(reviews: Sequence[LensReview]) -> list[Finding]:
     """Host-filed survivors among `anchored_blockers`, in its order
     (backlog b-f7a591). Every host-filed survivor is already a blocker, so
-    the anchor-or-blocker filter above never drops one here."""
+    `anchored_blockers`' filter never drops one here."""
     return [f for f in anchored_blockers(reviews) if f.claim.startswith(HOST_FILED)]
 
 
@@ -1144,15 +1144,14 @@ def _probe_entry(
     assert survivor.probe is not None  # every host survivor carries one
     key = probe_key(survivor.probe)
     for entry in entries:
-        probe_field = cast("Mapping[str, object]", entry["probe"])
-        if (probe_field["file"], probe_field["find"], probe_field["replace"]) == key:
+        if probe_key(Mutant.model_validate(entry["probe"])) == key:
             return entry
     return None
 
 
 def _survivor_fate(entry: Mapping[str, object] | None) -> str:
-    """One of `incomplete_after_rebut`'s four fates, read from `entry`, or
-    `None` entry meaning the survivor was never asked again. A killed fate
+    """One of `incomplete_after_rebut`'s four fates, read from `entry`. A
+    `None` entry means the survivor was never asked again. A killed fate
     names every failure in order. An unproven one names its reason."""
     if entry is None:
         return "not asked again after the rebuttal"

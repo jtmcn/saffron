@@ -2420,10 +2420,8 @@ def test_a_withdrawn_host_filed_blocker_on_a_preserves_criterion_stands_only_aft
     ]
 
 
-def test_a_lens_named_unreviewed_gets_no_verdict_session_and_keeps_its_numbers(
-    monkeypatch,
-):
-    """Criterion 4 of SA-0406's `rebut.py` witness (backlog b-f7a591).
+def test_a_lens_named_unreviewed_gets_no_verdict_session_and_keeps_its_numbers():
+    """Criterion 3 of SA-0406's `rebut.py` witness (backlog b-f7a591).
     `run_rebut`'s `unreviewed` keyword skips a named lens's own verdict
     session, and its own default verdicts every lens. `blockers`, their
     numbering, the rebuttal turn's prompt and the full guard list stay as
@@ -2436,15 +2434,6 @@ def test_a_lens_named_unreviewed_gets_no_verdict_session_and_keeps_its_numbers(
     guarded = review.survivor_finding(preserved, edit, "return series\n")
     healthy = _blocker(lens="correctness", claim="a real defect")
     blockers = [guarded, healthy]
-
-    guarded_calls: list[int] = []
-    original_guarded_blockers = rebut._guarded_blockers
-
-    def _spy_guarded_blockers(numbered_arg, acceptance_arg):
-        guarded_calls.append(len(numbered_arg))
-        return original_guarded_blockers(numbered_arg, acceptance_arg)
-
-    monkeypatch.setattr(rebut, "_guarded_blockers", _spy_guarded_blockers)
 
     # `conventions` holds no blocker here: it is never the lens left to
     # verdict, whatever `unreviewed` names.
@@ -2487,8 +2476,6 @@ def test_a_lens_named_unreviewed_gets_no_verdict_session_and_keeps_its_numbers(
         prompt = record[0]["prompt"]
         assert "1. [adequacy]" in prompt
         assert "2. [correctness]" in prompt
-        # The guard still reads every blocker, whatever `unreviewed` names.
-        assert guarded_calls[-1] == len(blockers)
 
         if left == "correctness":
             (correctness_verdicts,) = result.verdicts
@@ -2519,6 +2506,26 @@ def test_a_lens_named_unreviewed_gets_no_verdict_session_and_keeps_its_numbers(
         acceptance=[preserved],
     )
     assert [v.lens for v in result_default.verdicts] == ["correctness", "adequacy"]
+
+    # The named lens's blocker first: the guarded one keeps number 2, so a
+    # guard renumbered after the drop would let its withdrawal stand.
+    (reordered,) = _run(
+        "Fixed both.",
+        _rebuttals(
+            _argued(1, "the default is set by the caller"),
+            _argued(2, _WITHDRAWAL_ARGUMENT),
+        ),
+        _verdicts(_verdict(2, verdict="withdrawn", reason="2")),
+        blockers=[healthy, guarded],
+        acceptance=[preserved],
+        unreviewed=("correctness",),
+    ).verdicts
+    assert reordered.lens == "adequacy"
+    assert reordered.verdicts == [
+        rebut.Verdict(
+            finding=2, verdict="confirmed", reason=f"{_WITHDRAWAL_HOST_SENTENCE} r2"
+        )
+    ]
 
 
 def test_a_lens_blocker_quoting_the_host_text_mid_claim_stays_withdrawn():

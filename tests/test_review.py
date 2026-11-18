@@ -2755,7 +2755,7 @@ def test_a_host_filed_survivor_is_a_blocker_whether_or_not_it_anchors():
 
 
 def test_a_lens_with_an_error_routes_to_rebut_only_beside_a_host_survivor_and_no_cut():
-    """Criteria 1 and 2 of SA-0406's `review.py` witness (backlog b-f7a591).
+    """Criterion 1 of SA-0406's `review.py` witness (backlog b-f7a591).
     `host_survivors` keeps every host-filed blocker `anchored_blockers`
     returns, in its order. `rebuts_despite_errors` is true only with no
     cut, some lens holding an `error`, and at least one such survivor.
@@ -2832,7 +2832,7 @@ def test_a_lens_with_an_error_routes_to_rebut_only_beside_a_host_survivor_and_no
 
 
 def test_the_incomplete_line_names_what_the_rebuttal_left_of_each_survivor_under_a_lens_with_an_error():
-    """Criterion 3 of SA-0406's `review.py` witness (backlog b-f7a591).
+    """Criterion 2 of SA-0406's `review.py` witness (backlog b-f7a591).
     `incomplete_after_rebut` extends `review_state`'s errored-lens line
     with one clause per host-filed survivor a lens with an `error` holds.
     Each clause names the holding `LensReview`'s own `lens`, never the
