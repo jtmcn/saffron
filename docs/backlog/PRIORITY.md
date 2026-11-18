@@ -137,7 +137,7 @@ git calls can prompt and drop git's reason. A cell makes CONNECTs no git
 call explains.
 
 **Placed 2026-10-15**, from the spec loop's run 40: ~~**b-d31930**~~, then
-**b-bba47a**. A queued spec's citations drift and nothing checks them before
+~~**b-bba47a**~~. A queued spec's citations drift and nothing checks them before
 its batch. The `tests` gate takes a printed warning for every failure.
 
 **Placed 2026-10-16**, from the spec loop's run 42: ~~**b-2da959**~~, then
