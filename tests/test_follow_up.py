@@ -778,13 +778,14 @@ def test_an_accepted_follow_up_is_a_minted_task_with_its_text_and_its_writers_co
         facts = built.record.read(built.ledger.record_key(c.task_id))
         assert [f.kind for f in facts] == [
             "task_created",
+            "run_created",
             "attempt_opened",
             "attempt_closed",
             "spec_text",
         ]
-        assert facts[1].batch_key is None
         assert facts[2].batch_key is None
-        assert facts[3].batch_key == str(built.batch_id)
+        assert facts[3].batch_key is None
+        assert facts[4].batch_key == str(built.batch_id)
 
     assert candidates[0].spec_sha == hash_artifact(turns[0])
 

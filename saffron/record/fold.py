@@ -5,12 +5,14 @@ nothing.
 § numbers here are `docs/superpowers/specs/2026-09-20-the-record-on-git-refs-design.md`'s,
 not `DESIGN.md`'s.
 
-Batches and runs are not, yet: `create_run`, `finish_run`, `set_run_preflight`,
-`create_batch`, `close_batch`, `attach_run_to_batch`, `attach_orphan_runs_to_batch`
-and `upsert_repo` append no fact, so a rebuild has no `batches` row and leaves
-`runs.batch_id`/`status`/`preflight`/`ended_at` unset — `Ledger.batch_spend`
-joins `runs.batch_id`, so every batch reads as $0 spent. §5's gap, not fixed
-here.
+Batches are not, yet. `create_run`, `create_batch`, `close_batch`,
+`attach_run_to_batch`, `attach_orphan_runs_to_batch`, `set_run_preflight` and
+`upsert_repo` append no fact. A rebuild has no `batches` row and leaves
+`runs.batch_id`/`preflight` unset. `Ledger.batch_spend` joins `runs.batch_id`,
+so every batch reads as $0 spent, and §5's gap stays open here. `create_task`
+and `finish_run` now append `run_created`/`run_finished`, so a run's own
+`status` and `ended_at` fold back. A run-fact task never shares its row by
+`base_sha` with another (item b-cafacd).
 
 Replay, not snapshot: a task's state is what its facts add up to (§3).
 """
@@ -19,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from saffron.ledger import Ledger, UnplacedRebuttal
+from saffron.ledger import _RUN_FACT_KINDS, Ledger, UnplacedRebuttal
 from saffron.record.contract import Fact, Record
 
 
@@ -41,7 +43,8 @@ class Fold:
 
 def fold(record: Record, ledger: Ledger, strict: bool = True) -> Fold:
     done = Fold()
-    for key in _creation_order(record, ledger, strict, done):
+    order, run_fact_keys = _creation_order(record, ledger, strict, done)
+    for key in order:
         try:
             facts = _facts_of(record, key)
         except Exception as exc:
@@ -49,7 +52,7 @@ def fold(record: Record, ledger: Ledger, strict: bool = True) -> Fold:
             _skipped(key, exc, strict, done)
             continue
         try:
-            ledger.fold_task(key, facts)
+            ledger.fold_task(key, facts, run_fact_keys=run_fact_keys)
         except UnplacedRebuttal as exc:
             # The record's own defect, not the fold's: a rebuttal with
             # nothing to rebut is priced like a fact git cannot read.
@@ -94,11 +97,11 @@ def _skipped(key: str, exc: Exception, strict: bool, done: Fold) -> None:
 
 def _creation_order(
     record: Record, ledger: Ledger, strict: bool, done: Fold
-) -> list[str]:
-    """Task keys oldest first, by the time their `task_created` fact was
-    appended. A record key is random hex, and `ORDER BY t.task_id` is read as
-    a chronology by `queue_lines` and `tasks_by_spec`, so folding in key order
-    scatters a rebuilt ledger through time.
+) -> tuple[list[str], frozenset[str]]:
+    """Task keys oldest first, by the time their `task_created` fact was appended, and
+    every key whose facts hold a run fact (item b-cafacd). A record key is random hex,
+    and `ORDER BY t.task_id` is read as a chronology by `queue_lines` and
+    `tasks_by_spec`, so folding in key order scatters a rebuilt ledger through time.
 
     A second read rather than a corpus held in memory: the 118 tasks measured
     on 2026-09-20 carry 33.9 MB of fact JSON, which parses into several times
@@ -106,6 +109,7 @@ def _creation_order(
     so the pass costs about 5 s and the memory is the worse half of the trade
     (`docs/evidence/2026-09-20-fold-rebuild-time.md`)."""
     dated = []
+    run_fact_keys = set()
     for key in sorted(record.task_keys()):
         try:
             facts = _facts_of(record, key)
@@ -115,4 +119,6 @@ def _creation_order(
             continue
         created = next(f for f in facts if f.kind == "task_created")
         dated.append((created.at, key))
-    return [key for _, key in sorted(dated)]
+        if any(f.kind in _RUN_FACT_KINDS for f in facts):
+            run_fact_keys.add(key)
+    return [key for _, key in sorted(dated)], frozenset(run_fact_keys)

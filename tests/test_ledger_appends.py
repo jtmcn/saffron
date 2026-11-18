@@ -2,6 +2,7 @@ import pytest
 
 from saffron.gates.contract import Failure, GateResult
 from saffron.ledger import Ledger
+from saffron.record.fold import fold
 from saffron.record.memory import MemoryRecord
 
 
@@ -45,7 +46,7 @@ def test_creating_a_task_mints_a_record_key(ledger, task):
 def test_creating_a_task_appends_task_created(ledger, record, task):
     _, task_id = task
     key = ledger.record_key(task_id)
-    assert kinds(record, key) == ["task_created"]
+    assert kinds(record, key) == ["task_created", "run_created"]
     fact = record.read(key)[0]
     # R1: the fold's `repos`/`runs` inserts need these, unproven elsewhere.
     assert fact.payload["origin"] == "/o"
@@ -71,7 +72,7 @@ def test_a_state_change_appends_task_state(ledger, record, task):
     _, task_id = task
     ledger.set_task_state(task_id, "IMPLEMENTING")
     key = ledger.record_key(task_id)
-    assert kinds(record, key) == ["task_created", "task_state"]
+    assert kinds(record, key) == ["task_created", "run_created", "task_state"]
 
 
 def test_an_attempt_appends_on_open_and_on_close(ledger, record, task):
@@ -429,3 +430,70 @@ def test_an_unknown_task_id_files_no_fact(ledger, record):
     with pytest.raises(ValueError, match="999999"):
         ledger.set_task_state(999_999, "IMPLEMENTING")
     assert record.task_keys() == []
+
+
+def test_finishing_a_run_appends_its_status_to_each_task_it_holds(
+    tmp_path, ledger, record
+):
+    repo_id = ledger.upsert_repo("saffron", "/o", "/m.git", policy_sha="p" * 64)
+
+    # A row holding two tasks: both take the one status it finished with.
+    shared_run = ledger.create_run(repo_id, base_sha="a" * 40)
+    first = ledger.create_task(
+        shared_run, spec_id="SA-1", spec_sha="s" * 64, branch="b1"
+    )
+    second = ledger.create_task(
+        shared_run, spec_id="SA-2", spec_sha="s" * 64, branch="b2"
+    )
+    ledger.finish_run(shared_run, "COMPLETE")
+    for task_id in (first, second):
+        key = ledger.record_key(task_id)
+        assert kinds(record, key) == ["task_created", "run_created", "run_finished"]
+        assert record.read(key)[-1].payload == {"status": "COMPLETE"}
+
+    # A row holding one task reads the same shape.
+    solo_run = ledger.create_run(repo_id, base_sha="b" * 40)
+    solo = ledger.create_task(solo_run, spec_id="SA-3", spec_sha="s" * 64, branch="b3")
+    ledger.finish_run(solo_run, "ABORTED")
+    key = ledger.record_key(solo)
+    assert kinds(record, key) == ["task_created", "run_created", "run_finished"]
+    assert record.read(key)[-1].payload == {"status": "ABORTED"}
+
+    # A row holding no task gains no fact and still takes the status.
+    empty_run = ledger.create_run(repo_id, base_sha="c" * 40)
+    ledger.finish_run(empty_run, "COMPLETE")
+    row = ledger._db.execute(
+        "SELECT status FROM runs WHERE run_id = ?", (empty_run,)
+    ).fetchone()
+    assert row["status"] == "COMPLETE"
+
+    # A row finished twice appends both facts in order, and a fold keeps
+    # the later status.
+    twice_run = ledger.create_run(repo_id, base_sha="d" * 40)
+    twice = ledger.create_task(
+        twice_run, spec_id="SA-4", spec_sha="s" * 64, branch="b4"
+    )
+    # Neither status is `RUNNING`, the row's own starting value: a fold
+    # that only updates a row still `RUNNING` would stick on the first.
+    ledger.finish_run(twice_run, "COMPLETE")
+    ledger.finish_run(twice_run, "ABORTED")
+    key = ledger.record_key(twice)
+    assert kinds(record, key) == [
+        "task_created",
+        "run_created",
+        "run_finished",
+        "run_finished",
+    ]
+    statuses = [
+        f.payload["status"] for f in record.read(key) if f.kind == "run_finished"
+    ]
+    assert statuses == ["COMPLETE", "ABORTED"]
+
+    into = Ledger(tmp_path / "into.db")
+    fold(record, into)
+    folded = into._db.execute(
+        "SELECT status FROM tasks t JOIN runs r USING (run_id) WHERE t.record_key = ?",
+        (key,),
+    ).fetchone()
+    assert folded["status"] == "ABORTED"
+    into.close()

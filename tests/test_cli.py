@@ -16777,7 +16777,12 @@ def test_every_command_pushes_the_facts_it_appended_before_it_exits(
         ]
     )
     assert code == 0
-    assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]
+    assert _pushed_kinds(origin, key) == [
+        "task_created",
+        "run_created",
+        "task_state",
+        "task_state",
+    ]
 
     # `batch`: a SIGTERM mid-command, read as exit 143.
     home, task_id, key, origin = _seed("batch")
@@ -16790,7 +16795,12 @@ def test_every_command_pushes_the_facts_it_appended_before_it_exits(
     monkeypatch.setattr(cli, "_batch", _stub_batch)
     code = cli.main(["--home", str(home), "batch", "--repo", str(tmp_path)])
     assert code == 143
-    assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]
+    assert _pushed_kinds(origin, key) == [
+        "task_created",
+        "run_created",
+        "task_state",
+        "task_state",
+    ]
 
     # `draft`
     home, task_id, key, origin = _seed("draft")
@@ -16811,7 +16821,12 @@ def test_every_command_pushes_the_facts_it_appended_before_it_exits(
         ]
     )
     assert code == 0
-    assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]
+    assert _pushed_kinds(origin, key) == [
+        "task_created",
+        "run_created",
+        "task_state",
+        "task_state",
+    ]
 
     # `queue`: a bare `KeyboardInterrupt`, left to propagate out of `main`.
     home, task_id, key, origin = _seed("queue")
@@ -16823,7 +16838,12 @@ def test_every_command_pushes_the_facts_it_appended_before_it_exits(
     monkeypatch.setattr(cli, "_queue", _stub_queue)
     with pytest.raises(KeyboardInterrupt):
         cli.main(["--home", str(home), "queue", "--repo", str(tmp_path)])
-    assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]
+    assert _pushed_kinds(origin, key) == [
+        "task_created",
+        "run_created",
+        "task_state",
+        "task_state",
+    ]
 
     # `reconcile`: a raise, read as exit 2, though nothing wraps it.
     home, task_id, key, origin = _seed("reconcile")
@@ -16835,7 +16855,12 @@ def test_every_command_pushes_the_facts_it_appended_before_it_exits(
     monkeypatch.setattr(cli, "_reconcile", _stub_reconcile)
     code = cli.main(["--home", str(home), "reconcile", "--repo", str(tmp_path)])
     assert code == 2
-    assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]
+    assert _pushed_kinds(origin, key) == [
+        "task_created",
+        "run_created",
+        "task_state",
+        "task_state",
+    ]
 
     # `regate`: a bare `KeyboardInterrupt`, re-raised by `_guarding_sigterm`
     # rather than read as a SIGTERM, and left to propagate out of `main`.
@@ -16848,7 +16873,12 @@ def test_every_command_pushes_the_facts_it_appended_before_it_exits(
     monkeypatch.setattr(cli, "_regate", _stub_regate)
     with pytest.raises(KeyboardInterrupt):
         cli.main(["--home", str(home), "regate", "1", "--repo", str(tmp_path)])
-    assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]
+    assert _pushed_kinds(origin, key) == [
+        "task_created",
+        "run_created",
+        "task_state",
+        "task_state",
+    ]
 
     # `review`
     home, task_id, key, origin = _seed("review")
@@ -16860,7 +16890,12 @@ def test_every_command_pushes_the_facts_it_appended_before_it_exits(
     monkeypatch.setattr(cli, "_review", _stub_review)
     code = cli.main(["--home", str(home), "review", "1", "--repo", str(tmp_path)])
     assert code == 0
-    assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]
+    assert _pushed_kinds(origin, key) == [
+        "task_created",
+        "run_created",
+        "task_state",
+        "task_state",
+    ]
 
     # `adopt`, whose own exit code is 1.
     home, task_id, key, origin = _seed("adopt")
@@ -16874,7 +16909,12 @@ def test_every_command_pushes_the_facts_it_appended_before_it_exits(
         ["--home", str(home), "adopt", "SY-1", "9", "--repo", str(tmp_path)]
     )
     assert code == 1
-    assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]
+    assert _pushed_kinds(origin, key) == [
+        "task_created",
+        "run_created",
+        "task_state",
+        "task_state",
+    ]
 
     # `package`
     home, task_id, key, origin = _seed("package")
@@ -16886,7 +16926,12 @@ def test_every_command_pushes_the_facts_it_appended_before_it_exits(
     monkeypatch.setattr(cli, "_package", _stub_package)
     code = cli.main(["--home", str(home), "package", "SY-1", "--repo", str(tmp_path)])
     assert code == 0
-    assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]
+    assert _pushed_kinds(origin, key) == [
+        "task_created",
+        "run_created",
+        "task_state",
+        "task_state",
+    ]
 
     # `finish`: a raise, read as exit 2.
     home, task_id, key, origin = _seed("finish")
@@ -16898,7 +16943,12 @@ def test_every_command_pushes_the_facts_it_appended_before_it_exits(
     monkeypatch.setattr(cli, "_finish", _stub_finish)
     code = cli.main(["--home", str(home), "finish", "1", "--repo", str(tmp_path)])
     assert code == 2
-    assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]
+    assert _pushed_kinds(origin, key) == [
+        "task_created",
+        "run_created",
+        "task_state",
+        "task_state",
+    ]
 
     # `chains`
     home, task_id, key, origin = _seed("chains")
@@ -16910,7 +16960,12 @@ def test_every_command_pushes_the_facts_it_appended_before_it_exits(
     monkeypatch.setattr(cli, "_chains", _stub_chains)
     code = cli.main(["--home", str(home), "chains"])
     assert code == 0
-    assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]
+    assert _pushed_kinds(origin, key) == [
+        "task_created",
+        "run_created",
+        "task_state",
+        "task_state",
+    ]
 
     # `replay`
     home, task_id, key, origin = _seed("replay")
@@ -16934,7 +16989,12 @@ def test_every_command_pushes_the_facts_it_appended_before_it_exits(
     monkeypatch.setattr(cli, "replay", _stub_replay)
     code = cli.main(["--home", str(home), "replay", str(tmp_path), "9"])
     assert code == 0
-    assert _pushed_kinds(origin, key) == ["task_created", "task_state", "task_state"]
+    assert _pushed_kinds(origin, key) == [
+        "task_created",
+        "run_created",
+        "task_state",
+        "task_state",
+    ]
 
 
 def test_a_writers_draft_is_judged_atop_its_head_by_the_repos_form_gates(

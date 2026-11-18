@@ -553,8 +553,6 @@ def test_a_fact_the_ledger_cannot_place_leaves_the_ledger_as_it_was(tmp_path, re
 
 _FOLD_BLIND = (
     "decision",
-    "run_created",
-    "run_finished",
     "run_preflight",
     "batch_created",
     "batch_closed",
@@ -708,7 +706,9 @@ def test_a_folded_task_is_dated_by_the_facts_that_set_each_column(tmp_path):
             for kind in others:
                 _set_six_kind(writer, task_id, kind)
             _set_six_kind(writer, task_id, target)
-            target_n = 1 + len(others) + 1
+            # `task_created` then `run_created`, then the others, then
+            # the target itself.
+            target_n = 2 + len(others) + 1
             attempt_id = writer.open_attempt(task_id, phase="REPAIR")
             writer.record_gate_result(_gate("lint", "ruff"), attempt_id=attempt_id)
             _close(writer, attempt_id, "s", None, None, 1, 0.1)
@@ -749,8 +749,8 @@ class _Recording:
         self._real = real
         self.touched: list[str] = []
 
-    def fold_task(self, key: str, facts) -> None:
-        self._real.fold_task(key, facts)
+    def fold_task(self, key: str, facts, *, run_fact_keys=None) -> None:
+        self._real.fold_task(key, facts, run_fact_keys=run_fact_keys)
 
     def __getattr__(self, name: str):
         self.touched.append(name)
