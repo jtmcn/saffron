@@ -16,7 +16,7 @@ read-only session that sees the argument and never the transcript behind it.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
@@ -899,6 +899,9 @@ def run_rebut(
     last_cost_usd: float = 0.0,
     # Told before the extraction and before the verdicts (b-4901d2).
     open_pool: Callable[[Literal["extraction", "verdict"]], None] = lambda stage: None,
+    # A lens named here gets no verdict session below. `blockers`, their
+    # numbering and the rebuttal turn stay as they are.
+    unreviewed: Collection[str] = (),
 ) -> RebutResult:
     """One rebuttal in the implementer's own container, the gate re-run there
     too, then one verdict session per lens in a fresh critic cell the
@@ -1011,7 +1014,9 @@ def run_rebut(
     changed = diff(critic)
     open_pool("verdict")
     for lens in [
-        lens for lens in review.LENSES if any(f.lens == lens for f in blockers)
+        lens
+        for lens in review.LENSES
+        if lens not in unreviewed and any(f.lens == lens for f in blockers)
     ]:
         mine = [(n, f) for n, f in numbered if f.lens == lens]
         result.verdicts.append(
