@@ -4501,6 +4501,37 @@ def test_check_names_a_mutant_outside_touches_that_declares_no_subject(
     assert named[0].startswith("concern: ") and "criterion 1" in named[0], out
 
 
+def test_check_blocks_a_spec_whose_body_quotes_its_own_mutants_find(
+    monkeypatch, capsys
+):
+    """Item 080: a spec that quotes its mutant's `find` is refused when the
+    mutant is seeded. `check` blocks it first, and passes the same spec
+    once its body no longer holds the text."""
+    from saffron.intake import Criterion, Mutant
+    from tests.test_spec_size_estimate import _run
+
+    find = "return sorted(found, key=len)"
+    target = _spec("SA-0009")
+    target.acceptance_criteria = []
+    target.acceptance = [
+        Criterion(
+            claim="c",
+            witness="t.py::t",
+            mutant=Mutant(file="f0.py", find=find, replace="return found"),
+        )
+    ]
+    target.body = f"Seed the mutant by replacing `{find}`.\n"
+    rc, out = _run(monkeypatch, capsys, target, [])
+    blockers = [line for line in out if line.startswith("blocker: ")]
+    assert rc == 1, out
+    assert len(blockers) == 1 and "body" in blockers[0], out
+
+    target.body = "Seed the mutant the ref holds.\n"
+    rc, out = _run(monkeypatch, capsys, target, [])
+    assert rc == 0, out
+    assert not [line for line in out if line.startswith("blocker: ")], out
+
+
 def test_subject_concerns_read_a_mutant_from_the_ref_not_the_spec(tmp_path):
     """SA-0338: a queued spec carries no inline mutant, so the concern reads
     the ref. A spec with none there is left as it is."""
