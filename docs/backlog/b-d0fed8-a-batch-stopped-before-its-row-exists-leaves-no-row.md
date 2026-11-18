@@ -4,7 +4,7 @@ title: "A batch sent SIGTERM during readiness or its first queue scan exits 143 
 status: open
 tier: 2
 filed: 2026-10-11
-specs: []
+specs: [SA-0409]
 prs: []
 commits: []
 cites: [§4.2.1]
