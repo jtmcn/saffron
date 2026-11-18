@@ -167,8 +167,8 @@ none of its tasks says whether its thread pool was uncapped.
    empty. `_drive_cell` calls it in place of its inline expression. The
    warning and the `create_task` argument read its answer as today.
 2. **The mint reads the policy.** `_stack_mint`'s minting closure reads
-   `.saffron/policy.yaml` at `pinned.base_sha` from `pinned.mirror`, first,
-   before it upserts the repo. It parses it and calls the function from 1
+   `.saffron/policy.yaml` at `pinned.base_sha` from `pinned.mirror`, before
+   it creates a run. It parses it and calls the function from 1
    with its `thread_env`. It passes the answer to `create_task`. With no
    policy at that commit it passes `None`, the value for a caller that
    never decided. A policy that does not parse raises out of the mint, as
@@ -209,13 +209,15 @@ already drives six dialect and policy pairs through the cell, and the
 move in Problem 1 must keep all six.
 
 **When this can run.** A plain batch refuses it until all but one of its
-parents' chains merge (`saffron/scheduler.py:1044-1056`). A `--stack`
-scan skips that check (`saffron/scheduler.py:1020`,
-`saffron/scheduler.py:1444`). It runs this spec only with `SA-0408` and
-`SA-0409` in the same order, stacked on `SA-0407`'s pull request
-(`saffron/scheduler.py:1227-1261`, `saffron/scheduler.py:1114-1172`). If
-`SA-0408` and `SA-0409` reach pull requests in an earlier batch, this spec
-waits for merges (`saffron/scheduler.py:296-320`).
+parents' chains merge (`saffron/scheduler.py:1044-1056`). The one left open
+needs a waiting task (`saffron/scheduler.py:735-750`). A
+`--stack` scan skips the chain check (`saffron/scheduler.py:1020`,
+`saffron/scheduler.py:1444`). It orders this spec after `SA-0408` and
+`SA-0409` (`saffron/scheduler.py:1227-1261`). The order stacks on
+`SA-0407`'s pull request when it has one, or holds `SA-0406` and `SA-0407`
+itself (`saffron/scheduler.py:1114-1172`). If `SA-0408` or `SA-0409`
+reaches a pull request in an earlier batch, this spec waits for merges
+(`saffron/scheduler.py:296-320`).
 
 **Three existing tests hand `_stack_mint` a base its mirror lacks.** Each
 must change. The mint now reads the mirror at the pinned `base_sha`, and
