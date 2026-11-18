@@ -1,0 +1,5 @@
+tests/test_session.py::test_a_shared_kernel_task_with_no_thread_env_entries_warns_and_records_an_uncapped_pool:
+  file: saffron/cell/session.py
+  find: "    if thread_pool_uncapped:\n"
+  replace: "    if False:\n"
+  case: a cell that records an uncapped thread pool and never warns at preflight
