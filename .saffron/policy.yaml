@@ -147,3 +147,14 @@ probes:
     - '\s+pass'
     - '\s+"""[^"]*"""'
     - '\s*#.*'
+
+# What a module constant and a test's own text look like here, so `witness`
+# mutates a constant a witness reads back (b-5b1f8a, SA-0280).
+witness:
+  witness_name: ::(?P<name>\w+)$
+  witness_body: (?m)^(?P<i>[ \t]*)def {name}\(.*(?:\n(?:(?P=i)[ \t]+.*|[ \t]*))*
+  constants:
+  - pattern: '(?m)^(?P<name>[A-Z][A-Z0-9_]*)(?:: [^=\n]+)? = \(?\s*(?P<value>[rbfuRBFU]{0,2}(?:\"\"\"|''''''|\"|''))'
+    replace: '\g<value>saffron constant mutant '
+  - pattern: '(?m)^(?P<name>[A-Z][A-Z0-9_]*)(?:: [^=\n]+)? = (?P<value>-?(?:0[xX][0-9a-fA-F_]+|0[oO][0-7_]+|0[bB][01_]+|\d[\d_]*(?:\.[\d_]*)?(?:[eE][-+]?\d+)?j?))(?![\w.])'
+    replace: (\g<value> + 1)

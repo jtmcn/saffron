@@ -1,10 +1,10 @@
 ---
 id: b-5b1f8a
 title: A witness whose expected value is the constant it tests cannot fail, and no gate or lens flags it
-status: partial
+status: done
 tier: 1
 filed: 2026-09-29
-closed:
+closed: 2026-11-18
 specs: [SA-0195, SA-0280]
 prs: [600, 908]
 commits: []
@@ -39,3 +39,6 @@ replaced the constant with a literal.
 - 2026-09-29: `SA-0195` (#600) made the adequacy prompt name the shape. No gate refuses it yet.
 - 2026-10-11: `SA-0280` queued. `witness` derives a constant mutant from patterns the repo declares under `policy.yaml`'s `witness:`. This repo's own block goes in by hand after it merges, since `.saffron/` is protected.
 - 2026-10-19, run 44: `SA-0280` (#908) derives constant mutants from the patterns a repo declares under `witness:`. This repo's own block in `.saffron/policy.yaml` still goes in by hand, so the item stays partial. Review found b-32b3db and b-b33854.
+- 2026-11-18: this repo's `witness:` block is in `.saffron/policy.yaml`, with
+  `SA-0280`'s measured patterns verbatim, by operator decision. `witness`
+  now mutates a constant a witness reads back.
