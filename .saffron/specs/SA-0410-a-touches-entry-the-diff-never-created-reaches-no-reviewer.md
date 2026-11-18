@@ -3,7 +3,7 @@ id: SA-0410
 title: A `touches` entry the diff never created reaches no reviewer
 type: feature
 priority: 2
-estimated_lines: 174
+estimated_lines: 182
 estimate_measured: true
 touches:
   - saffron/gates/core/scope.py
@@ -12,7 +12,6 @@ touches:
   - tests/test_worktree.py
   - tests/test_suite.py
   - tests/test_constant_mutants.py
-  - tests/test_scope.py
 forbidden:
   - DESIGN.md
   - CONTEXT.md
@@ -39,7 +38,7 @@ forbidden:
   - tests/test_session.py
   - tests/test_package.py
   - tests/test_review.py
-budget_usd: 50
+budget_usd: 56
 max_attempts: 3
 max_turns: 245
 risk: standard
@@ -50,10 +49,11 @@ acceptance:
       literal entry holds no `*` and no `?`. Its summary is the pass count,
       then `; touches entries absent at base and never created: `, then those
       entries in `touches` order, joined by `, `. Two such entries in the
-      middle of a ten-entry `touches` are both named. Never named are a glob
-      in each of its forms (`**`, `*` and `?`), a path present at base (a
-      directory, and a file whose name holds `[`), a path the diff
-      creates and a path the diff deletes. The status stays `pass` with no
+      middle of an eleven-entry `touches` are both named. Never named are a
+      glob in each of its forms (`**`, `*` and `?`), a path present at base
+      (a directory, and a file whose name holds `[`), a file the diff
+      creates, a file the diff deletes, and a directory whose only file the
+      diff deletes. The status stays `pass` with no
       failure. The baseline summary for the same spec names nothing. The
       lenses' gate text carries the whole summary on the `scope` line.
     witness: tests/test_worktree.py::test_a_passing_scope_names_each_touches_entry_the_diff_never_created
@@ -63,6 +63,7 @@ acceptance:
       - Every literal entry outside the changed files is named with no read of the base, so `src/x[1].py` and `docs` are named.
       - The changed files are not taken out first, so `src/made.py`, which the diff creates, is named.
       - Presence is read at HEAD and the changed files are not taken out, so `old.py`, which the diff deletes, is named.
+      - Presence is read at HEAD with the changed files taken out, so `lib/old`, whose only file the diff deletes, is named.
       - The base read lists files alone (`ls-tree -r`), so the directory entry `docs` is named.
       - The base read matches each entry as a shell pattern over the base listing, so `src/x[1].py` is named.
       - The entries are sorted, so `new_top.py` comes before `src/gone/deep.py`.
@@ -81,13 +82,17 @@ acceptance:
       - The baseline call reads the base too, so the head call sends one command fewer than its baseline.
   - claim: >-
       `worktree.absent_at(target, base_sha, paths)` returns each of `paths`
-      with no entry in `base_sha`'s tree, in the order given. When git exits
-      nonzero it raises `runtime.CellRuntimeError` carrying git's stderr, so
+      with no entry in `base_sha`'s tree, in the order given. Two absent
+      paths around a present one come back as those two, in order. The read
+      names `base_sha` itself. When git exits nonzero it raises `runtime.CellRuntimeError` carrying git's stderr, so
       a failed read is never taken as an empty tree.
     witness: tests/test_worktree.py::test_a_failed_read_of_the_base_raises_rather_than_naming_every_path
     wrong_versions:
       - The exit code is not read, so a refused read returns every path as absent.
       - A refused read returns an empty list, so nothing is named and nothing raises.
+      - The absent paths come back in reverse order.
+      - The absent paths come back sorted, as a set difference.
+      - The read ignores `base_sha` and reads HEAD.
   - claim: >-
       A spec whose `touches` are all globs keeps its baseline summary and its
       head summary as they read at base.
@@ -162,7 +167,8 @@ the one place every lens already reads.
    named, matched or not. A `[` is literal, as `matches` reads it.
 3. **The base decides.** A path present at the base is never named, a
    directory included. The changed files are taken out before the base is
-   asked, so a created path and a deleted one are never named.
+   asked, so a created file and a deleted one are never named. A
+   directory the diff empties is still present at base.
 4. **Head only.** The baseline call names nothing and reads nothing more.
 5. **Nothing left, nothing read.** A `touches` of globs and changed
    files leaves the base nothing to answer. Its head call sends the cell
@@ -181,6 +187,12 @@ the one place every lens already reads.
   it (`DESIGN.md` §2.1). b-71e2df stays partial on it.
 - **The two direct `scope_gate` calls.** PACKAGE's own scope check and
   replay hand it no base read, so their summaries do not change.
+- **A literal directory entry whose files the diff creates.** Say
+  `touches` lists `pkg` beside `pkg/**`, and the diff adds `pkg/a.py`. Then
+  `pkg` is absent at base and is not itself a changed file, so it is named.
+  The claim covers a created file alone. Leaving a directory out would cost
+  a prefix check and a fixture of its own, for a `touches` shape no spec here
+  uses.
 - **A glob that matches nothing.** This spec never names it, and leaves
   reporting it to a later item.
 - **`DESIGN.md`.** §5.4's gate roles row for `scope` is protected. One
@@ -204,8 +216,8 @@ directly. `CellTree.absent_at` calls `worktree.absent_at`, the function
 criterion 3 names. One `git --literal-pathspecs ls-tree -z --name-only
 --full-tree <base> -- <paths>` through `_git` answers every path at once. It
 prints a directory entry by its own name, and a path under a missing
-directory prints nothing. Measured on host git 2.54.0, 2026-11-17, and not
-on the cell image's git. Add
+directory prints nothing. A bad tree-ish exits 128. Measured on host git
+2.54.0 and the cell image's git 2.47.3 (2026-11-17). Add
 `absent_at` to `_Tree` (an empty list) and to `_GitTree` (its own `ls-tree`),
 or the protocol and criterion 5's test break. Add no module under
 `saffron/gates/core/`, which is the trap the item records.
@@ -218,15 +230,15 @@ real host git seam. `_exec_in` runs `runtime.exec_` on the host
 `CellSpec`, a `GateSuite` and a `CellTree` over that seam
 (`tests/test_worktree.py:1213-1267`). Share one helper between criteria 1 and
 2. It sets `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` to `os.devnull` and
-inits a repo. It writes `src/a.py`, `src/x[1].py`, `docs/guide.md` and
-`old.py`. It installs a spy over `_exec_in` that records each command, then
+inits a repo. It writes `src/a.py`, `src/x[1].py`, `docs/guide.md`,
+`old.py` and `lib/old/only.py`. It installs a spy over `_exec_in` that records each command, then
 commits the base. It takes `suite.baseline`. At head it edits `src/a.py`,
-adds `src/made.py` and deletes `old.py`, then commits and calls
+adds `src/made.py`, and deletes `old.py` and `lib/old/only.py`. Then it commits and calls
 `suite.against`. It returns both suites and the commands each call sent. Use
 `Policy(gates={}, ...)`, so no declared gate is invoked.
 
-For criterion 1, declare these ten entries in this order: `src/a.py`,
-`src/gone/deep.py`, `src/x[1].py`, `lib/**`, `docs`, `src/made.py`,
+For criterion 1, declare these eleven entries in this order: `src/a.py`,
+`src/gone/deep.py`, `src/x[1].py`, `lib/**`, `lib/old`, `docs`, `src/made.py`,
 `new_top.py`, `old.py`, `lib/*.py`, `README?.md`. Assert the head result's
 status, failures and summary together, as one tuple, with the summary
 compared whole. Assert the `scope` line of `gate_summary` over the head
@@ -237,13 +249,14 @@ that baseline read.
 For criterion 2, drive the same helper twice under one `tmp_path`, each in
 its own subdirectory. First with criterion 1's entries, and assert the head
 call sent more commands than the baseline call. That is the spy's positive
-case. Then with `src/**`, `old.py`, `src/made.py`, `lib/*.py` and
+case. Then with `src/**`, `old.py`, `src/made.py`, `lib/**`, `lib/*.py` and
 `README?.md`, and assert the two command lists are equal.
 
-For criterion 3, stub `worktree.runtime.exec_` to answer twice: first exit 0
-with `docs` and a NUL, then exit 128 with a stderr. Call `absent_at` with
-`docs` and one absent path each time. The first returns the absent path
-alone, which is the positive case. The second raises, matching the stderr.
+For criterion 3, stub `worktree.runtime.exec_` to record each command and
+answer twice: first exit 0 with `docs` and a NUL, then exit 128 with a
+stderr. Call `absent_at` with `z.py`, `docs` and `a.py` each time. The first
+returns `["z.py", "a.py"]`, which is the positive case, and its command holds
+the base sha. The second raises, matching the stderr.
 
 Import nothing new at module scope in a witness file. A name the change adds
 would make the reverted witness a collection error, which `revert` reads as
@@ -251,13 +264,13 @@ would make the reverted witness a collection error, which `revert` reads as
 
 **Measured on a prototype, 2026-11-17.** The change above and the three
 witnesses were built at `26754f35`. Each witness failed with `saffron/`
-reverted. Each of the 15 wrong versions above was applied as one edit, and
-each failed its witness. `ruff check`, `ruff format --check` and `ty check`
+reverted. Each of the 19 wrong versions above was applied, one at a time, and
+each failed its criterion's witness. `ruff check`, `ruff format --check` and `ty check`
 passed on the six Python files. `python3 hooks/prose_limit.py --file` read
 no new hit on each, once two first drafts were cut. `scope_gate`'s docstring
 is already over ten lines, so a sentence added to it is a `prose` hit, and
-"may" reads as a hedge. By `size_gate` the diff counted 694 changed tokens,
-475 of them under `tests/**`.
+"may" reads as a hedge. By `size_gate` the diff counted 727 changed tokens,
+508 of them under `tests/**`.
 
 **The `prose` gate** reads every new comment and docstring. Write none with
 an em dash, a semicolon, a contraction, the perfect tense or a sentence over
