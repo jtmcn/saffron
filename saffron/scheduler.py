@@ -152,7 +152,7 @@ def _stale_push_state(row: sqlite3.Row) -> bool:
     """Whether `row`'s state is one `STALE_PUSH_STATES` names, with no push
     recorded in that same state: `pushed_in_state` is anything else, `None`
     included (`SA-0330`, `b-e9dd4c`). Neither state is ever re-entered
-    (`SA-0331`), so nothing later ever makes such a push current again. The
+    (`SA-0331`, `SA-0408`), so nothing later ever makes such a push current again. The
     one rule `task.py`'s one-parent and multi-parent resolvers and
     `_stack_base_candidate` all read, rather than three copies of it."""
     return row["state"] in STALE_PUSH_STATES and row["pushed_in_state"] != row["state"]

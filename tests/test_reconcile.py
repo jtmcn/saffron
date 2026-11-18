@@ -1133,6 +1133,7 @@ def test_a_review_incomplete_row_is_asked_and_moves_on_no_answer_but_a_merge(led
     assert _state(ledger, merged_task) == "MERGED"
     assert _state(ledger, crashed_task) == "MERGED"
     assert _merged_head(ledger, merged_task) == _FIXED
+    assert HeadMoved(merged_task, _PUSHED, _FIXED) in result.head_moved
     assert crashed_url not in gh.calls
 
     for label in claimed:

@@ -3338,6 +3338,58 @@ def test_a_child_of_a_review_incomplete_parent_stacks_only_on_its_latest_runs_pu
     assert (stacked_on, branch) == (landed_sha, "saffron/SY-9100")
     ledger.close()
 
+    # An older row pushed what reached `base_sha`, and a newer stale row pushed past it.
+    # The older row still lands the parent, so the child stacks on the newer push.
+    _git(repo, "checkout", "-q", "saffron/SY-9100")
+    (repo / "later.txt").write_text("a later run\n")
+    _git(repo, "add", "-A")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=T", "commit", "-qm", "later")
+    later_sha = _rev_parse(repo, "HEAD")
+    _git(repo, "push", "-q", "origin", "saffron/SY-9100")
+    _git(repo, "checkout", "-q", main_branch)
+    mirror, url = _mirror_of(tmp_path, repo, name="rev-handmerged-older-mirror.git")
+
+    ledger = Ledger(tmp_path / "rev-handmerged-older.db")
+    repo_id = _seed_repo(tmp_path, ledger, "/o")
+    older = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-9100",
+        spec_sha="older",
+        state="READY_FOR_REVIEW",
+        branch="saffron/SY-9100",
+    )
+    ledger.record_push(older, landed_sha)
+    newer = _seed_task(
+        ledger,
+        repo_id,
+        spec_id="SY-9100",
+        spec_sha="newer",
+        state="READY_FOR_REVIEW",
+        branch="saffron/SY-9100",
+    )
+    ledger.record_push(newer, later_sha)
+    ledger.set_task_state(newer, "REVIEW_INCOMPLETE")
+
+    try:
+        stacked_on, branch = task._resolve_stacked_on(
+            ledger,
+            repo_id,
+            ["SY-9100"],
+            mirror=mirror,
+            url=url,
+            base_sha=base_sha,
+            spec_id="SY-2",
+            emit=lambda _: None,
+            gh=None,
+        )
+    except task._StackingRefused as refused:
+        raise AssertionError(
+            f"the older row lands SY-9100: {refused.reason}"
+        ) from refused
+    assert (stacked_on, branch) == (later_sha, "saffron/SY-9100")
+    ledger.close()
+
     # Case 8: with no `gh`, retired at `base_sha` instead of a `MERGED` row.
     repo, main_branch = _pushed_saffron_repo(
         tmp_path,
@@ -3431,18 +3483,18 @@ def test_a_multi_parent_child_is_refused_for_any_open_review_incomplete_parent_t
     def _no_cell(*_a, **_k):
         raise AssertionError("run_one_cell must not run for a refused task")
 
-    # The deepest parent, TF-B, is `REVIEW_INCOMPLETE` with no push, refused through `cli._run_cell` with a `gh`.
-    # The unattended path refuses it the same way, through `cli._batch_runner` with none.
+    # The deepest parent, TF-97, is `REVIEW_INCOMPLETE` with no push, refused through `cli._run_cell` with a `gh`.
+    # The unattended path refuses it the same way. Numeric ids make TF-97 the chain's deepest parent.
     for use_gh in (False, True):
         repo, main_branch = _pushed_saffron_repo(
             tmp_path,
             f"repo-rev-deepest-{use_gh}",
             [
-                ("pa.md", _chain_spec_text("TF-A")),
-                ("pb.md", _chain_spec_text("TF-B", depends_on=["TF-A"])),
+                ("pa.md", _chain_spec_text("TF-96")),
+                ("pb.md", _chain_spec_text("TF-97", depends_on=["TF-96"])),
             ],
         )
-        head_a = _push_stacked_branch(repo, "saffron/TF-A", main_branch)
+        head_a = _push_stacked_branch(repo, "saffron/TF-96", main_branch)
         _git(repo, "checkout", "-q", main_branch)
 
         ledger = Ledger(tmp_path / f"rev-deepest-{use_gh}.db")
@@ -3450,15 +3502,15 @@ def test_a_multi_parent_child_is_refused_for_any_open_review_incomplete_parent_t
         parent_a = _seed_task(
             ledger,
             repo_id,
-            spec_id="TF-A",
+            spec_id="TF-96",
             state="READY_FOR_REVIEW",
-            branch="saffron/TF-A",
+            branch="saffron/TF-96",
         )
         ledger.record_push(parent_a, head_a)
         _seed_task(
             ledger,
             repo_id,
-            spec_id="TF-B",
+            spec_id="TF-97",
             state="REVIEW_INCOMPLETE",
             pr_url="https://example.invalid/pull/revb",
         )
@@ -3466,7 +3518,7 @@ def test_a_multi_parent_child_is_refused_for_any_open_review_incomplete_parent_t
         monkeypatch.setattr("saffron.task.run_one_cell", _no_cell)
         if use_gh:
             args = _namespace(repo, tmp_path)
-            args.spec = _ceiling_spec(tmp_path, depends_on="[TF-A, TF-B]")
+            args.spec = _ceiling_spec(tmp_path, depends_on="[TF-96, TF-97]")
             monkeypatch.setattr("saffron.cli.run_gh", _gh_open)
             result = cli._run_cell(args, ledger, tmp_path / "out")
             printed = capsys.readouterr().out
@@ -3483,7 +3535,7 @@ def test_a_multi_parent_child_is_refused_for_any_open_review_incomplete_parent_t
                     title="t",
                     type="feature",
                     touches=["src/**"],
-                    depends_on=["TF-A", "TF-B"],
+                    depends_on=["TF-96", "TF-97"],
                 ),
                 spec_sha="s" * 64,
                 task_id=None,
@@ -3499,10 +3551,10 @@ def test_a_multi_parent_child_is_refused_for_any_open_review_incomplete_parent_t
             assert isinstance(returned, task.Refused)
             printed = returned.reason
 
-        assert "depends_on TF-B is REVIEW_INCOMPLETE" in printed
+        assert "depends_on TF-97 is REVIEW_INCOMPLETE" in printed
         assert "its latest run pushed nothing" in printed
         assert "REBUTTAL_UNJUDGED" not in printed
-        assert "TF-A" not in printed.replace("depends_on TF-B", "", 1)
+        assert "TF-96" not in printed.replace("depends_on TF-97", "", 1)
         ledger.close()
 
     # A real stack: TF-72 depends on TF-73, on TF-71.
@@ -3541,26 +3593,27 @@ def test_a_multi_parent_child_is_refused_for_any_open_review_incomplete_parent_t
 
     # A shallower parent (TF-71) is stale, while the deepest (TF-73) is
     # fine. Only TF-71 is named.
-    ledger = Ledger(tmp_path / "rev-shallow.db")
-    repo_id = _seed_repo(tmp_path, ledger, "/o")
-    t71, _t73 = _seed_chain(ledger, repo_id)
-    ledger.set_task_state(t71, "REVIEW_INCOMPLETE")
-    with pytest.raises(task._StackingRefused) as excinfo:
-        task._resolve_stacked_on(
-            ledger,
-            repo_id,
-            ["TF-71", "TF-73"],
-            mirror=mirror,
-            url=url,
-            base_sha=base_sha,
-            spec_id="SY-1",
-            emit=lambda _: None,
-            gh=None,
-        )
-    assert "TF-71 is REVIEW_INCOMPLETE" in excinfo.value.reason
-    assert "TF-73" not in excinfo.value.reason
-    assert "REBUTTAL_UNJUDGED" not in excinfo.value.reason
-    ledger.close()
+    for gh in (None, _gh_open):
+        ledger = Ledger(tmp_path / f"rev-shallow-{gh is None}.db")
+        repo_id = _seed_repo(tmp_path, ledger, "/o")
+        t71, _t73 = _seed_chain(ledger, repo_id)
+        ledger.set_task_state(t71, "REVIEW_INCOMPLETE")
+        with pytest.raises(task._StackingRefused) as excinfo:
+            task._resolve_stacked_on(
+                ledger,
+                repo_id,
+                ["TF-71", "TF-73"],
+                mirror=mirror,
+                url=url,
+                base_sha=base_sha,
+                spec_id="SY-1",
+                emit=lambda _: None,
+                gh=gh,
+            )
+        assert "TF-71 is REVIEW_INCOMPLETE" in excinfo.value.reason
+        assert "TF-73" not in excinfo.value.reason
+        assert "REBUTTAL_UNJUDGED" not in excinfo.value.reason
+        ledger.close()
 
     # TF-73 and TF-71 are both fine, but a third, off-chain parent, TF-90,
     # is stale. Its own reason is named, never the chain conflict.
@@ -3579,93 +3632,95 @@ def test_a_multi_parent_child_is_refused_for_any_open_review_incomplete_parent_t
     o_base_sha = _rev_parse(repo2, main2)
     o_mirror, o_url = _mirror_of(tmp_path, repo2, name="rev-offchain-mirror.git")
 
-    ledger = Ledger(tmp_path / "rev-offchain.db")
-    repo_id = _seed_repo(tmp_path, ledger, "/o")
-    t71 = _seed_task(
-        ledger,
-        repo_id,
-        spec_id="TF-71",
-        state="READY_FOR_REVIEW",
-        branch="saffron/TF-71",
-    )
-    ledger.record_push(t71, o_head71)
-    t73 = _seed_task(
-        ledger,
-        repo_id,
-        spec_id="TF-73",
-        state="READY_FOR_REVIEW",
-        branch="saffron/TF-73",
-    )
-    ledger.record_push(t73, o_head73)
-    _seed_task(
-        ledger,
-        repo_id,
-        spec_id="TF-90",
-        state="REVIEW_INCOMPLETE",
-        pr_url="https://example.invalid/pull/rev90",
-    )
-    with pytest.raises(task._StackingRefused) as excinfo:
-        task._resolve_stacked_on(
+    for gh in (None, _gh_open):
+        ledger = Ledger(tmp_path / f"rev-offchain-{gh is None}.db")
+        repo_id = _seed_repo(tmp_path, ledger, "/o")
+        t71 = _seed_task(
             ledger,
             repo_id,
-            ["TF-73", "TF-90"],
-            mirror=o_mirror,
-            url=o_url,
-            base_sha=o_base_sha,
-            spec_id="SY-1",
-            emit=lambda _: None,
-            gh=None,
+            spec_id="TF-71",
+            state="READY_FOR_REVIEW",
+            branch="saffron/TF-71",
         )
-    assert "TF-90 is REVIEW_INCOMPLETE" in excinfo.value.reason
-    assert "outside" not in excinfo.value.reason
-    assert "chain" not in excinfo.value.reason
-    ledger.close()
+        ledger.record_push(t71, o_head71)
+        t73 = _seed_task(
+            ledger,
+            repo_id,
+            spec_id="TF-73",
+            state="READY_FOR_REVIEW",
+            branch="saffron/TF-73",
+        )
+        ledger.record_push(t73, o_head73)
+        _seed_task(
+            ledger,
+            repo_id,
+            spec_id="TF-90",
+            state="REVIEW_INCOMPLETE",
+            pr_url="https://example.invalid/pull/rev90",
+        )
+        with pytest.raises(task._StackingRefused) as excinfo:
+            task._resolve_stacked_on(
+                ledger,
+                repo_id,
+                ["TF-73", "TF-90"],
+                mirror=o_mirror,
+                url=o_url,
+                base_sha=o_base_sha,
+                spec_id="SY-1",
+                emit=lambda _: None,
+                gh=gh,
+            )
+        assert "TF-90 is REVIEW_INCOMPLETE" in excinfo.value.reason
+        assert "outside" not in excinfo.value.reason
+        assert "chain" not in excinfo.value.reason
+        ledger.close()
 
     # TF-73 is `REBUTTAL_UNJUDGED` with a stale push, and TF-90 is
     # `REVIEW_INCOMPLETE` with none. Both are named in their own state.
-    ledger = Ledger(tmp_path / "rev-both.db")
-    repo_id = _seed_repo(tmp_path, ledger, "/o")
-    t71 = _seed_task(
-        ledger,
-        repo_id,
-        spec_id="TF-71",
-        state="READY_FOR_REVIEW",
-        branch="saffron/TF-71",
-    )
-    ledger.record_push(t71, o_head71)
-    t73 = _seed_task(
-        ledger,
-        repo_id,
-        spec_id="TF-73",
-        state="READY_FOR_REVIEW",
-        branch="saffron/TF-73",
-    )
-    ledger.record_push(t73, o_head73)
-    ledger.set_task_state(t73, "REBUTTAL_UNJUDGED")
-    _seed_task(
-        ledger,
-        repo_id,
-        spec_id="TF-90",
-        state="REVIEW_INCOMPLETE",
-        pr_url="https://example.invalid/pull/rev90b",
-    )
-    with pytest.raises(task._StackingRefused) as excinfo:
-        task._resolve_stacked_on(
+    for gh in (None, _gh_open):
+        ledger = Ledger(tmp_path / f"rev-both-{gh is None}.db")
+        repo_id = _seed_repo(tmp_path, ledger, "/o")
+        t71 = _seed_task(
             ledger,
             repo_id,
-            ["TF-73", "TF-90"],
-            mirror=o_mirror,
-            url=o_url,
-            base_sha=o_base_sha,
-            spec_id="SY-1",
-            emit=lambda _: None,
-            gh=None,
+            spec_id="TF-71",
+            state="READY_FOR_REVIEW",
+            branch="saffron/TF-71",
         )
-    assert "TF-73 is REBUTTAL_UNJUDGED" in excinfo.value.reason
-    assert "TF-90 is REVIEW_INCOMPLETE" in excinfo.value.reason
-    assert "its latest run pushed nothing" not in excinfo.value.reason
-    assert "their latest run pushed nothing" in excinfo.value.reason
-    ledger.close()
+        ledger.record_push(t71, o_head71)
+        t73 = _seed_task(
+            ledger,
+            repo_id,
+            spec_id="TF-73",
+            state="READY_FOR_REVIEW",
+            branch="saffron/TF-73",
+        )
+        ledger.record_push(t73, o_head73)
+        ledger.set_task_state(t73, "REBUTTAL_UNJUDGED")
+        _seed_task(
+            ledger,
+            repo_id,
+            spec_id="TF-90",
+            state="REVIEW_INCOMPLETE",
+            pr_url="https://example.invalid/pull/rev90b",
+        )
+        with pytest.raises(task._StackingRefused) as excinfo:
+            task._resolve_stacked_on(
+                ledger,
+                repo_id,
+                ["TF-73", "TF-90"],
+                mirror=o_mirror,
+                url=o_url,
+                base_sha=o_base_sha,
+                spec_id="SY-1",
+                emit=lambda _: None,
+                gh=gh,
+            )
+        assert "TF-73 is REBUTTAL_UNJUDGED" in excinfo.value.reason
+        assert "TF-90 is REVIEW_INCOMPLETE" in excinfo.value.reason
+        assert "its latest run pushed nothing" not in excinfo.value.reason
+        assert "their latest run pushed nothing" in excinfo.value.reason
+        ledger.close()
 
     # A deepest parent that pushed in `REVIEW_INCOMPLETE` stacks on its head, in both `gh` modes.
     # Numeric ids, unlike TF-A/TF-B above: nothing here is stale, so the chain check runs and must parse.

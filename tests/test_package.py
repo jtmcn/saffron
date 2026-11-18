@@ -3882,7 +3882,7 @@ def test_another_review_incomplete_row_with_a_pull_request_keeps_that_branch(
 ):
     """Another row of this spec at `REVIEW_INCOMPLETE` that carries a pull
     request refuses a rerun's unpackaged push, whatever state the outcome
-    itself holds (`SA-0330`, `b-e9dd4c`). The remote branch stays where it
+    itself holds (`SA-0331`, `b-e9dd4c`). The remote branch stays where it
     was. An empty `pr_url` on that row lets the push through, and the
     branch moves. This holds on either side of the outcome's own task id."""
     import typing

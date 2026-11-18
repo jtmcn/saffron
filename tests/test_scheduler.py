@@ -3426,14 +3426,22 @@ def test_a_stack_order_refuses_a_child_whose_review_incomplete_stack_base_pushed
     )
     ledger.set_task_state(stale, "REVIEW_INCOMPLETE")
 
-    # TB-REVNOPUSH: `REVIEW_INCOMPLETE`, never pushed at all.
-    _task_at(
+    # TB-REVNOPUSH: carries a pull request, `REVIEW_INCOMPLETE`, never pushed at all.
+    nopush = _task_at(
         ledger,
         repo_id,
         spec_id="TB-REVNOPUSH",
         spec_sha="s",
-        state="REVIEW_INCOMPLETE",
+        state="READY_FOR_REVIEW",
     )
+    set_task_package(
+        ledger,
+        nopush,
+        "READY_FOR_REVIEW",
+        branch="saffron/TB-REVNOPUSH",
+        pr_url="https://example.invalid/revnopush",
+    )
+    ledger.set_task_state(nopush, "REVIEW_INCOMPLETE")
 
     # TB-REVNEWEST: an older, fully-qualifying row is hidden by a newer
     # `REVIEW_INCOMPLETE` row with a stale push. The newest row decides.
