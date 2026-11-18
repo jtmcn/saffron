@@ -4,7 +4,7 @@ title: A run's status reaches no fact, so a ledger folded from the record re-que
 type: bug
 priority: 3
 risk: elevated
-estimated_lines: 97
+estimated_lines: 100
 estimate_measured: true
 retired_first: []
 depends_on: [SA-0408, SA-0411]
@@ -46,48 +46,48 @@ forbidden:
   - tests/test_session.py
   - tests/test_ledger.py
   - tests/test_record_migrate.py
-budget_usd: 61
+budget_usd: 64
 max_attempts: 3
-max_turns: 290
+max_turns: 300
 acceptance:
   - claim: >-
       A ledger folded from the record gives each task's `runs` row the status
       the live ledger gave it, for each of `RUNNING`, `COMPLETE` and
-      `ABORTED`. A row that ended keeps a non-null `ended_at`, and a
-      `RUNNING` one keeps a null one. So `SA-0126`'s cap reads the folded
-      ledger as it reads the live one. Of three cuts of one spec at one
-      `spec_sha` and one `base_sha`, `row_is_orphaned_cut` holds only for the
-      one whose row finished `COMPLETE`. A later task of that spec, minted in
-      the folded ledger, finds that one through `previous_cut_orphan`. The
-      cap settles a second cut `NOT_IMPLEMENTED` on that answer.
+      `ABORTED`. A row that ended takes its `ended_at` from its
+      `run_finished` fact's time, and a `RUNNING` one keeps a null one. Of
+      three cuts of one spec at one `spec_sha` and one `base_sha`,
+      `row_is_orphaned_cut` holds only for the one whose row finished
+      `COMPLETE`. A later task of that spec, minted in the folded ledger,
+      finds that one through `previous_cut_orphan`.
     witness: tests/test_fold.py::test_a_folded_ledger_finds_the_earlier_cut_by_its_runs_own_status
     wrong_versions:
       - "`finish_run` appends no fact, as at base, so every folded row reads `RUNNING`."
       - The fold ignores `run_created` and lets a later task share a `RUNNING` row at its `base_sha`, so the `RUNNING` cut takes the `COMPLETE` cut's status.
       - "`finish_run` files `COMPLETE` whatever status it was given, so the `ABORTED` cut reads `COMPLETE` in both ledgers."
       - Placing `run_finished` leaves `ended_at` null, in the live ledger as in the fold.
+      - Placing `run_finished` takes `ended_at` from `datetime('now')`, so the folded time is the fold's own.
       - Placing `run_finished` names no row, so every `runs` row takes the last status applied.
   - claim: >-
-      A task whose record holds `run_created` folds onto a `runs` row of its
-      own, finished or not, and folding the same record again into the same
-      ledger leaves one row per task. A record that holds neither run fact
+      A task whose record holds either run fact folds onto a `runs` row of
+      its own, finished or not. That covers a task holding `run_finished`
+      with no `run_created`, after an older task with neither. Folding the
+      same record again into the same ledger leaves one row per task. A record that holds neither run fact
       folds as at base. Its tasks at one `base_sha` share one row, `RUNNING`
       with a null `ended_at`, through a second fold as well. In a record
       where one task holds the run facts and another does not, the one that
       does not never joins the other's finished row. It reads `RUNNING` with
       a null `ended_at`, whether it is the older task or the younger, through
       a second fold as well. Folded back into the ledger that wrote it, a
-      task whose row holds a baseline gate result raises nothing, and the
-      gate result keeps its row.
+      task keeps the row it ran on, twice over. Its `task_run` is that row,
+      the ledger holds one row, and the row keeps its `batch_id`, its
+      `preflight` and its baseline gate result.
     witness: tests/test_fold.py::test_a_task_whose_record_holds_run_created_folds_onto_a_run_of_its_own
     wrong_versions:
-      - The fold gives a task its own row only when its record holds `run_finished`, so two unfinished tasks share one row.
+      - The fold gives a task its own row only when its record holds `run_created`, so the task holding `run_finished` alone stamps the older task's row `COMPLETE`.
+      - A task with a run fact gets a new row even when the row it held survives the drop, so a fold into the writer moves it off its batch, preflight and baseline.
       - The fold gives every task its own row, so the record without run facts folds to three rows.
       - The fold never gives a task its own row, so the first unfinished task and the finished one share a row.
-      - A dropped task's row is never deleted, so the second fold of the record with run facts leaves six rows.
-      - A dropped task's row is deleted while another task still names it, so the second fold of the record without run facts raises.
       - "`create_task` appends no `run_created`, so the record with run facts folds to one row."
-      - A dropped task's row is deleted while a gate result still names it, so folding back into the writer raises.
       - A task with no `run_created` reuses any row at its `base_sha`, a finished one included, so in the mixed record it reads the other task's status.
   - claim: >-
       `create_task` appends `run_created` straight after `task_created`.
@@ -178,13 +178,16 @@ refused append raises out of `_append` and emits no event
    the status as the whole payload. It still writes the row's status when
    no task holds it. The row is committed before any append, as
    `_commit_and_append` does.
-3. **The fold reads both.** A task whose facts hold `run_created` folds onto
-   a new row of its own, never one `_run_for` would share. `run_finished`
-   sets that task's row's status and its `ended_at` from the fact's time.
-   Dropping a task in `fold_task` also deletes its row once no task and no
-   gate result names it. So a second fold leaves no empty row behind. A task with neither fact
-   still shares a row by `base_sha`, as at base. It never shares a row a
-   `run_finished` has set, which only a task with the facts can own.
+3. **The fold reads both.** `fold_task` first looks at the row the dropped
+   task hung from. Where no other task names it, the task goes back on it.
+   That row holds what no fact carries, such as `batch_id`, `preflight` and
+   baseline gate results. At base `_run_for` finds that row by `base_sha`
+   (`saffron/ledger.py:772-776`). With no such row, a task whose facts hold
+   either run fact folds onto a new row of its own, never one `_run_for`
+   would share. A task with neither fact still shares a row by `base_sha`,
+   as at base. It never shares a row a `run_finished` has set.
+   `run_finished` sets the task's row's status, and its `ended_at` from the
+   fact's time.
 
 ## Out of scope
 
@@ -196,12 +199,24 @@ refused append raises out of `_append` and emits no event
 - **`run_preflight`, `batch_id` and the batch facts.** `set_run_preflight`,
   `create_batch` and `attach_run_to_batch` still append nothing, so a fold
   leaves `runs.preflight` and `runs.batch_id` unset as at base.
-- **The kill path's order.** `_drive_cell` finishes the row `ABORTED` before
-  it stamps `ORPHANED` (`saffron/cell/session.py:4129-4132`). With a record
-  that refuses the `run_finished` append, `finish_run` now raises there, and
-  the task keeps its earlier state. At base `set_task_state` commits
-  `ORPHANED` and then raises. This spec forbids `saffron/cell/**`, which
-  `SA-0407` and `SA-0411` edit.
+- **A refused `run_finished` inside the cell.** `_drive_cell`'s `try` opens
+  at `saffron/cell/session.py:2504`. Every `finish_run(run_id, "COMPLETE")`
+  from `saffron/cell/session.py:2567` to `:3074`, and the one at `:4063`,
+  sits inside it. So a refused append on a settled ending enters
+  `except BaseException` (`saffron/cell/session.py:4126-4133`). That
+  overwrites the row `ABORTED`, and a task that ended `NOT_IMPLEMENTED`
+  can become `ORPHANED` and re-queue. On the kill path itself `finish_run`
+  now raises before `ORPHANED` is stamped, so the task keeps its earlier
+  state. At base `set_task_state` commits `ORPHANED` and then raises. Its
+  own append, inside the same `try`, already carries the first risk at
+  base. Only the batch scan, which stamps `ORPHANED`
+  (`saffron/cli.py:2518-2525`), recovers a task left in flight. This spec
+  forbids `saffron/cell/**`, which `SA-0407` and `SA-0411` edit.
+- **The false cut on a resumed row.** Take a cell killed without a raise on
+  a resumed row, then stamped by a scan. `DESIGN.md:600` says it reads as a
+  cut.
+  It names two ways out. This spec takes the `run_finished` branch, which
+  carries the status to a fold and leaves that false cut as it is.
 - **A row two live tasks share.** No live caller makes one. A record from a
   test that does folds each task onto its own row.
 - **`DESIGN.md` and `CONTEXT.md`.** §4.6 says every state read comes from
@@ -220,7 +235,10 @@ which has the `record` fixture. Criterion 3 goes in
 Criterion 4 goes in `tests/test_ledger_events.py`, which has
 `_RecordingRecord` and its `refuse` predicate. Import `CellSpec`,
 `previous_cut_orphan` and `row_is_orphaned_cut` from
-`saffron.cell.session`, and call neither query with an edit to it.
+`saffron.cell.session`, and call neither query with an edit to it. The cap's
+branch settles a second cut `NOT_IMPLEMENTED` when that lookup returns a
+task (`saffron/cell/session.py:3058-3072`). So criterion 1's last read is
+the answer that decides it.
 
 **Criterion 1's arrangement.** One live `Ledger` with a `MemoryRecord`. One
 repo, then three cuts in this order: `RUNNING`, `COMPLETE`, `ABORTED`. Each
@@ -230,7 +248,10 @@ opened in that phase and closed, `set_task_state` `ORPHANED`, and
 `finish_run` with the cut's status, skipped for `RUNNING`. Read each row's
 status and whether `ended_at` is set, through the task's `record_key`. Read
 them in the live ledger, then in a fresh `Ledger` the record is folded into.
-Both lists must be exactly the three in order. Then `row_is_orphaned_cut`
+Both lists must be exactly the three in order. Before the fold, set each
+`run_finished` fact's `at` to its own minute on a fixed past date, through
+the `MemoryRecord`'s `_facts`. Then the folded `ended_at` of each ended row
+must equal its fact's minute. Then `row_is_orphaned_cut`
 over the three folded task ids must be `[False, True, False]`. Mint one more
 task of the spec in the folded ledger, on its own `create_run`, and assert
 `previous_cut_orphan` returns the middle task's folded id. The `COMPLETE`
@@ -246,11 +267,20 @@ second live ledger and record hold two cuts, `COMPLETE` then `ABORTED`.
 Copy that record twice, each copy without the run facts of one task, the
 older and then the younger. Fold each copy twice into its own ledger.
 Expect two rows, the stripped task `RUNNING` and the other its own status.
-Last, a third live ledger cuts once, `COMPLETE`, and records a baseline
-gate result with `run_id` on that cut's row. Fold its record into that same
-ledger twice. Each time, expect the status kept and that gate result still
-on its row. `record_gate_result` stores a baseline result by `run_id`
-(`saffron/ledger.py:2296-2299`).
+Copy the first record once more. Drop both run facts from the first task
+and only `run_created` from the second. Fold it twice, and expect three
+rows and the three statuses of the first record.
+Last, a third live ledger cuts once, `COMPLETE`. Attach that cut's row to a
+batch, set its preflight `PASSED`, and record a baseline gate result with
+`run_id` on it. `record_gate_result` stores a baseline result by `run_id`
+(`saffron/ledger.py:2253-2285`). Fold its record into that same ledger
+twice. Each time, expect `task_run` to return the original row and the
+ledger to hold one row. Expect the status kept, `batch_id` set and
+`preflight` `PASSED`. Expect `baseline_results` of that row to hold one
+result. Measured at base, that
+fold keeps all of it. On the first prototype, which always minted a new
+row, `task_run` moved and `batch_id`, `preflight` and the baseline were
+lost.
 
 **Criterion 3's arrangement.** Two tasks on one row, a row with none, and a
 row with one task finished `ABORTED` and then `COMPLETE`. Count every fact
@@ -297,11 +327,10 @@ costs order and nothing else.
 witnesses were built at the base this spec was written on. Neither parent
 had a diff to apply. Each witness failed with `saffron/` reverted. One
 harness applied each wrong version above as one edit, and each of the
-twenty-two failed its own criterion's witness. The whole suite passed,
-5371 tests, with the tests listed above changed. That was before criterion
-2's witness took its last case, the baseline gate result. By `size_gate` the diff
-counted 387 changed tokens, with 960 more under the declared
-`tests/**` test paths.
+twenty-one failed its own criterion's witness. The whole suite passed,
+5371 tests, with the tests listed above changed. By `size_gate` the diff
+counted 399 changed tokens, with 1186 more under the declared `tests/**`
+test paths.
 
 **The `types` gate and `_apply`.** `_commit_and_append` forwards
 `**apply_kwargs: int | None` to `_apply` (`saffron/ledger.py:700`). So a
