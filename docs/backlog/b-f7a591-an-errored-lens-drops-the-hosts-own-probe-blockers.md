@@ -1,11 +1,11 @@
 ---
 id: b-f7a591
 title: "A lens that errors drops the host's criterion-probe blockers filed under it, and the log says it produced nothing"
-status: open
+status: partial
 tier: 2
 filed: 2026-10-11
 specs: [SA-0406, SA-0407]
-prs: []
+prs: [1247, 1250, 1252]
 commits: []
 cites: [§5.5]
 related: [b-032c3e, b-4e0868, 60]
@@ -38,3 +38,4 @@ beside a survived criterion probe and reads both in the outcome.
 ## Record
 
 - 2026-10-11: filed from the spec loop's run 34 (#809).
+- 2026-11-17: `SA-0406` (#1247) and `SA-0407` (#1250) send the host's survivors to REBUT beside a lens with an error. Any REBUT end but its own `EXHAUSTED` or `GATE_ERROR` leaves `REVIEW_INCOMPLETE` with a line naming each survivor. The item stays partial: on those two ends no line names the survivors.
