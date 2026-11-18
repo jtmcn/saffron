@@ -64,7 +64,7 @@ Most were wrong versions the spec listed and nothing applied. REBUT argued a
 real blocker away on #562, and no lens reads `CLAUDE.md`'s conventions.
 Run 21 closed the first two. The third is partial until ADR 8's measured pass.
 
-**Placed 2026-09-29**, from the spec loop's run 21: ~~**b-cf832a**~~, **b-5b1f8a**,
+**Placed 2026-09-29**, from the spec loop's run 21: ~~**b-cf832a**~~, ~~**b-5b1f8a**~~,
 then ~~**b-cd5fd2**~~. The loop repairs each by hand every run. One uncollectable
 id makes `revert` check no witness. A witness that reads the constant it tests
 cannot fail. A lens withdrew a real `preserves` blocker because its line sat
