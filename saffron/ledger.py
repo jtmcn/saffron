@@ -814,6 +814,8 @@ class Ledger:
         theirs."""
         payload = fact.payload
         repo_id = self._upsert_repo_for_fact(fact)
+        # ponytail: a task with no run fact shares a row by `base_sha`, since
+        # `batch_key` is NULL on every stored task.
         if exclude_keys:
             placeholders = ", ".join("?" for _ in exclude_keys)
             found = self._db.execute(
@@ -892,7 +894,8 @@ class Ledger:
 
     def _apply(self, fact: Fact, *, run_id: int | None = None) -> int | None:
         """Turn one task fact into rows. Commits nothing. `run_id` is a live
-        writer's own run, or a resolved one `fold_task` already computed."""
+        writer's own run, or one `fold_task` resolved. With neither, `_run_for`
+        finds it."""
         payload = fact.payload
         at = _ledger_time(fact.at)
         if fact.kind == "task_created":

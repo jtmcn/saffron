@@ -762,6 +762,10 @@ def _status_by_key(ledger, key):
     return _run_shape(ledger, _task_id_by_key(ledger, key))[0]
 
 
+def _shapes_by_key(ledger, keys):
+    return [_run_shape(ledger, _task_id_by_key(ledger, key)) for key in keys]
+
+
 def _grown_run_finished(key, at, status):
     return Fact(
         kind="run_finished",
@@ -787,11 +791,14 @@ def test_a_task_whose_record_holds_run_created_folds_onto_a_run_of_its_own(tmp_p
     keys = [source.record_key(t) for t in (older, middle, younger)]
     source.close()
 
+    three = [("RUNNING", False), ("COMPLETE", True), ("RUNNING", False)]
     into_a = Ledger(tmp_path / "into-a.db")
     fold(record, into_a)
     assert _row_count(into_a) == 3
+    assert _shapes_by_key(into_a, keys) == three
     fold(record, into_a)
     assert _row_count(into_a) == 3
+    assert _shapes_by_key(into_a, keys) == three
     into_a.close()
 
     # The same three, each with both run kinds dropped: back to the base
@@ -802,8 +809,10 @@ def test_a_task_whose_record_holds_run_created_folds_onto_a_run_of_its_own(tmp_p
     into_b = Ledger(tmp_path / "into-b.db")
     fold(stripped, into_b)
     assert _row_count(into_b) == 1
+    assert _shapes_by_key(into_b, keys) == [("RUNNING", False)] * 3
     fold(stripped, into_b)
     assert _row_count(into_b) == 1
+    assert _shapes_by_key(into_b, keys) == [("RUNNING", False)] * 3
     into_b.close()
 
     # A second live ledger, two cuts sharing one `base_sha`: `COMPLETE` then
@@ -825,6 +834,7 @@ def test_a_task_whose_record_holds_run_created_folds_onto_a_run_of_its_own(tmp_p
     fold(strip_older, into_c1)
     assert _row_count(into_c1) == 2
     assert _status_by_key(into_c1, key_older2) == "RUNNING"
+    assert _shapes_by_key(into_c1, [key_older2]) == [("RUNNING", False)]
     assert _status_by_key(into_c1, key_younger2) == "ABORTED"
     into_c1.close()
 
@@ -836,6 +846,7 @@ def test_a_task_whose_record_holds_run_created_folds_onto_a_run_of_its_own(tmp_p
     fold(strip_younger, into_c2)
     assert _row_count(into_c2) == 2
     assert _status_by_key(into_c2, key_younger2) == "RUNNING"
+    assert _shapes_by_key(into_c2, [key_younger2]) == [("RUNNING", False)]
     assert _status_by_key(into_c2, key_older2) == "COMPLETE"
     into_c2.close()
 
@@ -846,12 +857,30 @@ def test_a_task_whose_record_holds_run_created_folds_onto_a_run_of_its_own(tmp_p
         {keys[0]: {"run_created", "run_finished"}, keys[1]: {"run_created"}},
     )
     into_d = Ledger(tmp_path / "into-d.db")
-    fold(mixed, into_d)
-    assert _row_count(into_d) == 3
-    assert _status_by_key(into_d, keys[0]) == "RUNNING"
-    assert _status_by_key(into_d, keys[1]) == "COMPLETE"
-    assert _status_by_key(into_d, keys[2]) == "RUNNING"
+    for _ in range(2):
+        fold(mixed, into_d)
+        assert _row_count(into_d) == 3
+        assert _status_by_key(into_d, keys[0]) == "RUNNING"
+        assert _status_by_key(into_d, keys[1]) == "COMPLETE"
+        assert _status_by_key(into_d, keys[2]) == "RUNNING"
+        assert _shapes_by_key(into_d, keys) == three
     into_d.close()
+
+    # The older task holds `run_finished` alone and the younger is bare.
+    # The bare task never joins the older task's row.
+    finished_only = _copy_without(
+        record2,
+        {key_older2: {"run_created"}, key_younger2: {"run_created", "run_finished"}},
+    )
+    into_f = Ledger(tmp_path / "into-f.db")
+    for _ in range(2):
+        fold(finished_only, into_f)
+        assert _row_count(into_f) == 2
+        assert _shapes_by_key(into_f, [key_older2, key_younger2]) == [
+            ("COMPLETE", True),
+            ("RUNNING", False),
+        ]
+    into_f.close()
 
     # A third live ledger, two cuts sharing one `base_sha`, both `RUNNING`.
     # Three copies of its record grow a `run_finished` between two folds.

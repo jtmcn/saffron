@@ -461,7 +461,7 @@ def test_the_exit_push_carries_each_appended_key_once_to_its_own_origin(
         key_earlier
     )
     assert RefsRecord(origin_b).read(key_kinds) == RefsRecord(mirror_b).read(key_kinds)
-    # `create_task` writes `task_created` then `run_created` together, ahead
+    # `create_task` writes `task_created` then `run_created` back to back, ahead
     # of every other kind the loop above appends in `KINDS`' own order.
     expected_order = ["task_created", "run_created"] + [
         kind for kind in KINDS if kind not in ("task_created", "run_created")
