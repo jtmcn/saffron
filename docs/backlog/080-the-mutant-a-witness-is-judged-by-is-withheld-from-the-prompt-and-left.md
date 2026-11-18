@@ -111,3 +111,6 @@ that must never reach a cell and must be handed to every cloud host.
   quoted its `find` text in the body. Seeding it refuses the task
   through `refuse_disclosed_mutants`. The batch's spec review caught it at
   $12.95. `driver.py check` could refuse such a body before any review.
+- 2026-11-18: `driver.py check` blocks a spec whose body or claim quotes
+  its own mutant's `find`, through `refuse_disclosed_mutants`. The item stays
+  partial on the withheld mutant left in the worktree.

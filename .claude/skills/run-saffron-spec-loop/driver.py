@@ -2819,6 +2819,21 @@ def _subject_concerns(target: Spec) -> list[str]:
     ]
 
 
+def _disclosure_blocker(target: Spec) -> str | None:
+    """Item 080: seeding refuses a spec that quotes its own mutant's `find`,
+    so `check` names it before any review pays to find it."""
+    from saffron.intake import DisclosedMutantError, refuse_disclosed_mutants
+
+    filled = _with_ref_mutants(target)
+    if isinstance(filled, str):
+        return None
+    try:
+        refuse_disclosed_mutants(filled)
+    except DisclosedMutantError as err:
+        return str(err)
+    return None
+
+
 def _review_change_lines(target: Spec, specs: dict[str, Spec]) -> list[str]:
     """One `review:` line per live ancestor, reached through `depends_on` at
     any depth, whose `touches` names a REVIEW-shaping path. A stacked
@@ -2902,12 +2917,11 @@ def cmd_check(args) -> int:
         print(f"concern: {size_concern}")
     for line in _review_change_lines(target, specs) + _subject_concerns(target):
         print(line)
-    cite_blocker = _cite_blocker(target, specs)
+    late = [b for b in (_cite_blocker(target, specs), _disclosure_blocker(target)) if b]
     if not rows:
-        for blocker in (size_blocker, cite_blocker):
-            if blocker:
-                print(f"blocker: {blocker}")
-        return 1 if size_blocker or cite_blocker else 0
+        for blocker in ([size_blocker] if size_blocker else []) + late:
+            print(f"blocker: {blocker}")
+        return 1 if size_blocker or late else 0
     blockers = [
         b
         for b in (
@@ -2922,9 +2936,9 @@ def cmd_check(args) -> int:
         print(f"blocker: {blocker}")
     if not blockers:
         print("check: ceilings clear this shape's history")
-    if cite_blocker:
-        print(f"blocker: {cite_blocker}")
-    return 1 if blockers or cite_blocker else 0
+    for blocker in late:
+        print(f"blocker: {blocker}")
+    return 1 if blockers or late else 0
 
 
 _TRUNK = "origin/main"  # the ref a spec's citations are written against

@@ -85,6 +85,8 @@ matches prints `no past cells of this shape to compare against`, which is a
 note rather than a pass. A `concern:` names a criterion whose mutant, read from
 `refs/saffron/mutants`, edits a file outside `touches` and declares no `subject:`. `revert` sets that
 witness aside, so ask the spec's author for a `subject:` (b-000d04).
+A `blocker:` names a spec whose body or claim quotes its own mutant's `find`.
+Seeding that mutant refuses the task, so revise the spec before the batch.
 
 A spec whose code reads `.saffron/specs/` gets one more question. Does it
 need `done/`, where every merged spec lives? A projection that missed it kept
