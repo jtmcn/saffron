@@ -5,6 +5,7 @@ import hashlib
 import ipaddress
 import itertools
 import json
+import re
 import shutil
 import subprocess
 import time
@@ -18216,7 +18217,7 @@ def _host_survivor_cell(
     """A cell whose criterion 1 probe survives on `src/x.py` and whose
     criterion 2's own wrong version survives on `src/y.py`, both host-filed
     under `adequacy` (backlog b-f7a591). `grows_after_rebuttal` makes the
-    exported patch `_GROWN_PATCH` once the rebuttal turn has run, and
+    exported patch `_GROWN_PATCH` once the rebuttal turn runs, and
     `_ANCHORING_DIFF` before it, the way REBUT's own patch-rejection
     witnesses need."""
     cell = _stub_the_runtime(
@@ -18739,3 +18740,10 @@ def test_a_review_cut_at_its_pool_or_left_no_survivor_sends_nothing_to_rebut(
     review_lines3 = [line for line in cell3.watched if line.startswith("REVIEW:")]
     assert review_lines3[-1] == f"REVIEW: {review._errored_lens_line(['conventions'])}"
     assert not any(line.startswith("REBUT:") for line in cell3.watched)
+
+
+def test_the_host_survivor_cells_own_docstring_takes_no_perfect_tense():
+    doc = _host_survivor_cell.__doc__
+    assert doc is not None
+    assert re.search(r"\b(?:has|have|had)\s+(?:already\s+)?run\b", doc, re.I) is None
+    assert "once the rebuttal turn runs" in doc
