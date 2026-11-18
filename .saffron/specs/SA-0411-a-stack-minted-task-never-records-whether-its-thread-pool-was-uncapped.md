@@ -4,7 +4,7 @@ title: A task a `--stack` batch mints never records whether its thread pool was 
 type: bug
 priority: 3
 risk: elevated
-estimated_lines: 141
+estimated_lines: 145
 estimate_measured: true
 depends_on: [SA-0407, SA-0408, SA-0409]
 touches:
@@ -47,21 +47,23 @@ acceptance:
       A task a `--stack` batch's `_stack_mint` mints carries
       `thread_pool_uncapped` on its own `task_created` fact. The value comes
       from the `.saffron/policy.yaml` at the pinned `base_sha`, never from
-      the mirror's first or newest commit. It is true on a dialect that
-      shares the host kernel when that policy's `thread_env` names no entry,
-      for podman's dialect and for a shared-kernel dialect under another
-      binary, each with `thread_env` absent and with it empty. It is false
-      when `thread_env` names an entry, and false on apple/container's
-      dialect and on one whose `unattended` is false. It is `None` when the
+      another commit of the mirror. It is true on a dialect that shares the
+      host kernel when that policy's `thread_env` names no entry, for
+      podman's dialect and for a shared-kernel dialect under another binary,
+      each with `thread_env` absent and with it empty. Under podman an empty
+      `policy.yaml` is true too. It is false when `thread_env` names an
+      entry, and false on apple/container's dialect, and on a dialect with
+      its own kernel whose `unattended` is false. It is `None` when the
       pinned `base_sha` holds no policy, under podman's dialect and under
       apple/container's. A policy there that is not valid YAML, or whose
-      fields do not validate, raises `PolicyError` from the mint under each
-      of those two dialects, and no run and no task are written.
+      `thread_env` or another field does not validate, raises `PolicyError`
+      from the call to the mint under each of those two dialects, and no run
+      and no task are written.
     witness: tests/test_cli.py::test_the_stack_mint_records_whether_the_thread_pool_is_uncapped_from_the_policy_at_the_pinned_base
     wrong_versions:
       - The mint passes no `thread_pool_uncapped`, as at base, so every case reads `None`.
-      - The mint reads the policy at the mirror's `HEAD`, so a case whose newest commit answers the opposite fails.
-      - The mint reads the policy at the pinned `base_sha`'s parent, so a case whose first commit answers the opposite fails.
+      - The mint reads the policy at the mirror's `HEAD`, so a case whose newest commit answers differently fails.
+      - The mint reads the policy at the pinned `base_sha`'s parent, so a case whose parent commit answers differently fails.
       - The mint keeps its own copy of the rule and reads `not unattended` where `shares_kernel` belongs, so the unproven VM dialect reads true.
       - The mint keeps its own copy of the rule and compares the dialect's binary with `podman`, so the shared kernel under another binary reads false.
       - The mint reads an absent policy as an empty `thread_env`, so the no-policy case reads true where `None` belongs.
@@ -73,6 +75,9 @@ acceptance:
       - The mint catches a YAML error alone and files `None` for a policy whose fields do not validate.
       - The mint reads the policy after it opens the run, so a broken policy leaves a run row behind.
       - The mint reads no policy on a dialect with its own kernel and files false there, so apple/container with no policy reads false where `None` belongs.
+      - The mint files `None` for any falsy policy text, so an empty `policy.yaml` under podman reads `None` where true belongs.
+      - The mint reads the policy once in `_stack_mint`'s own body, outside its minting closure, so a broken policy raises when the mint is built and not when it is called.
+      - "The mint reads `thread_env` from the YAML itself and validates no other field, so `nope: 1` mints a task."
   - claim: >-
       A task a cell mints still records `thread_pool_uncapped` true on a
       shared kernel with no `thread_env` entry and false otherwise, and warns
@@ -80,6 +85,7 @@ acceptance:
     witness: tests/test_session.py::test_a_shared_kernel_task_with_no_thread_env_entries_warns_and_records_an_uncapped_pool
     preserves: true
     wrong_versions:
+      - The cell never warns at preflight, whatever the rule answers.
       - The cell passes an empty `thread_env` to the shared rule, so podman with an entry reads true.
       - The cell's call drops the dialect and reads `not policy.thread_env` alone, so apple/container reads true.
 ---
@@ -123,6 +129,12 @@ cell's branch above never mints it (`saffron/cli.py:935-940`). Measured at
 that `main`, a mint over a mirror whose policy at the pinned `base_sha`
 declares no `thread_env`, under podman's dialect, filed
 `thread_pool_uncapped: None`.
+
+**Which dialects reach the mint.** A `saffron batch` refuses every dialect
+whose `unattended` is false (`saffron/cli.py:2429`), podman's included
+(`saffron/cell/runtimes/podman.py:94-97`). So a `--stack` night records
+false under apple/container. True is reachable only through the follow-up
+mint `saffron finish` builds (`saffron/cli.py:2886`), under podman.
 
 **The same policy.** `run_task` builds the cell's `CellSpec` with
 `base_sha=base.base_sha` (`saffron/task.py:863`). Its `base` is the same
@@ -181,14 +193,29 @@ none of its tasks says whether its thread pool was uncapped.
   unreadable.
 - **A `tasks` column.** `SA-0282` left the value on the fact alone, since
   nothing reads it from the ledger.
+- **A witness for the one rule.** No witness can see that the mint and the
+  cell share one function. An identical copy of the rule inline in
+  `_stack_mint` passes every test. Problem 1 asks for the move, and
+  criterion 1's wrong versions kill only a copy that diverges.
 
 ## Notes for the agent
 
-**Mutants and new code.** Criterion 1's read in `_stack_mint` is new code
-whose spelling is yours. So it declares a witness and no mutant, and
-`witness` will report `skip` for it. Criterion 2 names a test that exists
-at your base and must stay green. It already drives six dialect and policy
-pairs through the cell, and the move in Problem 1 must keep all six.
+**Mutants, edit and new.** Criterion 1 is new code. Its read in
+`_stack_mint` is spelled by you, so it declares a witness and no mutant,
+and `witness` will report `skip` for it. Criterion 2 is an edit. Its
+mutant on the ref pins text in `saffron/cell/session.py` that the move
+leaves alone. Its witness exists at your base and must stay green. It
+already drives six dialect and policy pairs through the cell, and the
+move in Problem 1 must keep all six.
+
+**When this can run.** A plain batch refuses it until all but one of its
+parents' chains merge (`saffron/scheduler.py:1044-1056`). A `--stack`
+scan skips that check (`saffron/scheduler.py:1020`,
+`saffron/scheduler.py:1444`). It runs this spec only with `SA-0408` and
+`SA-0409` in the same order, stacked on `SA-0407`'s pull request
+(`saffron/scheduler.py:1227-1261`, `saffron/scheduler.py:1114-1172`). If
+`SA-0408` and `SA-0409` reach pull requests in an earlier batch, this spec
+waits for merges (`saffron/scheduler.py:296-320`).
 
 **Three existing tests hand `_stack_mint` a base its mirror lacks.** Each
 must change. The mint now reads the mirror at the pinned `base_sha`, and
@@ -214,43 +241,52 @@ an "always false" build passes any case left on it. Set
 `tests/test_session.py:5058-5059` does. Define two local stub dialects in
 `tests/test_cli.py`, shaped as `_UnprovenVM` and `_OtherSharedKernel` are
 (`tests/test_session.py:5018-5028`, `tests/test_session.py:5032-5037`).
-Import neither from `test_session.py`. Import `podman` beside `apple` from `saffron.cell.runtimes` at module
-scope. It exists at base. Reference the new function nowhere in the test,
-so a reverted run collects.
+Import neither from `test_session.py`. Import `podman` beside `apple`
+from `saffron.cell.runtimes` at module scope. It exists at base. Reference
+the new function nowhere in the test, so the witness collects with the
+source reverted.
 
-Drive nine cases with one `MemoryRecord` and one `Ledger`. Each case
-builds its own repo of three commits. The middle commit is the pinned
-`base_sha` and holds the case's policy, or none. The first and newest
-hold a policy whose answer is the opposite: one with a `thread_env` entry
-where the case expects true or `None`, and `gates: {}` where it expects
-false. The cases run in this order. Apple and the unproven VM each take
-`gates: {}`. Podman takes an entry, then `gates: {}`. The other shared
-kernel takes `gates: {}`. Podman and then the other shared kernel take
-`thread_env: {}`. Last, podman and then apple each take no policy. The
-expected values are false, false, false, true, true, true, true, `None`
-and `None`. Read each value from the task's `task_created` fact
-through `ledger.record_key` and `record.read`. Compare it with `is`.
-Before and after each mint, count the rows of `runs` and `tasks`, and
-assert each grew by one. That is the positive case for the last step.
-Then mint four times more, under podman and under apple. For each, one
-base holds `gates: [`, which is not valid YAML. The other holds
-`thread_env: [1]` beside `gates: {}`, which does not validate. Assert each
-mint raises `cli.PolicyError` and leaves both counts unchanged. A mint that
-skips the read under apple fails here, and on the last case above.
+Drive ten cases with one `MemoryRecord` and one `Ledger`. Each case
+builds its own repo of four commits. The third is the pinned `base_sha`
+and holds the case's policy, or none. The other three hold a policy that
+answers differently wherever the case's dialect lets a policy change the
+answer. That is a `thread_env` entry where the case expects true or
+`None`, and `gates: {}` where it expects false. Under apple/container or
+the unproven VM with `gates: {}`, no policy answers differently, and
+those two cases test the dialect alone. The cases run in this order.
+Apple and the unproven VM each take `gates: {}`. Podman takes an entry,
+then `gates: {}`. The other shared kernel takes `gates: {}`. Podman takes
+`thread_env: {}`, then an empty `policy.yaml`. The other shared kernel
+takes `thread_env: {}`. Last, podman and then apple each take no policy.
+The expected values are false, false, false, true, true, true, true,
+true, `None` and `None`. Read each value from the task's `task_created`
+fact through `ledger.record_key` and `record.read`. Compare it with `is`.
+Before and after each call to the mint, count the rows of `runs` and
+`tasks`, and assert each grew by one. That is the positive case for the
+last step.
+
+Then build six more mints, under podman and under apple, over three
+broken policies each. One is `gates: [`, which is not valid YAML. One is
+`thread_env: [1]` beside `gates: {}`, and one is `nope: 1`. Neither
+validates. Build each mint and its candidate outside `pytest.raises`.
+Wrap only the call, as `run_stack_batch` reads only a raise from the call
+as a miss (`saffron/batch.py:703-710`). Assert each call raises
+`cli.PolicyError` and leaves both counts unchanged. A mint that skips the
+read under apple fails here, and on the last case above.
 
 **Witness red at base.** Measured at that `main`, the first case fails,
 since the mint files `None` where false belongs.
 
 **Measured on a prototype, 2026-11-17.** The change above and the witness
-were built at that `main`. The witness failed with `saffron/cli.py`
-reverted. One harness applied each wrong version as one edit. Each of the
-fourteen under criterion 1 failed its witness on an assertion. Each of the two under
-criterion 2 failed criterion 2's witness on an assertion. The whole suite
-passed with the three fixtures changed, before the witness took its
-apple/container no-policy and broken-policy cases. Before they changed, those three failed on
-`GitError` and no other test in the file did. By `size_gate` the diff
-counted 564 changed tokens, 475 of them in the test. With the policy's
-`tests/**` test paths declared, it counts 89.
+were built at that `main`. The witness failed with `saffron/` reverted.
+One harness applied each wrong version as one edit. Each of the
+seventeen under criterion 1 failed its witness. Each of the three under
+criterion 2 failed criterion 2's witness. The whole suite passed with the
+three fixtures changed, before the witness took its later cases. Before
+those fixtures changed, the three tests failed on `GitError`, and no other
+test in the file did. By `size_gate` the diff counted 580 changed tokens,
+491 of them in the test. With the policy's `tests/**` test paths declared,
+it counts 89.
 
 **The `prose` gate** reads every new comment and docstring. Write none
 with an em dash, a semicolon, a contraction, the perfect tense or a
