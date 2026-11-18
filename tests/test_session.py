@@ -18114,3 +18114,602 @@ def test_the_printed_log_names_each_new_failure_beneath_its_count(
         ("[format] x.py:? E1: m", "[lint] x.py:? E1: m"),
         ("[format] x.py:? E1: m",),
     ]
+
+
+# --- SA-0407: beside a lens with an error, the host's own survivors still go
+# to REBUT, and REBUT's own stops still stand (backlog b-f7a591) ---
+
+_HOST_SURVIVOR_ANCHOR = {"file": "src/x.py", "find": "assert x == 1", "replace": "x2"}
+_HOST_SURVIVOR_WRONG_VERSION = {
+    "file": "src/y.py",
+    "find": "check(9)",
+    "replace": "check(0)",
+}
+_HOST_SURVIVOR_CONTENTS = {
+    "src/x.py": "def y():\n    return 1\nassert x == 1\n",
+    "src/y.py": "def other():\n    check(9)\n",
+}
+# A readable `suites=` pair buys `revert_gate` this leading ask, over the
+# whole witness list, ahead of any criterion probe or wrong version.
+_HOST_SURVIVOR_LEADING_ASK = _tests_result("pass", collected=["t.py::a", "t.py::b"])
+
+# The witness ask, then the whole-suite ask, for the criterion-probe edit on
+# `src/x.py`, then the wrong version's edit on `src/y.py`. Both survive.
+_HOST_SURVIVOR_GATE_RESULTS = [
+    _tests_result("pass", collected=["t.py::a"]),
+    _tests_result("pass", collected=["t.py::a", "t.py::b"]),
+    _tests_result("pass", collected=["t.py::b"]),
+    _tests_result("pass", collected=["t.py::a", "t.py::b"]),
+]
+
+
+def _host_survivor_criteria():
+    """Criterion 1 takes a criterion probe on `src/x.py`. Criterion 2
+    declares one wrong version on `src/y.py` (backlog b-f7a591)."""
+    from saffron.intake import Criterion
+
+    return [
+        Criterion(claim="the guard rejects a negative amount", witness="t.py::a"),
+        Criterion(
+            claim="the total never goes negative",
+            witness="t.py::b",
+            wrong_versions=["the guard never runs"],
+        ),
+    ]
+
+
+def _host_survivor_probe_turns():
+    """The criterion-probe and wrong-version turns after the four lenses: a
+    surviving probe on `src/x.py`, no edit for criterion 2's own probe, then
+    its one surviving wrong version."""
+    return [
+        _turn(
+            _probe_answer(
+                _HOST_SURVIVOR_ANCHOR, "removing the guard lets a negative through"
+            )
+        ),
+        _turn(_probe_answer(None, "nothing in the diff touches the total")),
+        _turn(
+            _wrong_version_answer(
+                (_HOST_SURVIVOR_WRONG_VERSION, "the guard never runs at all")
+            )
+        ),
+    ]
+
+
+def _lens_turn_values(value):
+    """One lens's own turns. `value` is the text for a single clean turn, or
+    a `BaseException` for a session that fails outright. A list of either
+    builds a reprompt sequence."""
+    if isinstance(value, list):
+        return [v if isinstance(v, BaseException) else _turn(v) for v in value]
+    if isinstance(value, BaseException):
+        return [value]
+    return [_turn(value)]
+
+
+def _host_survivor_turns(
+    *, correctness=_EMPTY, contract=_EMPTY, adequacy=_EMPTY, conventions=_EMPTY
+):
+    """Plan, implement, the four lenses in `LENSES` order, then the
+    criterion-probe and wrong-version turns every cell below shares."""
+    return [
+        _turn(_block(_PLAN)),
+        _turn(),
+        *_lens_turn_values(correctness),
+        *_lens_turn_values(contract),
+        *_lens_turn_values(adequacy),
+        *_lens_turn_values(conventions),
+        *_host_survivor_probe_turns(),
+    ]
+
+
+def _host_survivor_cell(
+    monkeypatch,
+    *,
+    rebut_commits,
+    gate_results=None,
+    suites=(),
+    gate_cell_suite=None,
+    grows_after_rebuttal=False,
+):
+    """A cell whose criterion 1 probe survives on `src/x.py` and whose
+    criterion 2's own wrong version survives on `src/y.py`, both host-filed
+    under `adequacy` (backlog b-f7a591). `grows_after_rebuttal` makes the
+    exported patch `_GROWN_PATCH` once the rebuttal turn has run, and
+    `_ANCHORING_DIFF` before it, the way REBUT's own patch-rejection
+    witnesses need."""
+    cell = _stub_the_runtime(
+        monkeypatch,
+        patch=_ANCHORING_DIFF,
+        suites=suites,
+        gate_cell_suite=gate_cell_suite,
+    )
+    _rebuttable(monkeypatch, cell, rebut_commits=rebut_commits)
+    if grows_after_rebuttal:
+
+        def _export_patch(_container, sha):
+            cell.exported_from = sha
+            cell.export_calls.append((_container, sha))
+            return _GROWN_PATCH if _rebuttal_turn_has_run(cell) else _ANCHORING_DIFF
+
+        monkeypatch.setattr("saffron.cell.worktree.export_patch", _export_patch)
+
+    def _read_at_head(container, path):
+        return (
+            None
+            if container == _CRITIC_CONTAINER
+            else _HOST_SURVIVOR_CONTENTS.get(path)
+        )
+
+    monkeypatch.setattr("saffron.cell.worktree.read_at_head", _read_at_head)
+    _stub_probe_gates(
+        monkeypatch,
+        cell,
+        gate_results=list(gate_results or _HOST_SURVIVOR_GATE_RESULTS),
+    )
+    return cell
+
+
+_HOST_SURVIVOR_ARGUED_REBUT = [
+    _turn("the host already answered for these."),
+    _turn(
+        structured_output={
+            "rebuttals": [
+                {"finding": 1, "action": "argued", "argument": "stands as written"},
+                {"finding": 2, "action": "argued", "argument": "stands as written"},
+            ]
+        }
+    ),
+]
+
+
+def test_a_lens_with_an_error_still_sends_the_hosts_survivors_to_rebut_and_ends_incomplete(
+    monkeypatch, tmp_path
+):
+    """Beside a lens with an `error`, REVIEW's pool cut nothing and the
+    host's own two survivors still route to `REBUTTING`. A lens named in
+    `unreviewed` gets no verdict session, and REBUT's own end is overridden
+    to `REVIEW_INCOMPLETE` on `incomplete_after_rebut`'s own line, whatever
+    REBUT itself decided."""
+    spec = _spec(acceptance=_host_survivor_criteria())
+
+    # Cell 1: adequacy's output is not the schema twice. HEAD moves, so the
+    # re-probe runs: one survivor is killed and one survives the suite too.
+    cell1_base = [
+        GateResult(
+            gate="tests", status="pass", tool="pytest 8.0", collected=["t.py::old"]
+        )
+    ]
+    cell1_head = [
+        GateResult(
+            gate="tests",
+            status="pass",
+            tool="pytest 8.0",
+            collected=["t.py::old", "t.py::a", "t.py::b"],
+        )
+    ]
+    cell1 = _host_survivor_cell(
+        monkeypatch,
+        rebut_commits=1,
+        suites=(cell1_base, cell1_head, cell1_head),
+        gate_cell_suite=cell1_head,
+        gate_results=[
+            _HOST_SURVIVOR_LEADING_ASK,
+            *_HOST_SURVIVOR_GATE_RESULTS,
+            _tests_result("pass", collected=["t.py::new1", "t.py::new2"]),
+            _tests_result(
+                "fail",
+                collected=["t.py::new1", "t.py::new2"],
+                failures=[Failure(file="t.py", code="t.py::new1", message="boom")],
+            ),
+            _tests_result("pass", collected=["t.py::new1", "t.py::new2"]),
+        ],
+    )
+    outcome1, ledger1 = _drive(
+        monkeypatch,
+        tmp_path / "cell1",
+        cell=cell1,
+        spec=spec,
+        turns=[
+            *_host_survivor_turns(adequacy=["not the schema", "still not the schema"]),
+            *_HOST_SURVIVOR_ARGUED_REBUT,
+        ],
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome1.state == "REVIEW_INCOMPLETE"
+    expected1 = review._errored_lens_line(["adequacy"])
+    expected1 += ", and 2 host-filed survivor(s) go to REBUT"
+    review_lines1 = [line for line in cell1.watched if line.startswith("REVIEW:")]
+    assert review_lines1[-1] == f"REVIEW: {expected1}"
+    assert rebut.VERDICT_TURN_PROMPT not in cell1.turns
+    assert _task_state(ledger1) == "REVIEW_INCOMPLETE"
+    (adequacy1,) = [r for r in outcome1.reviews if r.lens == "adequacy"]
+    assert any("the criterion's own edit" in f.claim for f in adequacy1.findings)
+    assert any(
+        "wrong version 'the guard never runs'" in f.claim for f in adequacy1.findings
+    )
+    entries1 = json.loads(
+        (tmp_path / "cell1" / "out" / "SY-1" / "rebut-probes.json").read_text()
+    )
+    assert sorted(e["probe_verdict"] for e in entries1) == ["killed", "survived"]
+    expected_why1 = review.incomplete_after_rebut(outcome1.reviews, entries1)
+    rebut_lines1 = [line for line in cell1.watched if line.startswith("REBUT:")]
+    assert rebut_lines1[-1] == f"REBUT: {expected_why1}"
+    assert "killed after the rebuttal" in expected_why1
+    assert "survived the probe after the rebuttal" in expected_why1
+    rebuttal1 = json.loads(
+        (tmp_path / "cell1" / "out" / "SY-1" / "rebuttal.json").read_text()
+    )
+    assert rebuttal1["state"] == "REVIEW_INCOMPLETE"
+    assert rebuttal1["why"] == expected_why1
+
+    # Cell 2: adequacy's own session fails outright, and the implementer
+    # claims a fix for both survivors without committing one.
+    cell2 = _host_survivor_cell(monkeypatch, rebut_commits=0)
+    outcome2, ledger2 = _drive(
+        monkeypatch,
+        tmp_path / "cell2",
+        cell=cell2,
+        spec=spec,
+        turns=[
+            *_host_survivor_turns(adequacy=implement.AgentFailed("adequacy crashed")),
+            _turn("I fixed both."),
+            _turn(
+                structured_output={
+                    "rebuttals": [
+                        {"finding": 1, "action": "fixed", "argument": "fixed it"},
+                        {"finding": 2, "action": "fixed", "argument": "fixed it"},
+                    ]
+                }
+            ),
+        ],
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome2.state == "REVIEW_INCOMPLETE"
+    assert rebut.VERDICT_TURN_PROMPT not in cell2.turns
+    assert _task_state(ledger2) == "REVIEW_INCOMPLETE"
+    rebuttal2 = json.loads(
+        (tmp_path / "cell2" / "out" / "SY-1" / "rebuttal.json").read_text()
+    )
+    assert rebuttal2["state"] == "REVIEW_INCOMPLETE"
+    assert rebuttal2["why"] == review.incomplete_after_rebut(outcome2.reviews, [])
+
+    # Cell 3: correctness and conventions fail, and adequacy's own output
+    # is not the schema twice. The line names all three lenses.
+    cell3 = _host_survivor_cell(monkeypatch, rebut_commits=0)
+    outcome3, ledger3 = _drive(
+        monkeypatch,
+        tmp_path / "cell3",
+        cell=cell3,
+        spec=spec,
+        turns=[
+            *_host_survivor_turns(
+                correctness=implement.AgentFailed("correctness crashed"),
+                adequacy=["not the schema", "still not the schema"],
+                conventions=implement.AgentFailed("conventions crashed"),
+            ),
+            *_HOST_SURVIVOR_ARGUED_REBUT,
+        ],
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome3.state == "REVIEW_INCOMPLETE"
+    expected3 = review._errored_lens_line(["correctness", "adequacy", "conventions"])
+    expected3 += ", and 2 host-filed survivor(s) go to REBUT"
+    review_lines3 = [line for line in cell3.watched if line.startswith("REVIEW:")]
+    assert review_lines3[-1] == f"REVIEW: {expected3}"
+    assert rebut.VERDICT_TURN_PROMPT not in cell3.turns
+    assert _task_state(ledger3) == "REVIEW_INCOMPLETE"
+
+    # Cell 4: correctness fails, contract files a blocker of its own, and
+    # adequacy holds both survivors with no `error`.
+    cell4 = _host_survivor_cell(monkeypatch, rebut_commits=0)
+    outcome4, ledger4 = _drive(
+        monkeypatch,
+        tmp_path / "cell4",
+        cell=cell4,
+        spec=spec,
+        turns=[
+            *_host_survivor_turns(
+                correctness=implement.AgentFailed("correctness crashed"),
+                contract=_block(_BLOCKER),
+            ),
+            _turn("the host already answered for the survivors."),
+            _turn(
+                structured_output={
+                    "rebuttals": [
+                        {"finding": 1, "action": "argued", "argument": "intentional"},
+                        {"finding": 2, "action": "argued", "argument": "stands"},
+                        {"finding": 3, "action": "argued", "argument": "stands"},
+                    ]
+                }
+            ),
+            _turn(
+                structured_output={
+                    "verdicts": [{"finding": 1, "verdict": "withdrawn", "reason": "ok"}]
+                }
+            ),
+            _turn(
+                structured_output={
+                    "verdicts": [
+                        {"finding": 2, "verdict": "withdrawn", "reason": "ok"},
+                        {"finding": 3, "verdict": "withdrawn", "reason": "ok"},
+                    ]
+                }
+            ),
+        ],
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome4.state == "REVIEW_INCOMPLETE"
+    expected4 = review._errored_lens_line(["correctness"])
+    expected4 += ", and 2 host-filed survivor(s) go to REBUT"
+    review_lines4 = [line for line in cell4.watched if line.startswith("REVIEW:")]
+    assert review_lines4[-1] == f"REVIEW: {expected4}"
+    verdict_turns4 = [p for p in cell4.turns if p == rebut.VERDICT_TURN_PROMPT]
+    assert len(verdict_turns4) == 2
+    assert _task_state(ledger4) == "REVIEW_INCOMPLETE"
+    rebuttal4 = json.loads(
+        (tmp_path / "cell4" / "out" / "SY-1" / "rebuttal.json").read_text()
+    )
+    assert rebuttal4["state"] == "REVIEW_INCOMPLETE"
+    assert rebuttal4["why"] == review.incomplete_after_rebut(outcome4.reviews, [])
+
+
+def test_beside_a_lens_with_an_error_rebuts_own_stops_stand_and_a_cut_ends_incomplete(
+    monkeypatch, tmp_path
+):
+    """Beside a lens with an `error`, REBUT's own `EXHAUSTED` and
+    `GATE_ERROR` stand, whatever stopped it. Only a REBUT pool cut, which
+    would otherwise clear `rebut_result` and read `EXHAUSTED`, ends
+    `REVIEW_INCOMPLETE` here instead, with `rebut_result` kept."""
+    from saffron.cell.worktree import CriticPatchRejected
+
+    spec = _spec(acceptance=_host_survivor_criteria())
+    errored_turns = {"conventions": implement.AgentFailed("conventions crashed")}
+
+    # Cell 1: a red gate re-run after the rebuttal still ends `EXHAUSTED`.
+    failing = Failure(file="a.py", code="E501", message="too long")
+    cell1 = _host_survivor_cell(
+        monkeypatch, rebut_commits=0, suites=([], [], _results(failing))
+    )
+    outcome1, ledger1 = _drive(
+        monkeypatch,
+        tmp_path / "cell1",
+        cell=cell1,
+        spec=spec,
+        turns=[
+            *_host_survivor_turns(**errored_turns),
+            *_HOST_SURVIVOR_ARGUED_REBUT,
+        ],
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome1.state == "EXHAUSTED"
+    assert outcome1.rebut_result is not None
+    rebuttal1 = json.loads(
+        (tmp_path / "cell1" / "out" / "SY-1" / "rebuttal.json").read_text()
+    )
+    assert rebuttal1["state"] == "EXHAUSTED"
+    assert "the gates are red after the rebuttal" in rebuttal1["why"]
+    assert _task_state(ledger1) == "EXHAUSTED"
+
+    # Cell 2: the probe cell refuses the post-rebuttal patch, ending
+    # `EXHAUSTED` the way REVIEW's own probe-cell fault does.
+    cell2 = _host_survivor_cell(monkeypatch, rebut_commits=1, grows_after_rebuttal=True)
+    real_probe_findings = session.probe_findings
+
+    def _probe_findings_stub(targets, *, patch, **kwargs):
+        if patch == _GROWN_PATCH:
+            raise CriticPatchRejected("the post-rebuttal patch does not apply")
+        return real_probe_findings(targets, patch=patch, **kwargs)
+
+    monkeypatch.setattr(session, "probe_findings", _probe_findings_stub)
+    outcome2, ledger2 = _drive(
+        monkeypatch,
+        tmp_path / "cell2",
+        cell=cell2,
+        spec=spec,
+        turns=[
+            *_host_survivor_turns(**errored_turns),
+            *_HOST_SURVIVOR_ARGUED_REBUT,
+        ],
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome2.state == "EXHAUSTED"
+    assert outcome2.rebut_result is not None
+    rebuttal2 = json.loads(
+        (tmp_path / "cell2" / "out" / "SY-1" / "rebuttal.json").read_text()
+    )
+    assert "did not apply" in rebuttal2["why"]
+    assert _task_state(ledger2) == "EXHAUSTED"
+
+    # Cell 3: REBUT's own critic cell refuses the post-rebuttal patch. HEAD
+    # stays unmoved, so no probe is asked again, and only this cell sees it.
+    cell3 = _host_survivor_cell(monkeypatch, rebut_commits=0, grows_after_rebuttal=True)
+    real_critic_cell = session.critic_cell
+
+    def _critic_cell_stub(**kwargs):
+        if kwargs.get("patch") == _GROWN_PATCH:
+            raise CriticPatchRejected("the critic cell refused the patch")
+        return real_critic_cell(**kwargs)
+
+    monkeypatch.setattr(session, "critic_cell", _critic_cell_stub)
+    outcome3, ledger3 = _drive(
+        monkeypatch,
+        tmp_path / "cell3",
+        cell=cell3,
+        spec=spec,
+        turns=[
+            *_host_survivor_turns(**errored_turns),
+            *_HOST_SURVIVOR_ARGUED_REBUT,
+        ],
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome3.state == "EXHAUSTED"
+    assert outcome3.rebut_result is not None
+    rebuttal3 = json.loads(
+        (tmp_path / "cell3" / "out" / "SY-1" / "rebuttal.json").read_text()
+    )
+    assert "refused the patch" in rebuttal3["why"]
+    assert _task_state(ledger3) == "EXHAUSTED"
+
+    # Cell 4: the `tests` gate itself errors on the re-run, ending
+    # `GATE_ERROR` rather than `EXHAUSTED`.
+    errored_suite = [GateResult(gate="tests", status="error", summary="no toolchain")]
+    cell4 = _host_survivor_cell(
+        monkeypatch, rebut_commits=0, suites=([], [], errored_suite)
+    )
+    outcome4, ledger4 = _drive(
+        monkeypatch,
+        tmp_path / "cell4",
+        cell=cell4,
+        spec=spec,
+        turns=[
+            *_host_survivor_turns(**errored_turns),
+            *_HOST_SURVIVOR_ARGUED_REBUT,
+        ],
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome4.state == "GATE_ERROR"
+    assert outcome4.rebut_result is not None
+    assert _task_state(ledger4) == "GATE_ERROR"
+
+    # Cell 5: REBUT's own cap cuts the rebuttal turn short. The task ends
+    # `REVIEW_INCOMPLETE`, never `EXHAUSTED`, and keeps its `rebut_result`.
+    cell5 = _host_survivor_cell(monkeypatch, rebut_commits=0)
+    outcome5, ledger5 = _drive(
+        monkeypatch,
+        tmp_path / "cell5",
+        cell=cell5,
+        spec=spec,
+        turns=[
+            *_host_survivor_turns(**errored_turns),
+            implement.AgentFailed("provider crashed", _cut_off_turn(cost=10.25)),
+        ],
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome5.state == "REVIEW_INCOMPLETE"
+    assert outcome5.rebut_result is not None
+    rebuttal5 = json.loads(
+        (tmp_path / "cell5" / "out" / "SY-1" / "rebuttal.json").read_text()
+    )
+    assert rebuttal5["state"] == "REVIEW_INCOMPLETE"
+    expected_why5 = review.incomplete_after_rebut(outcome5.reviews, [])
+    assert rebuttal5["why"] == expected_why5
+    rebut_lines5 = [line for line in cell5.watched if line.startswith("REBUT:")]
+    assert rebut_lines5[-1] == f"REBUT: {expected_why5}"
+    assert _task_state(ledger5) == "REVIEW_INCOMPLETE"
+
+
+def test_a_review_cut_at_its_pool_or_left_no_survivor_sends_nothing_to_rebut(
+    monkeypatch, tmp_path
+):
+    """A REVIEW whose pool could not cover the wrong-version session sends
+    nothing to REBUT, even beside a lens with an `error` and a host-filed
+    survivor. With money left, the same shape reaches REBUT. With every
+    edit killed, no host-filed survivor exists at all."""
+    # Cell 1: the lenses spend the pool down so criterion 2's wrong
+    # version is cut, beside conventions's error and criterion 1's survivor.
+    cell1 = _host_survivor_cell(
+        monkeypatch, rebut_commits=0, gate_results=_HOST_SURVIVOR_GATE_RESULTS[:2]
+    )
+    spec1 = _spec(acceptance=_host_survivor_criteria(), budget_usd=8.2)
+    outcome1, ledger1 = _drive(
+        monkeypatch,
+        tmp_path / "cell1",
+        cell=cell1,
+        spec=spec1,
+        turns=[
+            _turn(_block(_PLAN)),
+            _turn(),
+            _turn(_EMPTY, cost=2.0),
+            _turn(_EMPTY, cost=2.0),
+            implement.AgentFailed("conventions crashed"),
+            _turn(_EMPTY, cost=1.9),
+            _turn(
+                _probe_answer(
+                    _HOST_SURVIVOR_ANCHOR, "removing the guard lets a negative through"
+                ),
+                cost=0.05,
+            ),
+            _turn(
+                _probe_answer(None, "nothing in the diff touches the total"), cost=0.10
+            ),
+        ],
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome1.state == "REVIEW_INCOMPLETE"
+    cut_line, _why = review.review_state(outcome1.reviews, cut="t.py::b")
+    assert cut_line == "REVIEW_INCOMPLETE"
+    review_lines1 = [line for line in cell1.watched if line.startswith("REVIEW:")]
+    assert review_lines1[-1].startswith("REVIEW: REVIEW's pool could not cover")
+    assert "host-filed survivor" not in review_lines1[-1]
+    assert not any(line.startswith("REBUT:") for line in cell1.watched)
+    assert not (tmp_path / "cell1" / "out" / "SY-1" / "rebuttal.json").exists()
+    findings1 = json.loads(
+        (tmp_path / "cell1" / "out" / "SY-1" / "findings.json").read_text()
+    )
+    (adequacy1,) = [r for r in findings1 if r["lens"] == "adequacy"]
+    assert any(f["claim"].startswith(review.HOST_FILED) for f in adequacy1["findings"])
+
+    # Cell 2: the same lenses and probes, with money left, reach REBUT.
+    cell2 = _host_survivor_cell(monkeypatch, rebut_commits=0)
+    outcome2, ledger2 = _drive(
+        monkeypatch,
+        tmp_path / "cell2",
+        cell=cell2,
+        spec=_spec(acceptance=_host_survivor_criteria()),
+        turns=[
+            *_host_survivor_turns(conventions=implement.AgentFailed("crashed")),
+            *_HOST_SURVIVOR_ARGUED_REBUT,
+        ],
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome2.state == "REVIEW_INCOMPLETE"
+    assert (tmp_path / "cell2" / "out" / "SY-1" / "rebuttal.json").exists()
+    review_lines2 = [line for line in cell2.watched if line.startswith("REVIEW:")]
+    expected2 = review._errored_lens_line(["conventions"])
+    expected2 += ", and 2 host-filed survivor(s) go to REBUT"
+    assert review_lines2[-1] == f"REVIEW: {expected2}"
+
+    # Cell 3: every witness kills its own edit, so no host-filed survivor
+    # exists, and the line is `review_state`'s errored-lens line alone.
+    cell3 = _host_survivor_cell(
+        monkeypatch,
+        rebut_commits=0,
+        gate_results=[
+            _tests_result(
+                "fail",
+                collected=["t.py::a"],
+                failures=[Failure(file="t.py", code="t.py::a", message="boom")],
+            ),
+            _tests_result(
+                "fail",
+                collected=["t.py::b"],
+                failures=[Failure(file="t.py", code="t.py::b", message="boom")],
+            ),
+        ],
+    )
+    outcome3, ledger3 = _drive(
+        monkeypatch,
+        tmp_path / "cell3",
+        cell=cell3,
+        spec=_spec(acceptance=_host_survivor_criteria()),
+        turns=_host_survivor_turns(conventions=implement.AgentFailed("crashed")),
+        policy=_PROBE_POLICY,
+        gates=("tests",),
+    )
+    assert outcome3.state == "REVIEW_INCOMPLETE"
+    assert not (tmp_path / "cell3" / "out" / "SY-1" / "rebuttal.json").exists()
+    review_lines3 = [line for line in cell3.watched if line.startswith("REVIEW:")]
+    assert review_lines3[-1] == f"REVIEW: {review._errored_lens_line(['conventions'])}"

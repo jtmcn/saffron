@@ -1108,9 +1108,9 @@ def review_state(
 
     Any single anchored blocker routes to REBUT (§5.5), so `REBUTTING` here is
     a phase to run, not a stop. So does a host-filed survivor, anchored or
-    not: the host already ran its own edit. A lens that errored *is* a stop,
-    at `REVIEW_INCOMPLETE`. An unrun lens must not read as a clean review,
-    and there is no finding set to rebut against.
+    not: the host already ran its own edit. A lens that errored returns
+    `REVIEW_INCOMPLETE`: an unrun lens must not read as a clean review.
+    `rebuts_despite_errors` decides whether REBUT still takes the host's survivors.
 
     `cut` is REVIEW's own `ReviewPool.cut`, checked first and worded apart
     from the errored-lens line below."""

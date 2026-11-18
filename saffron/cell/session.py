@@ -3669,6 +3669,13 @@ def _drive_cell(
                         )
                     )
                     outcome, why = review.review_state(reviews, cut=review_pool.cut)
+                    # A lens with an `error` names no finding set here, but
+                    # the host's own survivors still go to REBUT (b-f7a591).
+                    errored_lenses = [r.lens for r in reviews if r.error]
+                    if review.rebuts_despite_errors(reviews, review_pool.cut):
+                        outcome = "REBUTTING"
+                        survivors = len(review.host_survivors(reviews))
+                        why += f", and {survivors} host-filed survivor(s) go to REBUT"
                     _phase_start("REVIEW", "REVIEW", why)
 
         # Same reasoning as `reviews` above: bound only inside the REBUTTING
@@ -3685,6 +3692,9 @@ def _drive_cell(
         # Written only once a §5.6 repair turn ran.
         repair_turn_why: str | None = None
         repair_session_id: str | None = None
+        # `_rebut_gates` sets this to its own `rebut-probes.json` list, read
+        # when a lens with an `error` still rebuts (b-f7a591).
+        rebut_probe_entries: list[dict] = []
 
         if outcome == "REBUTTING":
             ledger.set_task_state(task_id, "REBUTTING")
@@ -3757,6 +3767,7 @@ def _drive_cell(
                 true at base, so `revert` spares it (b-4a63b7).
                 """
                 nonlocal revert_exempt, probe_patch_why, repair_turn_why
+                nonlocal rebut_probe_entries
                 survived = [
                     f
                     for f in blockers
@@ -3811,6 +3822,7 @@ def _drive_cell(
                             f"binary change — {binary}"
                         )
                         return "GATE_ERROR"
+                    rebut_probe_entries = entries
                     (task_dir / "rebut-probes.json").write_text(
                         json.dumps(entries, indent=2)
                     )
@@ -3957,6 +3969,9 @@ def _drive_cell(
                     emit=emit,
                     last_cost_usd=last_cost,
                     open_pool=cap.open,
+                    # A lens with an `error` gets no verdict session: the
+                    # host already answered for it (b-f7a591).
+                    unreviewed=errored_lenses,
                 )
             # A pool, not the agent, ended this REBUT: its blockers stand,
             # and the record must not read as the silence `rebut_state` names.
@@ -3977,6 +3992,12 @@ def _drive_cell(
             # is still red, so run_rebut's "does not re-enter" line is wrong here.
             if repair_turn_why is not None:
                 result.why = repair_turn_why
+            # Beside a lens with an `error`, REBUT's own EXHAUSTED or GATE_ERROR stands.
+            # Any other end, a pool cut included, becomes REVIEW_INCOMPLETE (b-f7a591).
+            if errored_lenses and result.state not in ("EXHAUSTED", "GATE_ERROR"):
+                result.state = "REVIEW_INCOMPLETE"
+                result.why = review.incomplete_after_rebut(reviews, rebut_probe_entries)
+                cut = False
             rebut_result = result
             # Item 42: read before a pool cut clears `rebut_result` below.
             unread = rebut.unread_blockers(result, len(blockers))
