@@ -1501,6 +1501,21 @@ def test_a_failed_read_of_the_tree_base_raises_rather_than_naming_every_path(
         worktree.absent_at("c", "deadbeef", ["z.py", "docs", "a.py"])
 
 
+def test_a_touches_path_that_starts_with_a_colon_is_read_literally(
+    tmp_path, monkeypatch
+):
+    """Criterion 1 (b-71e2df): `:odd.py` present at the tree base is never
+    named absent. Read as pathspec magic, `ls-tree` prints nothing for it."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+    (tmp_path / ":odd.py").write_text("odd = 1\n")
+    monkeypatch.setattr(worktree.runtime, "exec_", _exec_in(tmp_path))
+    base = _commit(tmp_path, "base")
+
+    assert worktree.absent_at("unused", base, [":odd.py", "gone.py"]) == ["gone.py"]
+
+
 def _porcelain(tmp_path):
     return subprocess.run(
         ["git", "status", "--porcelain"],

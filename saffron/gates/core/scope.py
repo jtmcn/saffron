@@ -44,8 +44,8 @@ def literal_touches(touches: list[str], changed_files: list[str]) -> list[str]:
     """`touches` entries worth asking the tree base about: no glob token,
     outside `changed_files`, in touches order.
 
-    A glob names no literal path to look up, and a changed file already
-    answered by the diff itself.
+    A glob names no literal path to look up, and the diff itself already
+    answers for a changed file.
     """
     changed = set(changed_files)
     return [t for t in touches if t not in changed and not _TOKENS.search(t)]

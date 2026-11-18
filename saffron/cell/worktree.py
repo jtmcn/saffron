@@ -902,8 +902,8 @@ def absent_at(
     """Each of `paths` with no entry in `tree_base`'s own tree, in the order
     given.
 
-    One `ls-tree` answers for every path at once, with literal pathspecs
-    pinned so a bracket in a path never acts as a character class. A
+    One `ls-tree` answers for every path at once. Literal pathspecs keep a
+    path that starts with `:` from being read as pathspec magic. A
     directory pathspec is printed by its own name, never descended. A
     failed read raises `runtime.CellRuntimeError` carrying git's stderr, so
     a refused read is never taken as an empty tree.
