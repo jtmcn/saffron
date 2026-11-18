@@ -1609,8 +1609,8 @@ def _stack_mint(
         repo_id = ledger.upsert_repo(
             repo.name, pinned.url, str(pinned.mirror), policy_sha=None
         )
-        # Read before any row exists, so a broken policy raises here rather
-        # than into a half-open run (b-e9153f).
+        # Read before the run and task rows exist, so a broken policy raises
+        # here rather than into a half-open run (b-e9153f).
         raw_policy = git_mirror.file_at(
             pinned.mirror, pinned.base_sha, ".saffron/policy.yaml"
         )

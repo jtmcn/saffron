@@ -11080,24 +11080,17 @@ def test_the_stack_mint_records_the_mutants_refs_commit_and_null_without_one(tmp
         text=True,
         check=True,
     ).stdout.strip()
-    base_sha = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(mirror),
-            "-c",
-            "user.email=t@t",
-            "-c",
-            "user.name=T",
-            "commit-tree",
-            empty_tree,
-            "-m",
-            "base",
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
+    base_sha = _git(
+        mirror,
+        "-c",
+        "user.email=t@t",
+        "-c",
+        "user.name=T",
+        "commit-tree",
+        empty_tree,
+        "-m",
+        "base",
+    )
     pinned = task.PinnedBase(
         mirror=mirror, url="https://github.com/o/r.git", base_sha=base_sha
     )
@@ -11195,8 +11188,8 @@ def _policy_commits(repo_dir: Path, texts: list[str | None]) -> list[str]:
     return shas
 
 
-# `_THREAD_POOL_CASES` pairs each dialect with a pinned policy and the
-# policy its three other commits hold, chosen to answer differently.
+# `_THREAD_POOL_CASES` pairs each dialect with a pinned policy and the policy
+# its three other commits hold, apart wherever the dialect lets a policy count.
 _ENTRY_POLICY = 'gates: {}\nthread_env:\n  OMP_NUM_THREADS: "1"\n'
 _EMPTY_ENV_POLICY = "gates: {}\n"
 _EXPLICIT_EMPTY_ENV_POLICY = "thread_env: {}\n"
