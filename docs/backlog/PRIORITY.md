@@ -152,6 +152,9 @@ stack thresholds assume every earlier candidate ran.
 criterion cannot name the members its claim covers, so no command sees one
 that no witness drives.
 
+**Placed 2026-11-18**, from writing `SA-0415`: **b-c7fd81**, by hand once
+`SA-0415` merges. `CONTEXT.md` has no entry for a covered set or a positive case.
+
 **Placed 2026-11-08**, from the spec loop's run 55: ~~**b-31e3c8**~~,
 ~~**b-cbb6e7**~~, ~~**b-c7858c**~~, ~~**b-879e72**~~, then ~~**b-3df181**~~. REBUT answers
 no concern, so every in-cell concern reached both seats. A finish minted a

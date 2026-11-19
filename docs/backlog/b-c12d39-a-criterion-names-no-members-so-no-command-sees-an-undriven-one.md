@@ -4,7 +4,7 @@ title: "A criterion names no members of the sets its claim covers, so no command
 status: open
 tier: 2
 filed: 2026-11-09
-specs: []
+specs: [SA-0415]
 prs: []
 commits: []
 cites: [§5.4]

@@ -4532,6 +4532,33 @@ def test_check_blocks_a_spec_whose_body_quotes_its_own_mutants_find(
     assert not [line for line in out if line.startswith("blocker: ")], out
 
 
+def test_check_blocks_on_an_undriven_member_and_notes_a_negative_claim(
+    monkeypatch, capsys
+):
+    """b-c12d39: `check` prints an undriven member as a blocker and a negative
+    claim with no positive case as a concern, and passes with neither."""
+    from saffron import intake
+    from tests.test_spec_size_estimate import _run
+
+    target = _spec("SA-0009")
+    member = "criterion 1: 'forms' member 'bare' names no driver"
+    negative = "criterion 2: its claim says 'never' and it declares no positive_case"
+    monkeypatch.setattr(
+        intake, "coverage_problems", lambda spec: [member, negative], raising=False
+    )
+    rc, out = _run(monkeypatch, capsys, target, [])
+    assert rc == 1, out
+    assert [b for b in out if b.startswith("blocker: ")] == [f"blocker: {member}"], out
+    assert f"concern: {negative}" in out, out
+
+    monkeypatch.setattr(
+        intake, "coverage_problems", lambda spec: [negative], raising=False
+    )
+    rc, out = _run(monkeypatch, capsys, target, [])
+    assert rc == 0, out
+    assert not [b for b in out if b.startswith("blocker: ")], out
+
+
 def test_subject_concerns_read_a_mutant_from_the_ref_not_the_spec(tmp_path):
     """SA-0338: a queued spec carries no inline mutant, so the concern reads
     the ref. A spec with none there is left as it is."""
