@@ -3,7 +3,7 @@ id: SA-0415
 title: "A criterion cannot name the members of the sets its claim covers, so no command sees a member no witness drives"
 type: feature
 priority: 3
-estimated_lines: 349
+estimated_lines: 370
 estimate_measured: true
 touches:
   - saffron/intake.py
@@ -52,7 +52,10 @@ acceptance:
       its own spec. They are an empty `covers`, a blank set name, an empty
       `members`, a blank member, one member twice in a set, one set name
       twice in a criterion, a blank `positive_case`, an unknown key in a
-      member, and an unknown key in a set.
+      member, and an unknown key in a set. Each blank is whitespace alone.
+      A repeated member shares only its text, with another `driven_by` and
+      a member between the two. A repeated set name carries other members,
+      with a set between the two.
     witness: tests/test_intake.py::test_a_criterion_declares_the_sets_its_claim_covers_and_its_positive_case
     wrong_versions:
       - A set with no duplicate check, so one member declared twice loads.
@@ -70,22 +73,29 @@ acceptance:
       - An explicit empty `members` accepted.
       - A `driven_by` that defaults to an empty string in place of `None`.
       - A set name declared twice in one criterion accepted.
+      - Duplicates compared as whole models, so a member or set repeated with other contents loads.
+      - Only adjacent duplicates refused, so a repeat with an entry between loads.
   - claim: >-
       `intake.coverage_problems(spec)` returns one line per declared member
       whose `driven_by` is absent, or is not exactly its own criterion's
       witness or one of its own criterion's `wrong_versions`. A member
       driven by either yields no line. Each line starts `criterion {n}:`,
       with `n` the criterion's place among all the spec's criteria,
-      counted from 1. The witness's spec holds three criteria. The first is
-      clean. It declares two wrong versions, and its two members are driven
-      by its own witness and its first wrong version. The second declares
-      three wrong versions and two sets. Three members are driven, by its
-      witness, its middle wrong version and its last wrong version. Six are
-      flagged. One names no driver. The others name the first criterion's
-      witness, its own wrong version with a changed first letter's case,
-      the first criterion's wrong version, a prefix of its witness, and its
-      own wrong version with a trailing space. The third is clean. The
-      witness compares the whole list of lines, in declared order.
+      counted from 1. Lines follow the criteria, their sets and their
+      members in declared order. The witness's spec holds three criteria.
+      The first is clean. It declares two wrong versions, and its two
+      members are driven by its own witness and its first wrong version.
+      The second declares three wrong versions and two sets, and the
+      second set's name sorts before the first's. Four of its members are
+      driven, by its witness twice, its middle wrong version and its last
+      wrong version. Seven are flagged. One names no driver. The others
+      name the first criterion's witness, its own wrong version with a
+      changed first letter's case, the first criterion's wrong version, a
+      prefix of its witness, its witness with a suffix, and its own wrong
+      version with a trailing space. In each set the first and the last
+      member are flagged, and a driven member sits between two flagged
+      ones. The third criterion has one member, with no driver. The
+      witness compares the whole list of lines.
     witness: tests/test_intake.py::test_coverage_problems_names_each_declared_member_no_driver_reaches
     wrong_versions:
       - Any criterion's witness accepted as a driver.
@@ -101,6 +111,13 @@ acceptance:
       - Only the first and the last wrong version accepted.
       - The lines sorted before they are returned.
       - Criteria numbered among those that yield lines, so the flagged criterion reads as criterion 1.
+      - The last criterion skipped.
+      - Only the first set of a criterion read.
+      - The sets walked in reverse order.
+      - The sets walked sorted by name.
+      - The last member of each set skipped.
+      - A set's walk stopped at its first driven member.
+      - A driver accepted when it starts with the witness.
   - claim: >-
       `coverage_problems` also returns one line for a criterion whose claim
       holds a word of `intake.NEGATION_WORDS` and that declares no
@@ -111,15 +128,17 @@ acceptance:
       `criterion {n}: its claim says {word!r} and it declares no
       positive_case`, where `word` is the first match in the claim,
       lowercased. The witness drives each word in its own claim, and an
-      upper case and a sentence-initial form. Its quiet claims hold each
-      word inside a longer word, and they yield no line. One quiet claim
-      comes first, one sits among the loud ones, and one comes last. The
-      same claim with a `positive_case` yields no negation line, while its
-      twin without one yields a line. That criterion also declares an
-      undriven member, and still yields the member's line. A criterion
-      with an undriven member and a negative claim yields the member's
-      line first. The witness compares the whole list of lines from the
-      one call.
+      upper case and a sentence-initial form, each the only listed word in
+      its claim. One loud claim ends with its word and a full stop. Its
+      quiet claims hold each word inside a longer word, and they yield no
+      line. One quiet claim comes first, one sits among the loud ones, and
+      one comes third from last. A criterion with an undriven member and a
+      negative claim yields the member's line first. The last two criteria
+      hold one negative claim. The first of them declares a
+      `positive_case` and an undriven member, and yields only the member's
+      line. The last declares no `positive_case` and yields the negation
+      line. The witness compares the whole list of lines from the one
+      call.
     witness: tests/test_intake.py::test_coverage_problems_names_each_negative_claim_that_declares_no_positive_case
     wrong_versions:
       - A list missing `nor`.
@@ -136,6 +155,9 @@ acceptance:
       - Criteria numbered among those that yield lines.
       - The walk stops after the first criterion that yields a line.
       - A declared `positive_case` skips the criterion's member lines.
+      - The final criterion skipped.
+      - A `positive_case` flag carried across criteria.
+      - A whitespace split that strips backticks, so a word before a full stop goes unflagged.
   - claim: >-
       `coverage_problems` refuses no spec. A spec it returns lines for parses
       with `parse_spec`, and `discover_specs` returns it as a candidate. In
@@ -310,7 +332,8 @@ A plain scalar loses the space. Declare the flagged members out of
 sorted order, so a sort is caught. Keep every claim in the fixture spec
 free of the nine words, so no negation line joins the list. Put the
 clean criterion with two wrong versions first, so the flagged one is
-criterion 2.
+criterion 2. Give the third criterion one undriven member, so the last
+criterion yields a line.
 
 **The third witness.** Assert `sorted(NEGATION_WORDS)` against the nine
 words, so a missing or an added word fails. One claim holds `not`
@@ -321,7 +344,9 @@ claim holds a word only inside backticks. The quiet claims hold
 `neither`, `without` and `cannot` with the word inside it, such as
 `neithermost`. Spread the quiet claims among the loud ones, so a numbering
 that skips a quiet criterion is caught. Give the criterion that declares
-a `positive_case` an undriven member too.
+a `positive_case` an undriven member too. Put it right before its twin,
+which ends the spec, so a flag leaking into the next criterion is
+caught.
 
 **The fourth witness.** Write both specs into one `tmp_path` and call
 `discover_specs` once. Assert the candidate ids and the failure file
@@ -332,5 +357,5 @@ with an em dash, a semicolon, a contraction, the perfect tense or a
 sentence over 25 words.
 
 **Size.** A prototype of this change measured 461 counted tokens
-outside `tests/` and 932 under it, against the 3000-token `feature`
-ceiling. That is 349 changed lines in all.
+outside `tests/` and 1018 under it, against the 3000-token `feature`
+ceiling. That is 370 changed lines in all.
