@@ -3,7 +3,7 @@ id: SA-0415
 title: "A criterion cannot name the members of the sets its claim covers, so no command sees a member no witness drives"
 type: feature
 priority: 3
-estimated_lines: 338
+estimated_lines: 349
 estimate_measured: true
 touches:
   - saffron/intake.py
@@ -46,7 +46,7 @@ acceptance:
       member has a `member` text and an optional `driven_by`, which loads as
       `None` when omitted. Sets and members load in declared order. One
       member text may recur in two sets, and one set name in two criteria.
-      A criterion omitting both fields loads `covers` as an empty list and
+      A criterion declaring only `claim` and `witness` loads `covers` as an empty list and
       `positive_case` as `None`, and its `model_fields_set` holds only
       `claim` and `witness`. Load refuses nine shapes as a `SpecError`, each in
       its own spec. They are an empty `covers`, a blank set name, an empty
@@ -63,6 +63,7 @@ acceptance:
       - A blank check by emptiness, so a set name of two spaces loads.
       - A blank check by emptiness on the member, so a member of one space loads.
       - A `positive_case` with no blank check.
+      - A blank check by emptiness on `positive_case`, so one of two spaces loads.
       - The sets sorted by name at load, so the declared order is lost.
       - The members sorted at load.
       - An explicit empty `covers` accepted.
@@ -73,15 +74,18 @@ acceptance:
       `intake.coverage_problems(spec)` returns one line per declared member
       whose `driven_by` is absent, or is not exactly its own criterion's
       witness or one of its own criterion's `wrong_versions`. A member
-      driven by either yields no line. The witness drives a criterion with
-      two sets. Two members are driven by its witness and its second wrong
-      version. Six are flagged. One names no driver. The others name a
-      sibling criterion's witness, its own wrong version with a changed
-      first letter's case, a sibling criterion's wrong version, a prefix of
-      its witness, and its own wrong version with a trailing space. A
-      sibling criterion declares two wrong versions, and its two members
-      are driven by its own witness and its first wrong version. The witness compares the whole list of lines, in
-      declared order.
+      driven by either yields no line. Each line starts `criterion {n}:`,
+      with `n` the criterion's place among all the spec's criteria,
+      counted from 1. The witness's spec holds three criteria. The first is
+      clean. It declares two wrong versions, and its two members are driven
+      by its own witness and its first wrong version. The second declares
+      three wrong versions and two sets. Three members are driven, by its
+      witness, its middle wrong version and its last wrong version. Six are
+      flagged. One names no driver. The others name the first criterion's
+      witness, its own wrong version with a changed first letter's case,
+      the first criterion's wrong version, a prefix of its witness, and its
+      own wrong version with a trailing space. The third is clean. The
+      witness compares the whole list of lines, in declared order.
     witness: tests/test_intake.py::test_coverage_problems_names_each_declared_member_no_driver_reaches
     wrong_versions:
       - Any criterion's witness accepted as a driver.
@@ -93,19 +97,29 @@ acceptance:
       - The witness accepted and every wrong version refused.
       - Only the first wrong version accepted.
       - Only the last wrong version accepted.
+      - Only the first two wrong versions accepted.
+      - Only the first and the last wrong version accepted.
       - The lines sorted before they are returned.
+      - Criteria numbered among those that yield lines, so the flagged criterion reads as criterion 1.
   - claim: >-
       `coverage_problems` also returns one line for a criterion whose claim
       holds a word of `intake.NEGATION_WORDS` and that declares no
       `positive_case`. The tuple holds exactly `no`, `not`, `never`,
       `nothing`, `none`, `neither`, `nor`, `without` and `cannot`. A word
-      matches whole and in any case, inside backticks too. The line names
-      the first such word in the claim, lowercased. The witness drives each
-      word in its own claim, and an upper case and a sentence-initial
-      form. Its quiet claims hold each word inside a longer word, and they
-      yield no line. The same claim with a `positive_case` yields no line,
-      while its twin without one yields a line. A criterion with an
-      undriven member and a negative claim yields the member's line first.
+      matches whole and in any case, inside backticks too. The criterion
+      yields one such line however many words match. The line is exactly
+      `criterion {n}: its claim says {word!r} and it declares no
+      positive_case`, where `word` is the first match in the claim,
+      lowercased. The witness drives each word in its own claim, and an
+      upper case and a sentence-initial form. Its quiet claims hold each
+      word inside a longer word, and they yield no line. One quiet claim
+      comes first, one sits among the loud ones, and one comes last. The
+      same claim with a `positive_case` yields no negation line, while its
+      twin without one yields a line. That criterion also declares an
+      undriven member, and still yields the member's line. A criterion
+      with an undriven member and a negative claim yields the member's
+      line first. The witness compares the whole list of lines from the
+      one call.
     witness: tests/test_intake.py::test_coverage_problems_names_each_negative_claim_that_declares_no_positive_case
     wrong_versions:
       - A list missing `nor`.
@@ -117,6 +131,11 @@ acceptance:
       - A declared `positive_case` ignored.
       - Backticked text stripped before the match.
       - The negation line placed before the member lines.
+      - A negation line worded other than the template.
+      - One line per matched word.
+      - Criteria numbered among those that yield lines.
+      - The walk stops after the first criterion that yields a line.
+      - A declared `positive_case` skips the criterion's member lines.
   - claim: >-
       `coverage_problems` refuses no spec. A spec it returns lines for parses
       with `parse_spec`, and `discover_specs` returns it as a candidate. In
@@ -257,9 +276,10 @@ nothing.
   `_.coverage_problems` under "Called from outside the scanned roots".
   The `dead` gate scans no `.claude/` file
   (`.saffron/gates/dead.py:21`), so the judge reads as dead without it.
-  `docs/agents/issue-tracker.md`'s Conventions gain a bullet for the two
-  fields beside `wrong_versions`. It says load refuses either key until
-  this spec lands, as the `renames` bullet says of its own.
+  In `docs/agents/issue-tracker.md`'s Conventions, the bullet on a claim
+  over a set gains two sentences. They name `covers:` and
+  `positive_case:`, and say load refuses either key until `SA-0415`
+  lands.
 - **Hand edits once this spec merges.** `.claude/agents/spec-writer.md`
   step 6 and `.claude/agents/spec-reviewer.md` check 3 name the fields.
   Before the merge a spec declaring them fails to parse. `CONTEXT.md`
@@ -286,8 +306,11 @@ caught.
 
 **The second witness.** Give each flagged member its own text, and
 write the driver with a trailing space as a double-quoted YAML scalar.
-A plain scalar loses the space. Keep every claim in the fixture spec free of
-the nine words, so no negation line joins the list.
+A plain scalar loses the space. Declare the flagged members out of
+sorted order, so a sort is caught. Keep every claim in the fixture spec
+free of the nine words, so no negation line joins the list. Put the
+clean criterion with two wrong versions first, so the flagged one is
+criterion 2.
 
 **The third witness.** Assert `sorted(NEGATION_WORDS)` against the nine
 words, so a missing or an added word fails. One claim holds `not`
@@ -296,7 +319,9 @@ claim holds a word only inside backticks. The quiet claims hold
 `another`, `normal`, `note`, `nevertheless`, `notable`, `nobody`,
 `knot`, `nothingness` and `nonempty`. Coin a word for each of
 `neither`, `without` and `cannot` with the word inside it, such as
-`neithermost`.
+`neithermost`. Spread the quiet claims among the loud ones, so a numbering
+that skips a quiet criterion is caught. Give the criterion that declares
+a `positive_case` an undriven member too.
 
 **The fourth witness.** Write both specs into one `tmp_path` and call
 `discover_specs` once. Assert the candidate ids and the failure file
@@ -307,5 +332,5 @@ with an em dash, a semicolon, a contraction, the perfect tense or a
 sentence over 25 words.
 
 **Size.** A prototype of this change measured 461 counted tokens
-outside `tests/` and 889 under it, against the 3000-token `feature`
-ceiling. That is 338 changed lines in all.
+outside `tests/` and 932 under it, against the 3000-token `feature`
+ceiling. That is 349 changed lines in all.
