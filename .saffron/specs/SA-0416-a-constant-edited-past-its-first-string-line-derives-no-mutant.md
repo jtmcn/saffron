@@ -40,7 +40,7 @@ forbidden:
   - saffron/gates/core/integrity.py
   - tests/test_queued_specs.py
   - tests/test_scheduler.py
-budget_usd: 58
+budget_usd: 62
 max_attempts: 3
 max_turns: 200
 acceptance:
@@ -72,17 +72,18 @@ acceptance:
       counts when any line it spans is an added line. Its `find` spans from
       the match's start to the end of its `value` group, and its `replace`
       is that text with the `value` span expanded. The witness's module is
-      the notes' fixture, seven constants back to back, one per spelling.
+      the notes' fixture, nine constants back to back, one per spelling.
       They are a triple-quoted string whose body sits at column 0 and holds
       a blank line, a parenthesized concatenation of eight strings, a
-      one-line implicit concatenation, a parenthesized tuple of eight
-      strings, an integer, a parenthesized sum of a string and a name, and a
-      parenthesized concatenation that ends the file. Each of the module's
-      50 lines is edited alone, by a trailing space, in its own commit, and
+      one-line implicit concatenation, the same in single quotes, a
+      parenthesized tuple of eight strings, an integer, a string in
+      single-quote triple quotes, a parenthesized sum of a string and a
+      name, and a parenthesized concatenation that ends the file. Each of
+      the module's 56 lines is edited alone, by a trailing space, in its own commit, and
       read through the diff `git` gives with `worktree.DIFF_FLAGS`. An edit
       to any line of a constant derives that constant alone, with the
-      notes' `find` and `replace` for it. That covers its opening line, each middle line,
-      its last string line and its closing line. An edit to a blank line
+      notes' `find` and `replace` for it. That covers its opening line,
+      each middle line, its last string line and its closing line. An edit to a blank line
       between two constants, to the `def` line or to its body derives
       nothing, and the module holds five such lines. The witness compares
       the whole derived list for each line.
@@ -95,12 +96,14 @@ acceptance:
       - The first line a match spans is counted one too early, so an edit to the line before a constant derives it.
       - Context lines count as added, so an edit beside a constant derives it.
       - The `replace` keeps the match's text past `value`, so applying it writes the rest of the constant twice.
+      - "`PATTERNS` copies the YAML spelling of the string pattern, so the single-quote branches match doubled quotes and `QUOTED` and `SINGLE` derive nothing."
   - claim: >-
       `CellTree.head_text(path)` returns the file's text at `HEAD` for a
       regular file and for an executable one, never the working copy's
       uncommitted edit. It returns `None` for a symlink, a gitlink and a
       path absent at `HEAD`. A refused read raises `CellRuntimeError`
-      carrying git's stderr. The witness drives `worktree` over a real git
+      carrying git's stderr, whether `ls-tree` or the blob read is refused.
+      In the second case `ls-tree` reaches the real repo. The witness drives `worktree` over a real git
       repo through `runtime.exec_`. It reads seven paths in this order. They
       are a symlink, the edited regular file, a regular file named
       `:odd.py`, a gitlink, a regular file one directory down, the
@@ -108,7 +111,8 @@ acceptance:
     witness: tests/test_worktree.py::test_head_text_reads_a_regular_file_at_head_and_nothing_else
     wrong_versions:
       - The reader reads the working copy, so the uncommitted edit comes back.
-      - A refused read returns `None`, so a broken git reads as a file with no text.
+      - A refused `ls-tree` returns `None`, so a broken git reads as a file with no text.
+      - The blob read's refusal returns `None`, as `read_at_head` does.
       - A symlink is read as a regular file, so its target's name comes back as text.
       - Only mode `100644` reads, so the executable comes back `None`.
       - "`ls-tree` reads its path as a pathspec, so `:odd.py` comes back `None`."
@@ -225,11 +229,22 @@ declared `find` that is absent fails the gate. So the ref holds no
 mutant, and `witness` reports `skip` for these criteria. Each criterion's
 `wrong_versions` carries what its witness must kill.
 
-**The string pattern.** Replace the first `constants` entry of
-`PATTERNS` in `tests/test_constant_mutants.py` with this one, and keep
-its `replace`. The existing pins there hold unchanged, because each
-`find` still stops at `value`'s end. Fix the comment above `PATTERNS` so
-it says this repo declares the same block by hand once this spec merges.
+**The string pattern.** Replace the first `constants` entry's
+`pattern` in `PATTERNS`, in `tests/test_constant_mutants.py`, and keep
+its `replace`. That dict is Python, so write it with the existing
+`_NAME` prefix and raw strings, as below. The existing pins there hold
+unchanged, because each `find` still stops at `value`'s end. Fix the
+comment above `PATTERNS` so it says this repo declares the same block by
+hand once this spec merges.
+
+```python
+            "pattern": _NAME
+            + r"\(?\s*(?P<value>[rbfuRBFU]{0,2}(?:(?P<t>\"\"\"|''')|\"|'))"
+            + r"(?(t)[\s\S]*?(?P=t)).*(?:\n(?:[ \t]+\S|\)).*)*",
+```
+
+The same pattern in YAML spelling is the policy's hand edit, not the
+test's. YAML doubles each single quote inside a single-quoted scalar.
 
 ```yaml
   - pattern: '(?m)^(?P<name>[A-Z][A-Z0-9_]*)(?:: [^=\n]+)? = \(?\s*(?P<value>[rbfuRBFU]{0,2}(?:(?P<t>\"\"\"|'''''')|\"|''))(?(t)[\s\S]*?(?P=t)).*(?:\n(?:[ \t]+\S|\)).*)*'
@@ -257,8 +272,10 @@ string. Assert three `@@ ` lines in the diff, and that no hunk line is
 `witness_body` finds them in the diff. Copy the environment pins and the
 `tests` gate from the first test in that file.
 
-**Criterion 2's fixture.** Write this module verbatim as `consts.py`. The
-test's table maps each constant to its first and last line.
+**Criterion 2's fixture.** Write this module verbatim as `consts.py`. It
+holds both quote kinds, so `_MODULE` cannot be one triple-quoted Python
+string. Build it from a tuple of line strings. The test's table maps
+each constant to its first and last line.
 
 ```python
 FIRST = """
@@ -281,6 +298,7 @@ PAREN = (
     "eight"
 )
 ONE_LINE = "a" "b"
+QUOTED = 'q' 'r'
 TUPLE = (
     "t1",
     "t2",
@@ -293,6 +311,11 @@ TUPLE = (
 )
 LIMIT = 7
 
+SINGLE = '''
+one
+two
+three
+'''
 SUM = (
     "s1 "
     + ONE_LINE
@@ -313,15 +336,15 @@ LAST = (
 )
 ```
 
-The spans are `FIRST` 1 to 9, `PAREN` 10 to 19 and `ONE_LINE` 20. Then
-`TUPLE` 21 to 30, `LIMIT` 31, `SUM` 33 to 36 and `LAST` 41 to 50. Lines 32, 37,
-38, 39 and 40 derive nothing. Each `find` spans from the name through
+The spans are `FIRST` 1 to 9, `PAREN` 10 to 19, `ONE_LINE` 20 and
+`QUOTED` 21. Then `TUPLE` 22 to 31, `LIMIT` 32, `SINGLE` 34 to 38, `SUM`
+39 to 42 and `LAST` 47 to 56. Lines 33, 43, 44, 45 and 46 derive nothing. Each `find` spans from the name through
 the first opening quote, as `'PAREN = (\n    "'`, or is `LIMIT = 7` for
 the integer. Each `replace` puts `saffron constant mutant ` after that
 quote, or reads `LIMIT = (7 + 1)`. A trailing space on the opening line
 of `PAREN`, `TUPLE`, `SUM` or `LAST` falls inside its `find`, after the
-paren. On the other three openings it falls past the `find`.
-The witness names all seven constants in one new test file, added in
+paren. On the other five openings it falls past the `find`.
+The witness names all nine constants in one new test file, added in
 each commit. Commit each edit and reset to base after, so each diff
 holds one module line.
 
@@ -329,8 +352,17 @@ holds one module line.
 `tests/test_worktree.py`. Build the gitlink with `git update-index --add
 --cacheinfo 160000,<sha>,sub`, and commit it without `_commit`, whose
 `add -A` drops a gitlink with no checkout. `git show` exits 128 on a
-gitlink, measured with git 2.54 on the host. For the refusal, stub
-`runtime.exec_` to return exit 128.
+gitlink, measured with git 2.54 on the host. The reader never calls it
+there. On the cell image's git 2.47.3 `ls-tree` prints each fixture
+path's mode as on the host, and prints nothing for `:odd.py` without
+`--literal-pathspecs`. Drive two refusals. First stub `runtime.exec_` to
+return exit 128 for every call. Then let a call holding `ls-tree` reach
+`_exec_in`, and return 128 with its own stderr for any other call.
+Assert each raise and that its message carries that stderr.
+
+**Why not `read_at_head`.** `worktree.read_at_head`
+(`saffron/cell/worktree.py:405-411`) reads a symlink's target as text,
+and returns `None` on any refusal.
 
 **Imports.** Import `constant_mutants` and `CellTree` inside each test
 body, as the existing tests in these files do.
@@ -346,6 +378,6 @@ when the repo declares patterns. A repo with none still returns before
 any read.
 
 **Size.** The prototype measured 321 changed tokens on `size_gate`
-outside `tests/**`, and 1395 with the tests. The `bug` ceiling is 1300,
+outside `tests/**`, and 1498 with the tests. The `bug` ceiling is 1300,
 and `saffron/gates/**` is in `elevate_on`, so `size` blocks here.
 `estimated_lines` is the first count over four.
