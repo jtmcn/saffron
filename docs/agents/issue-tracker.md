@@ -211,6 +211,8 @@ GitHub issues remain in use only for research/evidence records under
   criteria in `SA-0114` and `SA-0115` carried this defect, and three passed a
   first review (backlog item b-250dc7). The author checks each claim against
   its own witness rather than leaving it to a reader.
+  Once `SA-0415` lands, a criterion declares each set under `covers:`, and
+  each member names its driver. Until then, load refuses the key.
 
 - **A witness must fail with the source reverted, not merely be missing at
   base.** `criteria` requires a non-`preserves` witness to be red at base, and a

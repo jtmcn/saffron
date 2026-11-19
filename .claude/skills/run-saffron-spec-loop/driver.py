@@ -2834,6 +2834,21 @@ def _disclosure_blocker(target: Spec) -> str | None:
     return None
 
 
+_NO_POSITIVE_CASE = "and it declares no positive_case"
+
+
+def _coverage_lines(target: Spec) -> tuple[list[str], list[str]]:
+    """b-c12d39: `coverage_problems` split into blockers and concerns. A
+    negative claim with no positive case is a concern, by operator decision,
+    since the word list matches most claims (78% of done ones)."""
+    from saffron import intake
+
+    judge = getattr(intake, "coverage_problems", None)  # absent until SA-0415 lands
+    lines = judge(target) if judge is not None else []
+    concerns = [line for line in lines if line.endswith(_NO_POSITIVE_CASE)]
+    return [line for line in lines if line not in concerns], concerns
+
+
 def _review_change_lines(target: Spec, specs: dict[str, Spec]) -> list[str]:
     """One `review:` line per live ancestor, reached through `depends_on` at
     any depth, whose `touches` names a REVIEW-shaping path. A stacked
@@ -2917,7 +2932,12 @@ def cmd_check(args) -> int:
         print(f"concern: {size_concern}")
     for line in _review_change_lines(target, specs) + _subject_concerns(target):
         print(line)
-    late = [b for b in (_cite_blocker(target, specs), _disclosure_blocker(target)) if b]
+    coverage_blockers, coverage_concerns = _coverage_lines(target)
+    for concern in coverage_concerns:
+        print(f"concern: {concern}")
+    late = [
+        b for b in (_cite_blocker(target, specs), _disclosure_blocker(target)) if b
+    ] + coverage_blockers
     if not rows:
         for blocker in ([size_blocker] if size_blocker else []) + late:
             print(f"blocker: {blocker}")

@@ -87,6 +87,8 @@ note rather than a pass. A `concern:` names a criterion whose mutant, read from
 witness aside, so ask the spec's author for a `subject:` (b-000d04).
 A `blocker:` names a spec whose body or claim quotes its own mutant's `find`.
 Seeding that mutant refuses the task, so revise the spec before the batch.
+A `blocker:` also names a declared set member that names no driver. A
+`concern:` names a negative claim that declares no `positive_case` (b-c12d39).
 
 A spec whose code reads `.saffron/specs/` gets one more question. Does it
 need `done/`, where every merged spec lives? A projection that missed it kept
