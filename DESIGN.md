@@ -1192,8 +1192,9 @@ survivor, filed as one under a declared mutant is. What a constant looks
 like, and where a witness's text lies, is language knowledge. So the repo
 declares both as Python `re` patterns under `policy.yaml`'s `witness:`
 (§2.1). `integrity`'s tokens are the nearest precedent, though they are
-plain substrings. Core applies the patterns to the diff as text and runs
-nothing new. A repo that declares none derives none. A constant in a declared
+plain substrings. Core applies the patterns to each changed file's text at
+head, counting a match only when the diff adds a line inside it (`SA-0416`).
+It runs nothing new. A repo that declares none derives none. A constant in a declared
 test path is never mutated. Some survivors are false. A witness that feeds the
 constant in, or names it only in a comment, also stays green.
 
