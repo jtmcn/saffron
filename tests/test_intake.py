@@ -998,24 +998,43 @@ def test_a_criterion_declares_the_sets_its_claim_covers_and_its_positive_case():
     `positive_case` parses as one sentence. Both are absent by default, and
     an omitted criterion parses exactly as it did before either field
     existed."""
+    # Each deciding entry sits behind a valid first set, and a blank or
+    # repeated member sits past the first member, so no edge-only check passes.
+    valid_first = (
+        "    covers:\n      - set: a\n        members:\n          - member: m\n"
+    )
     refused = [
-        "    covers: []\n",
-        '    covers:\n      - set: "  "\n        members:\n          - member: m\n',
-        "    covers:\n      - set: s\n        members: []\n",
-        '    covers:\n      - set: s\n        members:\n          - member: "   "\n',
+        ("    covers: []\n", "covers is declared but empty"),
         (
-            "    covers:\n"
-            "      - set: s\n"
+            valid_first
+            + '      - set: "  "\n        members:\n          - member: m\n',
+            "covers set name is blank",
+        ),
+        (
+            valid_first + "      - set: s\n        members: []\n",
+            "covers set 's' has no members",
+        ),
+        (
+            valid_first + "      - set: s\n"
             "        members:\n"
+            "          - member: a\n"
+            '          - member: "   "\n'
+            "          - member: b\n",
+            "covers set 's' has a blank member",
+        ),
+        (
+            valid_first + "      - set: s\n"
+            "        members:\n"
+            "          - member: a\n"
             "          - member: dup\n"
             "            driven_by: a\n"
             "          - member: other\n"
             "          - member: dup\n"
-            "            driven_by: b\n"
+            "            driven_by: b\n",
+            "covers set 's' member 'dup' is declared twice",
         ),
         (
-            "    covers:\n"
-            "      - set: s\n"
+            valid_first + "      - set: s\n"
             "        members:\n"
             "          - member: m1\n"
             "      - set: other\n"
@@ -1023,25 +1042,27 @@ def test_a_criterion_declares_the_sets_its_claim_covers_and_its_positive_case():
             "          - member: m2\n"
             "      - set: s\n"
             "        members:\n"
-            "          - member: m3\n"
+            "          - member: m3\n",
+            "covers set 's' is declared twice",
         ),
-        '    positive_case: "   "\n',
+        ('    positive_case: "   "\n', "positive_case is blank"),
         (
-            "    covers:\n"
-            "      - set: s\n"
+            valid_first + "      - set: s\n"
             "        members:\n"
-            "          - member: m\n"
-            "            driver: x\n"
+            "          - member: a\n"
+            "          - member: b\n"
+            "            driver: x\n",
+            "members.1.driver",
         ),
         (
-            "    covers:\n"
-            "      - set: s\n"
+            valid_first + "      - set: s\n"
             "        extra: x\n"
             "        members:\n"
-            "          - member: m\n"
+            "          - member: m\n",
+            "covers.1.extra",
         ),
     ]
-    for covers_yaml in refused:
+    for covers_yaml, message in refused:
         text = (
             "---\nid: TE-1\ntitle: t\ntype: feature\n"
             "acceptance:\n"
@@ -1050,8 +1071,9 @@ def test_a_criterion_declares_the_sets_its_claim_covers_and_its_positive_case():
             f"{covers_yaml}"
             "---\n\nbody\n"
         )
-        with pytest.raises(SpecError):
+        with pytest.raises(SpecError) as excinfo:
             parse_spec(text)
+        assert message in str(excinfo.value)
 
     spec = parse_spec(
         "---\nid: TE-1\ntitle: t\ntype: feature\n"
@@ -1237,12 +1259,13 @@ def test_coverage_problems_names_each_negative_claim_that_declares_no_positive_c
             ),
         ),
         ("The queue drops nothing.", None, ""),
+        ("A note on the queue stays pinned twice.", None, ""),
         (
             "The retry queue never loses a record without an operator retry.",
             "the case where a record is lost and then retried by the operator",
             ("    covers:\n      - set: s\n        members:\n          - member: m1\n"),
         ),
-        ("No record is lost during a crash.", None, ""),
+        ("The retry queue never loses a record without an operator retry.", None, ""),
     ]
     entries = []
     for i, (claim, positive_case, covers_yaml) in enumerate(criteria):
@@ -1271,8 +1294,8 @@ def test_coverage_problems_names_each_negative_claim_that_declares_no_positive_c
         "criterion 21: 'ord' member 'm order' names no driver",
         "criterion 21: its claim says 'never' and it declares no positive_case",
         "criterion 22: its claim says 'nothing' and it declares no positive_case",
-        "criterion 23: 's' member 'm1' names no driver",
-        "criterion 24: its claim says 'no' and it declares no positive_case",
+        "criterion 24: 's' member 'm1' names no driver",
+        "criterion 25: its claim says 'never' and it declares no positive_case",
     ]
 
 
@@ -1327,8 +1350,8 @@ def test_coverage_problems_docstring_says_it_cannot_know_a_set_is_complete():
     assert doc is not None
     assert "cannot know" in doc
     assert "complete" in doc
-    assert "heuristic" in doc
-    assert "a rule" not in doc
+    assert "`NEGATION_WORDS` is a heuristic" in doc
+    assert "rule" not in doc
 
 
 def _done_hits(source: str) -> list[tuple[int, str]]:
