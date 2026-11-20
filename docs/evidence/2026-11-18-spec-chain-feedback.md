@@ -57,3 +57,40 @@ Neither round's fix reached the other edge until a reviewer read for it.
 71. A loop over criteria, sets or members carries no flag across
     iterations unless a witness puts the reader of that flag after its
     writer.
+
+## SA-0416 (b-32b3db)
+
+One writer, two reviews, and a fixture pass after the second review. The
+chain began on 2026-11-18 and ended on 2026-11-20, after a weekly usage
+limit cut the second review off mid-read. The writer measured the gap on
+this repo's tree: an edit to line 200 of `SCHEMA` derived nothing. Its
+first prototype killed 15 wrong versions, and the reviews brought the
+count to 20.
+
+Round 1 found one blocker and one concern.
+
+- The refusal witness refused every call, so `ls-tree` raised first. The
+  blob read's own refusal branch never ran. A blob read that returns
+  `None`, as `read_at_head` does, passed.
+- The notes gave the string pattern in YAML escaping for a Python dict,
+  and no fixture used a single quote.
+
+Round 2 found one blocker.
+
+- No witness diff held two non-test files whose added lines differ. So a
+  line set built once, outside the per-file loop, passed.
+
+The writer measured every fix, and no third review ran. Budget rose from
+58 to 62 after round 1, since the old ceiling cleared the worst review
+plus rebut by $0.32.
+
+## What this chain adds
+
+Both blockers sit after the decisive step: a second call, and a second
+file. Check 67's class reached both. Neither brief named a second call or
+a second file.
+
+72. A witness for a function that makes two calls in sequence refuses the
+    second call alone, with the first call passing through.
+73. A witness for a per-file loop holds two files in which the second
+    file's line numbers would read differently under the first file's set.
