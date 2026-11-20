@@ -1,10 +1,10 @@
 ---
 id: b-952c34
 title: Half the merged tasks never reach the chain comparison, and the one real overwrite in history is among them
-status: open
+status: partial
 tier: 2
 filed: 2026-09-19
-specs: []
+specs: [SA-0418]
 prs: []
 commits: []
 cites: [§4.1]
@@ -42,3 +42,17 @@ decides whether the tasks still left out are migrated or abandoned.
 - 2026-09-19: filed from the spec loop's run 8 (stack #351 ← #360 ← #355 ←
   #366 ← #353). The numbers are the Spec seat's run over a ledger copy.
 - 2026-11-09: b-60d804 closed. The projection no longer leaves a `test` or `docs` task out on its type, so `SA-0013` task 8 can reach the comparison.
+- 2026-11-20: measured over the home ledger at main `4e58acd`. `saffron chains`
+  compared 143 of 336 merged tasks, with 3 breaks (`SA-0245`, `SA-0277` and
+  `SA-0415`). It left out 187 as unattributable, 5 as `spec_not_found` and 1
+  as `spec_unusable`. Of those left out:
+  - 151 date before their log's first span. `_all_tasks` dates a task by its
+    run's `started_at`. A batch's later cells start long after the run does.
+  - 20 logs hold no `Ceilings` event, and 17 tasks have no `events.jsonl`.
+    `SA-0013` task 8 is one of the 17, so no log can attribute it.
+  - 3 share a span with another task of the spec, and 2 spans lack a plan
+    or diff line.
+  Dating each task by its first attempt keeps 178 instead of 143. Newer
+  tasks write that attempt about two seconds before the span's `Ceilings`
+  event, and older ones after it. So neither date alone reaches both eras.
+  The tally scripts were run by hand and are not in the tree.

@@ -128,3 +128,32 @@ each member takes.
     can see.
 75. A witness that compares bytes uses an input that no default
     serializer reproduces, so a parse and a re-dump changes them.
+
+## SA-0418 (b-952c34)
+
+One writer, two reviews, and a fixture pass after the second review. The
+writer took about 72 minutes for the draft and 18 and 20 for the two
+revisions. Each review took about 11 minutes.
+
+Round 1 found one blocker. The function under change already picks the
+last gated attempt as the diff's generator. A rule tied to that attempt
+passed every witness, because each fixture task gated its last cell
+attempt. Check 67 named the set's members but not the rule beside it.
+Round 1 also found a mutant the writer had called impossible. The line
+`math.floor(ceilings.timestamp)` survives the change, so the spec now
+carries one.
+
+Round 2 found one blocker. The spec described base's shared-floor guard
+as wider than it is. The prototype had widened it silently, and the
+writer read the claim from the prototype. Check 5 resolved the citation
+but not the sentence. The operator kept base's rule, and the measured
+table did not move. Round 2 also named a rule in which every cell
+attempt claims its span. It survived once measured, and a new fixture
+member kills it. The writer ran 25 wrong versions, and all died.
+
+## What SA-0418 adds
+
+76. A witness for a selection rule also kills each selection the same
+    function or its module already makes, run as a wrong version.
+77. Each sentence that says what base does is read at base, never from
+    the prototype, before the prototype's measurements are quoted.
