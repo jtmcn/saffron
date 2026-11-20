@@ -1,7 +1,7 @@
 """The credential shapes PACKAGE refuses to push (`DESIGN.md` §5.7), and the
 ones `EventLog`, `plan.json`, `notes.json` and the task's own `findings.json`
-redact before each write (§4.7). One module, so neither reader drifts from
-the other (backlog item 46, §5.4, §9).
+redact before each write (§4.7). One module, so no reader drifts from
+another (backlog item 46, §5.4, §9).
 """
 
 from __future__ import annotations

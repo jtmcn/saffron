@@ -2689,7 +2689,7 @@ def _drive_cell(
                         "root_cause": proposal.root_cause,
                         "raw": proposed.raw,
                         # `sha256sum plan.json` re-derives the PLAN line's hash.
-                        # This envelope wraps raw text, so it carries its own hash too.
+                        # This wrapper holds raw text, so it carries its own hash too.
                         "sha256": artifacts.hash_artifact(proposed.raw),
                     },
                     indent=2,
@@ -2771,7 +2771,7 @@ def _drive_cell(
                 advisory_gates=sorted(latest.advisory_gates),
             )
 
-        # Redacted, then extracted and hashed the moment it is produced:
+        # Extracted, redacted, then hashed, and never read from /work again:
         # rewritable text is a claim, not a record (§5.3).
         redacted_plan, _ = redact(raw_plan, token=token)
         (task_dir / "plan.json").write_text(redacted_plan)

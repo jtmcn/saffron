@@ -16991,9 +16991,8 @@ def test_the_recorded_proposal_carries_the_hash_of_its_own_raw_block(
 ):
     """`sha256sum plan.json` re-derives the plan checkpoint's watch line's
     hash, since the block is redacted before it is written there. The
-    proposal is wrapped in an envelope instead, so unless the envelope
-    carries the hash the printed sha256 matches nothing on disk and the
-    record cannot be re-derived."""
+    proposal is held in a JSON wrapper instead. Without its own hash, the
+    printed sha256 matches nothing on disk."""
     cell = _stub_the_runtime(monkeypatch)
     outcome, _ledger = _drive(
         monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PROPOSAL))]
@@ -18870,6 +18869,7 @@ def test_the_recorded_findings_are_redacted_in_every_lens_and_finding(
     leaf, never on the whole serialized block, so an unterminated
     private-key header sweeps only its own finding."""
     from saffron import credentials
+    from saffron.agents.findings import Finding
 
     aws_key_1 = "AKIA" + "A" * 16
     cell_token = "token" + "S" * 20
@@ -18924,11 +18924,14 @@ def test_the_recorded_findings_are_redacted_in_every_lens_and_finding(
             ],
             token=token,
         )
-        # A lens that fails outright leaves the review incomplete, the same
-        # outcome an errored lens gets regardless of severity (§4.3).
+        # A lens whose session fails produces no findings, so the task ends
+        # REVIEW_INCOMPLETE (§5.5).
         assert outcome.state == "REVIEW_INCOMPLETE"
         raw = (outcome.task_dir / "findings.json").read_text()
         findings = json.loads(raw)
+        for lens in findings:
+            for record in lens["findings"]:
+                Finding.model_validate(record)
         assert [f["lens"] for f in findings] == [
             "correctness",
             "contract",
@@ -18974,6 +18977,12 @@ def test_the_recorded_findings_are_redacted_in_every_lens_and_finding(
             "adequacy",
             "conventions",
         ]
+        for lens_review, given in zip(
+            outcome.reviews, (lens1, lens2, lens3), strict=False
+        ):
+            assert [f.claim for f in lens_review.findings] == [
+                f["claim"] for f in given
+            ]
         assert outcome.reviews[0].findings[0].claim == f"uses {aws_key_1} as a key"
         assert (
             outcome.reviews[1].findings[0].claim == f"debug token {cell_token} leaked"
@@ -18986,7 +18995,7 @@ def test_a_cells_default_log_redacts_the_token_it_was_handed(monkeypatch, tmp_pa
     """`run_one_cell` takes a keyword `token`, handed to the default
     `EventLog` it builds when given no `emit`. The log never falls back to
     `CLAUDE_CODE_OAUTH_TOKEN` when handed `None` instead (item 46,
-    `saffron/events.py:505-506`)."""
+    `EventLog.__init__`)."""
     from saffron.credentials import OWN_TOKEN_DESCRIPTION
     from saffron.events import read_log
 
