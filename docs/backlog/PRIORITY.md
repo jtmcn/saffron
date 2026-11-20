@@ -386,6 +386,9 @@ a writer takes is not reserved, so a batch's follow-up minted it twice.
 
 ### Tier 3 — real, not urgent
 
+**Placed 2026-11-20**, with `SA-0419`: **b-60f950**. No vocabulary owns the
+run statuses `SA-0419` makes a closed set.
+
 **Placed 2026-11-20**, with `SA-0418`: **b-d0a813**. The vocabulary has no
 word for an attempt a cell opened, and `SA-0418` dates a task by one.
 

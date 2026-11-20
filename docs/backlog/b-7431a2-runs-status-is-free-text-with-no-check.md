@@ -4,11 +4,11 @@ title: '`runs.status` is free text with no CHECK, the shape #338 fixed one colum
 status: open
 tier: 3
 filed: 2026-09-18
-specs: []
+specs: [SA-0419]
 prs: []
 commits: []
 cites: [§4.1]
-related: [164]
+related: [164, b-60f950]
 ---
 
 ## Problem
