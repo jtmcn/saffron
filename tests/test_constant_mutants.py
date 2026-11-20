@@ -711,7 +711,7 @@ _CONSTS_WITNESSES = {
 }
 
 # The `find`/`replace` each constant's own mutant carries, the same
-# whichever of its lines was edited (§5.4.1).
+# whichever of its lines was edited.
 _CONSTS_EXPECTED = {
     "FIRST": ('FIRST = """', 'FIRST = """saffron constant mutant '),
     "PAREN": ('PAREN = (\n    "', 'PAREN = (\n    "saffron constant mutant '),
@@ -754,14 +754,7 @@ def test_an_edit_to_any_line_of_a_constant_derives_its_mutant(tmp_path, monkeypa
         f"def {fn}():\n    assert {name}" for name, fn in _CONSTS_WITNESSES.items()
     )
 
-    def head_reader(path: str) -> str | None:
-        done = subprocess.run(
-            ["git", "show", f"HEAD:{path}"],
-            cwd=repo,
-            capture_output=True,
-            text=True,
-        )
-        return done.stdout if done.returncode == 0 else None
+    head_reader = _GitTree(repo).head_text
 
     base_lines = _CONSTS_MODULE.split("\n")
     for line_no in range(1, 57):
@@ -785,7 +778,7 @@ def test_an_edit_to_any_line_of_a_constant_derives_its_mutant(tmp_path, monkeypa
             find, replace = _CONSTS_EXPECTED[owner]
             if line_no in _CONSTS_OPENING_LINES:
                 # The opening line's own trailing space falls inside
-                # `find`, right after the paren (§5.4.1).
+                # `find`, right after the paren.
                 find = find.replace(" (\n", " ( \n")
                 replace = replace.replace(" (\n", " ( \n")
             fn = _CONSTS_WITNESSES[owner]

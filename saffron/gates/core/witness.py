@@ -376,28 +376,10 @@ CLAIM_TEMPLATE = (
 )
 
 
-def _new_side(
-    hunk: list[tuple[str, str, int | None]],
-) -> tuple[str, list[tuple[int, int]]]:
-    """A hunk's context and added lines, joined with `\\n`.
-
-    Also the `(start, end)` offset of each added line in that text. A
-    removed line contributes nothing: it has no new side.
-    """
-    lines = [content for kind, content, _ in hunk if kind != "-"]
-    kinds = [kind for kind, _content, _ in hunk if kind != "-"]
-    text_parts: list[str] = []
-    spans: list[tuple[int, int]] = []
-    pos = 0
-    for content in lines:
-        start = pos
-        end = start + len(content)
-        spans.append((start, end))
-        text_parts.append(content)
-        pos = end + 1  # the "\n" this function joins with
-    return "\n".join(text_parts), [
-        span for span, kind in zip(spans, kinds, strict=True) if kind == "+"
-    ]
+def _new_side(hunk: list[tuple[str, str, int | None]]) -> str:
+    """A hunk's context and added lines, joined with `\\n`. A removed line
+    contributes nothing: it has no new side."""
+    return "\n".join(content for kind, content, _ in hunk if kind != "-")
 
 
 def _readable_files(diff: str, test_paths: Sequence[str]) -> list[_FileDiff]:
@@ -487,7 +469,7 @@ def _witness_text(name: str, diff: str, patterns: WitnessPatterns) -> str:
     pieces = []
     for file_diff in _readable_files(diff, ()):
         for hunk in file_diff.hunks:
-            text, _added = _new_side(hunk)
+            text = _new_side(hunk)
             pieces.extend(m.group(0) for m in re.finditer(body_pattern, text))
     return "\n".join(pieces)
 

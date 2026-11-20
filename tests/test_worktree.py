@@ -1535,9 +1535,10 @@ def test_head_text_reads_a_regular_file_at_head_and_nothing_else(tmp_path, monke
     (tmp_path / "link").symlink_to("a.py")
     _commit(tmp_path, "base")
 
-    # Uncommitted: proves the read is of `HEAD`, never the working copy.
+    # Uncommitted but staged: the read is of `HEAD`, never the index or working copy.
     (tmp_path / "a.py").write_text("edited\n")
     _commit_a_gitlink(tmp_path)
+    subprocess.run(["git", "add", "a.py"], cwd=tmp_path, check=True)
 
     inner = _exec_in(tmp_path)
     monkeypatch.setattr(worktree.runtime, "exec_", inner)

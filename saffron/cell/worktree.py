@@ -38,6 +38,8 @@ _FETCH_FAILED_MARKER = "SAFFRON_SEED_FETCH_FAILED"
 # Every measured recovery came a minute or more after the refusal (b-f582ee).
 # An immediate retry is unmeasured.
 _RETRY_PAUSE_S = 60.0
+# A blob git can write back with `checkout`: a plain or an executable file.
+_REGULAR_MODES = ("100644", "100755")
 
 
 def mounts(volume: str, state_volume: str, gates_dir: Path) -> list[runtime.Mount]:
@@ -806,7 +808,7 @@ def source_mutated(container: str, mutant: Mutant) -> Iterator[str | None]:
     if not entry:
         yield f"{mutant.file}: not tracked at HEAD, so the undo has nothing to restore"
         return
-    if not entry.startswith(("100644", "100755")):
+    if not entry.startswith(_REGULAR_MODES):
         yield (
             f"{mutant.file}: not a regular file at HEAD (mode "
             f"{entry.split()[0]}) — `git checkout` would not undo a write "
@@ -946,7 +948,7 @@ def head_text(target: str | VolumeTarget, path: str) -> str | None:
     if not entry:
         return None
     mode, _kind, rest = entry.split(None, 2)
-    if mode not in ("100644", "100755"):
+    if mode not in _REGULAR_MODES:
         return None
     sha = rest.split("\t", 1)[0]
     blob = _git(target, "cat-file", "blob", sha)
