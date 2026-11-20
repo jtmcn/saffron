@@ -47,12 +47,14 @@ acceptance:
       `SPEC_REVIEW`, `SPEC_WRITING` and `COMMIT_REVIEW`. This witness drives
       the last two, and criterion 2's drives `SPEC_REVIEW`. The witness writes
       one log with four spans and three merged tasks. Task A's run row
-      predates every span. A's cell starts in span 0, and A reaches
-      `run_task` again under its own id, so A's last cell attempt starts in the
-      very second of span 1's `Ceilings`, which carries a fraction of a
-      second. A also has a spec writing attempt inside span 2. Task B's
+      predates every span. A's gated `IMPLEMENTING` attempt lies in span 0.
+      A reaches `run_task` again under its own id, and its last cell attempt
+      is an ungated `REVIEWING` one. It starts in the very second of span
+      1's `Ceilings`, which carries a fraction of a second. A also has a
+      spec writing attempt inside span 2. Task B's
       run row and its spec review lie inside span 1. B's cell attempts lie
-      in span 2, the last one in the second before span 3 starts. B also
+      in span 2. The gated one is `IMPLEMENTING`, and the last, an ungated
+      `REBUTTING` one, starts in the second before span 3 starts. B also
       has a commit review attempt inside span 3. Task C, the last in the
       log, has a run row one second after span 3's `Ceilings` and a cell
       attempt a day later. Each span's plan and export lines match the
@@ -63,6 +65,7 @@ acceptance:
     wrong_versions:
       - Each task is tied by its run's `started_at`, as at base.
       - Each task is tied by its first cell attempt, so a re-queued task keeps its first span.
+      - Each task is tied by its last gated attempt, falling back to its last cell attempt.
       - Each task is tied by its first attempt in any phase.
       - Each task is tied by its last attempt in any phase.
       - A later spec writing session counts as a cell attempt.
@@ -103,6 +106,8 @@ acceptance:
         members:
           - member: a task's second span, A's re-queue
             driven_by: Each task is tied by its first cell attempt, so a re-queued task keeps its first span.
+          - member: an ungated last cell attempt after a gated one, A
+            driven_by: Each task is tied by its last gated attempt, falling back to its last cell attempt.
           - member: the second task in a log, B
             driven_by: Each task is tied by its run's `started_at`, as at base.
           - member: a spec review in the span before its own, B
@@ -180,8 +185,9 @@ acceptance:
 
 Backlog item **b-952c34**, with item 170, b-946f03 and b-60d804. It cites
 `DESIGN.md` §4.1, and Appendix T states the rule the projection serves.
-Every line below was read at `4e58acde`, which this spec's base leaves
-unchanged outside `docs/backlog/`.
+Every line below was read at `4e58acde`. This spec's base changes no file
+it cites. Its commits add only this spec, two backlog records, the
+priority order and the queue smoke test in `tests/test_scheduler.py`.
 
 **The rule today.** `materialize` hands `_attribute` each task's run
 `started_at` (`saffron/projection.py:334-339`). `_attribute` ties a task to
@@ -277,11 +283,23 @@ changes.
   `spec_unusable`. With the 17 that have no log, they make the 36.
 - **Nine old `ORPHANED` tasks with no attempt.** The base rule kept them by
   their run's start. They leave the graph, and none is merged, so the
-  comparison is unchanged.
-- **A task whose own `Ceilings` never reached its log.** Its last cell
-  attempt then lands in a neighbour's span. The neighbour's own attempt
-  lands there too, so the span goes to neither. One case remains. When
-  the neighbour has no cell attempt, the stray task takes its span.
+  comparison is unchanged. Any other task with no cell attempt is
+  unattributable too, such as a `PREFLIGHT_FAILED` or `SPEC_WITHHELD` one.
+  On the ledger copy no such task was kept at base, so only the nine
+  leave.
+- **A span no task's last cell attempt lands in.** Take a task whose own
+  `Ceilings` never reached its log. Its last cell attempt lies in a
+  neighbour's span. Where the neighbour's own attempt lands there too, the
+  span goes to neither. Where it lands in no task's span, the stray task
+  takes it. Three causes leave a span that empty. One is a neighbour whose
+  own `Ceilings` is missing and which has no cell attempt. Another is an
+  earlier span of a re-queued neighbour. The last is a call that stopped at
+  preflight (`saffron/cell/session.py:2566`) before the attempt wrapper
+  (`:2637`).
+- **The `v0.5` phase.** A ledger migration backfills one attempt per
+  legacy gate result in phase `v0.5`, started at migration time
+  (`saffron/ledger.py:519-526`). The rule reads it as a cell attempt. The
+  ledger copy holds no such row, so no witness drives it.
 - **The `REPLAY` phase.** `saffron/replay.py:88` opens it for v0 replays,
   and no replayed spec writes a `Ceilings`.
 - **Appendix T's answer.** The rule's rerun over the kept tasks is
@@ -289,11 +307,17 @@ changes.
 
 ## Notes for the agent
 
-**Edit or new.** Each criterion edits `_attribute` and its caller. The
-spelling the edit needs is new at your base, so no mutant on the ref pins
-one. Each witness stands alone, and `witness` reports `skip`. The
-`preserves` witness exists at your base and passes there. It passes again
+**Edit or new.** Each criterion edits `_attribute` and its caller, whose
+spelling is new at your base. Criterion 1's witness has a mutant on the
+ref, in a line of `_spans` the change leaves alone
+(`saffron/projection.py:205`). Criteria 2 and 3 have none, and `witness`
+reports `skip` for each. The `preserves` witness exists at your base and
+passes there. It passes again
 once cases (a) and (j) carry their own attempts.
+
+**Phases.** The new witnesses use the phases a cell records:
+`IMPLEMENTING` for a gated attempt, `REVIEWING` or `REBUTTING` for a later
+ungated one.
 
 **The fixture.** `T` takes no attempt times today, and `build` opens one
 attempt only when `gate_result` is set (`tests/test_projection.py:184-197`).
