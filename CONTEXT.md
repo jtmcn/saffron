@@ -683,6 +683,21 @@ _Avoid_ "mutant" for one. A mutant is exact text withheld from the implementer, 
 version is prose the implementer reads. _Avoid_ "criterion probe" for its edit. A criterion
 probe's session is shown no list.
 
+**Covered set**: One set a criterion's claim quantifies over, declared under its `covers`
+with a name and its members (`SA-0415`). Each member's `driven_by` quotes exactly the
+criterion's own witness or one of its own `wrong_versions`. `intake.coverage_problems`
+names each member that quotes neither, and `driver.py check` blocks on that line. No
+command can know a set is complete, so a member the author leaves out goes unseen.
+_Avoid_ "coverage" alone for one. Coverage names lines a test executes, and a covered set
+names cases a claim promises.
+
+**Positive case**: The one sentence a criterion's `positive_case` holds. It names the case
+its witness observes where the effect a negative claim rules out does happen, through the
+same instrument (`SA-0415`). A spy that only asserts an absence passes when it is blind.
+`intake.coverage_problems` names each criterion whose claim holds a word of
+`NEGATION_WORDS` and declares none. `driver.py check` prints that line as a concern.
+_Avoid_ "positive control" for one.
+
 ---
 
 ## 5. Review

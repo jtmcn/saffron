@@ -117,6 +117,9 @@ And optionally:
    needs a witness that first sees the positive case through one instrument.
    A spy that only asserts an absence passes when it is blind. Five of six
    blockers on 2026-11-04 were this shape (b-c12d39).
+   Declare each set under the criterion's `covers:`, each member with its
+   `driven_by`, and each positive case under `positive_case:`. `driver.py
+   check` then names an undriven member as a blocker.
    **Done when** every member of every set names its witness, every negative
    claim names its positive case, and the report carries the table. List each
    criterion's wrong versions under its `wrong_versions:` field, not as "These

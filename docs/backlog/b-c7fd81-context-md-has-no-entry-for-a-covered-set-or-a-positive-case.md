@@ -1,12 +1,13 @@
 ---
 id: b-c7fd81
 title: '`CONTEXT.md` has no entry for a covered set or a positive case, the fields SA-0415 adds'
-status: open
+status: done
+closed: 2026-11-20
 tier: 2
 by_hand: true
 filed: 2026-11-18
 specs: []
-prs: []
+prs: [1275]
 commits: []
 cites: [§5.4]
 related: [b-c12d39]
@@ -40,3 +41,5 @@ names "positive control". They land after `SA-0415` merges.
 ## Record
 
 - 2026-11-18: filed with `SA-0415`.
+- 2026-11-20: landed by hand after #1271 merged `SA-0415`, with lines in the
+  spec writer's step 6, the spec reviewer's check 3 and `issue-tracker.md`.
