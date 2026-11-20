@@ -67,6 +67,8 @@ trivial.
    `pending_symbols` entry, or the `dead` gate fails the task: a blocker.
    A spec that adds or widens a refusal and names no queued spec it refuses
    in `retired_first` is a concern (b-e7898b).
+   A spec that asks the pull request body to say anything is a concern:
+   the cell writes none of the body (§5.7, b-63ac52).
 3. **Witness/mutant discipline.** A spec whose change edits existing code
    has a `mutant` per criterion on the ref, keyed by witness. Where one is
    missing, name a plausible wrong implementation its witness would pass;

@@ -110,6 +110,10 @@ GitHub issues remain in use only for research/evidence records under
   it, and a spec declaring both is refused at intake.
 - **Body**: headings `## Context`, `## Problem`, `## Out of scope`, `## Notes for
   the agent`.
+- **A spec asks no pull request body text.** PACKAGE renders the body from
+  the ledger and the spec (§5.7), and the cell writes none of it. Its notes
+  reach the body unadjudicated, and no gate reads them. So a fact a later spec
+  must know goes in the spec itself or in a backlog item (b-63ac52).
 - **Dependencies**: list blocked-by spec ids in `depends_on` (e.g. `[SA-0002, SA-0005]`).
 - **A new spec changes this repo's measured queue.**
   `tests/test_scheduler.py::test_saffron_queue_smoke_reproduces_this_repos_measured_queue`
