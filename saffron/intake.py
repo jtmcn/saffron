@@ -54,6 +54,23 @@ PENDING_SYMBOL = r"^[^\s:]+::[A-Za-z_][A-Za-z0-9_]*$"
 # Versioned per module (DESIGN.md §3.2). Only 1 exists today.
 SCHEMA_VERSIONS: tuple[int, ...] = (1,)
 
+# A heuristic, not a rule (backlog item b-c12d39): a listed word can describe
+# a precondition, and a negation can be spelled without one.
+NEGATION_WORDS: tuple[str, ...] = (
+    "no",
+    "not",
+    "never",
+    "nothing",
+    "none",
+    "neither",
+    "nor",
+    "without",
+    "cannot",
+)
+_NEGATION_PATTERN = re.compile(
+    r"\b(" + "|".join(NEGATION_WORDS) + r")\b", re.IGNORECASE
+)
+
 
 class SpecError(ValueError):
     """A spec that cannot be trusted to describe what it asks for, or a scan
@@ -147,6 +164,29 @@ class Mutant(BaseModel):
         return value
 
 
+class CoveredMember(BaseModel):
+    """One case a claim's `covers` set lists, and what drives it (b-c12d39).
+
+    `driven_by` names its own criterion's witness or one of its
+    `wrong_versions`. Load does not check this. `coverage_problems` flags any
+    other name.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    member: str
+    driven_by: str | None = None
+
+
+class CoveredSet(BaseModel):
+    """One named group of `CoveredMember` entries a claim covers (b-c12d39)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    set: str
+    members: list[CoveredMember]
+
+
 class Criterion(BaseModel):
     """One acceptance criterion and the witness the host checks it by.
 
@@ -176,6 +216,14 @@ class Criterion(BaseModel):
     """Plausible wrong implementations of this criterion, in the author's own
     words (backlog item b-7e69d0). Absent by default, and an omitted field
     must parse exactly as it did before this field existed."""
+    covers: list[CoveredSet] = Field(default_factory=list)
+    """The sets this claim's witness, or one of its `wrong_versions`, is
+    meant to drive (backlog item b-c12d39). Absent by default, and an
+    omitted field must parse exactly as it did before this field existed."""
+    positive_case: str | None = None
+    """One sentence naming the case where the claimed effect does happen,
+    through the same instrument as a negative clause (backlog item
+    b-c12d39). `None` by default."""
 
     @field_validator("wrong_versions")
     @classmethod
@@ -195,6 +243,56 @@ class Criterion(BaseModel):
             if version in seen:
                 raise ValueError(f"wrong_versions entry {version!r} is declared twice")
             seen.add(version)
+        return value
+
+    @field_validator("covers")
+    @classmethod
+    def _covers_sets_and_members_are_well_formed(
+        cls, value: list[CoveredSet]
+    ) -> list[CoveredSet]:
+        """Runs only when the spec sets this key, as `wrong_versions` does.
+
+        A set name is refused blank, and refused where this criterion
+        declares it twice, checked across the whole list rather than only
+        between neighbours. A member text is refused blank the same way.
+        It is also refused where its own set declares it twice. The same
+        text in two different sets is left alone. Sets and members are
+        returned in declared order, never sorted.
+        """
+        if not value:
+            raise ValueError("covers is declared but empty")
+        seen_sets: set[str] = set()
+        for covered_set in value:
+            if not covered_set.set.strip():
+                raise ValueError("covers set name is blank")
+            if covered_set.set in seen_sets:
+                raise ValueError(f"covers set {covered_set.set!r} is declared twice")
+            seen_sets.add(covered_set.set)
+            if not covered_set.members:
+                raise ValueError(f"covers set {covered_set.set!r} has no members")
+            seen_members: set[str] = set()
+            for member in covered_set.members:
+                if not member.member.strip():
+                    raise ValueError(
+                        f"covers set {covered_set.set!r} has a blank member"
+                    )
+                if member.member in seen_members:
+                    raise ValueError(
+                        f"covers set {covered_set.set!r} member "
+                        f"{member.member!r} is declared twice"
+                    )
+                seen_members.add(member.member)
+        return value
+
+    @field_validator("positive_case")
+    @classmethod
+    def _positive_case_is_not_blank(cls, value: str | None) -> str | None:
+        """Runs only when the spec sets this key. `None` passes through
+        untouched, as `Mutant._case_is_not_blank` does for `case`."""
+        if value is None:
+            return value
+        if not value.strip():
+            raise ValueError("positive_case is blank")
         return value
 
     @model_validator(mode="after")
@@ -602,3 +700,40 @@ def discover_specs(
             continue
         specs.append(DiscoveredSpec(path=path, spec=spec, spec_sha=spec_sha))
     return specs, failures
+
+
+def coverage_problems(spec: Spec) -> list[str]:
+    """Report each declared `covers` member with no trustworthy driver, and
+    each negative claim with no declared `positive_case` (backlog item
+    b-c12d39).
+
+    This judges only the members a spec declares, and cannot know whether a
+    declared set is complete. `NEGATION_WORDS` is a heuristic: a listed word
+    can describe a precondition, and a negation can be spelled without one.
+    No shape here is a load error, so this refuses nothing.
+    """
+    lines: list[str] = []
+    for number, criterion in enumerate(spec.acceptance, start=1):
+        drivers = {criterion.witness, *criterion.wrong_versions}
+        for covered_set in criterion.covers:
+            for member in covered_set.members:
+                if member.driven_by is None:
+                    lines.append(
+                        f"criterion {number}: {covered_set.set!r} member "
+                        f"{member.member!r} names no driver"
+                    )
+                elif member.driven_by not in drivers:
+                    lines.append(
+                        f"criterion {number}: {covered_set.set!r} member "
+                        f"{member.member!r} names {member.driven_by!r}, which "
+                        "is neither its witness nor one of its wrong versions"
+                    )
+        if criterion.positive_case is None:
+            match = _NEGATION_PATTERN.search(criterion.claim)
+            if match is not None:
+                word = match.group(0).lower()
+                lines.append(
+                    f"criterion {number}: its claim says {word!r} and it "
+                    "declares no positive_case"
+                )
+    return lines

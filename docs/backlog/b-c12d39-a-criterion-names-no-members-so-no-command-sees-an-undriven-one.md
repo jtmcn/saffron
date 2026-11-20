@@ -1,11 +1,12 @@
 ---
 id: b-c12d39
 title: "A criterion names no members of the sets its claim covers, so no command sees an undriven one"
-status: open
+status: done
+closed: 2026-11-20
 tier: 2
 filed: 2026-11-09
 specs: [SA-0415]
-prs: []
+prs: [1271]
 commits: []
 cites: [§5.4]
 related: [b-250dc7, b-98a3be]
@@ -45,3 +46,7 @@ parse.
 - 2026-11-09: filed from the spec chain speed review. The writer prompt is
   the interim home of the rule, since a new key breaks parsing until this
   lands.
+- 2026-11-20: #1271 shipped `SA-0415` in the spec loop's run 80. A criterion
+  declares `covers` and `positive_case`, and `intake.coverage_problems` names
+  each undriven member and each negative claim. `driver.py check` blocks on
+  the first and notes the second (#1269).
