@@ -50,10 +50,12 @@ acceptance:
       its value. The constant `LONG` is a name, ` = (`, nine string lines
       and a closing paren. The head edits its fifth string line and no other
       line of it, so that edit's hunk holds neither `LONG`'s opening line
-      nor its closing line. The same commit edits a function body above
-      `LONG` and one below it, so the diff holds three hunks and `LONG`'s
-      edit is the middle one. A constant `AFTER` follows the closing paren
-      unedited. The witness that compares the code's output with `LONG`
+      nor its closing line. The same commit grows a one-line function body
+      above `LONG` to two lines, and edits one below it. So that file's diff
+      holds three hunks, `LONG`'s edit is the middle one, and old and new
+      line numbers differ. A constant `AFTER` follows the closing paren
+      unedited, on line 21 at head. The same commit also edits line 21 of
+      `alpha.py`, a module of 30 comment lines whose path sorts first. The witness that compares the code's output with `LONG`
       also names `AFTER`. `witness` reports `fail` with exactly one
       `survived-mutant` failure, filed under that witness, and its message
       names `LONG`. The witness that pins the literal dies under the same
@@ -66,6 +68,7 @@ acceptance:
       - The added lines are read from the first hunk alone, so `LONG`'s edit in the second hunk is missed.
       - The added lines are read from the last hunk alone.
       - A match counts only on the lines up to the end of its `value` group, so an edit on `LONG`'s fifth string line is missed.
+      - The added-line set is carried across files, so `alpha.py`'s line 21 derives `AFTER` and a second failure appears.
   - claim: >-
       `constant_mutants` searches each constant pattern over the head text of
       each file outside the test paths that the diff adds a line to. A match
@@ -172,7 +175,8 @@ Make an added line on any line of a constant's match derive its mutant.
    `saffron/cell/worktree.py`. It returns the file's text at `HEAD`, the
    new side `export_patch` reads. Ask `git --literal-pathspecs ls-tree
    HEAD -- <path>` first. Return `None` unless the entry's mode is
-   `100644` or `100755`, then read that blob. Raise
+   `100644` or `100755`. Then read the blob with `git cat-file blob <sha>`,
+   the sha taken from that entry, so no textconv applies. Raise
    `runtime.CellRuntimeError` with git's stderr when either call exits
    non-zero.
 2. Add `head_text(self, path: str) -> str | None` to the `Tree` protocol,
@@ -266,9 +270,11 @@ parentheses would end the span early. The tree holds neither.
 **Criterion 1's fixture.** `prompts.py` at base opens with `def first()`
 and a one-line body, then six blank lines, `LONG` and `AFTER = "after"`.
 Then come `def long()` returning `LONG`, six blank lines, and `def
-last()` with a one-line body. The head changes both one-line bodies and `LONG`'s fifth
-string. Assert three `@@ ` lines in the diff, and that no hunk line is
-`LONG = (` or `)`. Both witnesses are new in the head commit, so
+last()` with a one-line body. The head turns the first body into two
+lines, changes the last body and `LONG`'s fifth string. Assert three
+`@@ ` lines in `prompts.py`'s diff, and that no hunk line is `LONG = (`
+or `)`. Assert that `AFTER` sits on line 21 at head. `alpha.py` at base
+holds 30 comment lines, and the head changes its line 21. Both witnesses are new in the head commit, so
 `witness_body` finds them in the diff. Copy the environment pins and the
 `tests` gate from the first test in that file.
 
@@ -378,6 +384,6 @@ when the repo declares patterns. A repo with none still returns before
 any read.
 
 **Size.** The prototype measured 321 changed tokens on `size_gate`
-outside `tests/**`, and 1498 with the tests. The `bug` ceiling is 1300,
+outside `tests/**`, and 1561 with the tests. The `bug` ceiling is 1300,
 and `saffron/gates/**` is in `elevate_on`, so `size` blocks here.
 `estimated_lines` is the first count over four.
