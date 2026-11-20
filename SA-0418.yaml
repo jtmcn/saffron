@@ -1,0 +1,5 @@
+tests/test_projection.py::test_a_task_is_tied_to_the_span_its_last_cell_attempt_starts_in:
+  file: saffron/projection.py
+  find: start = math.floor(ceilings.timestamp)
+  replace: start = ceilings.timestamp
+  case: a span dated by its raw Ceilings timestamp, so an attempt in that second falls to the span before
