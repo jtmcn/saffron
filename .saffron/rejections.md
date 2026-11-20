@@ -3254,3 +3254,20 @@ critic's own, so they have no line.
   still live. **Bucket 2**. **Landed:** a review commit on #1262.
 - `SA-0414` (#1262): a task with no run fact folds onto the first row at its
   `base_sha`. **Bucket 1**. **Open:** filed as b-15c480.
+
+## 2026-11-20, spec loop run 80 (#1271)
+
+- `SA-0415` (#1271): every refused `covers` shape put its deciding entry
+  first or alone. So a duplicate, blank or empty check confined to the
+  first set or the first member passed. **Bucket 1**. **Landed:** a review
+  commit on #1271.
+- `SA-0415` (#1271): the docstring witness checked only for one literal
+  phrase, so a docstring calling the list a firm rule passed. **Bucket 1**.
+  **Landed:** a review commit on #1271.
+- `SA-0415` (#1271): the last two criteria held different claims where the
+  spec asked for twins, so a lookup keyed by claim text passed. **Bucket
+  1**. **Landed:** a review commit on #1271.
+- `SA-0415` (#1271): three docstrings said less than the code does. One
+  said `driven_by` may name any test, one read "in both orders", and one
+  never said a word before a full stop still matches. **Bucket 3**.
+  **Landed:** a review commit on #1271.

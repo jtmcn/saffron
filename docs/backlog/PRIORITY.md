@@ -148,12 +148,16 @@ later one fits.
 **Placed 2026-11-08**, from `SA-0356`'s spec chain: ~~**b-d1c277**~~. The queue's
 stack thresholds assume every earlier candidate ran.
 
-**Placed 2026-11-09**, from the spec chain speed review: **b-c12d39**. A
+**Placed 2026-11-09**, from the spec chain speed review: ~~**b-c12d39**~~. A
 criterion cannot name the members its claim covers, so no command sees one
 that no witness drives.
 
 **Placed 2026-11-18**, from writing `SA-0415`: **b-c7fd81**, by hand once
 `SA-0415` merges. `CONTEXT.md` has no entry for a covered set or a positive case.
+
+**Placed 2026-11-20**, from `SA-0417`'s spec review: **b-0f5493**. Each event's
+terminal line prints before its log redacts it, so the token reaches the
+`launchd` log file.
 
 **Placed 2026-11-08**, from the spec loop's run 55: ~~**b-31e3c8**~~,
 ~~**b-cbb6e7**~~, ~~**b-c7858c**~~, ~~**b-879e72**~~, then ~~**b-3df181**~~. REBUT answers
