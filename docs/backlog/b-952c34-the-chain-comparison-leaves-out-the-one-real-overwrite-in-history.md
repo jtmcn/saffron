@@ -4,7 +4,7 @@ title: Half the merged tasks never reach the chain comparison, and the one real 
 status: partial
 tier: 2
 filed: 2026-09-19
-specs: []
+specs: [SA-0418]
 prs: []
 commits: []
 cites: [§4.1]
