@@ -968,6 +968,7 @@ def run_task(
             out_dir=out_dir,
             emit=emit,
             on_state=_write_live,
+            token=token,
         )
     except BaseException as cell_exc:
         if written:

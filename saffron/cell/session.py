@@ -29,6 +29,7 @@ from saffron.cell.worktree import (
     CriticPatchRejected,
     CriticPatchUnrepresentable,
 )
+from saffron.credentials import redact, redact_nested
 from saffron.engine import engine_commit
 from saffron.events import (
     Attempt,
@@ -1140,6 +1141,7 @@ def run_one_cell(
     out_dir: Path,
     emit: Callable[[Event], None] | None = None,
     on_state: Callable[[LiveState], None] | None = None,
+    token: str | None = None,
 ) -> CellOutcome:
     """Create a cell, drive one IMPLEMENT session in it, and gate the result.
 
@@ -1159,7 +1161,7 @@ def run_one_cell(
     stamped here.
     """
     if emit is None:
-        log = EventLog(out_dir / spec.spec_id)
+        log = EventLog(out_dir / spec.spec_id, token=token)
         emit = partial(_default_emit, log=log)
     exported: dict = {}
     outcome = _drive_cell(
@@ -1171,6 +1173,7 @@ def run_one_cell(
         emit=emit,
         exported=exported,
         on_state=on_state,
+        token=token,
     )
     outcome.cell_head_sha = exported.get("head_sha")
     outcome.agent_subjects = exported.get("subjects", [])
@@ -2332,6 +2335,7 @@ def _drive_cell(
     emit: Callable[[Event], None],
     exported: dict,
     on_state: Callable[[LiveState], None] | None = None,
+    token: str | None = None,
 ) -> CellOutcome:
     """`run_one_cell`'s whole body. `exported` is teardown's way out."""
     from saffron import parent_versions, preflight
@@ -2684,9 +2688,8 @@ def _drive_cell(
                         "proposed_touches": final_touches,
                         "root_cause": proposal.root_cause,
                         "raw": proposed.raw,
-                        # `plan.json` is the raw block verbatim, so its watch
-                        # line's sha256 is re-derivable with `sha256sum`. This
-                        # is an envelope, so it has to carry the hash itself.
+                        # `sha256sum plan.json` re-derives the PLAN line's hash.
+                        # This envelope wraps raw text, so it carries its own hash too.
                         "sha256": artifacts.hash_artifact(proposed.raw),
                     },
                     indent=2,
@@ -2768,13 +2771,14 @@ def _drive_cell(
                 advisory_gates=sorted(latest.advisory_gates),
             )
 
-        # Extracted and hashed the moment it is produced, and never read from
-        # /work again: a plan the implementer can rewrite is a claim (§5.3).
-        (task_dir / "plan.json").write_text(raw_plan)
+        # Redacted, then extracted and hashed the moment it is produced:
+        # rewritable text is a claim, not a record (§5.3).
+        redacted_plan, _ = redact(raw_plan, token=token)
+        (task_dir / "plan.json").write_text(redacted_plan)
         _phase_start(
             "IMPLEMENT",
             "PLAN",
-            f"accepted, sha256 {artifacts.hash_artifact(raw_plan)[:12]}",
+            f"accepted, sha256 {artifacts.hash_artifact(redacted_plan)[:12]}",
         )
 
         # Doneness is measured from here, not from base_sha: the plan turn holds
@@ -3249,9 +3253,14 @@ def _drive_cell(
             last_cost = noted.cost_usd_est
             notes = artifacts.extract_notes(noted.text)
             if notes:
-                notes_sha256 = artifacts.hash_artifact(notes)
+                # Redacted before the hash, so the hash names what the
+                # file holds, never what the turn extracted (§5.3).
+                redacted_notes, _ = redact(notes, token=token)
+                notes_sha256 = artifacts.hash_artifact(redacted_notes)
                 (task_dir / "notes.json").write_text(
-                    json.dumps({"raw": notes, "sha256": notes_sha256}, indent=2)
+                    json.dumps(
+                        {"raw": redacted_notes, "sha256": notes_sha256}, indent=2
+                    )
                 )
                 _phase_start(
                     "IMPLEMENT",
@@ -3653,8 +3662,12 @@ def _drive_cell(
                         + sum(e["cost_usd"] for e in criterion_probes)
                         + sum(e["cost_usd"] for e in wrong_versions)
                     )
+                    # Redacted leaf by leaf, never as one string (item 46).
+                    redacted_findings = [
+                        redact_nested(r.as_dict(), token=token)[0] for r in reviews
+                    ]
                     (task_dir / "findings.json").write_text(
-                        json.dumps([r.as_dict() for r in reviews], indent=2)
+                        json.dumps(redacted_findings, indent=2)
                     )
                     # Keyed by identity rather than re-filtered:
                     # `anchored_blockers` is the single selection rule REBUT's

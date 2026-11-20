@@ -1456,6 +1456,98 @@ def test_the_pull_request_url_is_logged_as_an_event(packageable):
     assert packaged[0].phase == "PACKAGE"
 
 
+def test_packages_own_logs_redact_the_token_they_were_handed(monkeypatch, packageable):
+    """`package()` and `push_unpackaged_work()` each build their default log
+    with the token they were handed, never the environment's own
+    `CLAUDE_CODE_OAUTH_TOKEN`."""
+    from saffron.credentials import OWN_TOKEN_DESCRIPTION
+    from saffron.events import Agent, read_log
+
+    created: list = []
+
+    class _Recording(package_phase.EventLog):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            created.append(self)
+
+    monkeypatch.setattr(package_phase, "EventLog", _Recording)
+
+    token1 = "a1token" + "Z" * 10
+    token2 = "b2token" + "Y" * 10
+    token3 = "c3token" + "X" * 10
+
+    def _gh(argv):
+        return sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n")
+
+    kwargs = packageable.kwargs
+    package(
+        packageable.outcome,
+        gh=_gh,
+        spec=kwargs["spec"],
+        repo=kwargs["repo"],
+        mirror=kwargs["mirror"],
+        image=kwargs["image"],
+        ledger=kwargs["ledger"],
+        out_dir=kwargs["out_dir"],
+        token=token1,
+    )
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", token3)
+    package(
+        packageable.outcome,
+        gh=_gh,
+        spec=kwargs["spec"],
+        repo=kwargs["repo"],
+        mirror=kwargs["mirror"],
+        image=kwargs["image"],
+        ledger=kwargs["ledger"],
+        out_dir=kwargs["out_dir"],
+        token=None,
+    )
+    uk = packageable.unpackaged_kwargs
+    package_phase.push_unpackaged_work(
+        packageable.outcome,
+        spec=uk["spec"],
+        repo=uk["repo"],
+        mirror=uk["mirror"],
+        out_dir=uk["out_dir"],
+        repo_id=uk["repo_id"],
+        ledger=uk["ledger"],
+        token=token2,
+    )
+    package_phase.push_unpackaged_work(
+        packageable.outcome,
+        spec=uk["spec"],
+        repo=uk["repo"],
+        mirror=uk["mirror"],
+        out_dir=uk["out_dir"],
+        repo_id=uk["repo_id"],
+        ledger=uk["ledger"],
+        token=None,
+    )
+
+    assert len(created) == 4
+    texts = [f"holds {token1}", f"holds {token3}", f"holds {token2}", f"holds {token3}"]
+    for log, text in zip(created, texts, strict=True):
+        log.append(Agent(timestamp=0.0, spec_id="SA-0005", raw=False, detail=text))
+
+    agent_events = [
+        e for e in read_log(packageable.outcome.task_dir) if isinstance(e, Agent)
+    ]
+    assert len(agent_events) == 4
+
+    assert token1 not in agent_events[0].detail
+    assert agent_events[0].redacted == (OWN_TOKEN_DESCRIPTION,)
+
+    assert token3 in agent_events[1].detail
+    assert agent_events[1].redacted == ()
+
+    assert token2 not in agent_events[2].detail
+    assert agent_events[2].redacted == (OWN_TOKEN_DESCRIPTION,)
+
+    assert token3 in agent_events[3].detail
+    assert agent_events[3].redacted == ()
+
+
 def test_a_worktree_that_will_not_go_away_is_said_and_not_raised(
     monkeypatch, packageable
 ):

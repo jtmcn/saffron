@@ -177,6 +177,39 @@ def test_run_task_hands_its_cell_the_task_it_was_given(tmp_path, monkeypatch):
     assert built == [9, None]
 
 
+def test_run_task_hands_its_cell_the_token_it_was_given(tmp_path, monkeypatch):
+    """`run_task` hands `run_one_cell` the token it was given, never the
+    environment's own `CLAUDE_CODE_OAUTH_TOKEN`."""
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "env-token-unused-by-run-task")
+    seen: list[str | None] = []
+
+    def _capture(kwargs: dict) -> None:
+        seen.append(kwargs.get("token"))
+
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="TK-1",
+        state="NOT_IMPLEMENTED",
+        task_id=1,
+        out_dir=tmp_path / "out1",
+        on_cell=_capture,
+        token="given-token",
+    )
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="TK-2",
+        state="NOT_IMPLEMENTED",
+        task_id=2,
+        out_dir=tmp_path / "out2",
+        on_cell=_capture,
+        token=None,
+    )
+
+    assert seen == ["given-token", None]
+
+
 def test_the_cell_spec_carries_the_specs_history_declaration(tmp_path, monkeypatch):
     """`run_task` passes `spec.history` straight onto the `CellSpec` it
     builds (backlog item b-a8270f). A spec with no `history` still reaches
