@@ -4,7 +4,7 @@ title: "Redaction reaches `events.jsonl` and none of the cell-authored files bes
 status: open
 tier: 2
 filed: 2026-10-19
-specs: []
+specs: [SA-0417]
 prs: []
 commits: []
 cites: [§5.4, §5.7]
@@ -41,3 +41,7 @@ residual risk.
 ## Record
 
 - 2026-10-19: filed from the spec loop's run 44.
+- 2026-11-20: `SA-0417` queued. The cell redacts `plan.json`, `notes.json`
+  and `findings.json` before each is written, and hashes the redacted text.
+  PACKAGE's two default logs take the token. `patch.diff` stays as it is,
+  and `DESIGN.md` §5.7 names it as accepted risk by hand.

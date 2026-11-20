@@ -80,7 +80,7 @@ will think one contradicts the other. One sentence, no renumbering.
 
 The credential refusal keeps a secret off the *remote*, not off the *host*:
 `patch.diff` and `pr_body.md` still sit in the batch tree with it in them.
-`_CREDENTIAL_SHAPES` is a partial list under a `ponytail:` comment naming that
+`saffron/credentials.py`'s `CREDENTIAL_SHAPES` is a partial list under a `ponytail:` comment naming that
 ceiling, and the real answer is §5.4's `secrets` gate, which is still v1's to
 build.
 

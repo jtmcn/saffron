@@ -94,3 +94,37 @@ a second file.
     second call alone, with the first call passing through.
 73. A witness for a per-file loop holds two files in which the second
     file's line numbers would read differently under the first file's set.
+
+## SA-0417 (b-3a3081)
+
+One writer, two reviews, and a fixture pass after the second review. No
+review found a blocker. Each found concerns that named wrong versions the
+writer had not run, and each such version survived once measured.
+
+Round 1 named four. A findings walk that redacted only each claim
+survived. So did a redaction skipped when the token is `None`, a plan
+parsed and dumped again, and a default log that read the environment's
+token. Every placed credential sat in a claim, and every drive handed a
+token.
+
+Round 2 named two more. A plan dumped again with `indent=2` wrote the
+same bytes as the block, since the block was itself that dump. A fallback
+to the environment survived in `run_task` and in both PACKAGE logs,
+because no `None` call set the environment.
+
+The writer measured each fix, and no third review ran. The spec carries
+no mutant: `saffron mutant` refused the writer's, because its `find` is
+new at base. The writer ran 30 wrong versions, and all died.
+
+## What this chain adds
+
+Both rounds found the same shape. The witness held every input the
+change handles in one form, so a wrong version that handles only that
+form passed. Check 67 names a set's members. It does not ask which form
+each member takes.
+
+74. A witness for a function that takes an optional value drives the
+    absent case as well, with every fallback source set to a value it
+    can see.
+75. A witness that compares bytes uses an input that no default
+    serializer reproduces, so a parse and a re-dump changes them.
