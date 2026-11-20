@@ -1,0 +1,10 @@
+tests/test_ledger.py::test_a_run_status_outside_the_closed_set_is_refused_before_anything_is_written:
+  file: saffron/ledger.py
+  find: (status, run_id),
+  replace: ("COMPLETE", run_id),
+  case: an admitted status other than COMPLETE written as handed
+tests/test_ledger_fold_task.py::test_a_run_finished_fact_outside_the_closed_set_aborts_its_fold:
+  file: saffron/ledger.py
+  find: (payload["status"], at, run_row["run_id"]),
+  replace: ("COMPLETE", at, run_row["run_id"]),
+  case: a run_finished fact folding an admitted status other than COMPLETE
