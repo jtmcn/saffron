@@ -926,3 +926,30 @@ def absent_at(
         raise runtime.CellRuntimeError(f"ls-tree failed: {done.stderr.strip()}")
     present = {name for name in done.stdout.split("\0") if name}
     return [path for path in paths if path not in present]
+
+
+def head_text(target: str | VolumeTarget, path: str) -> str | None:
+    """`path`'s text at `HEAD`, the new side `export_patch` reads, for a
+    regular or executable file. `None` for a symlink, a gitlink and a path
+    absent at `HEAD`. Literal pathspecs, as `absent_at` takes them, keep a
+    path that starts with `:` from being read as pathspec magic.
+
+    The blob is read by its own sha with `cat-file`, never the working
+    tree and never `show`. No textconv or filter runs over it that way.
+    A failed `ls-tree` or blob read raises `runtime.CellRuntimeError`
+    carrying git's stderr.
+    """
+    listed = _git(target, "--literal-pathspecs", "ls-tree", "HEAD", "--", path)
+    if listed.returncode != 0:
+        raise runtime.CellRuntimeError(f"ls-tree failed: {listed.stderr.strip()}")
+    entry = listed.stdout.strip()
+    if not entry:
+        return None
+    mode, _kind, rest = entry.split(None, 2)
+    if mode not in ("100644", "100755"):
+        return None
+    sha = rest.split("\t", 1)[0]
+    blob = _git(target, "cat-file", "blob", sha)
+    if blob.returncode != 0:
+        raise runtime.CellRuntimeError(f"cat-file failed: {blob.stderr.strip()}")
+    return blob.stdout

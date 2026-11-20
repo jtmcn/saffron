@@ -400,11 +400,6 @@ def _new_side(
     ]
 
 
-def _overlaps_added(span: tuple[int, int], added: list[tuple[int, int]]) -> bool:
-    start, end = span
-    return any(start < a_end and end > a_start for a_start, a_end in added)
-
-
 def _readable_files(diff: str, test_paths: Sequence[str]) -> list[_FileDiff]:
     try:
         blocks = _split_blocks(diff)
@@ -424,26 +419,54 @@ def _readable_files(diff: str, test_paths: Sequence[str]) -> list[_FileDiff]:
     return files
 
 
+def _added_lines(file_diff: _FileDiff) -> list[int]:
+    """Each added line's number in the post-image, over every hunk of one
+    file. Recomputed fresh per file: a line number is only ever compared
+    against its own file's matches, never a different file's."""
+    added: list[int] = []
+    for hunk in file_diff.hunks:
+        for kind, _content, new_line in hunk:
+            if kind == "+":
+                assert new_line is not None  # a `+` line always carries one
+                added.append(new_line)
+    return added
+
+
+def _line_at(text: str, offset: int) -> int:
+    """The 1-indexed line `offset` falls on, in `text`."""
+    return text.count("\n", 0, offset) + 1
+
+
 def _candidate_constants(
-    diff: str, patterns: WitnessPatterns, test_paths: Sequence[str]
+    diff: str,
+    patterns: WitnessPatterns,
+    test_paths: Sequence[str],
+    head_text: Callable[[str], str | None],
 ) -> list[tuple[str, str, str, str]]:
-    """Every `(name, file, find, replace)` the diff's non-test files add or
-    change, where the match overlaps an added line."""
+    """Every `(name, file, find, replace)` a non-test file's whole text at
+    `HEAD` carries, where an added line lies anywhere inside the match,
+    not only its opening line."""
     candidates: list[tuple[str, str, str, str]] = []
     for file_diff in _readable_files(diff, test_paths):
-        for hunk in file_diff.hunks:
-            text, added = _new_side(hunk)
-            for entry in patterns.constants:
-                for match in re.finditer(entry.pattern, text):
-                    if not _overlaps_added((match.start(), match.end()), added):
-                        continue
-                    name = match.group("name")
-                    find = text[match.start() : match.end()]
-                    value_start = match.start("value") - match.start()
-                    value_end = match.end("value") - match.start()
-                    expanded = match.expand(entry.replace)
-                    replace = find[:value_start] + expanded + find[value_end:]
-                    candidates.append((name, file_diff.path, find, replace))
+        added = _added_lines(file_diff)
+        if not added:
+            continue
+        text = head_text(file_diff.path)
+        if text is None:
+            continue
+        for entry in patterns.constants:
+            for match in re.finditer(entry.pattern, text):
+                first_line = _line_at(text, match.start())
+                last_line = _line_at(text, match.end() - 1)
+                if not any(first_line <= line <= last_line for line in added):
+                    continue
+                name = match.group("name")
+                find = text[match.start() : match.end("value")]
+                value_start = match.start("value") - match.start()
+                value_end = match.end("value") - match.start()
+                expanded = match.expand(entry.replace)
+                replace = find[:value_start] + expanded + find[value_end:]
+                candidates.append((name, file_diff.path, find, replace))
     return candidates
 
 
@@ -478,17 +501,19 @@ def constant_mutants(
     acceptance: Sequence[Criterion],
     patterns: WitnessPatterns,
     test_paths: Sequence[str],
+    head_text: Callable[[str], str | None],
 ) -> list[Criterion]:
     """A derived `Criterion` carries a `Mutant`. One exists for each pair
     of a constant and a criterion whose own witness names that constant.
 
     `[]`, never a raise, when the repo declares no patterns, or `diff`
-    is not the shape `integrity`'s own parser trusts (§5.4.1).
+    is not the shape `integrity`'s own parser trusts (§5.4.1). A refused
+    read raises instead, out of `head_text` itself.
     """
     if not patterns.witness_name or not patterns.witness_body or not patterns.constants:
         return []
 
-    candidates = _candidate_constants(diff, patterns, test_paths)
+    candidates = _candidate_constants(diff, patterns, test_paths, head_text)
     if not candidates:
         return []
 

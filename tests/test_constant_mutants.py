@@ -28,7 +28,9 @@ PATTERNS = dict(
     witness_body=r"(?m)^(?P<i>[ \t]*)def {name}\(.*(?:\n(?:(?P=i)[ \t]+.*|[ \t]*))*",
     constants=[
         {
-            "pattern": _NAME + r"\(?\s*(?P<value>[rbfuRBFU]{0,2}(?:\"\"\"|'''|\"|'))",
+            "pattern": _NAME
+            + r"\(?\s*(?P<value>[rbfuRBFU]{0,2}(?:(?P<t>\"\"\"|''')|\"|'))"
+            + r"(?(t)[\s\S]*?(?P=t)).*(?:\n(?:[ \t]+\S|\)).*)*",
             "replace": r"\g<value>saffron constant mutant ",
         },
         {
@@ -88,6 +90,15 @@ class _GitTree:
 
     def patch(self, base: str) -> str:
         return self._read("diff", *DIFF_FLAGS, f"{base}..HEAD")
+
+    def head_text(self, path: str) -> str | None:
+        done = subprocess.run(
+            ["git", "show", f"HEAD:{path}"],
+            cwd=self.repo,
+            capture_output=True,
+            text=True,
+        )
+        return done.stdout if done.returncode == 0 else None
 
     def dirty_paths(self) -> list[str]:
         return []
@@ -228,6 +239,152 @@ def test_a_witness_reading_its_constant_back_survives_a_constant_mutant(
     assert _git(repo, "diff", "HEAD").stdout == ""
 
 
+def test_an_edit_deep_inside_a_long_constant_derives_its_mutant(tmp_path, monkeypatch):
+    """Criterion 1: `LONG` is a name, ` = (`, nine string lines and a closing
+    paren. The head edits only its fifth string line, five lines from each
+    end. That edit's hunk holds neither `LONG`'s opening line nor its
+    closing line. `AFTER` follows the closing paren unedited, at line 21.
+    The same commit edits line 21 of `alpha.py` too, proving one file's
+    added lines never leak into another file's matches."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+
+    base_long = [f'    "line{n} "' if n < 9 else '    "line9"' for n in range(1, 10)]
+    base_prompts = "\n".join(
+        [
+            "def first():",
+            "    return 1",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "LONG = (",
+            *base_long,
+            ")",
+            'AFTER = "after"',
+            "def long():",
+            "    return LONG",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "def last():",
+            "    return 2",
+        ]
+    )
+    base_alpha = "\n".join(f"# comment {n}" for n in range(1, 31))
+    (repo / "prompts.py").write_text(base_prompts + "\n")
+    (repo / "alpha.py").write_text(base_alpha + "\n")
+    (repo / "pytest.ini").write_text("[pytest]\npythonpath = .\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "base")
+    base_sha = _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+    head_long = [f'    "line{n} "' if n < 9 else '    "line9"' for n in range(1, 10)]
+    head_long[4] = '    "line5-edited "'
+    head_prompts = "\n".join(
+        [
+            "def first():",
+            "    x = 1",
+            "    return x",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "LONG = (",
+            *head_long,
+            ")",
+            'AFTER = "after"',
+            "def long():",
+            "    return LONG",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "def last():",
+            "    return 3",
+        ]
+    )
+    head_alpha_lines = [f"# comment {n}" for n in range(1, 31)]
+    head_alpha_lines[20] = "# comment 21 edited"
+    head_alpha = "\n".join(head_alpha_lines)
+    assert head_prompts.splitlines()[20] == 'AFTER = "after"'  # line 21 at head
+
+    (repo / "prompts.py").write_text(head_prompts + "\n")
+    (repo / "alpha.py").write_text(head_alpha + "\n")
+    (repo / "tests").mkdir()
+    (repo / "tests" / "test_prompts.py").write_text(
+        "import prompts\n\n\n"
+        "def test_long():\n"
+        "    assert prompts.long() == prompts.LONG\n"
+        "    assert prompts.AFTER\n\n\n"
+        "def test_pin():\n"
+        "    assert prompts.long() == (\n"
+        '        "line1 line2 line3 line4 line5-edited line6 line7 line8 line9"\n'
+        "    )\n"
+        "    assert prompts.LONG\n"
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "head")
+
+    prompts_diff = _git(repo, "diff", f"{base_sha}..HEAD", "--", "prompts.py").stdout
+    hunk_lines = [line for line in prompts_diff.splitlines() if line.startswith("@@ ")]
+    assert len(hunk_lines) == 3
+    assert "LONG = (" not in prompts_diff.splitlines()
+    assert ")" not in [
+        line[1:] for line in prompts_diff.splitlines() if line[:1] in "+- "
+    ]
+
+    gate = tmp_path / "tests_gate.py"
+    gate.write_text(_TESTS_GATE.format(python=sys.executable))
+    gate.chmod(0o755)
+
+    acceptance = [
+        Criterion(claim="reads long back", witness="tests/test_prompts.py::test_long"),
+        Criterion(claim="pins the literal", witness="tests/test_prompts.py::test_pin"),
+    ]
+    policy = Policy(
+        gates={"tests": GateDeclaration()},
+        integrity=IntegrityPatterns(test_paths=["tests/**"]),
+        witness=PATTERNS,
+    )
+    suite = GateSuite(
+        gates={"tests": gate},
+        spec=_Spec(
+            touches=["prompts.py", "alpha.py", "pytest.ini", "tests/test_prompts.py"],
+            acceptance=acceptance,
+        ),
+        policy=policy,
+        diff_base=base_sha,
+    )
+    prior = [GateResult(gate="tests", status="pass", tool="pytest 0", collected=[])]
+
+    run = suite._run(_GitTree(repo), prior=prior)
+
+    witness = next(r for r in run.results if r.gate == "witness")
+    assert witness.status == "fail"
+    assert [(f.file, f.code) for f in witness.failures] == [
+        ("tests/test_prompts.py::test_long", "survived-mutant")
+    ]
+    assert witness.summary == "1 of 2 witness(es) survived their own mutant"
+    assert "`LONG`" in witness.failures[0].message
+
+    assert _git(repo, "diff", "HEAD").stdout == ""
+
+
 _DIFF = """\
 diff --git a/a.py b/a.py
 index 1111111..2222222 100644
@@ -297,6 +454,24 @@ index 0000000..4444444
 +    assert OLD == "b"
 """
 
+# Each hunk above covers its whole file, so this text's own line numbers
+# match the hunk's new-side numbering exactly.
+_DIFF_HEAD_TEXTS = {
+    "a.py": (
+        'CTX = "ctx-value"\n'
+        'NEW = "value"\n'
+        "SPREAD = (\n"
+        '    "text"\n'
+        ")\n"
+        'TAIL = "tail-value"\n'
+    ),
+    "b.py": 'KEEP = 1\nOLD = "b"\n',
+}
+
+
+def _diff_head_reader(path: str) -> str | None:
+    return _DIFF_HEAD_TEXTS.get(path)
+
 
 def test_only_a_constant_the_diff_writes_and_a_witness_names_is_mutated():
     """Criterion 2: every excluded shape sits beside two real pairs, in a
@@ -324,7 +499,9 @@ def test_only_a_constant_the_diff_writes_and_a_witness_names_is_mutated():
         Criterion(claim="c10", witness="tests/test_stuff.py::test_changed"),
     ]
 
-    derived = constant_mutants(_DIFF, acceptance, patterns, ["tests/**"])
+    derived = constant_mutants(
+        _DIFF, acceptance, patterns, ["tests/**"], _diff_head_reader
+    )
 
     tuples = []
     for criterion in derived:
@@ -366,23 +543,42 @@ def test_a_repo_declaring_no_witness_patterns_derives_nothing():
     full = WitnessPatterns.model_validate(PATTERNS)
 
     # No `witness:` block at all.
-    assert constant_mutants(_DIFF, acceptance, WitnessPatterns(), ["tests/**"]) == []
+    assert (
+        constant_mutants(
+            _DIFF, acceptance, WitnessPatterns(), ["tests/**"], _diff_head_reader
+        )
+        == []
+    )
 
     # `witness_name` absent.
     no_name = full.model_copy(update={"witness_name": None})
-    assert constant_mutants(_DIFF, acceptance, no_name, ["tests/**"]) == []
+    assert (
+        constant_mutants(_DIFF, acceptance, no_name, ["tests/**"], _diff_head_reader)
+        == []
+    )
 
     # `witness_body` absent.
     no_body = full.model_copy(update={"witness_body": None})
-    assert constant_mutants(_DIFF, acceptance, no_body, ["tests/**"]) == []
+    assert (
+        constant_mutants(_DIFF, acceptance, no_body, ["tests/**"], _diff_head_reader)
+        == []
+    )
 
     # No constant pattern.
     no_constants = full.model_copy(update={"constants": []})
-    assert constant_mutants(_DIFF, acceptance, no_constants, ["tests/**"]) == []
+    assert (
+        constant_mutants(
+            _DIFF, acceptance, no_constants, ["tests/**"], _diff_head_reader
+        )
+        == []
+    )
 
     # A diff it cannot read: a header line `_split_blocks` refuses.
     unreadable = "diff --git a/x b/y\nnot the a/X b/X shape\n"
-    assert constant_mutants(unreadable, acceptance, full, ["tests/**"]) == []
+    assert (
+        constant_mutants(unreadable, acceptance, full, ["tests/**"], _diff_head_reader)
+        == []
+    )
 
 
 def test_a_quantifier_in_witness_body_is_regex_not_a_format_field():
@@ -394,11 +590,215 @@ def test_a_quantifier_in_witness_body_is_regex_not_a_format_field():
     patterns = WitnessPatterns.model_validate({**PATTERNS, "witness_body": body})
     acceptance = [Criterion(claim="c", witness="tests/test_stuff.py::test_uses_new")]
 
-    derived = constant_mutants(_DIFF, acceptance, patterns, ["tests/**"])
+    derived = constant_mutants(
+        _DIFF, acceptance, patterns, ["tests/**"], _diff_head_reader
+    )
 
     assert [(c.witness, c.mutant.file, c.mutant.find) for c in derived if c.mutant] == [
         ("tests/test_stuff.py::test_uses_new", "a.py", 'NEW = "')
     ]
+
+
+# Nine constants back to back, one per declared spelling, verbatim from the
+# spec's own notes. Each of its 56 lines is edited alone, below.
+_CONSTS_MODULE = "\n".join(
+    [
+        'FIRST = """',
+        "alpha",
+        "beta",
+        "",
+        "gamma",
+        "delta",
+        "epsilon",
+        "zeta",
+        '"""',
+        "PAREN = (",
+        '    "one "',
+        '    "two "',
+        '    "three "',
+        '    "four "',
+        '    "five "',
+        '    "six "',
+        '    "seven "',
+        '    "eight"',
+        ")",
+        'ONE_LINE = "a" "b"',
+        "QUOTED = 'q' 'r'",
+        "TUPLE = (",
+        '    "t1",',
+        '    "t2",',
+        '    "t3",',
+        '    "t4",',
+        '    "t5",',
+        '    "t6",',
+        '    "t7",',
+        '    "t8",',
+        ")",
+        "LIMIT = 7",
+        "",
+        "SINGLE = '''",
+        "one",
+        "two",
+        "three",
+        "'''",
+        "SUM = (",
+        '    "s1 "',
+        "    + ONE_LINE",
+        ")",
+        "",
+        "",
+        "def f():",
+        "    return FIRST",
+        "LAST = (",
+        '    "l1 "',
+        '    "l2 "',
+        '    "l3 "',
+        '    "l4 "',
+        '    "l5 "',
+        '    "l6 "',
+        '    "l7 "',
+        '    "l8"',
+        ")",
+    ]
+)
+
+# Each constant's inclusive 1-indexed span, and the owner of each line
+# in 1..56. `None` means no constant spans that line.
+_CONSTS_SPANS = {
+    "FIRST": (1, 9),
+    "PAREN": (10, 19),
+    "ONE_LINE": (20, 20),
+    "QUOTED": (21, 21),
+    "TUPLE": (22, 31),
+    "LIMIT": (32, 32),
+    "SINGLE": (34, 38),
+    "SUM": (39, 42),
+    "LAST": (47, 56),
+}
+_CONSTS_OWNER = {
+    line: next(
+        (
+            name
+            for name, (first, last) in _CONSTS_SPANS.items()
+            if first <= line <= last
+        ),
+        None,
+    )
+    for line in range(1, 57)
+}
+
+# The bare `NAME = (` opening line of each parenthesized, multi-line
+# constant, where an added trailing space falls inside `find` itself.
+_CONSTS_OPENING_LINES = {
+    _CONSTS_SPANS["PAREN"][0],
+    _CONSTS_SPANS["TUPLE"][0],
+    _CONSTS_SPANS["SUM"][0],
+    _CONSTS_SPANS["LAST"][0],
+}
+
+# One witness function per constant, naming it and nothing else, so each
+# constant's own mutant pairs with its own criterion alone.
+_CONSTS_WITNESSES = {
+    "FIRST": "test_first",
+    "PAREN": "test_paren",
+    "ONE_LINE": "test_one_line",
+    "QUOTED": "test_quoted",
+    "TUPLE": "test_tuple",
+    "LIMIT": "test_limit",
+    "SINGLE": "test_single",
+    "SUM": "test_sum",
+    "LAST": "test_last",
+}
+
+# The `find`/`replace` each constant's own mutant carries, the same
+# whichever of its lines was edited (§5.4.1).
+_CONSTS_EXPECTED = {
+    "FIRST": ('FIRST = """', 'FIRST = """saffron constant mutant '),
+    "PAREN": ('PAREN = (\n    "', 'PAREN = (\n    "saffron constant mutant '),
+    "ONE_LINE": ('ONE_LINE = "', 'ONE_LINE = "saffron constant mutant '),
+    "QUOTED": ("QUOTED = '", "QUOTED = 'saffron constant mutant "),
+    "TUPLE": ('TUPLE = (\n    "', 'TUPLE = (\n    "saffron constant mutant '),
+    "LIMIT": ("LIMIT = 7", "LIMIT = (7 + 1)"),
+    "SINGLE": ("SINGLE = '''", "SINGLE = '''saffron constant mutant "),
+    "SUM": ('SUM = (\n    "', 'SUM = (\n    "saffron constant mutant '),
+    "LAST": ('LAST = (\n    "', 'LAST = (\n    "saffron constant mutant '),
+}
+
+
+def test_an_edit_to_any_line_of_a_constant_derives_its_mutant(tmp_path, monkeypatch):
+    """Criterion 2: an edit to any line of a constant derives that constant
+    alone, with the same `find`/`replace` regardless of which line was
+    touched. A blank line between two constants, the `def` line and its
+    body derive nothing, five such lines in this module."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+    from saffron.gates.core.witness import constant_mutants
+    from saffron.repos.policy import WitnessPatterns
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "consts.py").write_text(_CONSTS_MODULE + "\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "base")
+    base_sha = _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+    patterns = WitnessPatterns.model_validate(PATTERNS)
+    acceptance = [
+        Criterion(claim=f"c_{fn}", witness=f"tests/test_consts.py::{fn}")
+        for fn in _CONSTS_WITNESSES.values()
+    ]
+    witnesses_text = "\n\n\n".join(
+        f"def {fn}():\n    assert {name}" for name, fn in _CONSTS_WITNESSES.items()
+    )
+
+    def head_reader(path: str) -> str | None:
+        done = subprocess.run(
+            ["git", "show", f"HEAD:{path}"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+        return done.stdout if done.returncode == 0 else None
+
+    base_lines = _CONSTS_MODULE.split("\n")
+    for line_no in range(1, 57):
+        edited = list(base_lines)
+        edited[line_no - 1] = edited[line_no - 1] + " "
+        (repo / "consts.py").write_text("\n".join(edited) + "\n")
+        (repo / "tests").mkdir(exist_ok=True)
+        (repo / "tests" / "test_consts.py").write_text(witnesses_text + "\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-qm", f"edit line {line_no}")
+
+        diff = _git(repo, "diff", *DIFF_FLAGS, f"{base_sha}..HEAD").stdout
+        derived = constant_mutants(
+            diff, acceptance, patterns, ["tests/**"], head_reader
+        )
+
+        owner = _CONSTS_OWNER[line_no]
+        if owner is None:
+            assert derived == [], line_no
+        else:
+            find, replace = _CONSTS_EXPECTED[owner]
+            if line_no in _CONSTS_OPENING_LINES:
+                # The opening line's own trailing space falls inside
+                # `find`, right after the paren (§5.4.1).
+                find = find.replace(" (\n", " ( \n")
+                replace = replace.replace(" (\n", " ( \n")
+            fn = _CONSTS_WITNESSES[owner]
+            assert len(derived) == 1, (line_no, owner, derived)
+            (criterion,) = derived
+            mutant = criterion.mutant
+            assert mutant is not None
+            assert criterion.witness == f"tests/test_consts.py::{fn}"
+            assert mutant.file == "consts.py"
+            assert mutant.find == find, (line_no, owner)
+            assert mutant.replace == replace, (line_no, owner)
+
+        _git(repo, "reset", "-q", "--hard", base_sha)
 
 
 def test_a_constant_mutant_whose_find_matches_twice_stays_unproven(
