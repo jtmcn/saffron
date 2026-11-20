@@ -70,7 +70,9 @@ trivial.
 3. **Witness/mutant discipline.** A spec whose change edits existing code
    has a `mutant` per criterion on the ref, keyed by witness. Where one is
    missing, name a plausible wrong implementation its witness would pass;
-   if you can, that is a blocker. A `preserves: true` witness must already exist at `base` (use
+   if you can, that is a blocker. Read each `covers:` set against its claim.
+   A member the claim names and the set leaves out is a finding, since no
+   command can see it. A `preserves: true` witness must already exist at `base` (use
    `git grep` for the test name). A non-`preserves` witness must not already
    pass at `base`. Name the existing test at `base` that already passes and
    would serve as the witness, and that is a blocker. Behaviour that already

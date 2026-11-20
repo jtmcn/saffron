@@ -152,7 +152,7 @@ stack thresholds assume every earlier candidate ran.
 criterion cannot name the members its claim covers, so no command sees one
 that no witness drives.
 
-**Placed 2026-11-18**, from writing `SA-0415`: **b-c7fd81**, by hand once
+**Placed 2026-11-18**, from writing `SA-0415`: ~~**b-c7fd81**~~, by hand once
 `SA-0415` merges. `CONTEXT.md` has no entry for a covered set or a positive case.
 
 **Placed 2026-11-20**, from `SA-0417`'s spec review: **b-0f5493**. Each event's
