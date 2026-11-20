@@ -992,6 +992,345 @@ def test_renames_loads_as_a_mapping_and_refuses_a_blank_or_shared_new_name():
             parse_spec(f"---\nid: TE-1\ntitle: t\ntype: chore\n{shape}---\n")
 
 
+def test_a_criterion_declares_the_sets_its_claim_covers_and_its_positive_case():
+    """`covers` (backlog item b-c12d39) parses as a list of named sets, each
+    a list of members, each an opaque text with an optional `driven_by`.
+    `positive_case` parses as one sentence. Both are absent by default, and
+    an omitted criterion parses exactly as it did before either field
+    existed."""
+    refused = [
+        "    covers: []\n",
+        '    covers:\n      - set: "  "\n        members:\n          - member: m\n',
+        "    covers:\n      - set: s\n        members: []\n",
+        '    covers:\n      - set: s\n        members:\n          - member: "   "\n',
+        (
+            "    covers:\n"
+            "      - set: s\n"
+            "        members:\n"
+            "          - member: dup\n"
+            "            driven_by: a\n"
+            "          - member: other\n"
+            "          - member: dup\n"
+            "            driven_by: b\n"
+        ),
+        (
+            "    covers:\n"
+            "      - set: s\n"
+            "        members:\n"
+            "          - member: m1\n"
+            "      - set: other\n"
+            "        members:\n"
+            "          - member: m2\n"
+            "      - set: s\n"
+            "        members:\n"
+            "          - member: m3\n"
+        ),
+        '    positive_case: "   "\n',
+        (
+            "    covers:\n"
+            "      - set: s\n"
+            "        members:\n"
+            "          - member: m\n"
+            "            driver: x\n"
+        ),
+        (
+            "    covers:\n"
+            "      - set: s\n"
+            "        extra: x\n"
+            "        members:\n"
+            "          - member: m\n"
+        ),
+    ]
+    for covers_yaml in refused:
+        text = (
+            "---\nid: TE-1\ntitle: t\ntype: feature\n"
+            "acceptance:\n"
+            "  - claim: c\n"
+            "    witness: t.py::test_x\n"
+            f"{covers_yaml}"
+            "---\n\nbody\n"
+        )
+        with pytest.raises(SpecError):
+            parse_spec(text)
+
+    spec = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: feature\n"
+        "acceptance:\n"
+        "  - claim: first\n"
+        "    witness: t.py::test_a\n"
+        "    covers:\n"
+        "      - set: zeta\n"
+        "        members:\n"
+        "          - member: m two\n"
+        "            driven_by: t.py::test_a\n"
+        "          - member: m one\n"
+        "          - member: m three\n"
+        "      - set: alpha\n"
+        "        members:\n"
+        "          - member: m three\n"
+        "    positive_case: the case where it does happen\n"
+        "  - claim: second\n"
+        "    witness: t.py::test_b\n"
+        "  - claim: third\n"
+        "    witness: t.py::test_c\n"
+        "    covers:\n"
+        "      - set: zeta\n"
+        "        members:\n"
+        "          - member: m four\n"
+        "---\n\nbody\n"
+    )
+    first, second, third = spec.acceptance
+    assert [(s.set, [m.member for m in s.members]) for s in first.covers] == [
+        ("zeta", ["m two", "m one", "m three"]),
+        ("alpha", ["m three"]),
+    ]
+    assert first.covers[0].members[0].driven_by == "t.py::test_a"
+    assert first.covers[0].members[1].driven_by is None
+    assert first.positive_case == "the case where it does happen"
+    assert second.covers == []
+    assert second.positive_case is None
+    assert second.model_fields_set == {"claim", "witness"}
+    # `m three` recurs in two sets of one criterion, and `zeta` recurs as a
+    # set name in two criteria. Neither repeat is refused.
+    assert [(s.set, [m.member for m in s.members]) for s in third.covers] == [
+        ("zeta", ["m four"]),
+    ]
+
+
+def test_coverage_problems_names_each_declared_member_no_driver_reaches():
+    """`intake.coverage_problems` (backlog item b-c12d39) reports one line
+    per declared member whose `driven_by` reaches neither its own
+    criterion's witness nor one of its own criterion's `wrong_versions`.
+    The comparison is on whole strings."""
+    from saffron.intake import coverage_problems
+
+    text = (
+        "---\nid: TE-1\ntitle: t\ntype: feature\n"
+        "acceptance:\n"
+        "  - claim: criterion one claim\n"
+        "    witness: t.py::test_c1\n"
+        "    wrong_versions:\n"
+        "      - c1 wrong a\n"
+        "      - c1 wrong b\n"
+        "    covers:\n"
+        "      - set: s1\n"
+        "        members:\n"
+        "          - member: c1 m1\n"
+        "            driven_by: t.py::test_c1\n"
+        "          - member: c1 m2\n"
+        "            driven_by: c1 wrong a\n"
+        "  - claim: criterion two claim\n"
+        "    witness: t.py::test_c2\n"
+        "    wrong_versions:\n"
+        "      - c2 wrong a\n"
+        "      - c2 wrong b\n"
+        "      - c2 wrong c\n"
+        "    covers:\n"
+        "      - set: zeta\n"
+        "        members:\n"
+        "          - member: flag no driver\n"
+        "          - member: driven by witness one\n"
+        "            driven_by: t.py::test_c2\n"
+        "          - member: flag first witness\n"
+        "            driven_by: t.py::test_c1\n"
+        "      - set: alpha\n"
+        "        members:\n"
+        "          - member: flag own wrong case\n"
+        '            driven_by: "C2 wrong a"\n'
+        "          - member: driven by middle wrong\n"
+        "            driven_by: c2 wrong b\n"
+        "          - member: flag first wrong\n"
+        "            driven_by: c1 wrong a\n"
+        "          - member: driven by witness two\n"
+        "            driven_by: t.py::test_c2\n"
+        "          - member: flag prefix\n"
+        "            driven_by: t.py::test_c\n"
+        "          - member: driven by last wrong\n"
+        "            driven_by: c2 wrong c\n"
+        "          - member: flag suffix\n"
+        "            driven_by: t.py::test_c2x\n"
+        "          - member: flag trailing space\n"
+        '            driven_by: "c2 wrong a "\n'
+        "  - claim: criterion three claim\n"
+        "    witness: t.py::test_c3\n"
+        "    covers:\n"
+        "      - set: s3\n"
+        "        members:\n"
+        "          - member: c3 m1\n"
+        "---\n\nbody\n"
+    )
+    spec = parse_spec(text)
+    assert coverage_problems(spec) == [
+        "criterion 2: 'zeta' member 'flag no driver' names no driver",
+        "criterion 2: 'zeta' member 'flag first witness' names "
+        "'t.py::test_c1', which is neither its witness nor one of its "
+        "wrong versions",
+        "criterion 2: 'alpha' member 'flag own wrong case' names "
+        "'C2 wrong a', which is neither its witness nor one of its "
+        "wrong versions",
+        "criterion 2: 'alpha' member 'flag first wrong' names "
+        "'c1 wrong a', which is neither its witness nor one of its "
+        "wrong versions",
+        "criterion 2: 'alpha' member 'flag prefix' names "
+        "'t.py::test_c', which is neither its witness nor one of its "
+        "wrong versions",
+        "criterion 2: 'alpha' member 'flag suffix' names "
+        "'t.py::test_c2x', which is neither its witness nor one of its "
+        "wrong versions",
+        "criterion 2: 'alpha' member 'flag trailing space' names "
+        "'c2 wrong a ', which is neither its witness nor one of its "
+        "wrong versions",
+        "criterion 3: 's3' member 'c3 m1' names no driver",
+    ]
+
+
+def test_coverage_problems_names_each_negative_claim_that_declares_no_positive_case():
+    """`coverage_problems` also reports one line per criterion whose claim
+    holds a word of `NEGATION_WORDS` and that declares no `positive_case`
+    (backlog item b-c12d39). A criterion with an undriven member yields the
+    member's line first. A word reaches to a sentence's own full stop."""
+    from saffron.intake import NEGATION_WORDS, coverage_problems
+
+    assert sorted(NEGATION_WORDS) == sorted(
+        [
+            "no",
+            "not",
+            "never",
+            "nothing",
+            "none",
+            "neither",
+            "nor",
+            "without",
+            "cannot",
+        ]
+    )
+
+    criteria = [
+        ("Another path writes the record once.", None, ""),
+        ("No retry happens after this step.", None, ""),
+        ("A normal batch finishes within the window.", None, ""),
+        ("The retry does not happen, no matter the input.", None, ""),
+        ("A notable batch finishes within the window.", None, ""),
+        ("The queue NEVER drops a record.", None, ""),
+        ("A record survives nevertheless through the retry.", None, ""),
+        ("Nothing is retried twice in the same window.", None, ""),
+        ("A shard reaches nothingness only once.", None, ""),
+        ("None of the shards double count.", None, ""),
+        ("A shard stays nonempty through the merge.", None, ""),
+        ("Neither replica writes the same row twice.", None, ""),
+        ("A neithermost replica stays idle.", None, ""),
+        ("The merge nor the rebase touches the lock file.", None, ""),
+        ("Nobody retries a finished task.", None, ""),
+        ("The merge finishes `without` a manual step.", None, ""),
+        ("A withoutmost replica stays idle.", None, ""),
+        ("The scheduler cannot retry the same task twice.", None, ""),
+        ("A cannotical replica stays idle.", None, ""),
+        ("A knot in the queue stays tied twice.", None, ""),
+        (
+            "The retry never drops a shard, without warning.",
+            None,
+            (
+                "    covers:\n"
+                "      - set: ord\n"
+                "        members:\n"
+                "          - member: m order\n"
+            ),
+        ),
+        ("The queue drops nothing.", None, ""),
+        (
+            "The retry queue never loses a record without an operator retry.",
+            "the case where a record is lost and then retried by the operator",
+            ("    covers:\n      - set: s\n        members:\n          - member: m1\n"),
+        ),
+        ("No record is lost during a crash.", None, ""),
+    ]
+    entries = []
+    for i, (claim, positive_case, covers_yaml) in enumerate(criteria):
+        entry = f"  - claim: {claim}\n    witness: t.py::test_c{i}\n"
+        if positive_case is not None:
+            entry += f"    positive_case: {positive_case}\n"
+        entry += covers_yaml
+        entries.append(entry)
+
+    spec = parse_spec(
+        "---\nid: TE-1\ntitle: t\ntype: feature\nacceptance:\n"
+        + "".join(entries)
+        + "---\n\nbody\n"
+    )
+    assert len(spec.acceptance) == len(criteria)
+    assert coverage_problems(spec) == [
+        "criterion 2: its claim says 'no' and it declares no positive_case",
+        "criterion 4: its claim says 'not' and it declares no positive_case",
+        "criterion 6: its claim says 'never' and it declares no positive_case",
+        "criterion 8: its claim says 'nothing' and it declares no positive_case",
+        "criterion 10: its claim says 'none' and it declares no positive_case",
+        "criterion 12: its claim says 'neither' and it declares no positive_case",
+        "criterion 14: its claim says 'nor' and it declares no positive_case",
+        "criterion 16: its claim says 'without' and it declares no positive_case",
+        "criterion 18: its claim says 'cannot' and it declares no positive_case",
+        "criterion 21: 'ord' member 'm order' names no driver",
+        "criterion 21: its claim says 'never' and it declares no positive_case",
+        "criterion 22: its claim says 'nothing' and it declares no positive_case",
+        "criterion 23: 's' member 'm1' names no driver",
+        "criterion 24: its claim says 'no' and it declares no positive_case",
+    ]
+
+
+def test_a_spec_coverage_problems_flags_still_parses_and_is_discovered(tmp_path):
+    """`coverage_problems` refuses no spec (backlog item b-c12d39). One it
+    flags still parses with `parse_spec` and still reaches `discover_specs`
+    as a candidate, beside a spec that scan refuses for declaring a mutant
+    inline."""
+    from saffron.intake import coverage_problems
+
+    judge_flagged = (
+        "---\nid: TE-1\ntitle: t\ntype: feature\n"
+        "acceptance:\n"
+        "  - claim: c\n"
+        "    witness: t.py::test_x\n"
+        "    covers:\n"
+        "      - set: s\n"
+        "        members:\n"
+        "          - member: m\n"
+        "---\n\nbody\n"
+    )
+    spec = parse_spec(judge_flagged)
+    assert coverage_problems(spec) == [
+        "criterion 1: 's' member 'm' names no driver",
+    ]
+
+    inline_mutant = (
+        "---\nid: TE-2\ntitle: t\ntype: feature\n"
+        "acceptance:\n"
+        "  - claim: c\n"
+        "    witness: t.py::test_y\n"
+        "    mutant:\n"
+        "      file: a.py\n"
+        "      find: x\n"
+        "---\n\nbody\n"
+    )
+    (tmp_path / "a-judge.md").write_text(judge_flagged)
+    (tmp_path / "b-mutant.md").write_text(inline_mutant)
+
+    specs, failures = discover_specs(tmp_path)
+    assert [d.spec.id for d in specs] == ["TE-1"]
+    assert [f.path.name for f in failures] == ["b-mutant.md"]
+
+
+def test_coverage_problems_docstring_says_it_cannot_know_a_set_is_complete():
+    """The docstring names the two limits a judge over declared text alone
+    must carry: it cannot know a declared set is complete, and its word list
+    is a heuristic rather than a rule (backlog item b-c12d39)."""
+    from saffron.intake import coverage_problems
+
+    doc = coverage_problems.__doc__
+    assert doc is not None
+    assert "cannot know" in doc
+    assert "complete" in doc
+    assert "heuristic" in doc
+    assert "a rule" not in doc
+
+
 def _done_hits(source: str) -> list[tuple[int, str]]:
     """Each string constant whose value, split on `/` and compared with no
     stripping, holds a part equal to `done`. An f-string's literal segments
