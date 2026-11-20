@@ -286,12 +286,12 @@ both halves of the rule.
 
 ## Notes for the agent
 
-**Edit or new.** Each criterion edits existing code. Only criterion 4's
-call has a spelling the code already forces, so it is the one criterion a
-mutant on the ref can pin. Criteria 1 to 3 add new local names. Criterion 5's
-keyword can sit anywhere in the call. Criterion 6's two calls are spelled
-alike, so no `find` matches once. Those witnesses stand alone, and
-`witness` reports `skip` for them. The three `preserves` witnesses exist at
+**Edit or new.** Each criterion edits existing code, and no mutant on the
+ref pins one. A mutant's `find` must occur once at your base. Every spelling
+these criteria need is new there, criterion 4's keyword included. Criteria 1
+to 3 add new local names. Criterion 5's keyword can sit anywhere in the call.
+Criterion 6's two calls are spelled alike. So every witness stands alone,
+and `witness` reports `skip` for each. The three `preserves` witnesses exist at
 your base and pass there.
 
 **Test credentials.** Build each one inside the test from pieces, such as
