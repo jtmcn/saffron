@@ -52,9 +52,11 @@ acceptance:
       is an ungated `REVIEWING` one. It starts in the very second of span
       1's `Ceilings`, which carries a fraction of a second. A also has a
       spec writing attempt inside span 2. Task B's
-      run row and its spec review lie inside span 1. B's cell attempts lie
-      in span 2. The gated one is `IMPLEMENTING`, and the last, an ungated
-      `REBUTTING` one, starts in the second before span 3 starts. B also
+      run row and its spec review lie inside span 1, and so does B's first
+      cell attempt, an ungated `REPAIRING` one in the middle of span 1. B's
+      other cell attempts lie in span 2. The gated one is `IMPLEMENTING`,
+      and the last, an ungated `REBUTTING` one, starts in the second before
+      span 3 starts. B also
       has a commit review attempt inside span 3. Task C, the last in the
       log, has a run row one second after span 3's `Ceilings` and a cell
       attempt a day later. Each span's plan and export lines match the
@@ -66,6 +68,7 @@ acceptance:
       - Each task is tied by its run's `started_at`, as at base.
       - Each task is tied by its first cell attempt, so a re-queued task keeps its first span.
       - Each task is tied by its last gated attempt, falling back to its last cell attempt.
+      - Every cell attempt of a task claims the span it lies in, and the task is tied to the span of its last one.
       - Each task is tied by its first attempt in any phase.
       - Each task is tied by its last attempt in any phase.
       - A later spec writing session counts as a cell attempt.
@@ -108,6 +111,8 @@ acceptance:
             driven_by: Each task is tied by its first cell attempt, so a re-queued task keeps its first span.
           - member: an ungated last cell attempt after a gated one, A
             driven_by: Each task is tied by its last gated attempt, falling back to its last cell attempt.
+          - member: an earlier cell attempt inside another task's span, B's in span 1
+            driven_by: Every cell attempt of a task claims the span it lies in, and the task is tied to the span of its last one.
           - member: the second task in a log, B
             driven_by: Each task is tied by its run's `started_at`, as at base.
           - member: a spec review in the span before its own, B
@@ -168,15 +173,15 @@ acceptance:
           - member: J's run row inside the collided span
             driven_by: Each task is tied by its run's `started_at`, as at base.
   - claim: >-
-      Two spans that share a floored second are still unattributable, and a
-      ledger time still reads as UTC with the host zone set to `JST-9`. In
+      An instant in a second that two spans' floors share is still
+      unattributable, and a ledger time still reads as UTC with the host zone set to `JST-9`. In
       case (j), one task's last cell attempt lies in the shared second and
       its sibling's predates both spans. In case (a), two tasks' last cell
       attempts land in the second of two spans.
     witness: tests/test_projection.py::test_tasks_that_match_their_spans_in_count_but_not_time_are_unattributable
     preserves: true
     wrong_versions:
-      - A span whose floored start another span shares is still claimed.
+      - An instant in a second two spans' floors share is still tied to the later span.
       - A ledger time is parsed in the host's local zone.
       - A span two tasks land in goes to one of them.
 ---
@@ -186,16 +191,18 @@ acceptance:
 Backlog item **b-952c34**, with item 170, b-946f03 and b-60d804. It cites
 `DESIGN.md` §4.1, and Appendix T states the rule the projection serves.
 Every line below was read at `4e58acde`. This spec's base changes no file
-it cites. Its commits add only this spec, two backlog records, the
-priority order and the queue smoke test in `tests/test_scheduler.py`.
+it cites. Its commits add this spec and one backlog record. They edit
+another backlog record, the priority order and the queue smoke test in
+`tests/test_scheduler.py`.
 
 **The rule today.** `materialize` hands `_attribute` each task's run
 `started_at` (`saffron/projection.py:334-339`). `_attribute` ties a task to
 the one span whose `[start, end)` holds that second
 (`saffron/projection.py:225-249`). A span starts at its `Ceilings` second,
 floored (`saffron/projection.py:205`). A span claimed by two tasks goes to
-neither (`:245`). So does a span whose floored start another span shares
-(`:236`). The module docstring states the same rule
+neither (`:245`). An instant in a second that two spans' floors share is
+no one's (`:236`). An instant later in such a span still lands in the
+later span, since the earlier one is empty (`:207`). The module docstring states the same rule
 (`saffron/projection.py:19-22`), and so does `_run_start_epoch`'s
 (`:217-222`).
 
@@ -256,8 +263,8 @@ changes.
    and `_attribute` leaves it unattributable.
 2. **Keep the rest of the rule.** A span's `[start, end)` is unchanged,
    with floored starts and an open last span. A span two tasks' instants
-   land in stays no one's. A span sharing a floored start with another
-   stays no one's. A ledger time parses as UTC.
+   land in stays no one's. An instant in a second that two spans'
+   floors share stays no one's. A ledger time parses as UTC.
 3. **Say the new rule where the old one is said.** The module docstring,
    `_attribute`'s docstring and `_run_start_epoch`'s docstring each name a
    run's start. Name the last cell attempt instead.
@@ -326,7 +333,9 @@ phase `IMPLEMENT` in the task's own `Ceilings` second when the list is
 absent. That one attempt carries the gate result when `gate_result` is set,
 so no extra attempt appears. `tests/test_projection.py:341-342` pins the
 attempt numbers `[1, 1, 2]` and two phases. Record a gate result on a cell
-attempt, never on a spec session. Write each time as
+attempt, never on a spec session. With an attempts list, the gate result
+goes on its `IMPLEMENT` or `IMPLEMENTING` attempt, never on the list's
+last attempt by default. Criterion 1's A ends on an ungated attempt. Write each time as
 the ledger's own text, `%Y-%m-%d %H:%M:%S` in UTC.
 `tests/test_chain_walk.py` builds through the same helper and must pass
 unedited.
@@ -352,9 +361,11 @@ so a witness built that way stays green with the source reverted.
 
 **The `prose` gate.** A docstring line you rewrite is judged as new text.
 The module docstring's paragraph at `saffron/projection.py:19-22` holds an
-em-dash and a sentence over 25 words. Its rewrite takes neither, and nor
-does `_attribute`'s docstring. The prototype failed `make check` on both
-until each sentence was cut short.
+em-dash and a sentence over 25 words. `_run_start_epoch`'s docstring at
+`:218-220` holds an em-dash too. Each rewrite takes neither, and nor does
+`_attribute`'s docstring. Name the last cell attempt in the date helper's
+docstring. The prototype failed `make check` until each sentence was cut
+short.
 
 **Imports.** Import `saffron.projection` inside each test body, as the
 file's docstring asks (`tests/test_projection.py:3-6`).
