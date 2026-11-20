@@ -3722,10 +3722,10 @@ def test_a_stack_order_stacks_on_one_earlier_pull_request_and_refuses_a_spec_nam
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-11-18 for SA-0416, a candidate. Sets: SA-0338 to 0343,
+    """Re-measured 2026-11-20 for SA-0417, a candidate. Sets: SA-0338 to 0343,
     0350-0356, 0360-0365, 0368, 0369, 0371-0378, 0380, 0381, 0384-0390, 0393-0396,
-    0399-0411, 0414-0416. Candidates: SA-0338, 0360-0365, 0368, 0369, 0371-0376, 0380,
-    0381, 0384-0390, 0393-0395, 0400, 0403, 0405, 0406, 0408-0410, 0415, 0416.
+    0399-0411, 0414-0417. Candidates: SA-0338, 0360-0365, 0368, 0369, 0371-0376, 0380,
+    0381, 0384-0390, 0393-0395, 0400, 0403, 0405, 0406, 0408-0410, 0415-0417.
 
     Re-measured 2026-09-25, a hundred-and-first time: the spec loop's run 17
     retired `SA-0141` (#520) to `done/`, so `SA-0142` is the one candidate.
@@ -4486,6 +4486,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0414",
         "SA-0415",
         "SA-0416",
+        "SA-0417",
     }
     directory = tmp_path / "specs"
     _arrange_measured_queue(REAL_SPECS, directory, measured)
@@ -4543,6 +4544,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0409",
         "SA-0410",
         "SA-0416",
+        "SA-0417",
         "SA-0225",
         "SA-0269",
         "SA-0300",
