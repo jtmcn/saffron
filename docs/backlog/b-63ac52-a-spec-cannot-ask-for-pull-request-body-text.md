@@ -1,7 +1,8 @@
 ---
 id: b-63ac52
 title: A spec cannot ask for pull request body text, and nothing tells its author so
-status: open
+status: done
+closed: 2026-11-20
 tier: 2
 filed: 2026-09-18
 specs: [SA-0099, SA-0111]
@@ -48,3 +49,6 @@ body text.
   language", describing language the body does not contain. So the cell
   believes it complied, which hides the gap from the one channel that has it. The
   delegate wrote the three paragraphs into #381 by hand.
+- 2026-11-20: closed. `docs/agents/issue-tracker.md` says a spec asks no
+  pull request body text, and the spec reviewer's check 2 raises a concern on
+  one that does.
