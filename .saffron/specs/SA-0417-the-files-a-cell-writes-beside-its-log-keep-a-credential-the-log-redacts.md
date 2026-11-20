@@ -43,28 +43,33 @@ forbidden:
   - tests/test_intake.py
   - tests/test_queued_specs.py
   - tests/test_scheduler.py
-budget_usd: 52
+budget_usd: 56
 max_attempts: 3
-max_turns: 290
+max_turns: 300
 acceptance:
   - claim: >-
       `plan.json` holds the accepted plan block passed through
-      `credentials.redact` with the cell's own token, and the PLAN line's
-      sha256 is the hash of the bytes written. The witness's block carries
-      three credentials in three of its string fields. The cell's own token,
-      of no listed shape, sits in the first field. A GitHub token sits in a
-      middle field, and a private key block with its END line in a later
-      one. Two fields after the key, a list and the integer
-      `estimated_lines`, are written unchanged. The file loads as JSON, and
-      each of the three fields reads back as its own text on both sides with
-      that kind's placeholder between. The PLAN line names the hash of the
-      file's own bytes, and never the hash of the block as the cell wrote it.
+      `credentials.redact` as text, and the PLAN line's sha256 is the hash
+      of the bytes written. The witness's block is indented JSON, so a
+      parse and a fresh dump would change its bytes. It carries three
+      credentials in three of its string fields. The cell's own token, of no
+      listed shape, sits in the first field. A GitHub token sits in a middle
+      field, and a private key block with its END line in a later one. Two
+      fields after the key, a list and the integer `estimated_lines`, are
+      written unchanged. The file equals the block with each credential
+      replaced by its kind's placeholder, spacing included. The PLAN line
+      names the hash of the file's own bytes, and never the hash of the
+      block as the cell wrote it. The witness drives the cell twice, handed
+      the token and then handed `None`. Handed `None`, the two shapes are
+      still redacted and the token is written.
     witness: tests/test_session.py::test_the_recorded_plan_is_redacted_and_its_announced_hash_names_the_file
     wrong_versions:
       - "`plan.json` written as the block came, with only the PLAN line's hash changed."
       - The PLAN line hashes the block as the cell wrote it, while the file holds the redacted text.
       - The plan redacted with no token, so the cell's own token is written.
       - "`run_one_cell` takes the token but never hands it to `_drive_cell`, so every write there redacts the shapes only."
+      - The plan is redacted only when a token was handed, so a cell handed `None` writes every shape.
+      - "`plan.json` is parsed, walked with `redact_nested` and dumped again, so its bytes are not the block's."
   - claim: >-
       `notes.json`'s `raw` is the notes passed through `credentials.redact`
       with the cell's own token. Its `sha256` and the outcome's
@@ -73,26 +78,36 @@ acceptance:
       own token on the middle one, and an AWS access key id ends the last.
       `raw` reads back as all three lines with each credential's placeholder
       in its place. The outcome's `notes` stay the text the turn extracted,
-      credentials included, so PACKAGE's own body scan still sees them.
+      credentials included, so PACKAGE's own body scan still sees them. The
+      witness drives the cell twice, handed the token and then handed
+      `None`. Handed `None`, the two shapes are still redacted and the token
+      is written.
     witness: tests/test_session.py::test_the_recorded_notes_are_redacted_and_hashed_as_written
     wrong_versions:
       - "`notes.json`'s `raw` written as the turn extracted it."
       - The envelope's `sha256` hashes the notes as extracted, so it names a text no file holds.
       - The notes redacted in memory too, so the outcome's `notes` lose the credential PACKAGE refuses.
       - The notes redacted with no token, so the cell's own token is written.
+      - The notes are redacted only when a token was handed, so a cell handed `None` writes every shape.
   - claim: >-
-      `findings.json` holds every lens's findings with each string passed
-      through `credentials.redact` with the cell's own token, one string at
-      a time. The witness drives all four lenses in `LENSES` order. The
+      The task's own `findings.json` holds every lens's record with each
+      string passed through `credentials.redact` with the cell's own token,
+      one string at a time. That covers a claim, a probe's text and a lens's
+      `error`. The witness drives all four lenses in `LENSES` order. The
       first lens files two findings, an AWS access key id inside the first
-      one's claim and a clean second. The second lens files one carrying the
-      cell's own token. The third files none. The last files four. They are
-      a clean one, one whose claim ends in a private key header and one body
-      line with no END line, a clean one, and one ending in a GitHub token.
-      The file loads as JSON. Each claim reads back unchanged or with its
-      placeholder, and the claim with the key keeps the text before it.
-      Every finding validates as a `Finding`, the way `ready_task` reads
-      them back. The outcome's reviews keep each claim as the lens filed it.
+      one's claim and a clean second. The second lens files five. They are
+      one carrying the cell's own token, a clean one, one whose claim ends
+      in a private key header and one body line with no END line, a clean
+      one, and one ending in a GitHub token. The third, adequacy, files one
+      clean finding whose probe's `find` carries an AWS access key id. The
+      last lens fails, and its `error` quotes a GitHub token. The file loads
+      as JSON. Each claim, the probe's `find` and the error read back
+      unchanged or with its placeholder. The claim with the key keeps the
+      text before it. Every finding validates as a `Finding`, the way
+      `ready_task` reads them back. The outcome's reviews keep each claim
+      and the error as the lenses gave them. The witness drives the cell
+      twice, handed the token and then handed `None`. Handed `None`, every
+      shape is still redacted and the token is written.
     witness: tests/test_session.py::test_the_recorded_findings_are_redacted_in_every_lens_and_finding
     wrong_versions:
       - The serialized JSON redacted as one string, so the key with no END line takes every finding after it and the file no longer loads.
@@ -101,6 +116,9 @@ acceptance:
       - Only the first finding of each lens redacted.
       - The findings redacted with no token, so the second lens's claim keeps the cell's own token.
       - Each finding's claim redacted in place, so the outcome's reviews and the ledger's rows lose what the lens filed.
+      - Only each finding's `claim` redacted, so a probe's `find` and a lens's `error` keep their credentials.
+      - Each lens's findings walked and its `error` left alone.
+      - The findings are redacted only when a token was handed, so a cell handed `None` writes every shape.
   - claim: >-
       `run_one_cell` takes a keyword `token`, default `None`, and the log it
       builds when handed no `emit` is handed that token. The witness drives
@@ -108,10 +126,13 @@ acceptance:
       and each of the six turns emits one `Agent` event carrying the token.
       Handed it, `events.jsonl` holds the token nowhere, and each of the six
       events reads back with `redacted` naming the cell's own token. Handed
-      `None`, the same cell writes the token, and no event names a redaction.
+      `None`, with the same token set in `CLAUDE_CODE_OAUTH_TOKEN`, the same
+      cell writes the token, and no event names a redaction. The log never
+      reads the environment (item 46, `saffron/events.py:505-506`).
     witness: tests/test_session.py::test_a_cells_default_log_redacts_the_token_it_was_handed
     wrong_versions:
       - "`run_one_cell`'s default log built with no token, as at base."
+      - "`run_one_cell`'s default log falls back to `CLAUDE_CODE_OAUTH_TOKEN` when handed `None`."
   - claim: >-
       `run_task` hands `run_one_cell` the token it was given, and never the
       environment's. The witness sets `CLAUDE_CODE_OAUTH_TOKEN` to one value
@@ -175,7 +196,7 @@ came.
 - `notes.json` is an envelope of the extracted notes and their hash
   (`saffron/cell/session.py:3252-3255`). The hash also reaches the
   outcome's `notes_sha256` (`:4100`).
-- `findings.json` is every lens's `as_dict()`, dumped whole
+- The task's own `findings.json` is every lens's `as_dict()`, dumped whole
   (`saffron/cell/session.py:3656-3658`).
 
 **Who holds the token.** `run_task` builds its own log with the token it
@@ -184,8 +205,8 @@ was given (`saffron/task.py:799`). It calls `run_one_cell` with no token
 takes one (`saffron/cell/session.py:1134`, `:2325`). `run_one_cell`'s own
 default log, built when it is handed no `emit`, gets no token
 (`saffron/cell/session.py:1161-1163`). PACKAGE holds `token` in both
-`package()` and `push_unpackaged_work()` (`saffron/phases/package.py:658`,
-`:1132`). Each builds its default log without it (`:691`, `:1171`). PACKAGE
+`package()` and `push_unpackaged_work()` (`saffron/phases/package.py:659`,
+`:1133`). Each builds its default log without it (`:691`, `:1171`). PACKAGE
 emits no `Agent` event today, so nothing it writes is unredacted yet.
 
 **Who reads the hash.** `projection` takes the 12-character hash from the
@@ -227,15 +248,16 @@ these changes.
    through `redact` with the token. The envelope's `raw` is that text, and
    its `sha256` and the outcome's `notes_sha256` are that text's hash. The
    outcome's `notes` stay the text as extracted.
-5. **`findings.json` is redacted leaf by leaf.** Pass the list of
+5. **The task's own `findings.json` is redacted leaf by leaf.** Pass the list of
    `as_dict()` values through `redact_nested` with the token, and dump what
    it returns. The `reviews` list itself is untouched.
 6. **PACKAGE's two default logs take the token.** Both `EventLog` calls in
    `saffron/phases/package.py` are handed the `token` that function holds.
 7. **The module says where it reaches.** `saffron/credentials.py`'s
    docstring names `EventLog` alone, and its `ponytail:` comment says an
-   unlisted shape reaches "the remote and the log". Name the three files in
-   the docstring, and say the host's files in the comment.
+   unlisted shape reaches "the remote and the log". Name `plan.json`,
+   `notes.json` and the task's own `findings.json` in the docstring, and
+   say the host's files in the comment.
 8. **Two texts stop calling the plan verbatim.** The comment at
    `saffron/cell/session.py:2687-2689` and the docstring of
    `test_the_recorded_proposal_carries_the_hash_of_its_own_raw_block`
@@ -259,9 +281,10 @@ both halves of the rule.
   scan refuses a patch carrying a known shape (`saffron/phases/package.py:835`).
   §5.7 names it as accepted risk.
 - **Every other file in the task directory.** `scope_proposal.json`
-  (`saffron/cell/session.py:2681`), `rebuttal.json`
-  (`saffron/cell/session.py:4007`) and the
-  probe and wrong-version records carry cell text and stay as they are.
+  (`saffron/cell/session.py:2681`) and `rebuttal.json`
+  (`saffron/cell/session.py:4007`) carry cell text and stay as they are.
+  So do each review commit's `commit-reviews/<head>.json`
+  (`saffron/commit_review.py:189`) and the probe and wrong-version records.
   So does `pr_body.md`, which PACKAGE writes before it scans the body
   (`saffron/phases/package.py:962`, `:965`).
 - **The end review's `findings.json`.** `saffron/finish.py:43` names a
@@ -269,6 +292,11 @@ both halves of the rule.
   the task directory.
 - **The ledger and the record.** `ledger.record_findings` still stores each
   claim as filed (`saffron/cell/session.py:3667`).
+- **The terminal line.** Each default emitter prints `describe(event)`
+  before `log.append` redacts it (`saffron/cell/session.py:135-138`,
+  `saffron/task.py:803-806`). So stdout carries the token and every known
+  shape. Under `launchd` that line lands in `~/.saffron/batch.out.log`
+  (`docs/host/dev.saffron.batch.plist:59`). §5.7 names both as residual.
 - **The spec-session log.** `_spec_session_emit` builds `EventLog(log_dir)`
   with no token (`saffron/cli.py:1375`), and `cli.py` is forbidden here.
 - **A plan with an unterminated key.** `plan.json` is the raw block. A
@@ -278,8 +306,10 @@ both halves of the rule.
   files back. On that path a placeholder reaches the pull request body, and
   the body scan no longer refuses it.
 - **Hand edits in this spec's pull request.** `DESIGN.md` §5.7 now says
-  `events.jsonl`, `plan.json`, `notes.json` and `findings.json` are redacted
-  before each is written. It says `patch.diff` is accepted risk. That text
+  `events.jsonl`, `plan.json`, `notes.json` and the task's own
+  `findings.json` are redacted before each is written. It says `patch.diff`
+  is accepted risk, and names the terminal line and the batch log file as
+  residual. That text
   replaces the sentence that began "Until it exists" and named the remote
   alone. Item 11 now names `saffron/credentials.py`'s tuple in place
   of `_CREDENTIAL_SHAPES` (`docs/backlog/011-what-package-left-and-the-one-design-question-it-raised.md:83`).
@@ -302,14 +332,19 @@ For the cell's own token, use one that matches none of the five shapes, so
 only the literal check catches it.
 
 **`tests/test_session.py`.** Give `_drive` a `token` keyword, default
-`None`, and hand it to both of its `run_one_cell` calls. Criteria 1 to 3
-drive `_drive` with `token` set. Criterion 1 scripts `_turn(_block(plan))`
-and one implement turn. Criterion 2 follows
+`None`, and hand it to both of its `run_one_cell` calls. Criteria 1 to 4
+each drive `_drive` twice, under `tmp_path / name`, handed the token and
+then `None`. Criterion 1 scripts its block as `json.dumps(plan, indent=2)`
+inside an `<output>` block, then one implement turn. Criterion 2 follows
 `test_the_notes_artifact_is_hashed_when_it_is_produced`: a `forbidden` list
-asks the notes turn. Criterion 3 drives `_adequacy_turns` with `"note"`
-findings, so no REBUT turn runs. Criterion 4 drives `use_default_emit=True`
-with `agent_says`, which emits one `Agent` per turn, and reads
-`tmp_path / name / "out" / "SY-1" / "events.jsonl"`. Its plan, implement
+asks the notes turn. Criterion 3 files `"note"` findings, so no REBUT turn
+runs. Only adequacy's schema takes a `probe` (`saffron/phases/review.py:102-105`),
+so its probe sits on an adequacy finding. The last lens's turn is an
+`implement.AgentFailed`, whose message becomes that lens's `error`.
+Criterion 4 drives `use_default_emit=True` with `agent_says`, which emits
+one `Agent` per turn, and reads
+`tmp_path / name / "out" / "SY-1" / "events.jsonl"`. Its None half sets
+`CLAUDE_CODE_OAUTH_TOKEN` with `monkeypatch.setenv`. Its plan, implement
 turn and four lenses make six. The PLAN line `cell.watched` holds reads
 `PLAN: accepted, sha256 <12 hex>`.
 

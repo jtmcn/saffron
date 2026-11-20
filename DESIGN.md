@@ -1415,13 +1415,16 @@ first component that moves cell-authored bytes off the host, and the cell holds
 undeletable. This is a refusal, not the `secrets` gate. That gate is still v1's
 to build. Until it exists, **the residual risk is every credential shape the
 refusal does not know**, on the remote and on the host. `events.jsonl`,
-`plan.json`, `notes.json` and `findings.json` redact the refusal's shapes and
-the cell's own token before each is written. A shape the list misses is
+`plan.json`, `notes.json` and the task's own `findings.json` redact the
+refusal's shapes and the cell's own token before each is written. Each sits
+in the task directory. A shape the list misses is
 written in each of them. `patch.diff` is written as the cell left it, and that
 is accepted risk. PACKAGE applies and pushes that text, so redacting it would
 change the code the push carries. The push already carries the same text to
 the remote. Every other file in the task directory is written as it came,
-`pr_body.md`, `rebuttal.json` and `scope_proposal.json` among them.
+`pr_body.md`, `rebuttal.json` and `scope_proposal.json` among them. So is
+each event's terminal line, printed to stdout and under `launchd` to the
+batch log file.
 
 Model-authored text is neutralized before it enters a commit body or a PR body:
 GitHub acts on `Fixes #12` and `@name` in both, so a cell can close an issue or
