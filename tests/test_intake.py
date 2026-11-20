@@ -1188,7 +1188,7 @@ def test_coverage_problems_names_each_negative_claim_that_declares_no_positive_c
     """`coverage_problems` also reports one line per criterion whose claim
     holds a word of `NEGATION_WORDS` and that declares no `positive_case`
     (backlog item b-c12d39). A criterion with an undriven member yields the
-    member's line first. A word reaches to a sentence's own full stop."""
+    member's line first. A word directly before a full stop still matches."""
     from saffron.intake import NEGATION_WORDS, coverage_problems
 
     assert sorted(NEGATION_WORDS) == sorted(

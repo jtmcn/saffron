@@ -167,9 +167,9 @@ class Mutant(BaseModel):
 class CoveredMember(BaseModel):
     """One case a claim's `covers` set lists, and what drives it (b-c12d39).
 
-    `driven_by` names a test or a prose source the author believes exercises
-    this case. It is read, never checked here: `coverage_problems` is where a
-    name that matches nothing is judged.
+    `driven_by` names its own criterion's witness or one of its
+    `wrong_versions`. Load does not check this. `coverage_problems` flags any
+    other name.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -256,8 +256,8 @@ class Criterion(BaseModel):
         declares it twice, checked across the whole list rather than only
         between neighbours. A member text is refused blank the same way.
         It is also refused where its own set declares it twice. The same
-        text in two different sets is left alone. Returned as declared,
-        in both orders.
+        text in two different sets is left alone. Sets and members are
+        returned in declared order, never sorted.
         """
         if not value:
             raise ValueError("covers is declared but empty")
