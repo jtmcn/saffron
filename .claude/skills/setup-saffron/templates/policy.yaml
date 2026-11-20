@@ -34,7 +34,7 @@ witness:
   witness_name: null
   # FILL: a pattern holding `{name}` that matches that test's own text.
   witness_body: null
-  # FILL: a `pattern` per constant spelling, with `name` and the `value` a constant mutant edits.
+  # FILL: a `pattern` per constant spelling: `name`, the `value` a mutant edits, then the rest of it.
   # Each `replace` must leave every matched file importable.
   constants: []
 

@@ -4,7 +4,7 @@ title: A multi-line constant edited past its first string segment derives no con
 status: open
 tier: 2
 filed: 2026-10-19
-specs: []
+specs: [SA-0416]
 prs: []
 commits: []
 cites: [§5.4.1]
@@ -29,3 +29,6 @@ the last segment of a multi-line constant and asserts the mutant is derived.
 ## Record
 
 - 2026-10-19: filed from the spec loop's run 44.
+- 2026-11-18: `SA-0416` queued. Core searches each changed file's head
+  text and counts every line a match spans. This repo's string pattern is
+  widened by hand once it merges.
