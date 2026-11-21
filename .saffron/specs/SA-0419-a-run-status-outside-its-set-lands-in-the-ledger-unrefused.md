@@ -44,7 +44,8 @@ acceptance:
       on a fresh ledger with a record. It also drives a ledger whose `runs`
       table is the home ledger's own, with no `CHECK`. The refused statuses
       are the misspelling `ABORTD`, a lower-case `complete`, `RUNNING`, the
-      preflight outcome `PASSED` and the batch stop reason `DRAINED`. On
+      preflight outcomes `PASSED` and `FAILED`, the batch stop reason
+      `DRAINED` and the empty string. On
       that older ledger, an existing row holding NULL and one holding a
       status outside the set read as they did before the ledger opened.
     witness: tests/test_ledger.py::test_a_run_status_outside_the_closed_set_is_refused_before_anything_is_written
@@ -62,6 +63,8 @@ acceptance:
       - "`finish_run` admits `RUNNING` as well."
       - "`finish_run` admits the preflight outcomes as well."
       - "`finish_run` admits the batch stop reasons as well."
+      - "`finish_run` admits `FAILED` as well."
+      - "`finish_run` refuses only a non-empty status outside the set, so the empty string passes."
       - "`finish_run` writes `COMPLETE` whatever status it is handed."
       - Opening a ledger clears an existing status outside the set.
       - Opening a ledger backfills a NULL status to `COMPLETE`.
@@ -76,8 +79,12 @@ acceptance:
             driven_by: "`finish_run` admits `RUNNING` as well."
           - member: the preflight outcome `PASSED`
             driven_by: "`finish_run` admits the preflight outcomes as well."
+          - member: the preflight outcome `FAILED`
+            driven_by: "`finish_run` admits `FAILED` as well."
           - member: the batch stop reason `DRAINED`
             driven_by: "`finish_run` admits the batch stop reasons as well."
+          - member: the empty string
+            driven_by: "`finish_run` refuses only a non-empty status outside the set, so the empty string passes."
       - set: admitted statuses
         members:
           - member: "`ABORTED`"
@@ -109,7 +116,8 @@ acceptance:
       `Ledger`. The row `create_run` mints reads `RUNNING`. An `UPDATE` to
       each admitted value reads back, and an `INSERT` that names no status
       lands. An `UPDATE` and an `INSERT` of `ABORTD`, `complete`, `PASSED`,
-      `DRAINED` or the empty string each raise `sqlite3.IntegrityError`.
+      `FAILED`, `DRAINED` or the empty string each raise
+      `sqlite3.IntegrityError`.
     witness: tests/test_ledger.py::test_a_fresh_ledgers_runs_table_admits_only_the_closed_set_of_statuses
     positive_case: >-
       Through the same connection, each admitted status written by `UPDATE`
@@ -121,6 +129,8 @@ acceptance:
       - The column is also `NOT NULL`.
       - The `CHECK` compares the status case-insensitively.
       - The `CHECK` admits the preflight outcomes as well.
+      - The `CHECK` admits `FAILED` as well.
+      - The `CHECK` admits the batch stop reasons as well.
     covers:
       - set: admitted values
         members:
@@ -140,8 +150,10 @@ acceptance:
             driven_by: The `CHECK` compares the status case-insensitively.
           - member: the preflight outcome `PASSED`
             driven_by: The `CHECK` admits the preflight outcomes as well.
+          - member: the preflight outcome `FAILED`
+            driven_by: The `CHECK` admits `FAILED` as well.
           - member: the batch stop reason `DRAINED`
-            driven_by: tests/test_ledger.py::test_a_fresh_ledgers_runs_table_admits_only_the_closed_set_of_statuses
+            driven_by: The `CHECK` admits the batch stop reasons as well.
           - member: the empty string
             driven_by: tests/test_ledger.py::test_a_fresh_ledgers_runs_table_admits_only_the_closed_set_of_statuses
       - set: write forms
@@ -155,10 +167,11 @@ acceptance:
       is not `COMPLETE` or `ABORTED`, and the ledger then holds no row for
       that task. The witness reads a task's facts after `finish_run` closed
       its run `ABORTED`. It swaps that fact's status for `ABORTD`,
-      `complete`, `RUNNING`, the preflight outcome `PASSED` and the batch
-      stop reason `DRAINED` in turn. It folds each into a fresh ledger and
-      into a ledger whose `runs` table is the home ledger's own, with no
-      `CHECK`.
+      `complete`, `RUNNING`, the preflight outcomes `PASSED` and `FAILED`,
+      the batch stop reason `DRAINED` and the empty string in turn. It folds
+      each into a fresh ledger and into a ledger whose `runs` table is the
+      home ledger's own, with no `CHECK`. It reads the task's rows after
+      each refused fold.
     witness: tests/test_ledger_fold_task.py::test_a_run_finished_fact_outside_the_closed_set_aborts_its_fold
     positive_case: >-
       The unedited facts then fold into each of the same two ledgers, and the
@@ -170,6 +183,9 @@ acceptance:
       - The fold drops the fact and returns without raising.
       - The fold admits the preflight outcomes as well.
       - The fold admits the batch stop reasons as well.
+      - The fold admits `FAILED` as well.
+      - The fold refuses only a non-empty status outside the set, so the empty string passes.
+      - The fold refuses after `fold_task` commits, so the task's rows stay on the older ledger.
       - The fold writes `COMPLETE` whatever status the fact carries.
     covers:
       - set: refused statuses
@@ -182,8 +198,12 @@ acceptance:
             driven_by: The fold admits `RUNNING` as well.
           - member: the preflight outcome `PASSED`
             driven_by: The fold admits the preflight outcomes as well.
+          - member: the preflight outcome `FAILED`
+            driven_by: The fold admits `FAILED` as well.
           - member: the batch stop reason `DRAINED`
             driven_by: The fold admits the batch stop reasons as well.
+          - member: the empty string
+            driven_by: The fold refuses only a non-empty status outside the set, so the empty string passes.
       - set: ledgers by their `runs` table
         members:
           - member: a fresh ledger, with the `CHECK`
@@ -196,6 +216,8 @@ acceptance:
             driven_by: The fold drops the fact and returns without raising.
           - member: it writes an admitted status as the fact carries it
             driven_by: The fold writes `COMPLETE` whatever status the fact carries.
+          - member: no task row remains after a refused fold
+            driven_by: The fold refuses after `fold_task` commits, so the task's rows stay on the older ledger.
 ---
 
 ## Context
@@ -346,7 +368,7 @@ semicolon, contraction or sentence over 25 words. A sentence listing the
 statuses in backticks runs long fast.
 
 **Size.** A prototype at `f605529d` measured 90 changed tokens outside the
-test paths with `size_gate`, and 657 under them. `estimated_lines` is the
+test paths with `size_gate`, and 667 under them. `estimated_lines` is the
 first over four. Each witness failed with `saffron/ledger.py` reverted, and
 each wrong version above failed its own witness. The ledger's own test
 files, the fold's and the ontology tests passed with the change.
