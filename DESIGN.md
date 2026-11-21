@@ -1186,7 +1186,7 @@ the REVIEW line and the pull request name it (`SA-0202`).
 **An edit the gate derives.** A witness can compare the code's output with
 the constant it tests. Any value then passes it (backlog item b-5b1f8a). So
 `witness` also derives a **constant mutant** from the diff (`SA-0280`). It
-changes the value the diff gives a constant. It then runs each witness whose
+changes the value of a constant the diff edits. It then runs each witness whose
 own text in the diff names that constant. A witness that stays green is a
 survivor, filed as one under a declared mutant is. What a constant looks
 like, and where a witness's text lies, is language knowledge. So the repo
