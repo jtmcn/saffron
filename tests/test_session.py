@@ -17001,6 +17001,32 @@ def test_the_recorded_proposal_carries_the_hash_of_its_own_raw_block(
     assert record["sha256"] == artifacts.hash_artifact(record["raw"])
 
 
+def test_the_scope_proposals_hash_comment_names_why_it_differs_from_plans_json():
+    """The comment above `scope_proposal.json`'s `sha256` field must name the
+    right cause. `plan.json` needs no hash because it *is* the raw block.
+    This wrapper needs one because it holds that block under a `raw` key."""
+    text = Path(session.__file__).read_text()
+    marker = '"sha256": artifacts.hash_artifact(proposed.raw),'
+    before, _, _after = text.partition(marker)
+    lines = before.splitlines()
+    # The last fragment before the match is only the match line's own leading
+    # indentation, not a comment line.
+    lines = lines[:-1]
+    comment_lines = []
+    for line in reversed(lines):
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            comment_lines.append(stripped.lstrip("#").strip())
+        else:
+            break
+    comment_lines.reverse()
+    comment = " ".join(comment_lines)
+    assert "the whole file *is* the raw block" in comment
+    assert "plan.json needs no embedded hash" in comment
+    assert re.search(r"\braw key\b", comment)
+    assert "holds raw text" not in comment
+
+
 def test_the_notes_artifact_is_hashed_when_it_is_produced(monkeypatch, tmp_path):
     """Extracted and hashed the moment it is produced, and never re-read from
     `/work` again — `plan.json` is the precedent and the reason is the same

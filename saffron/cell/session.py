@@ -2688,8 +2688,8 @@ def _drive_cell(
                         "proposed_touches": final_touches,
                         "root_cause": proposal.root_cause,
                         "raw": proposed.raw,
-                        # `sha256sum plan.json` re-derives the PLAN line's hash.
-                        # This wrapper holds raw text, so it carries its own hash too.
+                        # plan.json needs no embedded hash because the whole file *is* the raw block.
+                        # scope_proposal.json carries its own sha256 because it is a JSON wrapper around a raw key, not the block itself.
                         "sha256": artifacts.hash_artifact(proposed.raw),
                     },
                     indent=2,
