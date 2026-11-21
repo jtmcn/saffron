@@ -3271,3 +3271,30 @@ critic's own, so they have no line.
   said `driven_by` may name any test, one read "in both orders", and one
   never said a word before a full stop still matches. **Bucket 3**.
   **Landed:** a review commit on #1271.
+
+## 2026-11-20, spec loop run 81 (#1278, #1279, #1281)
+
+- `SA-0416` (#1278): `head_text`'s witness left its uncommitted edit
+  unstaged, so a reader of the index passed as a reader of `HEAD`.
+  **Bucket 1**. **Landed:** a review commit on #1278.
+- `SA-0416` (#1278): `_new_side` still computed added-line spans that
+  nothing read, and a test restated `_GitTree.head_text`. **Bucket 3**.
+  **Landed:** a review commit on #1278.
+- `SA-0417` (#1279): the findings witness never read the written records
+  back as a `Finding`, so a record missing `severity` passed. **Bucket 1**.
+  **Landed:** a review commit on #1279.
+- `SA-0417` (#1279): the findings witness checked only each lens's first
+  claim on the outcome, so redacting every other claim in place passed.
+  **Bucket 1**. **Landed:** a review commit on #1279.
+- `SA-0417` (#1279): the plan-write comment put redaction before
+  extraction and dropped the never-read-from-`/work` half of the rule.
+  **Bucket 3**. **Landed:** a review commit on #1279.
+- `SA-0418` (#1281): three witnesses looked a task up in `kept` before
+  asserting, so 15 wrong versions died by `KeyError` and not by an
+  assertion. **Bucket 1**. **Landed:** a review commit on #1281.
+- `SA-0418` (#1281): no witness made a repair or rebuttal turn a task's
+  last cell attempt, so excluding either phase passed. **Bucket 1**.
+  **Landed:** a review commit on #1281.
+- `SA-0418` (#1281): a docstring said spec sessions run before or after
+  any cell exists, where `CONTEXT.md` puts them in a critic cell.
+  **Bucket 3**. **Landed:** a review commit on #1281.

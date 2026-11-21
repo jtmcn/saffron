@@ -1,11 +1,12 @@
 ---
 id: b-3a3081
 title: "Redaction reaches `events.jsonl` and none of the cell-authored files beside it, and §5.7 still names the remote alone"
-status: open
+status: done
 tier: 2
 filed: 2026-10-19
 specs: [SA-0417]
-prs: []
+prs: [1279, 1284]
+closed: 2026-11-20
 commits: []
 cites: [§5.4, §5.7]
 related: [46, 11]
@@ -45,3 +46,6 @@ residual risk.
   and `findings.json` before each is written, and hashes the redacted text.
   PACKAGE's two default logs take the token. `patch.diff` stays as it is,
   and `DESIGN.md` §5.7 names it as accepted risk by hand.
+- 2026-11-20: done in the spec loop's run 81. `SA-0417` (#1279) redacts the
+  files a cell writes beside `events.jsonl`. Its finish ran `SA-0420` (#1284),
+  which corrects one comment.

@@ -62,3 +62,6 @@ before the finish commits it.
 - 2026-11-12: #1170 shipped `SA-0376` in the spec loop's run 65. A stack batch
   refuses an order spec whose revision session ends with fault lines. Gates that
   are not form gates, such as `census`, can still turn a finish red.
+- 2026-11-20: recurred in finish 99 of the spec loop's run 81. The draft
+  `SA-0421` failed `prose` on one long sentence and was pooled, so a real
+  `DESIGN.md` concern was fixed in review by hand.

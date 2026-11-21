@@ -5,7 +5,7 @@ status: partial
 tier: 2
 filed: 2026-09-19
 specs: [SA-0418]
-prs: []
+prs: [1281]
 commits: []
 cites: [§4.1]
 related: [170, b-946f03, b-60d804]
@@ -56,3 +56,6 @@ decides whether the tasks still left out are migrated or abandoned.
   tasks write that attempt about two seconds before the span's `Ceilings`
   event, and older ones after it. So neither date alone reaches both eras.
   The tally scripts were run by hand and are not in the tree.
+- 2026-11-20: `SA-0418` (#1281) dates each task by its first cell attempt.
+  The item stays partial until `saffron chains` runs again over main and
+  Appendix T's rule is re-run.

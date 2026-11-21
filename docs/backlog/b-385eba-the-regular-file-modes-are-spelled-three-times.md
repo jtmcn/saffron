@@ -28,3 +28,6 @@ One public constant, imported by all three modules.
 ## Record
 
 - 2026-10-08: filed from the spec loop's run 31.
+- 2026-11-20: `SA-0416` (#1278) named the inline pair in
+  `saffron/cell/worktree.py` `_REGULAR_MODES`, the same private name
+  `mirror.py` uses. Its spec did not touch `saffron/repos/`.
