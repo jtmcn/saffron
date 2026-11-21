@@ -1516,6 +1516,60 @@ def test_a_touches_path_that_starts_with_a_colon_is_read_literally(
     assert worktree.absent_at("unused", base, [":odd.py", "gone.py"]) == ["gone.py"]
 
 
+def test_head_text_reads_a_regular_file_at_head_and_nothing_else(tmp_path, monkeypatch):
+    """`head_text` reads a regular file and an executable one at `HEAD`,
+    never the working copy's uncommitted edit. `None` answers for a
+    symlink, a gitlink and an absent path. A refused `ls-tree` or blob
+    read raises `runtime.CellRuntimeError` carrying git's stderr, whether
+    `ls-tree` or the blob read itself is refused."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
+
+    (tmp_path / "a.py").write_text("original\n")
+    (tmp_path / ":odd.py").write_text("odd = 1\n")
+    (tmp_path / "dir").mkdir()
+    (tmp_path / "dir" / "nested.py").write_text("nested = 1\n")
+    (tmp_path / "run.sh").write_text("#!/bin/sh\necho hi\n")
+    (tmp_path / "run.sh").chmod(0o755)
+    (tmp_path / "link").symlink_to("a.py")
+    _commit(tmp_path, "base")
+
+    # Uncommitted but staged: the read is of `HEAD`, never the index or working copy.
+    (tmp_path / "a.py").write_text("edited\n")
+    _commit_a_gitlink(tmp_path)
+    subprocess.run(["git", "add", "a.py"], cwd=tmp_path, check=True)
+
+    inner = _exec_in(tmp_path)
+    monkeypatch.setattr(worktree.runtime, "exec_", inner)
+
+    assert worktree.head_text("c", "link") is None
+    assert worktree.head_text("c", "a.py") == "original\n"
+    assert worktree.head_text("c", ":odd.py") == "odd = 1\n"
+    assert worktree.head_text("c", "vendor/sub") is None
+    assert worktree.head_text("c", "dir/nested.py") == "nested = 1\n"
+    assert worktree.head_text("c", "run.sh") == "#!/bin/sh\necho hi\n"
+    assert worktree.head_text("c", "absent.py") is None
+
+    # `ls-tree` itself refused: never read as an empty or absent file.
+    def every_call_fails(container, command, *, workdir=None, timeout_s=900):
+        return runtime.Completed(128, "", "fatal: ls-tree boom")
+
+    monkeypatch.setattr(worktree.runtime, "exec_", every_call_fails)
+    with pytest.raises(runtime.CellRuntimeError, match="fatal: ls-tree boom"):
+        worktree.head_text("c", "a.py")
+
+    # `ls-tree` reaches the real repo and answers. The blob read is refused.
+    def cat_file_fails(container, command, *, workdir=None, timeout_s=900):
+        if "ls-tree" in command:
+            return inner(container, command, workdir=workdir, timeout_s=timeout_s)
+        return runtime.Completed(128, "", "fatal: cat-file boom")
+
+    monkeypatch.setattr(worktree.runtime, "exec_", cat_file_fails)
+    with pytest.raises(runtime.CellRuntimeError, match="fatal: cat-file boom"):
+        worktree.head_text("c", "a.py")
+
+
 def _porcelain(tmp_path):
     return subprocess.run(
         ["git", "status", "--porcelain"],

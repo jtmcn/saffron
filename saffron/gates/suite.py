@@ -66,6 +66,7 @@ class Tree(Protocol):
     def changed_files(self, base: str) -> list[str]: ...
     def absent_at(self, tree_base: str, paths: Sequence[str]) -> list[str]: ...
     def patch(self, base: str) -> str: ...
+    def head_text(self, path: str) -> str | None: ...
     def dirty_paths(self) -> list[str]: ...
     def spec_ids(self) -> list[str]: ...
     def reverted(
@@ -94,6 +95,9 @@ class CellTree:
 
     def patch(self, base: str) -> str:
         return worktree.export_patch(self.container, base)
+
+    def head_text(self, path: str) -> str | None:
+        return worktree.head_text(self.container, path)
 
     def dirty_paths(self) -> list[str]:
         return worktree.dirty_paths(self.container)
@@ -189,7 +193,11 @@ class GateSuite:
         # Read by `run_suite` alone (§5.4.1). `revert` and `criteria`
         # below still read `spec.acceptance` on its own.
         derived = constant_mutants(
-            diff, spec.acceptance, policy.witness, policy.integrity.test_paths
+            diff,
+            spec.acceptance,
+            policy.witness,
+            policy.integrity.test_paths,
+            tree.head_text,
         )
         # Declared gates run before `dirty_paths` is read, on both calls, so an
         # artifact a gate writes is dirty on both sides and cancels (item 14).

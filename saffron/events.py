@@ -48,7 +48,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from saffron.credentials import redact
+from saffron.credentials import redact, redact_nested
 from saffron.gates.contract import GateStatus
 
 # The one size bound feeding both paths a cell's stdout can reach the host's
@@ -447,51 +447,6 @@ def _bounded_usage(event: dict) -> dict | None:
     return usage
 
 
-def _redact_nested(value: object, token: str | None) -> tuple[object, list[str]]:
-    """`value` walked at every depth, dict keys included, every string leaf
-    passed through `credentials.redact`. An explicit stack, never recursion:
-    a cell-authored event can nest hundreds of levels deep, and a recursive
-    walk would raise before `append` could write anything (item 46).
-
-    Returns a value built from new containers, never the caller's own, and
-    the descriptions found, each named once in first-seen order."""
-    found: list[str] = []
-
-    def leaf(text: str) -> str:
-        new_text, kinds = redact(text, token=token)
-        for kind in kinds:
-            if kind not in found:
-                found.append(kind)
-        return new_text
-
-    if isinstance(value, str):
-        return leaf(value), found
-    if not isinstance(value, (dict, list)):
-        return value, found
-
-    root: dict | list = {} if isinstance(value, dict) else []
-    stack: list[tuple[dict | list, dict | list]] = [(value, root)]
-    while stack:
-        orig, new = stack.pop()
-        pairs = orig.items() if isinstance(orig, dict) else enumerate(orig)
-        for key, child in pairs:
-            if isinstance(child, str):
-                built: object = leaf(child)
-            elif isinstance(child, dict):
-                built = {}
-                stack.append((child, built))
-            elif isinstance(child, list):
-                built = []
-                stack.append((child, built))
-            else:
-                built = child
-            if isinstance(new, dict):
-                new[leaf(key) if isinstance(key, str) else key] = built
-            else:
-                new.append(built)
-    return root, found
-
-
 class EventLog:
     """Appends `Event`s to one task's `events.jsonl`, and nothing else.
 
@@ -527,7 +482,7 @@ class EventLog:
                 kinds: list[str] = []
                 new_payload = event.event
                 if event.event is not None:
-                    new_payload, found = _redact_nested(event.event, self._token)
+                    new_payload, found = redact_nested(event.event, token=self._token)
                     kinds.extend(found)
                 new_line = event.line
                 if event.line is not None:

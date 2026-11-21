@@ -1582,6 +1582,7 @@ def _drive(
     # A `Record` backend for the `Ledger` this drives, `None` by default so
     # every caller that predates it still gets a ledger with no record.
     record=None,
+    token=None,
 ):
     """Run one whole cell against the stubbed runtime and return its outcome.
 
@@ -1720,6 +1721,7 @@ def _drive(
             mirror=tmp_path / "m.git",
             ledger=ledger,
             out_dir=tmp_path / "out",
+            token=token,
         )
         return outcome, ledger
 
@@ -1740,6 +1742,7 @@ def _drive(
         out_dir=tmp_path / "out",
         emit=_emit,
         on_state=on_state,
+        token=token,
     )
     return outcome, ledger
 
@@ -16986,16 +16989,42 @@ def test_a_repo_with_no_spec_directory_still_records_a_spec_path(monkeypatch, tm
 def test_the_recorded_proposal_carries_the_hash_of_its_own_raw_block(
     monkeypatch, tmp_path
 ):
-    """`plan.json` is the raw block verbatim, so `sha256sum plan.json` matches
-    the watch line it was announced with. The proposal is wrapped in an
-    envelope instead, so unless the envelope carries the hash the printed
-    sha256 matches nothing on disk and the record cannot be re-derived."""
+    """`sha256sum plan.json` re-derives the plan checkpoint's watch line's
+    hash, since the block is redacted before it is written there. The
+    proposal is held in a JSON wrapper instead. Without its own hash, the
+    printed sha256 matches nothing on disk."""
     cell = _stub_the_runtime(monkeypatch)
     outcome, _ledger = _drive(
         monkeypatch, tmp_path, cell=cell, turns=[_turn(_block(_PROPOSAL))]
     )
     record = json.loads((outcome.task_dir / "scope_proposal.json").read_text())
     assert record["sha256"] == artifacts.hash_artifact(record["raw"])
+
+
+def test_the_scope_proposals_hash_comment_names_why_it_differs_from_plans_json():
+    """The comment above `scope_proposal.json`'s `sha256` field must name the
+    right cause. `plan.json` needs no hash because it *is* the raw block.
+    This wrapper needs one because it holds that block under a `raw` key."""
+    text = Path(session.__file__).read_text()
+    marker = '"sha256": artifacts.hash_artifact(proposed.raw),'
+    before, _, _after = text.partition(marker)
+    lines = before.splitlines()
+    # The last fragment before the match is only the match line's own leading
+    # indentation, not a comment line.
+    lines = lines[:-1]
+    comment_lines = []
+    for line in reversed(lines):
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            comment_lines.append(stripped.lstrip("#").strip())
+        else:
+            break
+    comment_lines.reverse()
+    comment = " ".join(comment_lines)
+    assert "the whole file *is* the raw block" in comment
+    assert "plan.json needs no embedded hash" in comment
+    assert re.search(r"\braw key\b", comment)
+    assert "holds raw text" not in comment
 
 
 def test_the_notes_artifact_is_hashed_when_it_is_produced(monkeypatch, tmp_path):
@@ -18747,3 +18776,286 @@ def test_the_host_survivor_cells_own_docstring_takes_no_perfect_tense():
     assert doc is not None
     assert re.search(r"\b(?:has|have|had)\s+(?:already\s+)?run\b", doc, re.I) is None
     assert "once the rebuttal turn runs" in doc
+
+
+def test_the_recorded_plan_is_redacted_and_its_announced_hash_names_the_file(
+    monkeypatch, tmp_path
+):
+    """`plan.json` holds the accepted plan block passed through
+    `credentials.redact`. The PLAN line's announced hash names the file's
+    own bytes, never the block as the cell wrote it."""
+    from saffron import credentials
+
+    cell_token = "token" + "Q" * 20
+    gh_token = "gh" + "p_" + "B" * 20
+    private_words = "PRIVATE " + "KEY"
+    key_block = (
+        f"-----BEGIN {private_words}-----\na body line\n-----END {private_words}-----"
+    )
+    plan = {
+        "understanding": cell_token,
+        "approach": gh_token,
+        "files_to_change": ["tests/test_added.py"],
+        "test_strategy": key_block,
+        "risks": ["a flaky network call"],
+        "blocking_questions": [],
+        "estimated_lines": 42,
+        "estimated_test_lines": 10,
+    }
+    raw = json.dumps(plan, indent=2).replace(
+        '"understanding": ', '"understanding" : ', 1
+    )
+    block = f"Here is the plan.\n<output>\n{raw}\n</output>"
+
+    for name, token in (("handed", cell_token), ("bare", None)):
+        cell = _stub_the_runtime(monkeypatch)
+        events: list = []
+        outcome, _ledger = _drive(
+            monkeypatch,
+            tmp_path / name,
+            cell=cell,
+            turns=[_turn(block), _turn()],
+            token=token,
+            capture=events,
+        )
+        assert outcome.state == "READY_FOR_REVIEW"
+        recorded_text = (outcome.task_dir / "plan.json").read_text()
+        expected_text, _ = credentials.redact(raw, token=token)
+        assert recorded_text == expected_text
+        if token is not None:
+            assert cell_token not in recorded_text
+        assert gh_token not in recorded_text
+        assert key_block not in recorded_text
+        assert '"estimated_lines": 42' in recorded_text
+        assert '"a flaky network call"' in recorded_text
+
+        plan_lines = [
+            e
+            for e in events
+            if isinstance(e, PhaseStart)
+            and e.label == "PLAN"
+            and e.detail.startswith("accepted")
+        ]
+        assert len(plan_lines) == 1
+        announced = plan_lines[0].detail.removeprefix("accepted, sha256 ")
+        assert announced == hashlib.sha256(recorded_text.encode()).hexdigest()[:12]
+
+
+def test_the_recorded_notes_are_redacted_and_hashed_as_written(monkeypatch, tmp_path):
+    """`notes.json`'s `raw` is the extracted notes passed through
+    `credentials.redact`. Its `sha256`, and the outcome's own
+    `notes_sha256`, are both the hash of that redacted text. The outcome's
+    `notes` stay the text as extracted, credentials included."""
+    from saffron import credentials
+
+    gh_token = "gh" + "p_" + "C" * 20
+    cell_token = "token" + "R" * 20
+    aws_key = "AKIA" + "Q" * 16
+    notes_text = "\n".join(
+        [
+            f"a github token leaked: {gh_token}",
+            f"a cell token leaked: {cell_token}",
+            f"an aws key ends the line {aws_key}",
+        ]
+    )
+
+    for name, token in (("handed", cell_token), ("bare", None)):
+        cell = _stub_the_runtime(monkeypatch)
+        outcome, _ledger = _drive(
+            monkeypatch,
+            tmp_path / name,
+            cell=cell,
+            turns=[
+                _turn(_block(_PLAN)),
+                _turn(),
+                _turn(f"Noting something.\n<output>\n{notes_text}\n</output>"),
+            ],
+            spec=_spec(forbidden=["config/legacy.py"]),
+            policy="gates: {}\nprotected:\n  - DESIGN.md\n",
+            token=token,
+        )
+        assert outcome.state == "READY_FOR_REVIEW"
+        assert outcome.notes == notes_text
+        expected_text, _ = credentials.redact(notes_text, token=token)
+        assert outcome.notes_sha256 == artifacts.hash_artifact(expected_text)
+        record = json.loads((outcome.task_dir / "notes.json").read_text())
+        assert record["raw"] == expected_text
+        assert record["sha256"] == outcome.notes_sha256
+        assert gh_token not in record["raw"]
+        assert aws_key not in record["raw"]
+        if token is not None:
+            assert cell_token not in record["raw"]
+
+
+def test_the_recorded_findings_are_redacted_in_every_lens_and_finding(
+    monkeypatch, tmp_path
+):
+    """The task's own `findings.json` holds every lens's record, each
+    string passed through `credentials.redact`. Redaction runs leaf by
+    leaf, never on the whole serialized block, so an unterminated
+    private-key header sweeps only its own finding."""
+    from saffron import credentials
+    from saffron.agents.findings import Finding
+
+    aws_key_1 = "AKIA" + "A" * 16
+    cell_token = "token" + "S" * 20
+    private_words = "PRIVATE " + "KEY"
+    gh_token = "gh" + "p_" + "D" * 20
+    aws_key_2 = "AKIA" + "E" * 16
+    gh_token_2 = "gh" + "p_" + "F" * 20
+
+    def _note(claim, line):
+        return {
+            "file": "src/elsewhere.py",
+            "line": line,
+            "severity": "note",
+            "claim": claim,
+        }
+
+    lens1 = [_note(f"uses {aws_key_1} as a key", 1), _note("a clean concern", 2)]
+    lens2 = [
+        _note(f"debug token {cell_token} leaked", 1),
+        _note("another clean one", 2),
+        _note(f"before the key\n-----BEGIN {private_words}-----\nbody line", 3),
+        _note("yet another clean one", 4),
+        _note(f"uses token {gh_token} to push", 5),
+    ]
+    lens3 = [
+        {
+            **_note("adequacy clean", 1),
+            "probe": {
+                "file": "src/elsewhere.py",
+                "find": f"token {aws_key_2}",
+                "replace": "safe",
+            },
+        }
+    ]
+
+    def _lens_block(findings):
+        return f"<output>\n{json.dumps({'findings': findings})}\n</output>"
+
+    for name, token in (("handed", cell_token), ("bare", None)):
+        cell = _stub_the_runtime(monkeypatch)
+        outcome, _ledger = _drive(
+            monkeypatch,
+            tmp_path / name,
+            cell=cell,
+            turns=[
+                _turn(_block(_PLAN)),
+                _turn(),
+                _turn(_lens_block(lens1)),
+                _turn(_lens_block(lens2)),
+                _turn(_lens_block(lens3)),
+                implement.AgentFailed(f"provider refused, leaked {gh_token_2}"),
+            ],
+            token=token,
+        )
+        # A lens whose session fails produces no findings, so the task ends
+        # REVIEW_INCOMPLETE (§5.5).
+        assert outcome.state == "REVIEW_INCOMPLETE"
+        raw = (outcome.task_dir / "findings.json").read_text()
+        findings = json.loads(raw)
+        for lens in findings:
+            for record in lens["findings"]:
+                Finding.model_validate(record)
+        assert [f["lens"] for f in findings] == [
+            "correctness",
+            "contract",
+            "adequacy",
+            "conventions",
+        ]
+
+        correctness, contract, adequacy, conventions = findings
+        c0, c1 = correctness["findings"]
+        assert aws_key_1 not in c0["claim"]
+        assert c0["claim"].startswith("uses ")
+        assert c1["claim"] == "a clean concern"
+
+        k0, k1, k2, k3, k4 = contract["findings"]
+        if token is not None:
+            assert cell_token not in k0["claim"]
+        assert k1["claim"] == "another clean one"
+        assert "before the key" in k2["claim"]
+        assert "BEGIN" not in k2["claim"]
+        # The sweep stops at this finding's own string: a whole-block
+        # redaction consumes these two findings too.
+        assert k3["claim"] == "yet another clean one"
+        assert gh_token not in k4["claim"]
+
+        (a0,) = adequacy["findings"]
+        assert aws_key_2 not in a0["probe"]["find"]
+        assert a0["claim"] == "adequacy clean"
+
+        assert conventions["findings"] == []
+        assert gh_token_2 not in conventions["error"]
+        assert conventions["error"] is not None
+
+        expected_claim, _ = credentials.redact(
+            f"debug token {cell_token} leaked", token=token
+        )
+        assert k0["claim"] == expected_claim
+
+        # The outcome's own reviews keep every claim and error exactly as
+        # the lenses gave them, credentials included (unlike the file).
+        assert [r.lens for r in outcome.reviews] == [
+            "correctness",
+            "contract",
+            "adequacy",
+            "conventions",
+        ]
+        for lens_review, given in zip(
+            outcome.reviews, (lens1, lens2, lens3), strict=False
+        ):
+            assert [f.claim for f in lens_review.findings] == [
+                f["claim"] for f in given
+            ]
+        assert outcome.reviews[0].findings[0].claim == f"uses {aws_key_1} as a key"
+        assert (
+            outcome.reviews[1].findings[0].claim == f"debug token {cell_token} leaked"
+        )
+        assert outcome.reviews[2].findings[0].probe.find == f"token {aws_key_2}"
+        assert outcome.reviews[3].error == f"provider refused, leaked {gh_token_2}"
+
+
+def test_a_cells_default_log_redacts_the_token_it_was_handed(monkeypatch, tmp_path):
+    """`run_one_cell` takes a keyword `token`, handed to the default
+    `EventLog` it builds when given no `emit`. The log never falls back to
+    `CLAUDE_CODE_OAUTH_TOKEN` when handed `None` instead (item 46,
+    `EventLog.__init__`)."""
+    from saffron.credentials import OWN_TOKEN_DESCRIPTION
+    from saffron.events import read_log
+
+    cell_token = "token" + "T" * 20
+
+    cell = _stub_the_runtime(monkeypatch)
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path / "handed",
+        cell=cell,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        use_default_emit=True,
+        agent_says=f"agent: streaming {cell_token}",
+        token=cell_token,
+    )
+    events = read_log(outcome.task_dir)
+    agent_events = [e for e in events if isinstance(e, Agent)]
+    assert len(agent_events) == 6
+    assert all(cell_token not in e.detail for e in agent_events)
+    assert all(OWN_TOKEN_DESCRIPTION in e.redacted for e in agent_events)
+
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", cell_token)
+    cell_b = _stub_the_runtime(monkeypatch)
+    outcome_b, _ledger_b = _drive(
+        monkeypatch,
+        tmp_path / "bare",
+        cell=cell_b,
+        turns=[_turn(_block(_PLAN)), _turn()],
+        use_default_emit=True,
+        agent_says=f"agent: streaming {cell_token}",
+        token=None,
+    )
+    events_b = read_log(outcome_b.task_dir)
+    agent_events_b = [e for e in events_b if isinstance(e, Agent)]
+    assert len(agent_events_b) == 6
+    assert any(cell_token in e.detail for e in agent_events_b)
+    assert all(e.redacted == () for e in agent_events_b)

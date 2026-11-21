@@ -53,6 +53,9 @@ class _Tree:
     def patch(self, base):
         return self._patch
 
+    def head_text(self, path):
+        return None
+
     def dirty_paths(self):
         self.calls.append("dirty_paths")
         return list(self.dirty)

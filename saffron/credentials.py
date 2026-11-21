@@ -1,6 +1,7 @@
 """The credential shapes PACKAGE refuses to push (`DESIGN.md` §5.7), and the
-ones `EventLog` redacts from `events.jsonl` before the write (§4.7). One
-module, so neither reader drifts from the other (backlog item 46, §5.4, §9).
+ones `EventLog`, `plan.json`, `notes.json` and the task's own `findings.json`
+redact before each write (§4.7). One module, so no reader drifts from
+another (backlog item 46, §5.4, §9).
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ OWN_TOKEN_DESCRIPTION = "the cell's own CLAUDE_CODE_OAUTH_TOKEN"
 _PRIVATE_KEY_HEADER = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
 
 # ponytail: a refusal and a redaction, not the `secrets` gate (§5.4). v1's to build.
-# A shape not listed here still reaches the remote and the log unredacted.
+# A shape not listed here still reaches the remote and the host's own files unredacted.
 CREDENTIAL_SHAPES = (
     ("an Anthropic API key", re.compile(r"sk-ant-api\d{2}-[A-Za-z0-9_\-]{16,}")),
     ("an Anthropic OAuth token", re.compile(r"sk-ant-oat\d{2}-[A-Za-z0-9_\-]{8,}")),
@@ -49,3 +50,48 @@ def redact(text: str, *, token: str | None) -> tuple[str, tuple[str, ...]]:
             text = new_text
             found.append(description)
     return text, tuple(found)
+
+
+def redact_nested(value: object, *, token: str | None) -> tuple[object, list[str]]:
+    """`value` walked at every depth, dict keys included, every string leaf
+    passed through `redact`. An explicit stack, never recursion:
+    a cell-authored event can nest hundreds of levels deep, and a recursive
+    walk would raise before the caller could write anything (item 46).
+
+    Returns a value built from new containers, never the caller's own, and
+    the descriptions found, each named once in first-seen order."""
+    found: list[str] = []
+
+    def leaf(text: str) -> str:
+        new_text, kinds = redact(text, token=token)
+        for kind in kinds:
+            if kind not in found:
+                found.append(kind)
+        return new_text
+
+    if isinstance(value, str):
+        return leaf(value), found
+    if not isinstance(value, (dict, list)):
+        return value, found
+
+    root: dict | list = {} if isinstance(value, dict) else []
+    stack: list[tuple[dict | list, dict | list]] = [(value, root)]
+    while stack:
+        orig, new = stack.pop()
+        pairs = orig.items() if isinstance(orig, dict) else enumerate(orig)
+        for key, child in pairs:
+            if isinstance(child, str):
+                built: object = leaf(child)
+            elif isinstance(child, dict):
+                built = {}
+                stack.append((child, built))
+            elif isinstance(child, list):
+                built = []
+                stack.append((child, built))
+            else:
+                built = child
+            if isinstance(new, dict):
+                new[leaf(key) if isinstance(key, str) else key] = built
+            else:
+                new.append(built)
+    return root, found

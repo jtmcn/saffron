@@ -688,7 +688,7 @@ def package(
         # The same shape `run_one_cell` defaults to, and for the same reason:
         # a caller that forgets `emit` must still get `events.jsonl`. A
         # print-only default is this spec's own defect, defaulted back in.
-        log = EventLog(outcome.task_dir)
+        log = EventLog(outcome.task_dir, token=token)
 
         def emit(event: Event) -> None:
             line = describe(event)
@@ -1168,7 +1168,7 @@ def push_unpackaged_work(
     if emit is None:
         # Same default `package()` and `run_task` both fall back to: a caller
         # that forgets `emit` must still get `events.jsonl`.
-        log = EventLog(outcome.task_dir)
+        log = EventLog(outcome.task_dir, token=token)
 
         def emit(event: Event) -> None:
             line = describe(event)

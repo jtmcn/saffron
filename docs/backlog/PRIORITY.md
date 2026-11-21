@@ -169,7 +169,7 @@ Three commands take no home lock. An empty rebuttal error reads as no answer.
 driver orders a stack by `depends_on`, not by the stack base a batch built.
 
 **Placed 2026-10-19**, from the spec loop's run 44: **b-619b7d**, **b-71e2df**,
-**b-32b3db**, **b-3a3081**, then ~~**b-80cc6e**~~. An adopted task keeps its
+~~**b-32b3db**~~, ~~**b-3a3081**~~, then ~~**b-80cc6e**~~. An adopted task keeps its
 failed state, so its children stay refused. A spec named a module its own
 `forbidden` list made impossible. A multi-line constant derives no mutant.
 Redaction misses the files beside `events.jsonl`. The driver and two ADRs
@@ -376,6 +376,9 @@ wrong spec at 20 sites.
 
 **Placed 2026-11-17**, from the spec loop's run 78: **b-90c8fa**. A spec id
 a writer takes is not reserved, so a batch's follow-up minted it twice.
+
+**Placed 2026-11-20**, from the spec loop's run 81: **b-c2f264**. The
+`witness` gate counts a wrong version killed only by an exception as caught.
 
 **Closed since they were placed here.** Each id stays so its record's tier still resolves.
 - ~~**36**~~, ~~**37**~~, ~~**38**~~, ~~**48**~~, ~~**52**~~, ~~**60**~~, ~~**72**~~, ~~**103**~~, ~~**104**~~, ~~**113**~~, ~~**135**~~, ~~**138**~~, ~~**142**~~, ~~**144**~~, ~~**146**~~, ~~**147**~~, ~~**148**~~, ~~**149**~~, ~~**152**~~, ~~**153**~~.

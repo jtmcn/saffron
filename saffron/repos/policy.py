@@ -84,7 +84,9 @@ class ConstantPattern(BaseModel):
     constant and whose `value` group is the span `constant_mutants` edits.
     `replace` is a template `re` expands against a match of `pattern`.
     It takes the `value` span's place, so it names the value's own group
-    and nothing else a match of `pattern` does not also carry.
+    and nothing else a match of `pattern` does not also carry. Text the
+    pattern matches past `value` is the rest of the constant. An added
+    line anywhere in the match derives the mutant.
     """
 
     model_config = ConfigDict(extra="forbid")
