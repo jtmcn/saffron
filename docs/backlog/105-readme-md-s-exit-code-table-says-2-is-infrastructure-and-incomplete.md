@@ -7,7 +7,7 @@ tier: 3
 specs: []
 prs: []
 commits: [0e399951]
-by_hand: true
+outside_cell: true
 cites: []
 related: []
 ---

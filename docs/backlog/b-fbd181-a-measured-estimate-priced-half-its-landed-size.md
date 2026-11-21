@@ -2,7 +2,7 @@
 id: b-fbd181
 title: "A measured estimate priced two specs at half their landed size, and `size` only advised at `standard`, so both layers shipped over the ceiling"
 status: partial
-by_hand: true
+outside_cell: true
 tier: 2
 filed: 2026-10-07
 specs: []

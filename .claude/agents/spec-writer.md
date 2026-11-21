@@ -35,7 +35,7 @@ And optionally:
   caller commits and dispatches the review.
 - When the work cannot be a spec, you report instead of writing. That is work
   on a path `.saffron/policy.yaml` lists as `protected`, an item marked
-  `by_hand: true`, or one already done or already specced. Name which, with
+  `outside_cell: true`, or one already done or already specced. Name which, with
   the line.
 - A spec that adds or widens a refusal declares `retired_first`. Name each
   queued spec the new rule would refuse (b-e7898b).
@@ -104,7 +104,7 @@ And optionally:
    row's `review_usd` plus `rebut_usd` plus $2.
 5. **Do the bookkeeping** `issue-tracker.md` asks of the commit that adds a
    spec. **Done when** the origin item's `specs:` names the spec and any new
-   term has its `by_hand: true` record. The queue smoke test in
+   term has its `outside_cell: true` record. The queue smoke test in
    `tests/test_scheduler.py` has its re-measured paragraph and pinned lists.
 6. **Sweep each criterion's sets.** A claim over a set, named or in passing,
    needs a witness driving every member (`issue-tracker.md`'s Conventions).

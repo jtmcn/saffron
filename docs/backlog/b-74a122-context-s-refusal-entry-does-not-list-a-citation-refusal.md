@@ -4,7 +4,7 @@ title: "`CONTEXT.md`'s Refusal entry does not list a stack batch's refusal for c
 status: done
 tier: 3
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 filed: 2026-10-17
 specs: []
 prs: [1054]

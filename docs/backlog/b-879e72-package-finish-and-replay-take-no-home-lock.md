@@ -3,7 +3,7 @@ id: b-879e72
 title: '`package`, `finish` and `replay` take no home lock, so a batch beside one stamps its live row `ORPHANED`'
 status: done
 closed: 2026-11-10
-by_hand: true
+outside_cell: true
 tier: 2
 filed: 2026-11-08
 specs: []

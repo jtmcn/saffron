@@ -3,7 +3,7 @@ id: 122
 title: The event log records that a tool ran, never what it returned
 status: done
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 tier: 3
 filed: 2026-09-14
 specs: [SA-0087]

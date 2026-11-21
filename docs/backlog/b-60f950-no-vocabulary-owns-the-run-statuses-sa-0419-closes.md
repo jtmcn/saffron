@@ -3,7 +3,7 @@ id: b-60f950
 title: 'No vocabulary owns the run statuses `SA-0419` closes, so `ABORTED` means whatever its writer needed'
 status: open
 tier: 3
-by_hand: true
+outside_cell: true
 filed: 2026-11-20
 specs: []
 prs: []

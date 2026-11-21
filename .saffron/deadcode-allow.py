@@ -3,7 +3,7 @@
 
 # Called by a framework, not by a name vulture can see.
 _.model_config  # pydantic reads it on every model class
-_.by_hand  # BacklogItem field: extra="forbid" refuses a record that sets it unless it exists
+_.outside_cell  # BacklogItem field: extra="forbid" refuses a record that sets it unless it exists
 _.related  # BacklogItem field: extra="forbid" refuses a record that sets it unless it exists
 _.supersedes  # Adr field (SA-0110): read only by check_adr_supersession in records/check.py
 _.APPENDIX_OPENS  # ontology/design_record.py: read only by the guard test that refuses an appendix heading in DESIGN.md

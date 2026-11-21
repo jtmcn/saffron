@@ -3,7 +3,7 @@ id: b-a33889
 title: "A `CellRuntimeError` from a stack batch's mint or revision still marks the layer missed"
 status: done
 closed: 2026-11-07
-by_hand: true
+outside_cell: true
 tier: 2
 filed: 2026-10-09
 specs: []

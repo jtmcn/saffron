@@ -4,7 +4,7 @@ title: "Five glossary entries describe only the stack batch or the old compariso
 status: done
 tier: 3
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 filed: 2026-10-09
 specs: []
 prs: [781, 782, 787, 1062]

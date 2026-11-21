@@ -3,7 +3,7 @@ id: b-8c17dc
 title: "The finish raises an uncaught `NotADirectoryError` when a path component below the worktree is a file"
 status: done
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 tier: 3
 filed: 2026-10-09
 specs: []

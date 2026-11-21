@@ -4,7 +4,7 @@ title: '§5.3 says the rebuttal turn takes the schema, where the rebuttal extrac
 status: done
 closed: 2026-11-07
 tier: 3
-by_hand: true
+outside_cell: true
 filed: 2026-09-25
 specs: []
 prs: [1051]

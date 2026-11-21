@@ -4,7 +4,7 @@ title: '`prose` keys a docstring-length hit on its line count, so a grow or a sh
 status: open
 tier: 3
 filed: 2026-09-27
-by_hand: true
+outside_cell: true
 specs: []
 prs: []
 commits: [b3cd37fd, 9ef9e7b2]

@@ -158,13 +158,13 @@ def test_a_quoted_or_leading_zero_sha_loads_as_written():
 def test_plain_decimals_booleans_and_dates_still_load():
     record = parse(
         _open_item(
-            "id: 1\ntitle: T\nstatus: open\nrelated: [33]\nby_hand: true\nfiled: 2026-09-01"
+            "id: 1\ntitle: T\nstatus: open\nrelated: [33]\noutside_cell: true\nfiled: 2026-09-01"
         ),
         BACKLOG,
     )
-    assert record.model.model_dump(include={"related", "by_hand", "filed"}) == {
+    assert record.model.model_dump(include={"related", "outside_cell", "filed"}) == {
         "related": [33],
-        "by_hand": True,
+        "outside_cell": True,
         "filed": dt.date(2026, 9, 1),
     }
 

@@ -3,7 +3,7 @@ id: b-1b5747
 title: '`CONTEXT.md` has no entry for a `renames` entry, the field SA-0387 adds'
 status: done
 tier: 2
-by_hand: true
+outside_cell: true
 filed: 2026-11-13
 closed: 2026-11-14
 specs: []

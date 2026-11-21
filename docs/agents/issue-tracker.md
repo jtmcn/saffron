@@ -139,7 +139,7 @@ GitHub issues remain in use only for research/evidence records under
   a cell cannot land it. `ontology/factory.ttl` is editable by a cell, but
   `CONTEXT.md` is `protected` and is generated from it, so the two halves cannot
   move together inside a cell and the task is refused at intake. File it as a new
-  `docs/backlog/b-xxxxxx-slug.md` record marked `by_hand: true`, in the same commit as the spec.
+  `docs/backlog/b-xxxxxx-slug.md` record marked `outside_cell: true`, in the same commit as the spec.
 
 - **A mutant pins text the existing code already determines; a spec that
   creates new code supplies a witness and no mutant on the ref.** A `mutant` names exact

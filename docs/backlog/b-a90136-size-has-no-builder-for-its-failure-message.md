@@ -3,7 +3,7 @@ id: b-a90136
 title: '`size` has no builder for its failure message, so the plan checkpoint restates it'
 status: done
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 tier: 3
 filed: 2026-09-23
 specs: []

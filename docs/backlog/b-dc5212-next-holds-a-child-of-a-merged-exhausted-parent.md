@@ -5,7 +5,7 @@ status: superseded
 tier: 3
 filed: 2026-10-01
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 specs: [SA-0151, SA-0174]
 prs: [626, 628]
 commits: []

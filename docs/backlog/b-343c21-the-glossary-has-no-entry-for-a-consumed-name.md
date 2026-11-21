@@ -4,7 +4,7 @@ title: The glossary has no entry for a consumed name, and SA-0134 and SA-0135 us
 status: done
 closed: 2026-09-29
 tier: 2
-by_hand: true
+outside_cell: true
 filed: 2026-09-22
 specs: [SA-0134]
 prs: []

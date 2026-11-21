@@ -14,12 +14,19 @@ def test_a_minimal_open_item_validates():
     item = BacklogItem.model_validate(MINIMAL)
     assert item.tier is None
     assert item.specs == [] and item.prs == [] and item.cites == []
-    assert item.by_hand is False
+    assert item.outside_cell is False
 
 
 def test_an_unknown_key_is_refused_not_ignored():
     with pytest.raises(ValidationError, match="evidence"):
         BacklogItem.model_validate({**MINIMAL, "evidence": ["x.md"]})
+
+
+def test_the_retired_by_hand_key_is_refused_on_load():
+    """Item 128 renamed `by_hand` to `outside_cell`. A record that still sets
+    the old key fails to load, so no value is dropped in silence."""
+    with pytest.raises(ValidationError, match="by_hand"):
+        BacklogItem.model_validate({**MINIMAL, "by_hand": True})
 
 
 @pytest.mark.parametrize("status", ["done", "superseded", "wontfix"])

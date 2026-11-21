@@ -4,7 +4,7 @@ title: The event schema wants its own `DESIGN.md` §4 subsection, and nothing ca
 status: done
 closed: 2026-09-29
 tier: 2
-by_hand: true
+outside_cell: true
 specs: [SA-0040]
 prs: []
 commits: [bdb84c41]

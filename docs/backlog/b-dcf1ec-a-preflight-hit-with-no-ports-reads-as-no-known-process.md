@@ -3,7 +3,7 @@ id: b-dcf1ec
 title: "A preflight hit read with no socket list is labelled \"no known process\", though lsof ran"
 status: done
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 tier: 3
 filed: 2026-10-10
 specs: []

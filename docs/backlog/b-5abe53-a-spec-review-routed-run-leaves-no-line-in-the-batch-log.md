@@ -3,7 +3,7 @@ id: b-5abe53
 title: "A stack batch's spec review routed `run` leaves no line in the batch log"
 status: done
 closed: 2026-11-07
-by_hand: true
+outside_cell: true
 tier: 2
 filed: 2026-10-09
 specs: []

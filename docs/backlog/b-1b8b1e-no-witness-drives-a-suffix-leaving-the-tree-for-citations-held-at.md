@@ -4,7 +4,7 @@ title: "No witness drives `citations_held_at`'s `tokens_at` for a file suffix th
 status: partial
 tier: 3
 filed: 2026-10-27
-by_hand: true
+outside_cell: true
 specs: []
 prs: [1081]
 commits: []

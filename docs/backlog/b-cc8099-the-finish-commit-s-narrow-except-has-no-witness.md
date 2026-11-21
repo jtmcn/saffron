@@ -5,7 +5,7 @@ status: done
 tier: 3
 filed: 2026-10-03
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 specs: [SA-0151, SA-0170]
 prs: [647, 1078]
 commits: []

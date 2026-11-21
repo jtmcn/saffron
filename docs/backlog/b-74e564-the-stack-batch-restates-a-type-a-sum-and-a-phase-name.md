@@ -2,7 +2,7 @@
 id: b-74e564
 title: The stack batch restates the revise type, the budget-left sum and a phase name, and keeps a stale comment
 status: partial
-by_hand: true
+outside_cell: true
 tier: 3
 filed: 2026-09-28
 specs: []

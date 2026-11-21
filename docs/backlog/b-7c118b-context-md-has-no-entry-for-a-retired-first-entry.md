@@ -4,7 +4,7 @@ title: '`CONTEXT.md` has no entry for a `retired_first` entry, the field SA-0350
 status: done
 closed: 2026-11-07
 tier: 2
-by_hand: true
+outside_cell: true
 filed: 2026-11-07
 specs: []
 prs: [1042]

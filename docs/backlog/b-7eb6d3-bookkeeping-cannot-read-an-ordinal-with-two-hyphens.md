@@ -5,7 +5,7 @@ status: wontfix
 tier: 3
 filed: 2026-10-05
 closed: 2026-11-07
-by_hand: true
+outside_cell: true
 specs: [SA-0200]
 prs: []
 commits: ["f2f136e8"]

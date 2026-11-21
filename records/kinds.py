@@ -63,7 +63,7 @@ class BacklogItem(Identified):
     tier: Annotated[int, Strict(), Field(ge=0, le=3)] | None = None
     filed: dt.date | None = None
     closed: dt.date | None = None
-    by_hand: bool = False
+    outside_cell: bool = False
     specs: list[str] = Field(default_factory=list)
     prs: list[Number] = Field(default_factory=list)
     commits: list[str] = Field(default_factory=list)

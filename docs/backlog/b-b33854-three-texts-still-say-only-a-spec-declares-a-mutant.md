@@ -4,7 +4,7 @@ title: "Three texts still say the gate never parses a witness id and the spec de
 status: open
 tier: 3
 filed: 2026-10-19
-by_hand: true
+outside_cell: true
 specs: []
 prs: []
 commits: []

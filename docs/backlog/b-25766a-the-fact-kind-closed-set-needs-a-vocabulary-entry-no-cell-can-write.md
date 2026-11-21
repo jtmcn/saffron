@@ -4,7 +4,7 @@ title: The fact kind closed set needs a vocabulary entry no cell can write, beca
 status: done
 tier: 2
 closed: 2026-09-21
-by_hand: true
+outside_cell: true
 filed: 2026-09-20
 specs: []
 prs: [393]

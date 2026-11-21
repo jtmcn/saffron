@@ -3,7 +3,7 @@ id: b-bc8343
 title: The glossary names no review commit and no commit review, the read SA-0326 adds
 status: partial
 tier: 2
-by_hand: true
+outside_cell: true
 filed: 2026-10-27
 specs: [SA-0326]
 prs: [1062]

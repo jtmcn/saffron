@@ -3,7 +3,7 @@ id: b-50b566
 title: The authoring docs do not list the consumes field, and the pre-flight still checks consumed names by reading
 status: done
 tier: 3
-by_hand: true
+outside_cell: true
 filed: 2026-09-23
 closed: 2026-09-30
 specs: []

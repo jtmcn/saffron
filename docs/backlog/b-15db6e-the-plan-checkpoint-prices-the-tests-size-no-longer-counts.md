@@ -4,7 +4,7 @@ title: The plan checkpoint prices the tests that `size` no longer counts
 status: done
 tier: null
 closed: 2026-11-03
-by_hand: true
+outside_cell: true
 filed: 2026-10-11
 specs: [SA-0333]
 prs: [1014]

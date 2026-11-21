@@ -4,7 +4,7 @@ title: A criterion probe has no glossary entry, and §5.4.1 reads as a refusal o
 status: done
 closed: 2026-09-21
 tier: 2
-by_hand: true
+outside_cell: true
 filed: 2026-09-20
 specs: [SA-0113]
 prs: []

@@ -4,7 +4,7 @@ title: "`CONTEXT.md` has no entry for a criterion's subject, the `subject:` fiel
 status: done
 tier: 2
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 filed: 2026-10-13
 specs: [SA-0291]
 prs: [1062]

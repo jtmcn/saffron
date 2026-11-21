@@ -3,7 +3,7 @@ id: 124
 title: The spec review's "witness already green at base" check raises false blockers
 status: done
 tier: 3
-by_hand: true
+outside_cell: true
 filed: 2026-09-14
 closed: 2026-09-30
 specs: []

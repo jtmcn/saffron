@@ -4,7 +4,7 @@ title: DESIGN.md §5.5 still lists the correctness lens without the failure path
 status: done
 tier: 3
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 filed: 2026-10-13
 specs: [SA-0286]
 prs: [867, 1054]

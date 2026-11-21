@@ -4,7 +4,7 @@ title: The Gate-only cell's suite belongs to no attempt and no run, so no ledger
 status: partial
 tier: 2
 filed: 2026-09-17
-by_hand: true
+outside_cell: true
 specs: [SA-0102]
 prs: [307]
 commits: []

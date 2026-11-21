@@ -4,7 +4,7 @@ title: '`witness` and `mutant` exist in code and in no vocabulary, and the guard
 status: done
 tier: 2
 closed: 2026-09-07
-by_hand: true
+outside_cell: true
 specs: []
 prs: []
 commits: [504f87c, 0663823]

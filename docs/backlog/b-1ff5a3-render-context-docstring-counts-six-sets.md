@@ -3,7 +3,7 @@ id: b-1ff5a3
 title: "`render_context`'s docstring counts six closed sets, and `SETS` holds eleven"
 status: done
 closed: 2026-11-07
-by_hand: true
+outside_cell: true
 tier: 3
 filed: 2026-10-27
 specs: []

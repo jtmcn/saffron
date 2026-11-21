@@ -4,7 +4,7 @@ title: '`MERGE_TRAIN` is a state the scheduler reads twice and neither authorita
 status: done
 closed: 2026-09-29
 tier: 2
-by_hand: true
+outside_cell: true
 specs: []
 prs: []
 commits: [911c314a]

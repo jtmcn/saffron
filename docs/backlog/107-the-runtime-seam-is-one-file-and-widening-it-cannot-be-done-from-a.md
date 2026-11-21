@@ -7,7 +7,7 @@ closed: 2026-09-11
 specs: []
 prs: []
 commits: [572819a]
-by_hand: true
+outside_cell: true
 cites: [§4.6, §10]
 related: [65, 72, 101, 108]
 ---

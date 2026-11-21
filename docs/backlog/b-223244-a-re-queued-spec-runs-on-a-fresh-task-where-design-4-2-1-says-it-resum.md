@@ -3,7 +3,7 @@ id: b-223244
 title: A re-queued spec runs on a fresh task, where DESIGN 4.2.1 says it resumes its task row
 status: done
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 tier: 3
 filed: 2026-09-25
 specs: []

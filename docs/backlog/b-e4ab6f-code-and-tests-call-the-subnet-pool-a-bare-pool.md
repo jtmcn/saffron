@@ -2,7 +2,7 @@
 id: b-e4ab6f
 title: The code and its tests call the subnet pool a bare pool, which CONTEXT.md keeps for a batch's concurrency pool
 status: partial
-by_hand: true
+outside_cell: true
 tier: 3
 filed: 2026-10-13
 specs: [SA-0271]

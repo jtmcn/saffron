@@ -4,7 +4,7 @@ title: No deployment runs a night anywhere but the operator's laptop
 status: open
 tier: 2
 filed: 2026-10-06
-by_hand: true
+outside_cell: true
 specs: []
 prs: []
 commits: []

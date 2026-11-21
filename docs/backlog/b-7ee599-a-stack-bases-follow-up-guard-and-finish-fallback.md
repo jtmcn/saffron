@@ -5,7 +5,7 @@ status: done
 tier: 2
 filed: 2026-10-12
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 specs: []
 prs: [1076]
 commits: []

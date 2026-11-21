@@ -3,7 +3,7 @@ id: b-149df3
 title: A bound cut with nothing committed ends `ORPHANED` once SA-0126 lands, and the glossary, §4.5 and the spec loop's gotchas still say otherwise
 status: done
 tier: 1
-by_hand: true
+outside_cell: true
 filed: 2026-09-22
 closed: 2026-09-28
 specs: [SA-0126]

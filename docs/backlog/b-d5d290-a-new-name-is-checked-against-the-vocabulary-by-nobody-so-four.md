@@ -3,7 +3,7 @@ id: b-d5d290
 title: A new name is checked against the vocabulary by nobody, so four collided in one branch and three were found after the code shipped
 status: open
 tier: 3
-by_hand: false
+outside_cell: false
 filed: 2026-09-20
 specs: []
 prs: [393]

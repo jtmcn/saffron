@@ -9,7 +9,7 @@ prs: [92]
 commits: []
 cites: [§5.4]
 related: []
-by_hand: true
+outside_cell: true
 ---
 
 ## Problem

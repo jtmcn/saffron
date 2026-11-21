@@ -3,7 +3,7 @@ id: b-9ead75
 title: "`harness/recovery.py`'s `pinned_diff` lacks the `attr.tree` pin `git_argv` gained in SA-0137"
 status: done
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 tier: 3
 filed: 2026-09-25
 specs: []

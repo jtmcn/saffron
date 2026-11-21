@@ -4,7 +4,7 @@ title: "A night stopped by SIGTERM or Ctrl-C closes `INFRASTRUCTURE`, which `CON
 status: done
 tier: 3
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 filed: 2026-10-11
 specs: []
 prs: [1062]

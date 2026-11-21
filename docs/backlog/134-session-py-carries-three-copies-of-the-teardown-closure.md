@@ -4,7 +4,7 @@ title: session.py carries three copies of the teardown closure and two of the le
 status: open
 tier: 3
 filed: 2026-09-15
-by_hand: true
+outside_cell: true
 specs: [SA-0087]
 prs: [274]
 commits: []

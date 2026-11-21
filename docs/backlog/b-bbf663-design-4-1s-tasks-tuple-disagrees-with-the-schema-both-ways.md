@@ -4,7 +4,7 @@ title: §4.1's `tasks` tuple names three columns that never existed and omits th
 status: done
 tier: 3
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 filed: 2026-09-19
 specs: []
 prs: [1054]

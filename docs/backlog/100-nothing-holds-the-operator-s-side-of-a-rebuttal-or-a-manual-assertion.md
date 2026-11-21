@@ -3,7 +3,7 @@ id: 100
 title: Nothing holds the operator's side of a rebuttal, or a manual assertion, to the operator
 status: done
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 tier: 3
 specs: []
 prs: [1079]

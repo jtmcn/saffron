@@ -3,7 +3,7 @@ id: b-d0a813
 title: "The vocabulary has no word for an attempt a cell opened, and `SA-0418` dates a task by one"
 status: open
 tier: 3
-by_hand: true
+outside_cell: true
 filed: 2026-11-20
 specs: []
 prs: []

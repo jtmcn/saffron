@@ -4,7 +4,7 @@ title: '"Projection", "materialization", "emitter" and "checked walk" name SA-01
 status: done
 closed: 2026-09-21
 tier: 2
-by_hand: true
+outside_cell: true
 filed: 2026-09-18
 specs: [SA-0107, SA-0108]
 prs: []

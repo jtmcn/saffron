@@ -4,7 +4,7 @@ title: Every task mints its own run, so a batch holds one run per task and not o
 status: done
 tier: 2
 closed: 2026-09-22
-by_hand: true
+outside_cell: true
 filed: 2026-09-17
 specs: []
 prs: []
