@@ -868,9 +868,6 @@ def test_a_task_is_tied_to_the_span_its_last_cell_attempt_starts_in(tmp_path):
     output_path = tmp_path / "projection.ttl"
     result = materialize(ledger, out_dir, output_path)
 
-    assert result.kept[a_id] is not None
-    assert result.kept[b_id] is not None
-    assert result.kept[c_id] is not None
     assert {
         "a": _edges(output_path, a_id),
         "b": _edges(output_path, b_id),
@@ -878,7 +875,7 @@ def test_a_task_is_tied_to_the_span_its_last_cell_attempt_starts_in(tmp_path):
     } == {"a": (True, True), "b": (True, False), "c": (False, True)}
 
     rows = _run_q4(output_path)
-    assert {row["pr"].value for row in rows} == {result.kept[a_id]}
+    assert {row["pr"].value for row in rows} == {result.kept.get(a_id)}
 
 
 def test_a_task_with_no_cell_attempt_takes_no_span(tmp_path):
@@ -938,11 +935,59 @@ def test_a_task_with_no_cell_attempt_takes_no_span(tmp_path):
     reasons = {t: lo.reason for t, lo in result.left_out.items()}
     assert reasons.get(d_id) == "unattributable"
     assert reasons.get(e_id) == "unattributable"
-    assert result.kept[f_id] is not None
+    assert f_id in result.kept
     assert _edges(output_path, f_id) == (True, True)
 
     rows = _run_q4(output_path)
-    assert {row["pr"].value for row in rows} == {result.kept[f_id]}
+    assert {row["pr"].value for row in rows} == {result.kept.get(f_id)}
+
+
+def test_a_repair_or_rebuttal_turn_is_a_cell_attempt(tmp_path):
+    """P and Q each gate an IMPLEMENTING attempt in span 0. P's last cell
+    attempt is a REPAIRING turn in span 1, and Q's a REBUTTING turn in
+    span 2. Each is tied to the span its last turn starts in."""
+    from saffron.projection import materialize
+
+    spec_id = "SA-9204"
+    plan_whole = '{"owner": "pq"}'
+    diff_whole = "diff --git a/p b/p\n+p\n"
+    plan_hash = hashlib.sha256(plan_whole.encode()).hexdigest()[:12]
+    diff_length = len(diff_whole)
+    t0 = _epoch("2026-03-02 00:00:00")
+    t1, t2 = t0 + 3600, t0 + 7200
+
+    def task(name: str, last: tuple[str, str]) -> T:
+        return T(
+            spec_id,
+            "MERGED",
+            spec_text=spec_text(spec_id),
+            pr_url=f"https://example/pr/{name}",
+            started_at="2020-01-01 00:00:00",
+            no_ceilings=True,
+            attempts=[("IMPLEMENTING", _ledger_text(t0 + 600)), last],
+            gate_result=True,
+        )
+
+    p = task("p", ("REPAIRING", _ledger_text(t1 + 1200)))
+    q = task("q", ("REBUTTING", _ledger_text(t2 + 1200)))
+    ledger, out_dir, (p_id, q_id) = build(tmp_path, [p, q])
+    task_dir = out_dir / spec_id
+    (task_dir / "plan.json").write_bytes(plan_whole.encode("utf-8"))
+    with open(task_dir / "patch.diff", "w", newline="", encoding="utf-8") as fh:
+        fh.write(diff_whole)
+
+    log = EventLog(task_dir)
+    _write_span(log, spec_id, task_dir, t0)
+    _write_span(log, spec_id, task_dir, t1, plan_hash, 1)
+    _write_span(log, spec_id, task_dir, t2, "e" * 12, diff_length)
+
+    output_path = tmp_path / "projection.ttl"
+    materialize(ledger, out_dir, output_path)
+
+    assert {"p": _edges(output_path, p_id), "q": _edges(output_path, q_id)} == {
+        "p": (True, False),
+        "q": (False, True),
+    }
 
 
 def test_a_span_two_tasks_claim_is_no_ones_and_the_next_span_is_still_owned(
@@ -1010,5 +1055,5 @@ def test_a_span_two_tasks_claim_is_no_ones_and_the_next_span_is_still_owned(
     reasons = {t: lo.reason for t, lo in result.left_out.items()}
     assert reasons.get(g_id) == "unattributable"
     assert reasons.get(h_id) == "unattributable"
-    assert result.kept[j_id] is not None
+    assert j_id in result.kept
     assert _edges(output_path, j_id) == (False, True)

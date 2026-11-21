@@ -216,7 +216,7 @@ def _spans(spec_id: str, out_dir: Path) -> list[_Span]:
     return spans
 
 
-def _run_start_epoch(started_at: str) -> int:
+def _ledger_epoch(started_at: str) -> int:
     """A ledger timestamp is `datetime('now')` text, UTC with no offset.
     Parsed with an explicit UTC tzinfo so `.timestamp()` is correct
     regardless of the host's local zone (the fourth criterion's own test).
@@ -226,9 +226,9 @@ def _run_start_epoch(started_at: str) -> int:
 
 
 def _last_cell_attempt_started_at(attempt_rows: list[sqlite3.Row]) -> str | None:
-    """A task's own instant is its last attempt outside the phases a spec
-    review, a spec writer session or a commit review opens. Each of those
-    runs before or after any cell exists, so none is a cell attempt.
+    """A task's own instant is its last attempt outside the labels a spec
+    review, a spec writer session or a commit review gives its attempts.
+    Each runs outside the task's own cell, so none is a cell attempt.
     Attempt ids rise across every phase of a task, so the last surviving
     row is the last cell attempt. `None` when a task has no such attempt."""
     from saffron.spec_review import WRITING_PHASE
@@ -249,7 +249,7 @@ def _attribute(
     holders: list[list[int]] = [[] for _ in spans]
     task_spans: dict[int, list[int]] = {}
     for task_id, instant in tasks:
-        epoch = _run_start_epoch(instant)
+        epoch = _ledger_epoch(instant)
         if sum(1 for span in spans if span.start == epoch) > 1:
             continue
         for i, span in enumerate(spans):
@@ -303,7 +303,7 @@ def _all_tasks(ledger: Ledger) -> list[dict]:
     """Every task ever recorded, joined to its run and repo."""
     rows = ledger._db.execute(
         """SELECT t.task_id, t.spec_id, t.spec_sha, t.state, t.risk, t.pr_url,
-                  r.run_id, r.started_at, r.repo_id, repos.mirror_path
+                  r.run_id, r.repo_id, repos.mirror_path
              FROM tasks t
              JOIN runs r ON r.run_id = t.run_id
              JOIN repos ON repos.repo_id = r.repo_id
