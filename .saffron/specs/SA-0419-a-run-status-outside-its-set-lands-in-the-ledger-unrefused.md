@@ -3,7 +3,7 @@ id: SA-0419
 title: "`runs.status` takes any string `finish_run` or a `run_finished` fact hands it, where `runs.preflight` beside it is a closed set"
 type: bug
 priority: 3
-estimated_lines: 22
+estimated_lines: 23
 estimate_measured: true
 touches:
   - saffron/ledger.py
@@ -155,7 +155,8 @@ acceptance:
       is not `COMPLETE` or `ABORTED`, and the ledger then holds no row for
       that task. The witness reads a task's facts after `finish_run` closed
       its run `ABORTED`. It swaps that fact's status for `ABORTD`,
-      `complete` and `RUNNING` in turn. It folds each into a fresh ledger and
+      `complete`, `RUNNING`, the preflight outcome `PASSED` and the batch
+      stop reason `DRAINED` in turn. It folds each into a fresh ledger and
       into a ledger whose `runs` table is the home ledger's own, with no
       `CHECK`.
     witness: tests/test_ledger_fold_task.py::test_a_run_finished_fact_outside_the_closed_set_aborts_its_fold
@@ -167,6 +168,8 @@ acceptance:
       - The fold admits `RUNNING` as well.
       - The fold compares the status case-insensitively.
       - The fold drops the fact and returns without raising.
+      - The fold admits the preflight outcomes as well.
+      - The fold admits the batch stop reasons as well.
       - The fold writes `COMPLETE` whatever status the fact carries.
     covers:
       - set: refused statuses
@@ -177,6 +180,10 @@ acceptance:
             driven_by: The fold compares the status case-insensitively.
           - member: "`RUNNING`"
             driven_by: The fold admits `RUNNING` as well.
+          - member: the preflight outcome `PASSED`
+            driven_by: The fold admits the preflight outcomes as well.
+          - member: the batch stop reason `DRAINED`
+            driven_by: The fold admits the batch stop reasons as well.
       - set: ledgers by their `runs` table
         members:
           - member: a fresh ledger, with the `CHECK`
@@ -289,9 +296,22 @@ for it.
 
 **What the witnesses leave.** The refused statuses are an open set. The
 witnesses drive the values each criterion names, and no other string, nor
-`None`. Nothing drives the single declaration either. A `CHECK` and a
-refusal that spell the same members separately pass every witness, so keep
-one declaration that both read.
+`None`. Nothing drives the single declaration either. The `CHECK` is
+built into `SCHEMA` at import, so no test can swap the declaration and
+watch both move. A `CHECK` and a refusal that spell the same members
+separately pass every witness, so keep one declaration that both read.
+REVIEW is the only check on it.
+
+**`finish_run`'s docstring.** It says a refused one raises with the status
+already written (`saffron/ledger.py:1373-1376`). That sentence means a
+refused append. Reword it to say so, since a refused status now writes
+nothing.
+
+**Where the `CHECK` sits.** A test finds the first `status TEXT CHECK
+(status IN (...))` in `SCHEMA` and holds it to the batch stop reasons
+(`tests/ontology/test_vocabulary_agrees_with_code.py:94`). It finds
+`batches`, since that table comes first. Keep `runs` after `batches` in
+`SCHEMA`, as it is at your base. `tests/ontology/**` is forbidden here.
 
 **No queued spec is refused.** The refusal is of a status, never of a spec.
 No queued spec and neither open pull request (#1278, #1279) adds a
@@ -325,8 +345,8 @@ the positive case reads. Criterion 3 reads the task's rows through a
 semicolon, contraction or sentence over 25 words. A sentence listing the
 statuses in backticks runs long fast.
 
-**Size.** A prototype at `f605529d` measured 88 changed tokens outside the
-test paths with `size_gate`, and 655 under them. `estimated_lines` is the
+**Size.** A prototype at `f605529d` measured 90 changed tokens outside the
+test paths with `size_gate`, and 657 under them. `estimated_lines` is the
 first over four. Each witness failed with `saffron/ledger.py` reverted, and
 each wrong version above failed its own witness. The ledger's own test
 files, the fold's and the ontology tests passed with the change.
