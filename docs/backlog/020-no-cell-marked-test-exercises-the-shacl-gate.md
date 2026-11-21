@@ -1,7 +1,8 @@
 ---
 id: 20
 title: No cell-marked test exercises the `shacl` gate
-status: open
+status: done
+closed: 2026-11-21
 tier: 3
 specs: []
 prs: [46]
@@ -32,3 +33,11 @@ inside a cell.
 a `@pytest.mark.cell` test that starts a cell the way
 production does and runs `shacl` through `CellExecutor`, asserting `pass` and a
 `tool` obtained in the cell rather than on the host.
+
+## Record
+
+- 2026-11-21: closed. `tests/test_shacl_cell.py` starts a cell from the repo's
+  own image, runs `shacl` through `CellExecutor` and asserts `pass` on a
+  conforming graph and `fail` on one missing a required property. Its `tool`
+  is the cell's own `pyshacl --version`. A gate edited to pass everything
+  fails it.
