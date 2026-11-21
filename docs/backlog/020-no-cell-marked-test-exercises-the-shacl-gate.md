@@ -5,7 +5,7 @@ status: done
 closed: 2026-11-21
 tier: 3
 specs: []
-prs: [46]
+prs: [46, 1282]
 commits: []
 cites: []
 related: [19]
