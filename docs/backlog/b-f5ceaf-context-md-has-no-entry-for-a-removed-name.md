@@ -4,7 +4,7 @@ title: '`CONTEXT.md` has no entry for a removed name, the `removes` entry SA-029
 status: done
 tier: 2
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 filed: 2026-10-12
 specs: [SA-0290]
 prs: [1062]

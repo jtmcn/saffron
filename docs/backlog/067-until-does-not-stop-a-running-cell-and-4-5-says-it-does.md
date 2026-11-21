@@ -3,7 +3,7 @@ id: 67
 title: '`--until` does not stop a running cell, and §4.5 says it does'
 status: done
 closed: 2026-11-07
-by_hand: true
+outside_cell: true
 tier: 2
 specs: []
 prs: [1041]

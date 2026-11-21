@@ -4,7 +4,7 @@ title: '`DESIGN.md` §5.3 shows a `plan.json` without its estimate fields'
 status: done
 tier: 3
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 filed: 2026-11-04
 specs: []
 prs: [1054]

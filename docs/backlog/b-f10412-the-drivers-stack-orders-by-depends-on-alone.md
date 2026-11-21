@@ -4,7 +4,7 @@ title: "The loop driver's `stack` orders layers by `depends_on` alone, so it mis
 status: partial
 tier: 2
 filed: 2026-10-09
-by_hand: true
+outside_cell: true
 specs: []
 prs: [780, 788, 790, 1067]
 commits: []

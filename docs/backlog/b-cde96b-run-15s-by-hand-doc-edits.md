@@ -4,7 +4,7 @@ title: Run 15's merges leave protected docs stating the old behaviour
 status: done
 closed: 2026-09-29
 tier: 2
-by_hand: true
+outside_cell: true
 filed: 2026-09-23
 specs: []
 prs: []

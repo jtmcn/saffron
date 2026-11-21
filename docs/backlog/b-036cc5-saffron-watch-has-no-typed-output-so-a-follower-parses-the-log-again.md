@@ -4,7 +4,7 @@ title: "`saffron watch` has no typed output, so a follower outside Python parses
 status: partial
 tier: 3
 filed: 2026-10-07
-by_hand: true
+outside_cell: true
 specs: []
 prs: [1076]
 commits: []

@@ -4,7 +4,7 @@ title: The loop's driver orders and guards a stack by `depends_on`, not by the s
 status: partial
 tier: 2
 filed: 2026-10-17
-by_hand: true
+outside_cell: true
 specs: []
 prs: [1067]
 commits: []

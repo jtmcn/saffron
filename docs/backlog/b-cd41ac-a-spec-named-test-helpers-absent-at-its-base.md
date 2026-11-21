@@ -3,7 +3,7 @@ id: b-cd41ac
 title: "A spec told its cell to reuse five test helpers that did not exist at its base, and two spec reviews passed it"
 status: done
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 tier: 3
 filed: 2026-10-07
 specs: []

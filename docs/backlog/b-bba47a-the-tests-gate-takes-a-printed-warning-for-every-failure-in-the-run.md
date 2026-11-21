@@ -3,7 +3,7 @@ id: b-bba47a
 title: The `tests` gate takes an unindented warning a test prints for every failure in the run, and two comments say that is its common path
 status: done
 closed: 2026-11-18
-by_hand: true
+outside_cell: true
 tier: 2
 filed: 2026-10-15
 specs: [SA-0273]

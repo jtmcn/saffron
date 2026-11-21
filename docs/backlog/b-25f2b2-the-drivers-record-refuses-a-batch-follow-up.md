@@ -5,7 +5,7 @@ status: superseded
 tier: 2
 filed: 2026-10-09
 closed: 2026-11-07
-by_hand: true
+outside_cell: true
 specs: []
 prs: [789]
 commits: []

@@ -4,7 +4,7 @@ title: A probe's baseline failures are subtracted and then discarded
 status: done
 closed: 2026-09-29
 tier: 1
-by_hand: true
+outside_cell: true
 specs: [SA-0054, SA-0063]
 prs: []
 commits: [f76931df]

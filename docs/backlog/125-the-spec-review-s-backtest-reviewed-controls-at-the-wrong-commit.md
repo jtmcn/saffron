@@ -3,7 +3,7 @@ id: 125
 title: The spec review's backtest reviewed controls at the wrong commit and scored a spec review that has since changed
 status: superseded
 tier: 3
-by_hand: true
+outside_cell: true
 filed: 2026-09-14
 closed: 2026-09-30
 specs: []

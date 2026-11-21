@@ -3,7 +3,7 @@ id: b-2d9ae9
 title: A review test's docstring says only adequacy files an edit, and SA-0146's Spec lens files one too
 status: done
 closed: 2026-11-07
-by_hand: true
+outside_cell: true
 tier: 3
 filed: 2026-09-23
 specs: []

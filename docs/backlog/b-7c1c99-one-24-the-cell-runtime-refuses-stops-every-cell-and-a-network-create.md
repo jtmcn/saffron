@@ -3,7 +3,7 @@ id: b-7c1c99
 title: One /24 the cell runtime refuses stops every cell, and a network create past its bound names neither the /24 nor the bound
 status: done
 closed: 2026-11-07
-by_hand: true
+outside_cell: true
 tier: 2
 filed: 2026-10-23
 specs: []

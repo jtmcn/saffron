@@ -4,7 +4,7 @@ title: '`CONTEXT.md` has no entry for a covered set or a positive case, the fiel
 status: done
 closed: 2026-11-20
 tier: 2
-by_hand: true
+outside_cell: true
 filed: 2026-11-18
 specs: []
 prs: [1275]

@@ -4,7 +4,7 @@ title: "`session.py`, its tests and `suite.py` still use words `CONTEXT.md` tell
 status: partial
 tier: 3
 filed: 2026-09-16
-by_hand: false
+outside_cell: false
 specs: []
 prs: [422]
 commits: []

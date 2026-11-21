@@ -4,7 +4,7 @@ title: "`DESIGN.md` §10 and `CONTEXT.md`'s Ledger entry name no `saffron migrat
 status: done
 tier: 3
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 filed: 2026-10-07
 specs: []
 prs: [1054]

@@ -8,7 +8,7 @@ filed: 2026-10-11
 specs: [SA-0365]
 prs: [1137]
 commits: []
-by_hand: true
+outside_cell: true
 cites: [§4.5, §5.1]
 related: []
 ---

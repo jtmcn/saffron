@@ -4,7 +4,7 @@ title: Core gate names are not reserved, and `pr_body` is now a second consumer 
 status: done
 tier: 3
 closed: 2026-09-10
-by_hand: true
+outside_cell: true
 specs: []
 prs: []
 commits: [2c3b231]

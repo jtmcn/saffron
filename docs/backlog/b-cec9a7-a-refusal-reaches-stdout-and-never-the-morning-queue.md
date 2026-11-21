@@ -3,7 +3,7 @@ id: b-cec9a7
 title: A refusal reaches stdout and never the morning queue, though §4.2 and the glossary say it lands there as one line
 status: done
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 tier: 3
 filed: 2026-09-29
 specs: []

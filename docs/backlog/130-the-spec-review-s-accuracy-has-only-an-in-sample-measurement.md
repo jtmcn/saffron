@@ -3,7 +3,7 @@ id: 130
 title: The spec review's accuracy has only an in-sample measurement, and the reports step 1b now keeps were never pre-registered
 status: partial
 tier: 3
-by_hand: true
+outside_cell: true
 filed: 2026-09-15
 specs: []
 prs: []

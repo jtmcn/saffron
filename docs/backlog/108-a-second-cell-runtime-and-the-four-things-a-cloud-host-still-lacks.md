@@ -3,7 +3,7 @@ id: 108
 title: A second cell runtime, and the four things a cloud host still lacks
 status: partial
 tier: 3
-by_hand: true
+outside_cell: true
 specs: []
 prs: []
 commits: []

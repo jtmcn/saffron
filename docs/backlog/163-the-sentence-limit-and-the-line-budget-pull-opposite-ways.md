@@ -4,7 +4,7 @@ title: The sentence limit and the CLAUDE.md line budget move the same text in op
 status: partial
 tier: 3
 filed: 2026-09-17
-by_hand: true
+outside_cell: true
 specs: []
 prs: [317]
 commits: [e370d835]

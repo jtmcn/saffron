@@ -4,7 +4,7 @@ title: A cell can buy `revert` a `skip` for one printed line
 status: done
 tier: 1
 closed: 2026-09-29
-by_hand: true
+outside_cell: true
 specs: [SA-0127]
 prs: [476]
 commits: [166d467f]

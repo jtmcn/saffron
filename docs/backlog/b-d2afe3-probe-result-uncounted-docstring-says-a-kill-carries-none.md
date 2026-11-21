@@ -3,7 +3,7 @@ id: b-d2afe3
 title: "`ProbeResult.uncounted`'s docstring says a `killed` result carries none, and `check_probe` returns one that does"
 status: done
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 tier: 3
 filed: 2026-10-27
 specs: []

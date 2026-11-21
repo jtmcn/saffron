@@ -4,7 +4,7 @@ title: "`critic_cell` infers which cell it is building from whether it was hande
 status: open
 tier: 3
 filed: 2026-09-16
-by_hand: false
+outside_cell: false
 specs: [SA-0093]
 prs: [303]
 commits: []

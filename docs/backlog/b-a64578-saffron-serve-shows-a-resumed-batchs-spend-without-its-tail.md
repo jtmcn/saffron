@@ -3,7 +3,7 @@ id: b-a64578
 title: "`saffron serve` will show a resumed batch's spend without its tail"
 status: done
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 tier: 3
 filed: 2026-10-20
 specs: []

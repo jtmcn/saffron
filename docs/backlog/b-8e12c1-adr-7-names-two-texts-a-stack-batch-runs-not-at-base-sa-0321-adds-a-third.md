@@ -4,7 +4,7 @@ title: ADR 7 and the glossary name two texts a stack batch runs that are not at 
 status: done
 closed: 2026-10-26
 tier: 2
-by_hand: true
+outside_cell: true
 filed: 2026-10-26
 specs: []
 prs: [974]

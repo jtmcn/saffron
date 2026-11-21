@@ -3,7 +3,7 @@ id: b-aff9ea
 title: "A spec can prescribe a documentation line that contradicts the code, and the cell copies it faithfully"
 status: done
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 tier: 2
 filed: 2026-10-12
 specs: []

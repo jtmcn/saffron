@@ -4,7 +4,7 @@ title: '`CLAUDE.md` and the spec-loop skill call marking a draft ready "ratifyin
 status: done
 tier: 3
 closed: 2026-09-17
-by_hand: true
+outside_cell: true
 specs: []
 prs: [322]
 commits: []

@@ -1,11 +1,12 @@
 ---
 id: 128
 title: '`by_hand` names who does the work, when what it records is that a cell cannot'
-status: open
+status: done
+closed: 2026-11-21
 tier: 3
 filed: 2026-09-15
 specs: []
-prs: []
+prs: [1283]
 commits: []
 cites: []
 related: []
@@ -38,3 +39,7 @@ README's definition.
 
 **Filed 2026-09-15**, after PR #263 brought the 28 values into line with the
 README's definition, so the rename is mechanical.
+- 2026-11-21: closed. The field is `outside_cell` in `records/kinds.py`, its
+  tests, the README, the tracker doc, the spec writer and 218 records. The
+  model forbids extra keys, so a record that still sets `by_hand` fails to
+  load, and a test says so.

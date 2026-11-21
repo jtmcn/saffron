@@ -3,7 +3,7 @@ id: 55
 title: '`dist/` is not gitignored, so a build artifact is one `git add -A` from being committed'
 status: done
 closed: 2026-11-07
-by_hand: true
+outside_cell: true
 tier: 3
 specs: []
 prs: [1051]

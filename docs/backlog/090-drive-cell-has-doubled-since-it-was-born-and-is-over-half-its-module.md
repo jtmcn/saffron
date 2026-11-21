@@ -9,7 +9,7 @@ commits: [0301518, 2b1afda, 3604f31, 851836a, ab8c9d4]
 cites: []
 related: [5, 97]
 filed: 2026-09-08
-by_hand: true
+outside_cell: true
 ---
 
 ## Problem

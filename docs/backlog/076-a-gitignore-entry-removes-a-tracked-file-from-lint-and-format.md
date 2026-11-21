@@ -3,7 +3,7 @@ id: 76
 title: A gitignore entry removes a tracked file from `lint` and `format`
 status: done
 closed: 2026-11-08
-by_hand: true
+outside_cell: true
 tier: 3
 specs: []
 prs: [145, 1079]

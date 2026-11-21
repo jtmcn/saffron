@@ -3,7 +3,7 @@ id: b-1adb50
 title: Sentences in DESIGN.md and CLAUDE.md go false once a stack batch lands, and no cell may edit either
 status: done
 tier: 2
-by_hand: true
+outside_cell: true
 filed: 2026-09-23
 closed: 2026-11-07
 specs: [SA-0151, SA-0156, SA-0160, SA-0165, SA-0169]
