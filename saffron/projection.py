@@ -16,10 +16,10 @@ not by task (`task_dir = out_dir / spec_id`), so a later task of the same spec
 overwrites the earlier one's `plan.json`/`patch.diff` — a chain is stated only
 when the file on disk still matches what the *owning* task's own event log
 recorded at extraction, never from whatever happens to be sitting there now.
-Second, `events.jsonl` is one log per spec, shared by every task that spec has
-ever run, so a task must be tied to its own span of that log *by time*
-(`runs.started_at` against `Ceilings.timestamp`), never by position — a span a
-task's own start time does not land in cleanly is not this task's span.
+Second, `events.jsonl` is one log per spec, shared by every task that ran
+that spec. A task ties to its own span of that log by time: its last cell
+attempt's own `started_at` against `Ceilings.timestamp`, never by position.
+A span a task's instant does not land in cleanly is not this task's span.
 
 A task the shapes would reject is never written to the graph at all: it is
 left out with a reason, and the rest are still projected. A projection that
@@ -42,6 +42,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
+    import sqlite3
+
     from saffron.intake import Spec
     from saffron.ledger import Ledger
 
@@ -215,24 +217,39 @@ def _spans(spec_id: str, out_dir: Path) -> list[_Span]:
 
 
 def _run_start_epoch(started_at: str) -> int:
-    """`runs.started_at` is `datetime('now')` — UTC text with no offset.
+    """A ledger timestamp is `datetime('now')` text, UTC with no offset.
     Parsed with an explicit UTC tzinfo so `.timestamp()` is correct
-    regardless of the host's local zone (the fourth criterion's own test)."""
+    regardless of the host's local zone (the fourth criterion's own test).
+    Used on a task's last cell attempt's own `started_at`."""
     dt = datetime.strptime(started_at, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
     return math.floor(dt.timestamp())
+
+
+def _last_cell_attempt_started_at(attempt_rows: list[sqlite3.Row]) -> str | None:
+    """A task's own instant is its last attempt outside the phases a spec
+    review, a spec writer session or a commit review opens. Each of those
+    runs before or after any cell exists, so none is a cell attempt.
+    Attempt ids rise across every phase of a task, so the last surviving
+    row is the last cell attempt. `None` when a task has no such attempt."""
+    from saffron.spec_review import WRITING_PHASE
+
+    non_cell_phases = {"SPEC_REVIEW", WRITING_PHASE, "COMMIT_REVIEW"}
+    cell_attempts = [row for row in attempt_rows if row["phase"] not in non_cell_phases]
+    return cell_attempts[-1]["started_at"] if cell_attempts else None
 
 
 def _attribute(
     tasks: list[tuple[int, str]], spans: list[_Span]
 ) -> dict[int, _Span | None]:
-    """Ties each `(task_id, started_at)` to the one span whose half-open
-    `[start, end)` holds it. `None` for a task no span holds, for every task
-    in a span more than one task's start time lands in, and for a task whose
-    second is more than one span's floor."""
+    """Ties each `(task_id, instant)` to the one span whose half-open
+    `[start, end)` holds it. `instant` is a task's last cell attempt's own
+    `started_at`. `None` for a task no span holds. Also `None` for every
+    task in a span more than one task's instant lands in. Also `None` for
+    a task whose second matches more than one span's floor."""
     holders: list[list[int]] = [[] for _ in spans]
     task_spans: dict[int, list[int]] = {}
-    for task_id, started_at in tasks:
-        epoch = _run_start_epoch(started_at)
+    for task_id, instant in tasks:
+        epoch = _run_start_epoch(instant)
         if sum(1 for span in spans if span.start == epoch) > 1:
             continue
         for i, span in enumerate(spans):
@@ -322,6 +339,9 @@ def materialize(
     end_states = _sh_in(shapes_path, _END_STATE_PATH)
     spec_types = _sh_in(shapes_path, _SPEC_TYPE_PATH)
     tasks = _all_tasks(ledger)
+    attempts_by_task = {
+        row["task_id"]: ledger.attempts(row["task_id"]) for row in tasks
+    }
 
     kept: dict[int, str | None] = {}
     left_out: dict[int, LeftOut] = {}
@@ -331,11 +351,13 @@ def materialize(
     for spec_id in {row["spec_id"] for row in tasks}:
         spans = _spans(spec_id, out_dir)
         spans_by_spec[spec_id] = spans
-        holders = [
-            (row["task_id"], row["started_at"])
-            for row in tasks
-            if row["spec_id"] == spec_id
-        ]
+        holders: list[tuple[int, str]] = []
+        for row in tasks:
+            if row["spec_id"] != spec_id:
+                continue
+            instant = _last_cell_attempt_started_at(attempts_by_task[row["task_id"]])
+            if instant is not None:
+                holders.append((row["task_id"], instant))
         attribution_by_spec[spec_id] = _attribute(holders, spans)
 
     spec_cache: dict[
@@ -427,7 +449,7 @@ def materialize(
         g.add((task_node, prov.used, spec_node))
 
         # The last gate-holding attempt generated the exported diff: its suite judged HEAD.
-        attempt_rows = ledger.attempts(task_id)
+        attempt_rows = attempts_by_task[task_id]
         gated = [
             r["attempt_id"]
             for r in attempt_rows
