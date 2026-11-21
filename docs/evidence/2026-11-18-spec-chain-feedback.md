@@ -157,3 +157,25 @@ member kills it. The writer ran 25 wrong versions, and all died.
     function or its module already makes, run as a wrong version.
 77. Each sentence that says what base does is read at base, never from
     the prototype, before the prototype's measurements are quoted.
+
+## SA-0419 (b-7431a2)
+
+One writer, two reviews, and a fixture pass after the second review. The
+writer took about 21 minutes for the draft and 16 and 13 for the two
+revisions. Each review took 5 to 7 minutes. Neither review found a
+blocker.
+
+Round 1 found that the fold's refusal never met `PASSED` or `DRAINED`.
+Both are members of sets the same module already declares. The fix added
+those two values. Round 2 then found `FAILED`, the other member of the
+preflight set, refused nowhere. So the first fix named members and not
+the set. Round 2 also found the fold's twin of a refusal placed after the
+commit, which criterion 1 already drove. The writer ran 30 wrong
+versions, and all died.
+
+## What SA-0419 adds
+
+78. When a refused set borrows from a declared set in the same module,
+    every member of the declared set is a refused case.
+79. A refusal a criterion drives before and after a commit is driven the
+    same way on each path the claim names.
