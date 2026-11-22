@@ -1355,6 +1355,145 @@ def test_a_preflight_outcome_outside_the_closed_set_is_refused(tmp_path):
     old.close()
 
 
+def test_a_run_status_outside_the_closed_set_is_refused_before_anything_is_written(
+    tmp_path,
+):
+    """`finish_run` refuses a status outside `RUN_FINISHED_STATUSES` before
+    its `UPDATE`, so a misspelt or borrowed status lands on neither the row
+    nor the record (item b-7431a2). A fresh ledger refuses the same values.
+    So does one carrying the schema from before the `CHECK` existed,
+    whether the run holds a task or none."""
+    from saffron.ledger import RUN_FINISHED_STATUSES
+    from saffron.record.memory import MemoryRecord
+
+    assert RUN_FINISHED_STATUSES == ("COMPLETE", "ABORTED")
+    refused = ("ABORTD", "complete", "RUNNING", "PASSED", "FAILED", "DRAINED", "")
+    assert not set(refused) & set(RUN_FINISHED_STATUSES)  # else this proves nothing
+
+    record = MemoryRecord()
+    fresh = Ledger(tmp_path / "fresh.db", record=record)
+    repo_id = fresh.upsert_repo("r", "/o", "/m.git", policy_sha="p" * 64)
+    run_with_task = fresh.create_run(repo_id, base_sha="a" * 40)
+    task_id = fresh.create_task(
+        run_with_task, spec_id="SA-1", spec_sha="s" * 64, branch="b"
+    )
+    key = fresh.record_key(task_id)
+    assert key is not None
+    run_without_task = fresh.create_run(repo_id, base_sha="b" * 40)
+
+    # An admitted status is written as handed, never folded to one value
+    # regardless of which admitted status the caller passed.
+    aborted_run = fresh.create_run(repo_id, base_sha="c" * 40)
+    aborted_task = fresh.create_task(
+        aborted_run, spec_id="SA-2", spec_sha="s" * 64, branch="b"
+    )
+    fresh.finish_run(aborted_run, "ABORTED")
+    aborted_row = fresh._db.execute(
+        "SELECT status FROM runs WHERE run_id = ?", (aborted_run,)
+    ).fetchone()
+    assert aborted_row["status"] == "ABORTED"
+    aborted_key = fresh.record_key(aborted_task)
+    assert aborted_key is not None
+    aborted_fact = next(f for f in record.read(aborted_key) if f.kind == "run_finished")
+    assert aborted_fact.payload["status"] == "ABORTED"
+
+    complete_run = fresh.create_run(repo_id, base_sha="d" * 40)
+    complete_task = fresh.create_task(
+        complete_run, spec_id="SA-3", spec_sha="s" * 64, branch="b"
+    )
+    fresh.finish_run(complete_run, "COMPLETE")
+    complete_row = fresh._db.execute(
+        "SELECT status FROM runs WHERE run_id = ?", (complete_run,)
+    ).fetchone()
+    assert complete_row["status"] == "COMPLETE"
+    complete_key = fresh.record_key(complete_task)
+    assert complete_key is not None
+    complete_fact = next(
+        f for f in record.read(complete_key) if f.kind == "run_finished"
+    )
+    assert complete_fact.payload["status"] == "COMPLETE"
+
+    for run_id in (run_with_task, run_without_task):
+        for status in refused:
+            with pytest.raises(ValueError):
+                fresh.finish_run(run_id, status)
+            row = fresh._db.execute(
+                "SELECT status, ended_at FROM runs WHERE run_id = ?", (run_id,)
+            ).fetchone()
+            assert row["status"] == "RUNNING"
+            assert row["ended_at"] is None
+    assert [f.kind for f in record.read(key)] == ["task_created", "run_created"]
+    fresh.close()
+
+    # The shape an older ledger carries: `status` present, with no CHECK.
+    old_path = tmp_path / "old-status.db"
+    checked = next(
+        line
+        for line in SCHEMA.splitlines(keepends=True)
+        if line.lstrip().startswith("status") and "ABORTED" in line
+    )
+    assert "CHECK" in checked  # otherwise this proves nothing
+    before = SCHEMA.replace(checked, "    status     TEXT\n")
+    old_conn = sqlite3.connect(old_path)
+    old_conn.executescript(before)
+    old_conn.execute(
+        "INSERT INTO repos (name, origin, mirror_path) VALUES ('r', 'o', '/m')"
+    )
+    old_conn.execute(
+        "INSERT INTO runs (repo_id, base_sha, status) VALUES (1, 'a', NULL)"
+    )
+    old_conn.execute(
+        "INSERT INTO runs (repo_id, base_sha, status) VALUES (1, 'a', 'SIDEWAYS')"
+    )
+    old_conn.commit()
+    old_conn.close()
+
+    old = Ledger(old_path)
+    for run_id, kept in ((1, None), (2, "SIDEWAYS")):
+        for status in refused:
+            with pytest.raises(ValueError):
+                old.finish_run(run_id, status)
+        row = old._db.execute(
+            "SELECT status, ended_at FROM runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        assert row["status"] == kept
+        assert row["ended_at"] is None
+    old.close()
+
+
+def test_a_fresh_ledgers_runs_table_admits_only_the_closed_set_of_statuses(tmp_path):
+    """The `CHECK` on `runs.status`, read through a bare `sqlite3`
+    connection, past every `Ledger` method (item b-7431a2)."""
+    db_path = tmp_path / "fresh-check.db"
+    Ledger(db_path).close()
+
+    con = sqlite3.connect(db_path)
+    con.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r', 'o', '/m')")
+    con.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
+    run_id = con.execute("SELECT run_id FROM runs").fetchone()[0]
+    assert (
+        con.execute("SELECT status FROM runs WHERE run_id = ?", (run_id,)).fetchone()[0]
+        is None
+    )
+
+    for status in ("RUNNING", "COMPLETE", "ABORTED"):
+        con.execute("UPDATE runs SET status = ? WHERE run_id = ?", (status, run_id))
+        got = con.execute(
+            "SELECT status FROM runs WHERE run_id = ?", (run_id,)
+        ).fetchone()[0]
+        assert got == status
+
+    for bad in ("ABORTD", "complete", "PASSED", "FAILED", "DRAINED", ""):
+        with pytest.raises(sqlite3.IntegrityError):
+            con.execute("UPDATE runs SET status = ? WHERE run_id = ?", (bad, run_id))
+        with pytest.raises(sqlite3.IntegrityError):
+            con.execute(
+                "INSERT INTO runs (repo_id, base_sha, status) VALUES (1, 'a', ?)",
+                (bad,),
+            )
+    con.close()
+
+
 def test_an_attempt_against_no_task_raises_rather_than_naming_another(ledger, task):
     """`lastrowid` reports the connection's previous insert, so a select that
     matched nothing still hands back an id — one that exists, belongs to another

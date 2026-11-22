@@ -82,6 +82,13 @@ _RUN_FACT_KINDS = frozenset({"run_created", "run_finished"})
 RUN_PREFLIGHT_OUTCOMES = ("PASSED", "FAILED")
 _PREFLIGHT_IN = ", ".join(f"'{outcome}'" for outcome in RUN_PREFLIGHT_OUTCOMES)
 
+# The closed set `finish_run` writes. The `CHECK` below adds `RUNNING`, the
+# status every row is minted with (`create_run`, the fold's `_insert_run`).
+RUN_FINISHED_STATUSES = ("COMPLETE", "ABORTED")
+_RUN_STATUS_IN = ", ".join(
+    f"'{status}'" for status in (*RUN_FINISHED_STATUSES, "RUNNING")
+)
+
 # The closed set `record_spec_text` writes: a revision, a follow-up spec,
 # or a `draft_spec` task's own text. None is at `base_sha` (ADR 7).
 SPEC_TEXT_ORIGINS = ("revision", "follow_up", "draft")
@@ -132,7 +139,7 @@ CREATE TABLE IF NOT EXISTS runs (
     preflight  TEXT CHECK (preflight IN ({_PREFLIGHT_IN})),
     started_at TEXT NOT NULL DEFAULT (datetime('now')),
     ended_at   TEXT,
-    status     TEXT
+    status     TEXT CHECK (status IN ({_RUN_STATUS_IN}))
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
@@ -1209,6 +1216,11 @@ class Ledger:
             # `task_created`, so there is nothing left to apply here.
             return None
         if fact.kind == "run_finished":
+            status = payload["status"]
+            if status not in RUN_FINISHED_STATUSES:
+                raise ValueError(
+                    f"run status {status!r} is not one of {RUN_FINISHED_STATUSES}"
+                )
             run_row = self._db.execute(
                 "SELECT run_id FROM tasks WHERE task_id = ?", (task_id,)
             ).fetchone()
@@ -1372,8 +1384,12 @@ class Ledger:
     def finish_run(self, run_id: int, status: str) -> None:
         """The row's status is written whatever its tasks say, and whether
         it holds one task, two, or none. The append to each task it holds
-        comes after that commit, so a refused one raises with the status
-        already written (item b-cafacd)."""
+        comes after that commit. A status outside `RUN_FINISHED_STATUSES`
+        is refused before either write (item b-cafacd)."""
+        if status not in RUN_FINISHED_STATUSES:
+            raise ValueError(
+                f"run status {status!r} is not one of {RUN_FINISHED_STATUSES}"
+            )
         with self._db:
             self._db.execute(
                 "UPDATE runs SET status = ?, ended_at = datetime('now') WHERE run_id = ?",
