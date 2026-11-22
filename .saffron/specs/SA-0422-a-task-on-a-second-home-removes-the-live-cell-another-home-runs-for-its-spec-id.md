@@ -159,12 +159,14 @@ acceptance:
       `run_task`, before any runtime call, and is never a refusal. So does
       a lock file that is a symlink, and its target keeps its text. A root
       `run_task` creates has mode `0700`. The witness points the root at
-      four paths in turn, each with the spy at `runtime._call`. A fresh path
-      reaches the spy, and the root it makes has mode `0700`. A symlink to
-      a directory raises, and the directory stays empty. A directory whose
-      owner differs from `os.getuid()` raises, with `os.getuid` replaced to
-      return another uid. A symlink in place of `sy-1.lock` raises
-      `OSError`. Only the fresh path reaches the spy.
+      four paths in turn, each with the spy at `runtime._call`. A fresh path,
+      under a umask of `0o022` restored in a `finally`, reaches the spy, and
+      the root it makes has mode `0700`. A symlink to a directory raises,
+      and the directory stays empty. A directory whose owner differs from
+      `os.getuid()` raises, with `os.getuid` replaced to return another uid.
+      It raises the same way while this process holds `SY-1`'s lock there.
+      A symlink in place of `sy-1.lock` raises `OSError`. Only the fresh
+      path reaches the spy.
     witness: tests/test_cell_name_lock.py::test_a_lock_root_that_is_unsafe_raises_before_any_runtime_call
     positive_case: >-
       The fresh root reaches the spy with `rm -f saffron-cell-SY-1`, so the
@@ -176,6 +178,7 @@ acceptance:
       - "The lock file is opened without `O_NOFOLLOW`, so a symlink there is followed and written."
       - "The root is made without a mode, so it takes the umask's `0755`."
       - "`run_task` turns an unsafe root into `Refused`."
+      - "The root's owner is checked after the `flock`, so another user's root whose lock is held returns `Refused`."
     covers:
       - set: what is unsafe about the root
         members:
@@ -183,6 +186,8 @@ acceptance:
             driven_by: "The root is read with `os.stat`, which follows a symlink to a directory."
           - member: another user's directory
             driven_by: "The root's owner is never compared with `os.getuid()`."
+          - member: another user's directory whose lock is held
+            driven_by: "The root's owner is checked after the `flock`, so another user's root whose lock is held returns `Refused`."
           - member: a symlink as the lock file
             driven_by: "The lock file is opened without `O_NOFOLLOW`, so a symlink there is followed and written."
       - set: how an unsafe root ends the task
@@ -363,7 +368,12 @@ and a `Ledger` under each batch tree.
   Read the real root from the holder's marker line. Unlink that one file
   in a `finally`, once the holder is reaped.
 - **The fourth witness.** Replace `os.getuid` with `monkeypatch` for the
-  owner case alone. No test can make a directory another user owns.
+  owner cases alone. No test can make a directory another user owns. Take
+  the held lock with the real uid, then replace it, and unlink that lock
+  file before the symlink case. One version survives every witness, and
+  it stays off the list: an `lstat` of the lock file, then a plain open.
+  It is racy, since the symlink can land between the two calls, and no
+  test drives that race. `O_NOFOLLOW` is the one open that cannot race.
 
 **Linux `flock` is not measured.** Every witness ran on macOS. Two
 properties carry the lock on Linux, and both are read from `flock(2)`, not
