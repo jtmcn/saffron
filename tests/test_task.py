@@ -759,6 +759,7 @@ def test_run_tasks_default_emit_prints_no_credential(tmp_path, monkeypatch, caps
     """The `emit` `run_task` builds when handed none prints `describe` of
     what the log already redacted, the same contract `_default_emit` keeps
     (b-0f5493)."""
+    from saffron.credentials import OWN_TOKEN_DESCRIPTION
     from saffron.events import Agent, describe
 
     _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
@@ -826,6 +827,9 @@ def test_run_tasks_default_emit_prints_no_credential(tmp_path, monkeypatch, caps
     assert len(printed) == len(events)
     for line in printed:
         assert not _unredacted(line)
+        assert "(redacted: " in line
+    for line in printed[:5]:
+        assert OWN_TOKEN_DESCRIPTION in line
     stored = [e for e in read_log(out_dir / "SY-20") if isinstance(e, Agent)]
     assert len(stored) == len(events)
     for line, logged in zip(printed, stored, strict=True):
@@ -855,7 +859,35 @@ def test_run_tasks_default_emit_prints_no_credential(tmp_path, monkeypatch, caps
     assert len(printed_refused) == len(dir_events)
     for line in printed_refused:
         assert not _unredacted(line)
+        assert "(redacted: " in line
+    for line in printed_refused[:5]:
+        assert OWN_TOKEN_DESCRIPTION in line
     assert output.count("refused a write") == 1
+
+    # Handed no token, the log still redacts the three shapes, and the
+    # token prints as it came.
+    none_out_dir = tmp_path / "out-none"
+    none_events = _events("SY-22")
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-22",
+        state="NOT_IMPLEMENTED",
+        task_id=22,
+        out_dir=none_out_dir,
+        events=none_events,
+        token=None,
+    )
+    printed_none = [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("agent: ")
+    ]
+    assert len(printed_none) == len(none_events)
+    for line in printed_none[:5]:
+        assert token[:10] in line
+    for line in printed_none:
+        assert not any(s in line for s in ("ghp_", github, aws, api_key))
 
 
 def test_a_handoff_carries_both_halves_or_neither():

@@ -465,9 +465,9 @@ class EventLog:
         self.failed = False
 
     def append(self, event: Event) -> Event:
-        """Write one line, flushed. Returns the event redacted, unchanged if refused. Never raises:
-        a cell that cannot write its own log is not a cell whose task should die on that
-        account — the caller has nothing useful to do with the failure either way.
+        """Write one line, flushed, and return the event redacted, before the
+        bound, written or refused. Never raises: a cell that cannot write its
+        own log is not a cell whose task should die on that account.
 
         An `Agent` event's own `event` dict is bounded here, at the size its
         `json.dumps` serialization reaches — never at the size of the whole
@@ -502,8 +502,8 @@ class EventLog:
                         detail=new_detail,
                         redacted=tuple(seen),
                     )
-            # Returned to the caller below, pre-bound: what printed differs
-            # from what is stored only in the one case the bound rewrites.
+            # Returned to the caller below, pre-bound: what printed differs from
+            # what is stored where the bound rewrites it, or a refused write stores none.
             redacted_event = event
             if isinstance(event, Agent) and event.event is not None:
                 serialized = json.dumps(event.event)

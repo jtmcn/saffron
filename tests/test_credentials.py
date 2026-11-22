@@ -456,7 +456,7 @@ def test_the_default_emitters_line_carries_no_credential(tmp_path, capsys):
     from dataclasses import replace
 
     from saffron.cell.session import _default_emit
-    from saffron.credentials import CREDENTIAL_SHAPES
+    from saffron.credentials import CREDENTIAL_SHAPES, OWN_TOKEN_DESCRIPTION
     from saffron.events import Agent, EventLog, describe, read_log
 
     token = "cct-" + "5a9f3e7c21d4b8"
@@ -515,6 +515,9 @@ def test_the_default_emitters_line_carries_no_credential(tmp_path, capsys):
     assert len(printed) == len(events)
     for line in printed:
         assert not _unredacted(line)
+        assert "(redacted: " in line
+    for line in printed[:5]:
+        assert OWN_TOKEN_DESCRIPTION in line
     stored = read_log(task_dir)
     assert len(stored) == len(events)
     for line, logged in zip(printed, stored, strict=True):
@@ -524,16 +527,19 @@ def test_the_default_emitters_line_carries_no_credential(tmp_path, capsys):
     # static shapes still redact.
     none_dir = tmp_path / "CR-emit-none"
     none_log = EventLog(none_dir, token=None)
-    guarded = Agent(
-        timestamp=1.0,
-        spec_id="CR-emit-none",
-        raw=True,
-        line=f"{token} {aws} {api_key} {github}",
-    )
-    _default_emit(guarded, log=none_log)
-    out = capsys.readouterr().out
-    assert token in out
-    assert aws not in out and api_key not in out and github not in out
+    for event in events:
+        _default_emit(replace(event, spec_id="CR-emit-none"), log=none_log)
+    printed_none = [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("agent: ")
+    ]
+    assert len(printed_none) == len(events)
+    for line in printed_none[:5]:
+        assert token[:10] in line
+    for line in printed_none:
+        assert "ghp_" not in line
+        assert not any(pattern.search(line) for _, pattern in CREDENTIAL_SHAPES)
 
     # A log whose `events.jsonl` is a directory refuses every write, and
     # still prints each line redacted (append's own refusal branch).
@@ -552,6 +558,9 @@ def test_the_default_emitters_line_carries_no_credential(tmp_path, capsys):
     assert len(printed_while_refused) == len(events)
     for line in printed_while_refused:
         assert not _unredacted(line)
+        assert "(redacted: " in line
+    for line in printed_while_refused[:5]:
+        assert OWN_TOKEN_DESCRIPTION in line
 
     # Over `BOUND_CHARS`, the printed line is the redacted text before the
     # bound, never the `(bounded, ...)` placeholder the stored line becomes.
