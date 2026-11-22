@@ -64,45 +64,22 @@ Most were wrong versions the spec listed and nothing applied. REBUT argued a
 real blocker away on #562, and no lens reads `CLAUDE.md`'s conventions.
 Run 21 closed the first two. The third is partial until ADR 8's measured pass.
 
-**Placed 2026-09-29**, from the spec loop's run 21: ~~**b-cf832a**~~, ~~**b-5b1f8a**~~,
-then ~~**b-cd5fd2**~~. The loop repairs each by hand every run. One uncollectable
-id makes `revert` check no witness. A witness that reads the constant it tests
-cannot fail. A lens withdrew a real `preserves` blocker because its line sat
-outside the diff.
-
 **Placed 2026-09-30**, from the spec loop's run 23: **b-f582ee**. A cell that
 went green died seeding its gate cell on a transient `Permission denied`. It
 was recorded `ORPHANED`, and nothing resumes its patch, so the re-run paid
 again.
 
-**Placed 2026-10-12**, from the spec loop's run 36: **b-1c59c3**. A spec
-removed a name whose reader sat outside its `touches`, so its cell could not
-pass both `scope` and `tests`. It ended `EXHAUSTED` at $41.03.
-
 **Placed 2026-10-13**, from the spec loop's run 37: **b-703e64**. A stack
 batch's spec writer revised a spec no `prose` gate read. The finish wrote it
 back, and re-verification went red.
 
-**Placed 2026-10-19**, from the spec loop's run 44: ~~**b-e40d09**~~, moved up
-from tier 3, then ~~**b-e7898b**~~. A host-run probe that survived was dropped
-for want of an anchor, so `SA-0288` packaged past its own blocker. A spec
-that added a refusal refused the specs queued below it, and its cell ended
-`EXHAUSTED`.
-
-**Placed 2026-11-04**, from the spec loop's run 53: ~~**b-fa4a83**~~. A survived
-mutant reaches REPAIR as its whole claim, so `SA-0330`'s repair turns never
-found the two cases it lacked, and the cell ended `EXHAUSTED`.
-
-**Placed 2026-11-06**, from the spec loop's run 54: ~~**b-d39d9a**~~. `SA-0335`
-spent $76.77 against its $69 budget during REVIEW and REBUT, and nothing
-stopped it. The overrun stopped its batch after two of four specs.
-
 **Closed since they were placed here.** Each id stays so its record's tier still resolves.
 - ~~**7**~~, ~~**26**~~, ~~**40**~~, ~~**45**~~, ~~**46**~~, ~~**47**~~, ~~**50**~~, ~~**51**~~, ~~**57**~~, ~~**59**~~, ~~**61**~~, ~~**63**~~, ~~**69**~~, ~~**70**~~, ~~**71**~~, ~~**73**~~, ~~**74**~~, ~~**78**~~, ~~**81**~~, ~~**82**~~.
 - ~~**83**~~, ~~**84**~~, ~~**85**~~, ~~**88**~~, ~~**89**~~, ~~**94**~~, ~~**95**~~, ~~**97**~~, ~~**102**~~, ~~**109**~~, ~~**112**~~, ~~**114**~~, ~~**115**~~, ~~**117**~~, ~~**118**~~, ~~**120**~~, ~~**136**~~, ~~**137**~~, ~~**140**~~, ~~**141**~~.
-- ~~**143**~~, ~~**145**~~, ~~**154**~~, ~~**173**~~, ~~**b-36b551**~~, ~~**b-408cf5**~~, ~~**b-a8270f**~~, ~~**b-a4df62**~~, ~~**b-fd1468**~~, ~~**b-89ec93**~~, ~~**b-032c3e**~~, ~~**b-149df3**~~, ~~**b-4a63b7**~~, ~~**b-19b255**~~, ~~**b-792ab2**~~, ~~**b-8487de**~~, ~~**b-a7e5f3**~~, ~~**b-e471bd**~~, ~~**b-76f08d**~~, ~~**b-43a061**~~.
-- ~~**b-877e93**~~, ~~**b-bf0c91**~~, ~~**b-efdf1f**~~, ~~**b-8170eb**~~, ~~**b-a6bfb0**~~, ~~**b-038aef**~~, ~~**b-4c5dc7**~~, ~~**b-d4e015**~~, ~~**b-031ac2**~~, ~~**b-7251b5**~~, ~~**b-34d743**~~, ~~**b-3c7ce9**~~, ~~**b-60a399**~~, ~~**b-032c61**~~, ~~**b-3bba0f**~~, ~~**b-6cd3c2**~~, ~~**b-883f74**~~, ~~**b-a04cc8**~~, ~~**b-f8fa24**~~, ~~**b-6b06e1**~~.
-- ~~**b-af24d1**~~, ~~**b-02d328**~~, ~~**b-1c20da**~~, ~~**b-4eaaa4**~~, ~~**b-6677b6**~~, ~~**b-d4b847**~~, ~~**b-e773d9**~~, ~~**b-000d04**~~, ~~**b-4901d2**~~, ~~**b-b24cf7**~~, ~~**b-78a590**~~, ~~**b-9c7001**~~, ~~**b-8f6568**~~, ~~**b-cab612**~~.
+- ~~**143**~~, ~~**145**~~, ~~**154**~~, ~~**173**~~, ~~**b-36b551**~~, ~~**b-408cf5**~~, ~~**b-a8270f**~~, ~~**b-a4df62**~~, ~~**b-fd1468**~~, ~~**b-89ec93**~~, ~~**b-032c3e**~~, ~~**b-149df3**~~, ~~**b-4a63b7**~~, ~~**b-e40d09**~~, ~~**b-19b255**~~, ~~**b-792ab2**~~, ~~**b-8487de**~~, ~~**b-a7e5f3**~~, ~~**b-e471bd**~~, ~~**b-76f08d**~~.
+- ~~**b-43a061**~~, ~~**b-877e93**~~, ~~**b-bf0c91**~~, ~~**b-efdf1f**~~, ~~**b-5b1f8a**~~, ~~**b-8170eb**~~, ~~**b-a6bfb0**~~, ~~**b-cd5fd2**~~, ~~**b-cf832a**~~, ~~**b-038aef**~~, ~~**b-4c5dc7**~~, ~~**b-d4e015**~~, ~~**b-031ac2**~~, ~~**b-7251b5**~~, ~~**b-34d743**~~, ~~**b-3c7ce9**~~, ~~**b-60a399**~~, ~~**b-032c61**~~, ~~**b-3bba0f**~~, ~~**b-cab612**~~.
+- ~~**b-6cd3c2**~~, ~~**b-883f74**~~, ~~**b-a04cc8**~~, ~~**b-f8fa24**~~, ~~**b-6b06e1**~~, ~~**b-af24d1**~~, ~~**b-02d328**~~, ~~**b-1c20da**~~, ~~**b-1c59c3**~~, ~~**b-4eaaa4**~~, ~~**b-6677b6**~~, ~~**b-d4b847**~~, ~~**b-e773d9**~~, ~~**b-000d04**~~, ~~**b-4901d2**~~, ~~**b-b24cf7**~~, ~~**b-e7898b**~~, ~~**b-78a590**~~, ~~**b-9c7001**~~, ~~**b-fa4a83**~~.
+- ~~**b-d39d9a**~~, ~~**b-8f6568**~~.
 
 ### Tier 2 — the morning after
 
@@ -113,57 +90,15 @@ spec removes the first run's container. Cell images and the build cache are
 never reclaimed, and one host's free disk fell to 16 GB. The first two stand
 between ADR 10's sequence and two cells on one host.
 
-**Raised 2026-11-07 from tier 3**, in grooming: ~~**b-719346**~~. `driver.py record`
-refuses a finish's follow-up as not in the order. It took the rank of
-~~**b-25f2b2**~~, the tier 2 item grooming folded into it.
-
-**Placed 2026-11-10**, from the spec loop's run 60: ~~**b-96508a**~~, then
-~~**b-16c819**~~. The stack's end review hands its lenses a spec with no mutant
-from the ref. A session test fakes `subprocess.run` for every argv, so new
-code under `cell_up` must avoid `run`.
-
-**Placed 2026-11-07**, from reviewing `SA-0340`: ~~**b-3cf039**~~. `migrate`
-derives no `rebuttal` fact for a blocker that met REBUT's early exit, so it
-refuses the ref.
-
-**Placed 2026-11-07**, from reviewing `SA-0338`: ~~**b-c5da95**~~. Four commands
-load a spec without the ref's mutants, so a regate can judge a witness the cell
-set aside.
-
 **Placed 2026-11-06**, from the spec loop's run 54: ~~**b-fe3488**~~, ~~**b-ffb930**~~,
 ~~**b-0add4c**~~, then **b-71f95f**. A stack batch starts an order its budget
 cannot run. The follow-up writer's first draft never parses. The record's
 git calls can prompt and drop git's reason. A cell makes CONNECTs no git
 call explains.
 
-**Placed 2026-10-15**, from the spec loop's run 40: ~~**b-d31930**~~, then
-~~**b-bba47a**~~. A queued spec's citations drift and nothing checks them before
-its batch. The `tests` gate takes a printed warning for every failure.
-
-**Placed 2026-10-16**, from the spec loop's run 42: ~~**b-2da959**~~, then
-~~**b-f73cd0**~~. `cite` passes a drifted range and flags a correct one, and
-`SA-0294` ports it. A batch stops at a candidate it cannot pay for, though a
-later one fits.
-
-**Placed 2026-11-08**, from `SA-0356`'s spec chain: ~~**b-d1c277**~~. The queue's
-stack thresholds assume every earlier candidate ran.
-
-**Placed 2026-11-09**, from the spec chain speed review: ~~**b-c12d39**~~. A
-criterion cannot name the members its claim covers, so no command sees one
-that no witness drives.
-
-**Placed 2026-11-18**, from writing `SA-0415`: ~~**b-c7fd81**~~, by hand once
-`SA-0415` merges. `CONTEXT.md` has no entry for a covered set or a positive case.
-
 **Placed 2026-11-20**, from `SA-0417`'s spec review: **b-0f5493**. Each event's
 terminal line prints before its log redacts it, so the token reaches the
 `launchd` log file.
-
-**Placed 2026-11-08**, from the spec loop's run 55: ~~**b-31e3c8**~~,
-~~**b-cbb6e7**~~, ~~**b-c7858c**~~, ~~**b-879e72**~~, then ~~**b-3df181**~~. REBUT answers
-no concern, so every in-cell concern reached both seats. A finish minted a
-follow-up id `main` already held. `cite` passes a citation whose code moved.
-Three commands take no home lock. An empty rebuttal error reads as no answer.
 
 **Placed 2026-10-17**, from the spec loop's run 43: **b-3a79a0**. The loop's
 driver orders a stack by `depends_on`, not by the stack base a batch built.
@@ -175,29 +110,10 @@ failed state, so its children stay refused. A spec named a module its own
 Redaction misses the files beside `events.jsonl`. The driver and two ADRs
 name the old halts.
 
-**Placed 2026-10-12**, from writing `SA-0290`: ~~**b-f5ceaf**~~, by hand now that
-`SA-0290` merged (#919). `CONTEXT.md` has no entry for a removed name.
-
-**Placed 2026-11-07**, from writing `SA-0350`: ~~**b-7c118b**~~, done by hand in
-the spec's own pull request.
-
-**Placed 2026-11-13**, from writing `SA-0387`: ~~**b-1b5747**~~, by hand in
-the spec loop's run 69 pull request. `CONTEXT.md` has no entry for a declared rename.
-
-**Placed 2026-10-13**, from writing `SA-0291`: ~~**b-cd1566**~~, by hand now that
-`SA-0291` merged (#920). `CONTEXT.md` has no entry for a criterion's subject.
-
 **Placed 2026-10-06**, from ADR 10, in this order toward a night on GCP. The
 sequence crosses tiers, and each item keeps its own.
 First **170**, then **b-2e0b97**, then **108** and ~~**b-ca3bc6**~~. Then
 ~~**b-0569f7**~~, **b-da550a** and last **b-a9ec4b**.
-
-**Placed 2026-10-11**, from reviewing `SA-0282`: ~~**b-e9153f**~~, after b-0569f7.
-A task a `--stack` batch mints never records whether its thread pool was uncapped.
-
-**Placed 2026-10-10**, from writing `SA-0245` and `SA-0258`: ~~**b-52e670**~~. A
-SIGTERM during a silent agent turn waits for the turn to end, because the
-unwind closes a pipe a reader thread holds.
 
 **From the operator visibility plan and the spec loop's runs 5 to 10**, in
 this order: **43**, **66**, ~~**67**~~, **98**, ~~**157**~~, ~~**172**~~, **b-eac388**,
@@ -205,10 +121,6 @@ this order: **43**, **66**, ~~**67**~~, **98**, ~~**157**~~, ~~**172**~~, **b-ea
 **b-281f0a** and **b-7d3810**. Then **160**, which is what
 item 141's close left. The Gate-only cell's suite is in a file because the
 ledger has no owner column that fits it.
-
-**Placed 2026-09-22**: ~~**b-cafacd**~~, filed revising `SA-0126`. It is 170's
-neighbour. A run's status reaches no fact, so a folded ledger loses the cap
-on a cut spec's retries.
 
 **From the spec chain of 2026-09-20** (`SA-0113`): **b-7d3810**. One spec
 measured the chain at 35.7 minutes to draft and 6.2 to review. So a revision
@@ -227,21 +139,12 @@ reproducing every gate by hand. The second is a witness that fails once three
 local branches are pruned. The third opens when item b-b5f379 bumps the cell's
 git.
 
-**Placed 2026-09-23**, from writing `SA-0142`: ~~**b-466005**~~. It is the
-glossary entry for a stack batch, its order and a predecessor, which a cell
-cannot write.
-
 **Placed 2026-09-23**, from asking whether to adopt Pydantic AI: **b-4e0868**.
 The pinned SDK can constrain the extraction turn to a schema. Items 42 and 60
 lost $6.20 to the shapes it rules out. A spike on the host settled the SDK's
 behaviour, and `SA-0141` is its first slice. Then ~~**b-e51967**~~, filed
 writing `SA-0141`. It is the by-hand edit to §5.3 and the glossary, done in
 that spec's pull request.
-
-**Placed 2026-09-25**, from the spec loop's run 16: ~~**b-04a5d9**~~, ~~**b-e0cd57**~~,
-~~**b-bff670**~~, then ~~**b-c375d6**~~. The first is a PR body that calls a new
-advisory failure present at base. The second is a refusal that names ports
-and not processes. The last two are the loop's tools reading stale state.
 
 **Placed 2026-09-26**, from the spec loop's run 18: ~~**b-43061c**~~, then
 **b-fab381**. The first is text in a string literal that no `prose` rule reads.
@@ -258,9 +161,6 @@ its budget.
 `prose` with a false sentence. The last two are the loop's tools. One blocked a
 measured estimate, and the other takes a `drop` per spec to scope a loop.
 
-**Placed 2026-09-28**, after run 20: ~~**b-2e7c4d**~~. The loop's `stack` check
-merges adjacent pairs, and a sibling cut from `main` hid a conflict below it.
-
 **Placed 2026-09-28**, by hand: **b-12ffc3**. `cell_down` deletes the cell's
 session transcript, so a strange PR shows what the agent did but not what it read.
 
@@ -273,15 +173,6 @@ spec's wrong builds listed in prose reach no host run.
 criterion drove was dropped. The
 finishing commit writes through a symlink, unverified, and drops parse
 failures.
-
-**Placed 2026-10-03**, from the spec loop's run 27: ~~**b-970f53**~~, then
-~~**b-c94a2f**~~. The `tests` gate reads an interrupted pytest session as
-`error`. A second `depends_on` entry carries no code into the cell.
-
-**Placed 2026-10-05**, from the spec loop's run 28: ~~**b-8e30bd**~~,
-~~**b-2247dd**~~, then ~~**b-708c8a**~~. A merged draft leaves its task `EXHAUSTED`
-and its dependents refused. The loop driver refuses an `EXHAUSTED` layer.
-REVIEW's re-prompt is written twice.
 
 **Placed 2026-10-06**, at the operator's request: **b-e880ac**. Saffron takes
 the cell token from whoever starts it, so a delegate must hold the credential.
@@ -325,14 +216,6 @@ default value passes REBUT. A spec can prescribe a false line. No gate
 resolves a citation. A stack batch's follow-up guard has no witness. `migrate`
 writes a false package fact for an adopted row.
 
-**Placed 2026-10-12**, from the spec loop's run 36: ~~**b-9efbe2**~~. A child's
-cell deleted its parent's witness setup, and the parent's own wrong version
-then passed it. No gate re-runs a parent's wrong versions.
-
-**Placed 2026-11-16**, from the spec loop's run 75: ~~**b-d9a027**~~. `SA-0402`
-asks a parent's wrong versions in a cell. A review commit is still never asked
-them, and REBUT can withdraw a parent survivor's blocker.
-
 **Placed 2026-10-13**, from the spec loop's run 37: **b-7c8bc4**, then
 **b-a12047**. Fakes kept a reordered function's old signature, so a revert
 passed. PACKAGE leaves a spec's deferred check out of `## Not covered`.
@@ -347,21 +230,14 @@ every cell.
 **Placed 2026-10-23**, from `SA-0312`'s spec review: **b-e39286**. A
 deferred finish exempts the stack base's branch but none on its chain.
 
-**Placed 2026-10-24**, from the spec loop's run 47: ~~**b-a68b24**~~, then
-~~**b-781ea4**~~. The witness gate passes a mutant whose find matches twice. The
-finish's follow-up drafts fail to parse, so it files nothing.
-
 **Placed 2026-10-27**, from writing `SA-0326`: **b-bc8343**, by hand after
 `SA-0326` merges. `CONTEXT.md` names no review commit and no commit review.
 
 **Placed 2026-10-29**, from the spec loop's run 50: **b-298b1c**,
-**b-8826cf**, **b-323c97** and ~~**b-0bd8c9**~~. A spec review's lost findings
+**b-8826cf**, ~~**b-323c97**~~ and ~~**b-0bd8c9**~~. A spec review's lost findings
 skip a layer. A rebuttal's suppression ends a green task. An adopted task
 gets no end review. A stack batch refuses a spec that meets an earlier
 batch's open layer.
-
-**Placed 2026-10-30**, from `SA-0330`'s first review: ~~**b-e9dd4c**~~. A
-`REVIEW_INCOMPLETE` parent whose push was refused still admits its child.
 
 **Placed 2026-11-02**, from the spec loop's run 52: **b-b664d1**, then
 **b-4a9207**. A citation that names one construct beside another's lines
@@ -389,8 +265,10 @@ and tokenless session logs still print the cell's token.
 **Closed since they were placed here.** Each id stays so its record's tier still resolves.
 - ~~**36**~~, ~~**37**~~, ~~**38**~~, ~~**48**~~, ~~**52**~~, ~~**60**~~, ~~**72**~~, ~~**103**~~, ~~**104**~~, ~~**113**~~, ~~**135**~~, ~~**138**~~, ~~**142**~~, ~~**144**~~, ~~**146**~~, ~~**147**~~, ~~**148**~~, ~~**149**~~, ~~**152**~~, ~~**153**~~.
 - ~~**158**~~, ~~**159**~~, ~~**168**~~, ~~**169**~~, ~~**171**~~, ~~**177**~~, ~~**b-122686**~~, ~~**b-606ea3**~~, ~~**b-60732c**~~, ~~**b-7c41e0**~~, ~~**b-afec7c**~~, ~~**b-b5f379**~~, ~~**b-f2a9d1**~~, ~~**b-044ae7**~~, ~~**b-08a36a**~~, ~~**b-17fb8b**~~, ~~**b-1c7019**~~, ~~**b-3e0dbe**~~, ~~**b-461729**~~, ~~**b-5d5b56**~~.
-- ~~**b-5e443c**~~, ~~**b-65e7e2**~~, ~~**b-6f7f8d**~~, ~~**b-865399**~~, ~~**b-a70ec1**~~, ~~**b-ce93aa**~~, ~~**b-0c1d69**~~, ~~**b-250dc7**~~, ~~**b-25766a**~~, ~~**b-602d00**~~, ~~**b-e8027b**~~, ~~**b-343c21**~~, ~~**b-db95e1**~~, ~~**b-1adb50**~~, ~~**b-6377cf**~~, ~~**b-cde96b**~~, ~~**b-dce9a4**~~, ~~**b-b0cd68**~~, ~~**b-38d45f**~~, ~~**b-47659f**~~.
-- ~~**b-66d1c3**~~, ~~**b-78ccc7**~~, ~~**b-00534f**~~, ~~**b-209696**~~, ~~**b-23a149**~~, ~~**b-60ff2e**~~, ~~**b-0a08bf**~~, ~~**b-4e1b6d**~~, ~~**b-a1d649**~~, ~~**b-e0e1cf**~~, ~~**b-5df2a7**~~, ~~**b-cf50dc**~~, ~~**b-998bb7**~~, ~~**b-009d51**~~, **b-1b05be**, ~~**b-b9365d**~~, ~~**b-8e12c1**~~, ~~**b-549012**~~, ~~**b-e0044f**~~.
+- ~~**b-5e443c**~~, ~~**b-65e7e2**~~, ~~**b-6f7f8d**~~, ~~**b-865399**~~, ~~**b-a70ec1**~~, ~~**b-ce93aa**~~, ~~**b-0c1d69**~~, ~~**b-250dc7**~~, ~~**b-25766a**~~, ~~**b-602d00**~~, ~~**b-e8027b**~~, ~~**b-343c21**~~, ~~**b-cafacd**~~, ~~**b-db95e1**~~, ~~**b-1adb50**~~, ~~**b-466005**~~, ~~**b-6377cf**~~, ~~**b-cde96b**~~, ~~**b-dce9a4**~~, ~~**b-04a5d9**~~.
+- ~~**b-b0cd68**~~, ~~**b-bff670**~~, ~~**b-c375d6**~~, ~~**b-e0cd57**~~, ~~**b-2e7c4d**~~, ~~**b-38d45f**~~, ~~**b-47659f**~~, ~~**b-66d1c3**~~, ~~**b-78ccc7**~~, ~~**b-00534f**~~, ~~**b-209696**~~, ~~**b-23a149**~~, ~~**b-60ff2e**~~, ~~**b-970f53**~~, ~~**b-c94a2f**~~, ~~**b-0a08bf**~~, ~~**b-2247dd**~~, ~~**b-4e1b6d**~~, ~~**b-708c8a**~~, ~~**b-8e30bd**~~.
+- ~~**b-a1d649**~~, ~~**b-e0e1cf**~~, ~~**b-5df2a7**~~, ~~**b-cf50dc**~~, ~~**b-52e670**~~, ~~**b-e9153f**~~, ~~**b-9efbe2**~~, ~~**b-f5ceaf**~~, ~~**b-cd1566**~~, ~~**b-bba47a**~~, ~~**b-d31930**~~, ~~**b-2da959**~~, ~~**b-f73cd0**~~, ~~**b-998bb7**~~, ~~**b-781ea4**~~, ~~**b-a68b24**~~, ~~**b-009d51**~~, ~~**b-1b05be**~~, ~~**b-b9365d**~~, ~~**b-8e12c1**~~.
+- ~~**b-549012**~~, ~~**b-719346**~~, ~~**b-e0044f**~~, ~~**b-e9dd4c**~~, ~~**b-3cf039**~~, ~~**b-7c118b**~~, ~~**b-c5da95**~~, ~~**b-31e3c8**~~, ~~**b-3df181**~~, ~~**b-879e72**~~, ~~**b-c7858c**~~, ~~**b-cbb6e7**~~, ~~**b-d1c277**~~, ~~**b-c12d39**~~, ~~**b-16c819**~~, ~~**b-96508a**~~, ~~**b-1b5747**~~, ~~**b-d9a027**~~, ~~**b-c7fd81**~~.
 - Closed as wontfix: **b-8d5e55**, **b-593d50**.
 
 ### Tier 3 — real, not urgent
@@ -418,10 +296,6 @@ no step can be cut on evidence.
 `saffron draft` takes no decisions, parent or pre-flight, so the chain runs by
 hand.
 
-**Moved 2026-11-07 from tier 2**, on the operator's ruling: ~~**b-dc5212**~~ and
-~~**b-4589be**~~. Each bites only on the driver's attended path, which is now the
-fallback.
-
 **Placed 2026-11-06**, from the spec loop's run 54: **b-25c0f5**, then
 **b-980fbd**. Test setup for the routed ledger is restated across a dozen
 files. The record append event's sink skips redaction, and `watch` names the
@@ -430,22 +304,12 @@ wrong first line.
 **Placed 2026-10-16**, from the spec loop's run 42: **b-60317d**.
 `reconcile`'s `head_moved` comment says nothing judges a moved head.
 
-**Placed 2026-10-17**, from the spec loop's run 43: ~~**b-74a122**~~.
-`CONTEXT.md`'s Refusal entry lacks the citation cause.
-
-**Placed 2026-11-02**, from the spec loop's run 52: ~~**b-e4cb58**~~. `CONTEXT.md`
-defines a Refusal as before any cell starts, and `ready_task` refuses after one.
-
 **Placed 2026-10-19**, from the spec loop's run 44: **b-b8f0d9**, **b-e9cd43**,
 **b-524b1a**, **b-62e00a**, **b-b33854**, **b-d149c6**, ~~**b-0094bd**~~, then
 ~~**b-8ef729**~~. Each is a gap a seat found and the stack left alone.
 
 **Placed 2026-10-20**, from the spec loop's run 45: **b-5288d7**. Three
 modules each split a `consumes` or `removes` entry at its colon.
-
-**Placed 2026-10-20**, from the spec chain for `SA-0300` to `SA-0306`:
-~~**b-a64578**~~, ~~**b-206d2c**~~. The view's spend after a resume, and a runaway
-row setting a budget floor.
 
 **Placed 2026-10-23**, from the spec loop's run 46: **b-30cbb8**,
 **b-d038df**, **b-25634b** and **b-19dbc9**. Each is a gap a
@@ -470,9 +334,6 @@ Each is a gap a seat, a finish or the run found and the stack left alone.
 **b-1b8b1e**, **b-92c92a**, **b-2a03c2**, ~~**b-d2afe3**~~, ~~**b-1ff5a3**~~ and
 **b-3a0789**. Each is a gap a seat, a finish or the run found and the stack
 left alone.
-
-**Placed 2026-10-30**, from #996's Standards seat and finish 61: ~~**b-25b7ba**~~.
-Two renderers spell a new failure, and they disagree on line 0.
 
 **The 2026-09-04 sort's tier 3, plus what spec loop runs up to 32 added.**
 Each line keeps the order it was filed in.
@@ -672,11 +533,11 @@ risk — not, as an earlier draft of this note said, that `.gitignore` in
 `integrity.gate_config` already routes the edit to a person. That is the
 *tracked* half only: a `.gitignore` naming itself reaches no diff at all.
 
-**What this ordering costs, recounted in grooming on 2026-11-07.** Tier 1
-holds 15 open items, tier 2 holds 96 and tier 3 holds 197. So tier 3 is two
-thirds of the backlog. That is the deliberate consequence of ranking by the
-milestone rather than by what is nearest to hand. Of the 308 open items, 42
-are by hand, since a cell cannot reach their files.
+**What this ordering costs, recounted on 2026-11-22.** Tier 1 holds 7 open
+items, tier 2 holds 62 and tier 3 holds 147. So tier 3 holds 68% of the
+backlog. That is the deliberate consequence of ranking by the milestone rather
+than by what is nearest to hand. 23 of the 216 open items are outside a cell,
+since a cell cannot reach their files.
 
 **Placed 2026-11-04**, from the spec loop's run 53: **b-8c6696**, ~~**b-a19ffd**~~
 and **b-9bb8b7**. A spec missed the fixtures that pin the plan's sha. §5.3's
@@ -684,9 +545,8 @@ and **b-9bb8b7**. A spec missed the fixtures that pin the plan's sha. §5.3's
 
 **Closed since they were placed here.** Each id stays so its record's tier still resolves.
 - ~~**14**~~, ~~**19**~~, ~~**22**~~, ~~**23**~~, ~~**56**~~, ~~**62**~~, ~~**64**~~, ~~**65**~~, ~~**68**~~, ~~**86**~~, ~~**87**~~, ~~**91**~~, ~~**99**~~, ~~**105**~~, ~~**106**~~, ~~**107**~~, ~~**110**~~, ~~**111**~~, ~~**123**~~, ~~**124**~~.
-- ~~**125**~~, ~~**127**~~, ~~**131**~~, ~~**132**~~, ~~**133**~~, ~~**139**~~, ~~**175**~~, ~~**176**~~, ~~**b-a1bdba**~~, ~~**b-e0bbbf**~~, ~~**b-e403c1**~~, ~~**b-d1d634**~~, ~~**b-ea1d13**~~, ~~**b-5fa523**~~, ~~**b-76953a**~~, ~~**b-0adc85**~~, ~~**b-111c56**~~, ~~**b-26315b**~~, ~~**b-2dea1c**~~, ~~**b-37924b**~~.
-- ~~**b-542beb**~~, ~~**b-ac97c0**~~, ~~**b-50b566**~~, ~~**b-6a692d**~~, ~~**b-f4eb52**~~, ~~**b-589cf6**~~, ~~**b-df59f8**~~, ~~**b-e88930**~~, ~~**b-ca3bc6**~~, ~~**b-5aa016**~~, ~~**b-f71105**~~, ~~**b-1c4a14**~~, ~~**b-d0baf7**~~.
+- ~~**125**~~, ~~**127**~~, ~~**131**~~, ~~**132**~~, ~~**133**~~, ~~**139**~~, ~~**175**~~, ~~**176**~~, ~~**b-a1bdba**~~, ~~**b-4589be**~~, ~~**b-e0bbbf**~~, ~~**b-e403c1**~~, ~~**b-d1d634**~~, ~~**b-ea1d13**~~, ~~**b-5fa523**~~, ~~**b-76953a**~~, ~~**b-0adc85**~~, ~~**b-111c56**~~, ~~**b-26315b**~~, ~~**b-2dea1c**~~.
+- ~~**b-37924b**~~, ~~**b-542beb**~~, ~~**b-ac97c0**~~, ~~**b-50b566**~~, ~~**b-6a692d**~~, ~~**b-f4eb52**~~, ~~**b-589cf6**~~, ~~**b-df59f8**~~, ~~**b-e88930**~~, ~~**b-ca3bc6**~~, ~~**b-dc5212**~~, ~~**b-5aa016**~~, ~~**b-f71105**~~, ~~**b-1c4a14**~~, ~~**b-74a122**~~, ~~**b-206d2c**~~, ~~**b-a64578**~~, ~~**b-d0baf7**~~, ~~**b-25b7ba**~~, ~~**b-e4cb58**~~.
 - Closed as wontfix: **9**, **10**, **b-1e5572**, **b-013138**, **b-830dc7**, **b-6ac0cd**, **b-7eb6d3**, **b-1fc93b**, **b-8971e6**, **b-8693ef**.
 
 ---
-
