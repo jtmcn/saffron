@@ -4,7 +4,7 @@ title: "An event's terminal line prints before its log redacts it, so the cell's
 status: open
 tier: 2
 filed: 2026-11-20
-specs: []
+specs: [SA-0421]
 prs: []
 commits: []
 cites: [§5.7]
