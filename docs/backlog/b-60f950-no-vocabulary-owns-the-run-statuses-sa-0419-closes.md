@@ -18,7 +18,7 @@ Found 2026-11-20, writing `SA-0419` for b-7431a2.
 
 `SA-0419` gives `runs.status` a closed set. A row is minted `RUNNING`, and
 `finish_run` writes `COMPLETE` or `ABORTED` (`saffron/ledger.py:1364-1366`,
-`saffron/cell/session.py:4150`). None of the three sits in `CONTEXT.md` or
+`saffron/cell/session.py:4163`). None of the three sits in `CONTEXT.md` or
 in `ontology/factory.ttl`. The Standards seat on #811 (`SA-0245`) found the
 same gap for `ABORTED` on 2026-10-11.
 
