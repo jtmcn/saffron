@@ -1384,8 +1384,9 @@ class Ledger:
     def finish_run(self, run_id: int, status: str) -> None:
         """The row's status is written whatever its tasks say, and whether
         it holds one task, two, or none. The append to each task it holds
-        comes after that commit (item b-cafacd). A status outside
-        `RUN_FINISHED_STATUSES` is refused before either write (b-7431a2)."""
+        comes after that commit, so a refused append raises with the status
+        already written (item b-cafacd). A status outside
+        `RUN_FINISHED_STATUSES` is refused before either write (item b-7431a2)."""
         if status not in RUN_FINISHED_STATUSES:
             raise ValueError(
                 f"run status {status!r} is not one of {RUN_FINISHED_STATUSES}"

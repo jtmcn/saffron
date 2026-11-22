@@ -1381,7 +1381,7 @@ def test_a_run_status_outside_the_closed_set_is_refused_before_anything_is_writt
     assert key is not None
     run_without_task = fresh.create_run(repo_id, base_sha="b" * 40)
 
-    # An admitted status is written as handed, never folded to one value
+    # An admitted status is written as handed, never collapsed to one value
     # regardless of which admitted status the caller passed.
     aborted_run = fresh.create_run(repo_id, base_sha="c" * 40)
     aborted_task = fresh.create_task(
@@ -1423,6 +1423,18 @@ def test_a_run_status_outside_the_closed_set_is_refused_before_anything_is_writt
             assert row["status"] == "RUNNING"
             assert row["ended_at"] is None
     assert [f.kind for f in record.read(key)] == ["task_created", "run_created"]
+
+    # The refused runs still finish, each with an admitted status.
+    fresh.finish_run(run_with_task, "ABORTED")
+    fresh.finish_run(run_without_task, "COMPLETE")
+    for run_id, want in ((run_with_task, "ABORTED"), (run_without_task, "COMPLETE")):
+        row = fresh._db.execute(
+            "SELECT status, ended_at FROM runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        assert row["status"] == want
+        assert row["ended_at"] is not None
+    finished = [f for f in record.read(key) if f.kind == "run_finished"]
+    assert [f.payload["status"] for f in finished] == ["ABORTED"]
     fresh.close()
 
     # The shape an older ledger carries: `status` present, with no CHECK.
@@ -1458,6 +1470,12 @@ def test_a_run_status_outside_the_closed_set_is_refused_before_anything_is_writt
         ).fetchone()
         assert row["status"] == kept
         assert row["ended_at"] is None
+    old.finish_run(1, "COMPLETE")
+    row = old._db.execute(
+        "SELECT status, ended_at FROM runs WHERE run_id = 1"
+    ).fetchone()
+    assert row["status"] == "COMPLETE"
+    assert row["ended_at"] is not None
     old.close()
 
 

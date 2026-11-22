@@ -643,6 +643,15 @@ def test_a_run_finished_fact_outside_the_closed_set_aborts_its_fold(tmp_path):
         ]
         into.close()
 
+        old_into_path = tmp_path / f"old-into-admitted-{admitted}.db"
+        _old_runs_schema(old_into_path)
+        old_into = Ledger(old_into_path)
+        fold(admitted_record, old_into)
+        assert _table_rows(old_into_path, run_status_sql, admitted_key) == [
+            {"status": admitted}
+        ]
+        old_into.close()
+
     for i, bad in enumerate(_BAD_RUN_STATUSES):
         record = MemoryRecord()
         writer = Ledger(tmp_path / f"writer-{i}.db", record=record)
