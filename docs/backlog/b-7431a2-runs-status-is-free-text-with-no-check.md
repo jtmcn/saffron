@@ -1,11 +1,12 @@
 ---
 id: b-7431a2
 title: '`runs.status` is free text with no CHECK, the shape #338 fixed one column over'
-status: open
+status: done
 tier: 3
 filed: 2026-09-18
 specs: [SA-0419]
-prs: []
+prs: [1290]
+closed: 2026-11-22
 commits: []
 cites: [§4.1]
 related: [164, b-60f950]
@@ -39,3 +40,6 @@ and `finish_run`, in the shape `runs.preflight` uses. A witness shows
   neither `CONTEXT.md` nor `ontology/factory.ttl`. No vocabulary owns
   the run statuses either. The set declared here also wants a glossary
   entry and an ontology class.
+- 2026-11-22: done in the spec loop's run 82. `SA-0419` (#1290) makes
+  `runs.status` a closed set. Its cell halted at `REBUTTAL_UNJUDGED`, and the
+  delegate took the branch by hand.

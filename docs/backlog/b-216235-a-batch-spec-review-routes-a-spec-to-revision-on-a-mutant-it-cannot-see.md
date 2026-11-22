@@ -36,3 +36,5 @@ revise.
 
 - 2026-11-21: filed from the spec loop's run 82. `SA-0419`'s second batch
   ran with room for a revision.
+- 2026-11-22: batch 102 ran `SA-0419` at `--budget 100`. Its spec review
+  routed `run` that time.
