@@ -1,0 +1,5 @@
+tests/test_package.py::test_pushed_unpackaged_work_carries_its_branchs_diff_stat_against_its_tree_base:
+  file: saffron/phases/package.py
+  find: tree_base = patch_meta.get("tree_base", patch_meta["base_sha"])
+  replace: tree_base = patch_meta["base_sha"]
+  case: a stat read from base_sha rather than tree_base
