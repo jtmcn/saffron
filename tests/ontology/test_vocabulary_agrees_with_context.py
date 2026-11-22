@@ -33,6 +33,7 @@ CLOSED_SETS = {
     "Gate role": "GateRole",
     "Core gates": "CoreGate",
     "Preflight outcome": "PreflightOutcome",
+    "Run status": "RunStatus",
     "Event kind": "EventKind",
     "Fact kind": "FactKind",
 }

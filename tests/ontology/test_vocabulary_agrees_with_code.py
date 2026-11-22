@@ -32,7 +32,12 @@ from saffron.agents.findings import Severity
 from saffron.batch import StopReason
 from saffron.events import Event
 from saffron.intake import SpecType
-from saffron.ledger import RUN_PREFLIGHT_OUTCOMES, SCHEMA, TaskState
+from saffron.ledger import (
+    RUN_FINISHED_STATUSES,
+    RUN_PREFLIGHT_OUTCOMES,
+    SCHEMA,
+    TaskState,
+)
 from saffron.reconcile import IN_FLIGHT_STATES
 from saffron.record.contract import KINDS
 from saffron.repos.policy import CORE_GATE_NAMES
@@ -163,6 +168,14 @@ def test_the_preflight_outcomes_the_ledger_stores_are_the_ones_the_vocabulary_de
     assert _declared("PreflightOutcome") == set(RUN_PREFLIGHT_OUTCOMES), (
         "factory:PreflightOutcome and saffron/ledger.py's RUN_PREFLIGHT_OUTCOMES "
         "disagree. The generator cannot reach Python, so this is a hand edit."
+    )
+
+
+def test_the_run_statuses_the_ledger_stores_are_the_ones_the_vocabulary_declares():
+    """b-60f950. The `CHECK` on `runs.status` adds `RUNNING` to this tuple."""
+    assert _declared("RunStatus") == {*RUN_FINISHED_STATUSES, "RUNNING"}, (
+        "factory:RunStatus and saffron/ledger.py's RUN_FINISHED_STATUSES plus "
+        "RUNNING disagree. The generator cannot reach Python, so this is a hand edit."
     )
 
 

@@ -279,9 +279,6 @@ ends a task unjudged on one API error, with no retry.
 
 ### Tier 3 — real, not urgent
 
-**Placed 2026-11-20**, with `SA-0419`: **b-60f950**. No vocabulary owns the
-run statuses `SA-0419` makes a closed set.
-
 **Placed 2026-11-20**, with `SA-0418`: **b-d0a813**. The vocabulary has no
 word for an attempt a cell opened, and `SA-0418` dates a task by one.
 
@@ -540,9 +537,9 @@ risk — not, as an earlier draft of this note said, that `.gitignore` in
 *tracked* half only: a `.gitignore` naming itself reaches no diff at all.
 
 **What this ordering costs, recounted on 2026-11-22.** Tier 1 holds 7 open
-items, tier 2 holds 62 and tier 3 holds 147. So tier 3 holds 68% of the
+items, tier 2 holds 64 and tier 3 holds 145. So tier 3 holds 67% of the
 backlog. That is the deliberate consequence of ranking by the milestone rather
-than by what is nearest to hand. 23 of the 216 open items are outside a cell,
+than by what is nearest to hand. 22 of the 216 open items are outside a cell,
 since a cell cannot reach their files.
 
 **Placed 2026-11-04**, from the spec loop's run 53: **b-8c6696**, ~~**b-a19ffd**~~
@@ -553,6 +550,7 @@ and **b-9bb8b7**. A spec missed the fixtures that pin the plan's sha. §5.3's
 - ~~**14**~~, ~~**19**~~, ~~**22**~~, ~~**23**~~, ~~**56**~~, ~~**62**~~, ~~**64**~~, ~~**65**~~, ~~**68**~~, ~~**86**~~, ~~**87**~~, ~~**91**~~, ~~**99**~~, ~~**105**~~, ~~**106**~~, ~~**107**~~, ~~**110**~~, ~~**111**~~, ~~**123**~~, ~~**124**~~.
 - ~~**125**~~, ~~**127**~~, ~~**131**~~, ~~**132**~~, ~~**133**~~, ~~**139**~~, ~~**175**~~, ~~**176**~~, ~~**b-a1bdba**~~, ~~**b-4589be**~~, ~~**b-e0bbbf**~~, ~~**b-e403c1**~~, ~~**b-d1d634**~~, ~~**b-ea1d13**~~, ~~**b-5fa523**~~, ~~**b-76953a**~~, ~~**b-0adc85**~~, ~~**b-111c56**~~, ~~**b-26315b**~~, ~~**b-2dea1c**~~.
 - ~~**b-37924b**~~, ~~**b-542beb**~~, ~~**b-ac97c0**~~, ~~**b-50b566**~~, ~~**b-6a692d**~~, ~~**b-f4eb52**~~, ~~**b-589cf6**~~, ~~**b-df59f8**~~, ~~**b-e88930**~~, ~~**b-ca3bc6**~~, ~~**b-dc5212**~~, ~~**b-5aa016**~~, ~~**b-f71105**~~, ~~**b-1c4a14**~~, ~~**b-74a122**~~, ~~**b-206d2c**~~, ~~**b-a64578**~~, ~~**b-d0baf7**~~, ~~**b-25b7ba**~~, ~~**b-e4cb58**~~.
+- ~~**b-60f950**~~.
 - Closed as wontfix: **9**, **10**, **b-1e5572**, **b-013138**, **b-830dc7**, **b-6ac0cd**, **b-7eb6d3**, **b-1fc93b**, **b-8971e6**, **b-8693ef**.
 
 ---

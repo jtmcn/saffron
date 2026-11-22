@@ -188,6 +188,11 @@ factory:INCOMPLETE a factory:BatchStopReason .
 factory:PreflightOutcome a owl:Class ; rdfs:label "preflight outcome" .
 factory:PASSED a factory:PreflightOutcome . factory:FAILED a factory:PreflightOutcome .
 
+## What `runs.status` stores: minted RUNNING, finished COMPLETE or ABORTED (SA-0419).
+factory:RunStatus a owl:Class ; rdfs:label "run status" .
+factory:RUNNING a factory:RunStatus . factory:COMPLETE a factory:RunStatus .
+factory:ABORTED a factory:RunStatus .
+
 ## The kinds `events.jsonl` tags a line with. Suffixed because `Attempt` and
 ## `GateResult` already name classes here, and an event is not the thing it reports.
 factory:EventKind a owl:Class ; rdfs:label "event kind" .

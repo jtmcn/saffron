@@ -409,6 +409,7 @@ decisions    (decision_id, task_id, actor, action, reason, created_at)
 ```
 
 `runs.preflight` holds a preflight outcome, `PASSED` or `FAILED` (CONTEXT.md §2).
+`runs.status` holds a run status, `RUNNING`, `COMPLETE` or `ABORTED`.
 What a NULL there means is open (backlog item b-eac388).
 
 `repos.origin` is the **real remote**: the URL a PR is opened against.

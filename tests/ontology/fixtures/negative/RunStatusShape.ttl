@@ -1,0 +1,4 @@
+@prefix factory: <urn:software-factory:ns#> .
+
+# The CHECK on runs.status admits three statuses. A batch stop reason is not one.
+factory:DRAINED a factory:RunStatus .

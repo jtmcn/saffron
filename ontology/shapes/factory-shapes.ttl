@@ -130,6 +130,11 @@ factory:PreflightOutcomeShape a sh:NodeShape ;
     sh:targetClass factory:PreflightOutcome ;
     sh:in ( factory:PASSED factory:FAILED ) .
 
+# `runs.status` has a CHECK too (SA-0419). This closes it where CONTEXT.md reads it.
+factory:RunStatusShape a sh:NodeShape ;
+    sh:targetClass factory:RunStatus ;
+    sh:in ( factory:RUNNING factory:COMPLETE factory:ABORTED ) .
+
 # Neither set is a §4.1 column. Each is closed in code, and this is where the glossary's copy is checked.
 factory:EventKindShape a sh:NodeShape ;
     sh:targetClass factory:EventKind ;
