@@ -57,7 +57,9 @@ acceptance:
       ledger's `pushed_sha`, and both already hold the commit it was handed.
       The push returns pushed, with `None` for both counts, and both the
       remote branch and the ledger's `pushed_sha` hold its `pushed_sha`. A
-      second push, with the real stat, carries the fixture's +2/−1.
+      second push has `diff_stat` raise `OSError`. It returns pushed, with
+      `None` for both counts, and emits a line carrying that error's text. A
+      third push, with the real stat, carries the fixture's +2/−1.
     witness: tests/test_package.py::test_pushed_unpackaged_work_carries_its_branchs_diff_stat_against_its_tree_base
     positive_case: >-
       The spy records exactly one call, with `tree_base` and the result's
@@ -70,6 +72,7 @@ acceptance:
       - "The stat is read inside the push's `try`, before `push_with_lease`, so a failed stat pushes nothing."
       - "A failed stat raises out of `push_unpackaged_work`."
       - "A failed stat is swallowed with nothing emitted."
+      - "A failed stat catches `GitError` alone."
       - "The stat is read before `ledger.record_push`, and a failed stat returns before the push is recorded."
       - "The stat is read in a guard of its own before `push_with_lease`."
       - "The stat is read in a guard of its own after `push_with_lease` and before `ledger.record_push`."
@@ -101,8 +104,10 @@ acceptance:
             driven_by: "The stat is read inside the push's `try`, before `push_with_lease`, so a failed stat pushes nothing."
           - member: the push recorded in the ledger
             driven_by: "The stat is read before `ledger.record_push`, and a failed stat returns before the push is recorded."
-          - member: no raise
+          - member: no raise, for a `GitError`
             driven_by: "A failed stat raises out of `push_unpackaged_work`."
+          - member: no raise, for an `OSError`
+            driven_by: "A failed stat catches `GitError` alone."
           - member: a line through `emit`
             driven_by: "A failed stat is swallowed with nothing emitted."
   - claim: >-
@@ -146,13 +151,14 @@ acceptance:
       line names the spec id, the line's state and the error's text. It
       comes before the task's status line, which still prints. A
       `KeyboardInterrupt` still leaves `run_task` from either line. The
-      witness drives eight failures. Four hit a `NOT_IMPLEMENTED` task: an
-      `OSError`, a `ValueError` and a `CellRuntimeError` from
+      witness drives eleven failures, with `_Unlisted` a test-local
+      `Exception` subclass. Five hit a `NOT_IMPLEMENTED` task: an `OSError`,
+      a `ValueError`, a `CellRuntimeError` and an `_Unlisted` from
       `append_queue_line`, and an `sqlite3.OperationalError` from
-      `accept_rate_header`. Three hit an `EXHAUSTED` task whose PACKAGE
-      refused: an `OSError` from the first, and an
-      `sqlite3.OperationalError` and a `RuntimeError` from the second. One
-      hits a `GATE_ERROR` task with an `OSError`. Each returns its outcome at
+      `accept_rate_header`. Five hit an `EXHAUSTED` task whose PACKAGE
+      refused: an `OSError`, a `ValueError` and an `_Unlisted` from the
+      first, and an `sqlite3.OperationalError` and a `RuntimeError` from the
+      second. One hits a `GATE_ERROR` task with an `OSError`. Each returns its outcome at
       its own state, which `CELL_EXIT` maps to 1, and to 2 for `GATE_ERROR`.
       Then a `KeyboardInterrupt` subclass from `append_queue_line` leaves
       `run_task`, once on each line.
@@ -173,6 +179,8 @@ acceptance:
       - "The guard catches `(OSError, ValueError, sqlite3.Error)`."
       - "The `EXHAUSTED` line alone catches `BaseException`."
       - "The printed line names the spec id and the error, but not the state."
+      - "The guard catches `(OSError, ValueError, sqlite3.Error, RuntimeError)`."
+      - "The `EXHAUSTED` line catches `OSError`, `sqlite3.Error` and `RuntimeError` alone."
     covers:
       - set: the queue lines `run_task` writes at a task's end
         members:
@@ -192,8 +200,12 @@ acceptance:
             driven_by: "Neither write is guarded, as at your base."
           - member: "`ValueError` and `sqlite3.Error`"
             driven_by: "The guard catches `OSError` alone."
-          - member: "a `RuntimeError`, so any `Exception`"
+          - member: a `RuntimeError`
             driven_by: "The guard catches `(OSError, ValueError, sqlite3.Error)`."
+          - member: "an `_Unlisted`, so any `Exception`"
+            driven_by: "The guard catches `(OSError, ValueError, sqlite3.Error, RuntimeError)`."
+          - member: a `ValueError` on the `EXHAUSTED` line
+            driven_by: "The `EXHAUSTED` line catches `OSError`, `sqlite3.Error` and `RuntimeError` alone."
           - member: "`KeyboardInterrupt` on the line for a task PACKAGE never ran, which still leaves"
             driven_by: "The guard catches `BaseException`."
           - member: "`KeyboardInterrupt` on the `EXHAUSTED` line, which still leaves"
@@ -212,19 +224,23 @@ acceptance:
       ledger write before it stands. The line names the result's state and
       the error's text. On a pull request PACKAGE opened and on a credential
       refusal, it reaches `emit`. A `KeyboardInterrupt` still leaves
-      `package()`. The witness calls `package()` on the `packageable` fixture
-      five times, each with one failing fake. First `append_queue_line`
+      `package()`. A raise out of `set_task_package` still leaves `package()`.
+      The witness calls `package()` on the `packageable` fixture seven times,
+      each with one failing fake, and `_Unlisted` is a test-local `Exception`
+      subclass. First `append_queue_line`
       raises `OSError` and `gh` opens a pull request. `package()` returns
       `READY_FOR_REVIEW`, the ledger holds that state and the pull request's
       URL, and an emitted line carries the state and the error's text. Then
-      a credential in the patch reaches `_finish` as `MERGE_FAILED` three
+      a credential in the patch reaches `_finish` as `MERGE_FAILED` four
       times, with the ledger moved back to `READY_FOR_REVIEW` before each.
       They raise a `ValueError` from `append_queue_line`, an
       `sqlite3.OperationalError` from `accept_rate_header`, and a
-      `CellRuntimeError` from `append_queue_line`. Each returns
-      `MERGE_FAILED`, the ledger holds `MERGE_FAILED`, and an emitted line
-      carries the state and the error's text. Last, a `KeyboardInterrupt`
-      subclass from `append_queue_line` leaves `package()`.
+      `CellRuntimeError` and an `_Unlisted` from `append_queue_line`. Each
+      returns `MERGE_FAILED`, the ledger holds `MERGE_FAILED`, and an emitted
+      line carries the state and the error's text. Then a
+      `KeyboardInterrupt` subclass from `append_queue_line` leaves
+      `package()`. Last, `set_task_package` raises an `_Unlisted`, and
+      `package()` raises that same object.
     witness: tests/test_package.py::test_a_failed_queue_row_in_finish_is_said_and_its_result_still_returns
     positive_case: >-
       Each failing fake records that it was reached, in order, so the witness
@@ -240,6 +256,8 @@ acceptance:
       - "One guard wraps `set_task_package` and the header, so a failed header skips the ledger write."
       - "`_finish` catches `BaseException`."
       - "`_finish`'s line names the error, but not the state."
+      - "`_finish` catches `(OSError, ValueError, sqlite3.Error, CellRuntimeError)`."
+      - "A `_finish` guard whose try also wraps `set_task_package`, with the ledger write still before the header and the append."
     covers:
       - set: the paths into `_finish`
         members:
@@ -259,8 +277,10 @@ acceptance:
             driven_by: "`_finish` guards nothing, as at your base."
           - member: "`ValueError` and `sqlite3.Error`"
             driven_by: "`_finish` catches `OSError` alone."
-          - member: "a `CellRuntimeError`, so any `Exception`"
+          - member: a `CellRuntimeError`
             driven_by: "`_finish` catches `(OSError, ValueError, sqlite3.Error)`."
+          - member: "an `_Unlisted`, so any `Exception`"
+            driven_by: "`_finish` catches `(OSError, ValueError, sqlite3.Error, CellRuntimeError)`."
           - member: "`KeyboardInterrupt`, which still leaves"
             driven_by: "`_finish` catches `BaseException`."
       - set: what a failed write leaves
@@ -269,6 +289,8 @@ acceptance:
             driven_by: "One guard wraps `set_task_package` and the header, so a failed header skips the ledger write."
           - member: the result's state in the line
             driven_by: "`_finish`'s line names the error, but not the state."
+          - member: a raise out of `set_task_package`, which still leaves
+            driven_by: "A `_finish` guard whose try also wraps `set_task_package`, with the ledger write still before the header and the append."
       - set: how a failed write is said
         members:
           - member: through `emit`
@@ -354,7 +376,8 @@ write turns a failed task into an infrastructure exit. Make these changes.
 4. **`_finish` guards its write.** Add a keyword-only `say` parameter,
    taking one string. Catch `Exception` around the write, with
    `accept_rate_header` inside the guard, and hand `say` a line naming the
-   state and the error. Return the result. Pass `say=_emit_package` at
+   state and the error. Keep `set_task_package` outside the guard, so a
+   raise out of the ledger write still leaves. Return the result. Pass `say=_emit_package` at
    every `_finish` call in `package()`. Add one sentence to `_finish`'s
    docstring saying a failed write is handed to `say`.
 5. **The tests that call `_finish` or assert the raise.** Pass `say` at the
@@ -381,8 +404,9 @@ write turns a failed task into an infrastructure exit. Make these changes.
   The comment at `saffron/task.py:1072-1073` already names the replacement.
 - **One hand edit, landed in this spec's pull request.** `DESIGN.md` is
   forbidden here. In §6's paragraph on what the queue's rows read, two
-  sentences change. "PACKAGE appends a `QueueLine` per task to a store in
-  the batch tree, and the page renders from it." becomes the text below.
+  sentences changed, and this spec's pull request amended each. The first
+  said PACKAGE appends a `QueueLine` per task. It was amended to the text
+  below.
 
   > At a task's end, two writers append its `QueueLine` to a store in the
   > batch tree, and the page renders from it. PACKAGE appends one for every
@@ -390,8 +414,8 @@ write turns a failed task into an infrastructure exit. Make these changes.
   > PACKAGE, and for an `EXHAUSTED` task whose PACKAGE opened no pull
   > request (`SA-0100`, `SA-0204`).
 
-  The paragraph's sentence on `SA-0124` and the mock's stat becomes the
-  text below.
+  The paragraph's sentence on `SA-0124` and the mock's stat was amended in
+  this spec's pull request to the text below.
 
   > Since `SA-0124` PACKAGE's diff stat, the one this section's mock shows
   > (`+180/−22`), also lands in `tasks.added` and `tasks.removed`. A line
@@ -434,7 +458,8 @@ witness here drives them. The claim names only the two it drives.
   refusal, move the task back with
   `packageable.ledger.set_task_state(packageable.task_id, "READY_FOR_REVIEW")`,
   so each refusal's own ledger write shows. Match the state and the error's
-  text in one emitted line.
+  text in one emitted line. For the last call, replace `set_task_package`
+  on `packageable.ledger` itself, the object `package()` is handed.
 
 **`tests/test_task.py`.** Drive the second and third witnesses through
 `_drive` and `_push`. An `EXHAUSTED` outcome reaches PACKAGE's exhausted mode
@@ -453,4 +478,5 @@ body, so a reverted source fails the test rather than its collection.
 `size_gate`. `estimated_lines` is that over four. It held all five steps and
 the four witnesses. `ty check`, ruff, `prose_limit --tree` and
 `.saffron/gates/structure` were clean. Each witness failed with the source
-reverted. Every wrong version listed above failed its witness there.
+reverted. Every wrong version listed above failed its witness there. The
+whole suite passed on that stacked prototype, 5457 tests.

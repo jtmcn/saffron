@@ -224,3 +224,26 @@ versions, and 26 died. The racy one is named in the notes.
 82. A witness that checks a file mode sets the umask it assumes.
 83. A path a change creates outside the batch tree is checked for owner,
     type and symlink before it is used.
+
+## SA-0423 (b-bc54d1)
+
+One writer, two reviews, and a final writer round. The writer took about
+33 minutes for the draft and 6 for each revision. Each review took about
+11 minutes.
+
+Round 1 found no blocker and four concerns. The guards' witnesses drove
+three exception families, and `KeyboardInterrupt` on one path only. A
+ledger check was vacuous because an earlier call had already written the
+state it read. A rewritten case checked a mark no reader sees. Round 2
+found three blockers in the same class. Every exception the revision
+added was a `RuntimeError` subclass, so a guard naming `RuntimeError`
+passed. A guard that also wrapped the ledger write passed as well. The
+final round added a test-local `Exception` subclass on each path. The
+writer ran 41 wrong versions, and all died.
+
+## What SA-0423 adds
+
+84. A claim that a guard catches `Exception` is driven with a test-local
+    `Exception` subclass on each path, since named kinds share bases.
+85. A guard's upper edge is driven too: the statement before the guarded
+    one raises, and the witness expects it to escape.
