@@ -4,7 +4,7 @@ title: '`EventLog` has no public path, and `failed` is one bit for two different
 status: open
 tier: 3
 filed: 2026-09-18
-specs: []
+specs: [SA-0424]
 prs: []
 commits: []
 cites: [§4.1]
