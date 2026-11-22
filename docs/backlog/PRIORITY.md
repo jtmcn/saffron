@@ -386,6 +386,12 @@ batch's spec review revises a spec over a mutant its clone cannot see.
 **Placed 2026-11-21**, with `SA-0421`: **b-394871**. Print-only emitters
 and tokenless session logs still print the cell's token.
 
+**Placed 2026-11-22**, from the spec loop's run 82: **b-65eb8f**. A record
+push has no time limit, so a stalled ssh push held a batch for hours.
+
+**Placed 2026-11-22**, from the spec loop's run 82: **b-53354f**. REBUT
+ends a task unjudged on one API error, with no retry.
+
 **Closed since they were placed here.** Each id stays so its record's tier still resolves.
 - ~~**36**~~, ~~**37**~~, ~~**38**~~, ~~**48**~~, ~~**52**~~, ~~**60**~~, ~~**72**~~, ~~**103**~~, ~~**104**~~, ~~**113**~~, ~~**135**~~, ~~**138**~~, ~~**142**~~, ~~**144**~~, ~~**146**~~, ~~**147**~~, ~~**148**~~, ~~**149**~~, ~~**152**~~, ~~**153**~~.
 - ~~**158**~~, ~~**159**~~, ~~**168**~~, ~~**169**~~, ~~**171**~~, ~~**177**~~, ~~**b-122686**~~, ~~**b-606ea3**~~, ~~**b-60732c**~~, ~~**b-7c41e0**~~, ~~**b-afec7c**~~, ~~**b-b5f379**~~, ~~**b-f2a9d1**~~, ~~**b-044ae7**~~, ~~**b-08a36a**~~, ~~**b-17fb8b**~~, ~~**b-1c7019**~~, ~~**b-3e0dbe**~~, ~~**b-461729**~~, ~~**b-5d5b56**~~.
@@ -481,7 +487,7 @@ Each line keeps the order it was filed in.
   ~~**77**~~, **90**, **92**, **96**, ~~**100**~~, **101** and **108**.
 - Filed 2026-09-12 to 2026-09-19: ~~**116**~~, **121**, ~~**122**~~, **130**, **134**,
   ~~**150**~~, ~~**151**~~, **155**, **156**, **174** and **b-d6bff7**.
-- From spec loop runs 7 to 10: ~~**b-990bd9**~~, **b-7431a2**, **b-9eceda**, **b-bc9951**,
+- From spec loop runs 7 to 10: ~~**b-990bd9**~~, ~~**b-7431a2**~~, **b-9eceda**, **b-bc9951**,
   **b-0281e4**, **b-e9db0e**, **b-397edd**, **b-0e20e9**, ~~**b-98dc4d**~~,
   ~~**b-27b9db**~~, ~~**b-bbf663**~~ and ~~**b-6a9707**~~.
 - From the reviews of #393 and `SA-0120`, and spec loop runs 13 and 14: **b-d5d290**,

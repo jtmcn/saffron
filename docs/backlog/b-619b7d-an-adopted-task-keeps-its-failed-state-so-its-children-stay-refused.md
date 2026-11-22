@@ -57,3 +57,6 @@ as `regate` then `adopt`. A test drives each route and starts a child on it.
   task is not a stack layer, so its end review never runs.
 - 2026-11-11: #1166 shipped `SA-0374` in the spec loop's run 64. Adopt now regates
   a task that ran a recorded spec text. No test starts a child on each route yet.
+- 2026-11-22: recurred in the spec loop's run 82. `saffron adopt` refused
+  `SA-0419`'s `REBUTTAL_UNJUDGED` task, whose REBUT died on an API error. So
+  #1290 merged with no adopted task.

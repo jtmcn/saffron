@@ -581,6 +581,121 @@ def test_a_kind_the_ledger_cannot_place_aborts_the_fold_in_either_mode(
             into.close()
 
 
+_BAD_RUN_STATUSES = ("ABORTD", "complete", "RUNNING", "PASSED", "FAILED", "DRAINED", "")
+
+
+def _old_runs_schema(path: Path) -> None:
+    """The home ledger's own `runs` table: present, with no `CHECK` on
+    either `preflight` or `status` (item b-7431a2)."""
+    conn = sqlite3.connect(path)
+    conn.executescript(SCHEMA)
+    conn.execute("DROP TABLE runs")
+    conn.execute(
+        """CREATE TABLE runs (
+            run_id     INTEGER PRIMARY KEY,
+            repo_id    INTEGER NOT NULL REFERENCES repos(repo_id),
+            base_sha   TEXT NOT NULL,
+            preflight  TEXT,
+            started_at TEXT NOT NULL DEFAULT (datetime('now')),
+            ended_at   TEXT,
+            status     TEXT,
+            batch_id   INTEGER REFERENCES batches(batch_id)
+        )"""
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_a_run_finished_fact_outside_the_closed_set_aborts_its_fold(tmp_path):
+    """`fold_task` refuses a `run_finished` fact whose status is outside
+    `RUN_FINISHED_STATUSES`, before its own `UPDATE`, so the task it names
+    gains no row (item b-7431a2). A fresh ledger and one carrying the
+    schema from before the `CHECK` existed refuse the same fact the same
+    way, in either fold mode."""
+    from saffron.ledger import RUN_FINISHED_STATUSES
+
+    assert RUN_FINISHED_STATUSES == ("COMPLETE", "ABORTED")
+    assert not set(_BAD_RUN_STATUSES) & set(RUN_FINISHED_STATUSES)
+
+    # A run_finished fact folds its own admitted status, never one value
+    # regardless of which admitted status the fact carries.
+    run_status_sql = (
+        "SELECT r.status FROM runs r JOIN tasks t USING (run_id) WHERE t.record_key = ?"
+    )
+    for admitted in ("ABORTED", "COMPLETE"):
+        admitted_record = MemoryRecord()
+        admitted_writer = Ledger(
+            tmp_path / f"writer-admitted-{admitted}.db", record=admitted_record
+        )
+        admitted_task_id = _minimal(admitted_writer, f"SA-admitted-{admitted}")
+        admitted_run_row = admitted_writer._db.execute(
+            "SELECT run_id FROM tasks WHERE task_id = ?", (admitted_task_id,)
+        ).fetchone()
+        admitted_writer.finish_run(int(admitted_run_row["run_id"]), admitted)
+        admitted_key = _key(admitted_writer, admitted_task_id)
+        admitted_writer.close()
+
+        into_path = tmp_path / f"into-admitted-{admitted}.db"
+        into = Ledger(into_path)
+        fold(admitted_record, into)
+        assert _table_rows(into_path, run_status_sql, admitted_key) == [
+            {"status": admitted}
+        ]
+        into.close()
+
+        old_into_path = tmp_path / f"old-into-admitted-{admitted}.db"
+        _old_runs_schema(old_into_path)
+        old_into = Ledger(old_into_path)
+        fold(admitted_record, old_into)
+        assert _table_rows(old_into_path, run_status_sql, admitted_key) == [
+            {"status": admitted}
+        ]
+        old_into.close()
+
+    for i, bad in enumerate(_BAD_RUN_STATUSES):
+        record = MemoryRecord()
+        writer = Ledger(tmp_path / f"writer-{i}.db", record=record)
+        task_id = _minimal(writer, f"SA-bad-{i}")
+        run_row = writer._db.execute(
+            "SELECT run_id FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        writer.finish_run(int(run_row["run_id"]), "ABORTED")
+        key = _key(writer, task_id)
+        writer.close()
+
+        good = record.read(key)
+        record._facts[key] = [
+            replace(f, payload={**f.payload, "status": bad})
+            if f.kind == "run_finished"
+            else f
+            for f in good
+        ]
+
+        for strict in (True, False):
+            fresh_path = tmp_path / f"fresh-{i}-{strict}.db"
+            fresh = Ledger(fresh_path)
+            with pytest.raises(ValueError):
+                fold(record, fresh, strict=strict)
+            assert _table_rows(fresh_path, _TASK_SQL, key) == []
+            fresh.close()
+
+            old_path = tmp_path / f"old-{i}-{strict}.db"
+            _old_runs_schema(old_path)
+            old = Ledger(old_path)
+            with pytest.raises(ValueError):
+                fold(record, old, strict=strict)
+            assert _table_rows(old_path, _TASK_SQL, key) == []
+            old.close()
+
+        # `fold_task` itself, past `fold`'s own cleanup of a refused task.
+        direct_path = tmp_path / f"direct-{i}.db"
+        direct = Ledger(direct_path)
+        with pytest.raises(ValueError):
+            direct.fold_task(key, record.read(key))
+        assert _table_rows(direct_path, _TASK_SQL, key) == []
+        direct.close()
+
+
 def test_a_rebuttal_with_no_finding_skips_its_whole_task(tmp_path, record):
     writer = Ledger(tmp_path / "writer.db", record=record)
     task_id = _minimal(writer, "SA-4")

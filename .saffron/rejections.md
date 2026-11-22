@@ -3298,3 +3298,16 @@ critic's own, so they have no line.
 - `SA-0418` (#1281): a docstring said spec sessions run before or after
   any cell exists, where `CONTEXT.md` puts them in a critic cell.
   **Bucket 3**. **Landed:** a review commit on #1281.
+
+## 2026-11-22, spec loop run 82 (#1290)
+
+- `SA-0419` (#1290): no witness finished a refused run afterwards. So
+  refusing every run with no task, dropping `ended_at`, or appending
+  `run_finished` twice passed. **Bucket 1**. **Landed:** a review commit
+  on #1290.
+- `SA-0419` (#1290): no witness folded the unedited facts into a ledger
+  with no status `CHECK`, so a fold refusing every status there passed.
+  **Bucket 1**. **Landed:** a review commit on #1290.
+- `SA-0419` (#1290): `finish_run`'s docstring dropped the sentence that a
+  refused append raises with the status written, where the spec asked for
+  a rewording. **Bucket 3**. **Landed:** a review commit on #1290.
