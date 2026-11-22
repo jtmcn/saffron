@@ -646,7 +646,7 @@ Each spec has one `events.jsonl`, shared by every task that spec runs. A stack b
 
 **The ceiling is one file per spec, with no rotation, compression or size cap.** One `Agent` event is cut at `BOUND_CHARS` characters. Nothing bounds the file.
 
-**A credential in an `Agent` event is redacted before the write.** `EventLog.append` replaces each credential shape PACKAGE refuses (§5.7) in the event's `event` and `line`. It does the same in `detail`, which is host text that can quote cell output. It replaces the cell's own token too, when the log was handed it. The event's `redacted` field names each shape it replaced, and never the value. For the token it holds a marker naming the cell's own token, which is not a shape. The terminal line is printed from the event the write redacted. So under `launchd` the batch log file carries what the log carries. This is not the `secrets` gate, which §5.4 still reserves.
+**A credential in an `Agent` event is redacted before the write.** `EventLog.append` replaces each credential shape PACKAGE refuses (§5.7) in the event's `event` and `line`. It does the same in `detail`, which is host text that can quote cell output. It replaces the cell's own token too, when the log was handed it. The event's `redacted` field names each shape it replaced, and never the value. For the token it holds a marker naming the cell's own token, which is not a shape. An emitter that holds the log prints the terminal line from the event `append` redacted, before the size bound. So that emitter's lines carry no credential the log redacts, under `launchd` in the batch log file too. That holds when the write is refused as well. An event over the bound prints whole, where the log stores it cut. This is not the `secrets` gate, which §5.4 still reserves.
 
 ---
 
@@ -1423,12 +1423,13 @@ is accepted risk. PACKAGE applies and pushes that text, so redacting it would
 change the code the push carries. The push already carries the same text to
 the remote. Every other file in the task directory is written as it came,
 `pr_body.md`, `rebuttal.json` and `scope_proposal.json` among them. An
-`Agent` event's terminal line is printed from the event its log redacted.
-So stdout, and under `launchd` the batch log file, carry what
-`events.jsonl` carries. A spec session's log holds no token, so its lines
+emitter that holds a log prints an `Agent` event's terminal line from the
+event that log redacted. So its lines on stdout, and under `launchd` in the
+batch log file, carry no credential the log redacts. That holds when the
+write is refused too. A spec session's log holds no token, so its lines
 redact the shapes alone. A print-only emitter prints its lines as they
 came, `saffron draft`'s and `saffron review`'s among them. Every other
-event kind's line is printed as it is written.
+event kind's line is printed as it came.
 
 Model-authored text is neutralized before it enters a commit body or a PR body:
 GitHub acts on `Fixes #12` and `@name` in both, so a cell can close an issue or

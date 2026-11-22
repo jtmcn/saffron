@@ -3,12 +3,14 @@ id: SA-0421
 title: "An `Agent` event's terminal line prints before its log redacts it, so the cell's token reaches the batch log file"
 type: bug
 priority: 2
-estimated_lines: 15
+estimated_lines: 16
 estimate_measured: true
 touches:
   - saffron/events.py
   - saffron/cell/session.py
   - saffron/task.py
+  - saffron/phases/implement.py
+  - saffron/phases/package.py
   - tests/test_credentials.py
   - tests/test_task.py
 forbidden:
@@ -32,7 +34,9 @@ forbidden:
   - saffron/commit_review.py
   - saffron/end_review.py
   - saffron/spec_review.py
-  - saffron/phases/**
+  - saffron/phases/review.py
+  - saffron/phases/rebut.py
+  - saffron/phases/__init__.py
   - saffron/gates/**
   - saffron/agents/**
   - tests/test_events.py
@@ -40,43 +44,50 @@ forbidden:
   - tests/test_package.py
   - tests/test_queued_specs.py
   - tests/test_scheduler.py
-budget_usd: 48
+budget_usd: 58
 max_attempts: 3
 max_turns: 260
 acceptance:
   - claim: >-
       `session._default_emit` prints each `Agent` event as its log redacted
-      it, with the token that log holds, in every field `describe` renders.
-      The witness emits five events through a log handed the cell's token.
-      A parsed `text` event carries the token and a GitHub token. A raw
-      line carries the token and an AWS access key id. A `detail` carries
-      the token and an Anthropic API key. Two raw lines start the token, and
+      it, before the size bound, with the token that log holds, in every
+      field `describe` renders. The witness emits six events through a log
+      handed the cell's token. A parsed `text` event and a parsed
+      `tool_use` event each carry the token and a GitHub token. A raw line
+      carries the token and an AWS access key id. A `detail` carries the
+      token and an Anthropic API key. Two raw lines start the token, and
       then a GitHub token, ten characters before `describe`'s 160-character
       cut. No printed line holds the token, its first ten characters, any of
       the three shapes or `ghp_`. Each line equals `describe` of the event
       the log read back. Handed `None`, the log prints the token and still
-      redacts the three shapes. A log whose `events.jsonl` is a directory refuses
-      every write and still prints each line redacted. A clean `text` event
-      over `BOUND_CHARS` prints the line `describe` gives the event as
-      emitted, while the log stores it bounded.
+      redacts the three shapes. A log whose `events.jsonl` is a directory
+      refuses every write and still prints each line redacted. A `text`
+      event over `BOUND_CHARS` carries the token and a GitHub token in its
+      first 160 characters. It prints as redacted, before the bound, while
+      the log stores it bounded. Its line holds neither credential and is
+      no `(bounded` line.
     witness: tests/test_credentials.py::test_the_default_emitters_line_carries_no_credential
     positive_case: >-
       Handed the token, every line names its redacted kinds in its
-      `(redacted: ...)` suffix, the cell's own token in the first four.
+      `(redacted: ...)` suffix, the cell's own token in the first five.
       Handed `None`, the token's first ten characters print in the same
-      four lines.
+      five lines.
     wrong_versions:
       - "`_default_emit` prints `describe(event)` before the log redacts it, as at base."
-      - "`EventLog.append` returns the event after the size bound, so a clean event over `BOUND_CHARS` prints as `agent: (bounded, ...)`."
+      - "`EventLog.append` returns the event after the size bound, so an event over `BOUND_CHARS` prints as `agent: (bounded, ...)`."
+      - "`EventLog.append` returns the event as it was handed whenever it bounds it, so an event over `BOUND_CHARS` prints its credentials."
       - "`EventLog.append` returns the event as it was handed when its write is refused."
+      - "`_default_emit` prints the event as it was handed whenever the log's write failed."
       - "`_default_emit` passes the line `describe` rendered through `credentials.redact`, so a credential cut at 160 characters keeps its first ten."
       - "`_default_emit` prints a copy redacted with no token, so the token prints."
       - "`_default_emit` redacts `line` and `detail` and prints a parsed `event` dict as it came."
     covers:
       - set: the fields `describe` renders for an `Agent` event
         members:
-          - member: a parsed `event` dict
+          - member: a parsed `text` event dict
             driven_by: "`_default_emit` redacts `line` and `detail` and prints a parsed `event` dict as it came."
+          - member: a parsed `tool_use` event dict
+            driven_by: tests/test_credentials.py::test_the_default_emitters_line_carries_no_credential
           - member: a raw `line`
             driven_by: tests/test_credentials.py::test_the_default_emitters_line_carries_no_credential
           - member: a host-authored `detail`
@@ -110,32 +121,38 @@ acceptance:
           - member: under the bound
             driven_by: tests/test_credentials.py::test_the_default_emitters_line_carries_no_credential
           - member: over the bound
-            driven_by: "`EventLog.append` returns the event after the size bound, so a clean event over `BOUND_CHARS` prints as `agent: (bounded, ...)`."
+            driven_by: "`EventLog.append` returns the event as it was handed whenever it bounds it, so an event over `BOUND_CHARS` prints its credentials."
   - claim: >-
       The `emit` `run_task` builds when handed none prints each `Agent`
       event as its log redacted it, with the token `run_task` was handed, in
       every field `describe` renders. The witness has the `run_one_cell`
-      double emit the same five events the first criterion names. Handed the
-      token, no printed `agent:` line holds the token, its first ten
-      characters, any of the three shapes or `ghp_`. The printed `agent:`
-      lines equal `describe` of each `Agent` event the task's own
+      double emit the six events under the bound the first criterion names.
+      Handed the token, no printed `agent:` line holds the token, its first
+      ten characters, any of the three shapes or `ghp_`. The printed
+      `agent:` lines equal `describe` of each `Agent` event the task's own
       `events.jsonl` holds, in order. Handed `None`, the token prints and
-      the three shapes are still redacted.
+      the three shapes are still redacted. Handed the token with
+      `events.jsonl` pre-created as a directory, every write is refused.
+      The same six lines still print redacted, beside one refused-write
+      warning.
     witness: tests/test_task.py::test_run_tasks_default_emit_prints_no_credential
     positive_case: >-
       Handed the token, every `agent:` line names its redacted kinds, the
-      cell's own token in the first four. Handed `None`, the token's first
-      ten characters print in the same four lines.
+      cell's own token in the first five. Handed `None`, the token's first
+      ten characters print in the same five lines.
     wrong_versions:
       - "`run_task`'s `emit` prints `describe(event)` before the log redacts it, as at base."
       - "`run_task`'s `emit` passes the line `describe` rendered through `credentials.redact`, so a credential cut at 160 characters keeps its first ten."
       - "`run_task`'s `emit` prints a copy redacted with no token, so the token prints."
       - "`run_task`'s `emit` redacts `line` and `detail` and prints a parsed `event` dict as it came."
+      - "`run_task`'s `emit` prints the event as it was handed whenever the log's write failed."
     covers:
       - set: the fields `describe` renders for an `Agent` event
         members:
-          - member: a parsed `event` dict
+          - member: a parsed `text` event dict
             driven_by: "`run_task`'s `emit` redacts `line` and `detail` and prints a parsed `event` dict as it came."
+          - member: a parsed `tool_use` event dict
+            driven_by: tests/test_task.py::test_run_tasks_default_emit_prints_no_credential
           - member: a raw `line`
             driven_by: tests/test_task.py::test_run_tasks_default_emit_prints_no_credential
           - member: a host-authored `detail`
@@ -158,9 +175,15 @@ acceptance:
             driven_by: tests/test_task.py::test_run_tasks_default_emit_prints_no_credential
           - member: "`None`"
             driven_by: tests/test_task.py::test_run_tasks_default_emit_prints_no_credential
+      - set: the log's write
+        members:
+          - member: written
+            driven_by: tests/test_task.py::test_run_tasks_default_emit_prints_no_credential
+          - member: refused
+            driven_by: "`run_task`'s `emit` prints the event as it was handed whenever the log's write failed."
   - claim: >-
       A cell driven through `run_one_cell`'s default `emit` still prints the
-      lines its `events.jsonl` replays.
+      lines its `events.jsonl` replays, for events under `BOUND_CHARS`.
     witness: tests/test_events.py::test_events_jsonl_reproduces_what_the_terminal_printed
     preserves: true
   - claim: >-
@@ -202,6 +225,13 @@ came, cut to 160 and 500 characters (`saffron/events.py:909-922`).
 `~/.saffron/batch.out.log` (`docs/host/dev.saffron.batch.plist:58-59`). So
 the cell's own token and every listed shape reach a host file.
 
+**Who passes `append` as an `emit`.** Two tests hand `log.append` itself
+to a function whose `emit` is annotated `Callable[[Event], None]`.
+`tests/test_implement.py:613` hands it to `run_agent`
+(`saffron/phases/implement.py:242`). `tests/test_package.py:1768` hands it
+to `package` (`saffron/phases/package.py:663`). The `types` gate checks
+the whole tree with `ty check`.
+
 **Who overrides `append` today.** Two test doubles in `tests/test_task.py`
 subclass `EventLog` and return nothing from `append`: `_FailFirst`
 (`tests/test_task.py:625-639`) and `_FailAfterTwo` (`:674-689`).
@@ -228,11 +258,17 @@ redacts. Make these changes.
 4. **The two doubles return an event.** On a refusal, `_FailFirst.append`
    and `_FailAfterTwo.append` return the event they were handed. Otherwise
    each returns what `super().append` returns.
+5. **Two `emit` parameters take any return.** Annotate `run_agent`'s
+   `emit` and `package`'s `emit` as `Callable[[Event], object]`, the
+   latter still `| None`. Each caller discards what `emit` returns. Without
+   this, `ty check` reports both test calls above once `append` returns an
+   `Event`.
 
-**Before the bound, not after.** A clean event over `BOUND_CHARS` prints
+**Before the bound, not after.** An event over `BOUND_CHARS` prints
 today as `describe` renders its own dict. Returning the bounded event
-would print `agent: (bounded, ...)` instead. This spec keeps that line
-as it is.
+would print `agent: (bounded, ...)` instead. This spec prints it as
+redacted, before the bound. Its printed line therefore differs from the
+line the log stores, as it does at your base.
 
 ## Out of scope
 
@@ -259,17 +295,15 @@ as it is.
 - **Every other event kind.** `describe` renders `detail` on `Preflight`,
   a rejected plan and others. `append` redacts none of them, and their
   lines stay as they are.
-- **A hand edit in this spec's pull request.** `DESIGN.md` §5.7's last
-  sentence before "Model-authored text" becomes false. The caller replaces
-  "So is each event's terminal line, printed to stdout and under `launchd`
-  to the batch log file." with this text.
-
-  > An `Agent` event's terminal line is printed from the event its log
-  > redacted. So stdout, and under `launchd` the batch log file, carry what
-  > `events.jsonl` carries. A spec session's log holds no token, so its
-  > lines redact the shapes alone. A print-only emitter prints its lines
-  > as they came, `saffron draft`'s and `saffron review`'s among them. Every
-  > other event kind's line is printed as it is written.
+- **Two hand edits, already landed in this spec's pull request.** The
+  first is in `DESIGN.md` §5.7's paragraph on PACKAGE's refusal. It now
+  says an emitter that holds a log prints an `Agent` event's line from the
+  event that log redacted. It names the spec session's tokenless log and the
+  print-only emitters as residual. §4's paragraph on redacting an `Agent`
+  event says the same of the batch log file, refused writes included. It
+  adds that an event over the bound prints whole where the log stores it
+  cut. `DESIGN.md` is forbidden here, and each passage already says what
+  this spec builds.
 
 ## Notes for the agent
 
@@ -290,10 +324,12 @@ check ignores a shorter one (`saffron/credentials.py:32-35`). Import
 
 **`tests/test_task.py`.** The module-level driver at
 `tests/test_task.py:46-122` takes `events` and `token`. Its double emits
-each event through the `emit` it is handed. Pass `state="NOT_IMPLEMENTED"`, so no PACKAGE path
-prints. Give each half its own `spec_id`, `task_id` and `out_dir`. Keep
+each event through the `emit` it is handed. Pass `state="NOT_IMPLEMENTED"`, so PACKAGE never
+runs. `run_task` still prints one queue line for it (`saffron/task.py:1116`). Give each half its own `spec_id`, `task_id` and `out_dir`. Keep
 only the printed lines that start with `agent: `, since the closure also
-prints the task's `ceilings:` line.
+prints the task's `ceilings:` line and that queue line. For the refused
+half, create `events.jsonl` as a directory under the task's own directory
+before the double emits.
 
 **Shapes.** Each witness drives three of the five listed shapes, one per
 field. `append`'s own per-shape test,
@@ -306,8 +342,8 @@ block included.
 limit, so fold the return into its first sentence. Each new docstring
 sentence stays within 25 words.
 
-**Size.** A prototype at `e7b70e7e` measured 59 changed tokens outside the
+**Size.** A prototype at `e7b70e7e` measured 63 changed tokens outside the
 test paths with `size_gate`, and `estimated_lines` is that over four. It
-held all four steps and both new witnesses. Each new witness failed with
+held all five steps and both new witnesses, and `ty check` was clean. Each new witness failed with
 the source reverted. Every wrong version listed above failed its witness
 there.
