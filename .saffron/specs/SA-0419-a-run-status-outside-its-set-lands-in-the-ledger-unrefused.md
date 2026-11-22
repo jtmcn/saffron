@@ -245,7 +245,7 @@ carrying the same string. The fold writes that fact's status back into
 (`saffron/ledger.py:1364-1366`), and so does the fold's `_insert_run`
 (`:798-804`). `finish_run`'s callers pass `COMPLETE` at
 `saffron/replay.py:109` and at nine sites in `saffron/cell/session.py`.
-They pass `ABORTED` at one, its abort path (`saffron/cell/session.py:4150`).
+They pass `ABORTED` at one, its abort path (`saffron/cell/session.py:4163`).
 `saffron/record/migrate.py` writes no `run_finished` fact. A reader counts
 on the spelling. `_CUT_ROW` matches `rn.status = 'COMPLETE'`
 (`saffron/cell/session.py:537-538`).
