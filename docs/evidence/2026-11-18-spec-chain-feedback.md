@@ -203,3 +203,24 @@ it rose to $60. Two DESIGN.md sentences named too few emitters.
     Every site that passes the function as a value is in `touches`.
 81. A hand edit to a protected document greps the whole document for each
     claim the change falsifies, not only the sentence the item names.
+
+## SA-0422 (b-d9ed45)
+
+One writer, two reviews, and a final writer round. The writer took about
+33 minutes for the draft. Round 1's revision ran long, since the host was
+busy with a batch. Each review took 10 to 13 minutes.
+
+Round 1 found no blocker and eight concerns. A fixed `/tmp` lock root
+trusted a directory or symlink another uid could plant. The scope cut was
+stated in one direction only. No witness drove PACKAGE under the lock. The
+claim said "every home on the host" over a root per uid. Round 2 found
+two concerns. A mode check relied on the host's umask. No member drove an
+unsafe root and a held lock at once. It also cited a line range wrongly,
+and the writer showed this with the file at base. The writer ran 27 wrong
+versions, and 26 died. The racy one is named in the notes.
+
+## What SA-0422 adds
+
+82. A witness that checks a file mode sets the umask it assumes.
+83. A path a change creates outside the batch tree is checked for owner,
+    type and symlink before it is used.

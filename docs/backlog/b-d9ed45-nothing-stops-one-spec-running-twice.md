@@ -4,7 +4,7 @@ title: Nothing stops one spec running in two cells at once, and the second remov
 status: partial
 tier: 2
 filed: 2026-10-11
-specs: []
+specs: [SA-0422]
 prs: [1090]
 commits: []
 cites: [§5.1]
@@ -43,3 +43,7 @@ second start refuses.
   `cell` or `batch`. So a second run of a spec on the same home refuses before
   any container is touched, naming the holder. Two homes on one host still
   share the runtime's container names, and nothing refuses that case.
+- 2026-11-21: `SA-0422` queued for the half left. `run_task` takes one
+  lock per spec id that every home shares, and refuses a task another
+  process holds. `regate`, the qualifying step, the end review's layer cell
+  and the probe networks still pre-clean spec-keyed names with no lock.
