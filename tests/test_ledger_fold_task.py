@@ -678,6 +678,14 @@ def test_a_run_finished_fact_outside_the_closed_set_aborts_its_fold(tmp_path):
             assert _table_rows(old_path, _TASK_SQL, key) == []
             old.close()
 
+        # `fold_task` itself, past `fold`'s own cleanup of a refused task.
+        direct_path = tmp_path / f"direct-{i}.db"
+        direct = Ledger(direct_path)
+        with pytest.raises(ValueError):
+            direct.fold_task(key, record.read(key))
+        assert _table_rows(direct_path, _TASK_SQL, key) == []
+        direct.close()
+
 
 def test_a_rebuttal_with_no_finding_skips_its_whole_task(tmp_path, record):
     writer = Ledger(tmp_path / "writer.db", record=record)

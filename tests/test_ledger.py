@@ -1465,12 +1465,30 @@ def test_a_fresh_ledgers_runs_table_admits_only_the_closed_set_of_statuses(tmp_p
     """The `CHECK` on `runs.status`, read through a bare `sqlite3`
     connection, past every `Ledger` method (item b-7431a2)."""
     db_path = tmp_path / "fresh-check.db"
-    Ledger(db_path).close()
+    minting = Ledger(db_path)
+    minted_repo = minting.upsert_repo(
+        "m", "minted-origin", "/minted", policy_sha="p" * 64
+    )
+    minted = minting.create_run(minted_repo, base_sha="b" * 40)
+    minting.close()
 
     con = sqlite3.connect(db_path)
+    # The whole admitted set, so a status added to it fails here too.
+    ddl = con.execute("SELECT sql FROM sqlite_master WHERE name = 'runs'").fetchone()[0]
+    admitted = re.search(r"status\s+TEXT CHECK \(status IN \(([^)]*)\)\)", ddl)
+    assert admitted is not None
+    assert sorted(s.strip().strip("'") for s in admitted.group(1).split(",")) == [
+        "ABORTED",
+        "COMPLETE",
+        "RUNNING",
+    ]
+    assert (
+        con.execute("SELECT status FROM runs WHERE run_id = ?", (minted,)).fetchone()[0]
+        == "RUNNING"
+    )
     con.execute("INSERT INTO repos (name, origin, mirror_path) VALUES ('r', 'o', '/m')")
     con.execute("INSERT INTO runs (repo_id, base_sha) VALUES (1, 'a')")
-    run_id = con.execute("SELECT run_id FROM runs").fetchone()[0]
+    run_id = con.execute("SELECT run_id FROM runs WHERE base_sha = 'a'").fetchone()[0]
     assert (
         con.execute("SELECT status FROM runs WHERE run_id = ?", (run_id,)).fetchone()[0]
         is None
