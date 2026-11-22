@@ -179,3 +179,27 @@ versions, and all died.
     every member of the declared set is a refused case.
 79. A refusal a criterion drives before and after a commit is driven the
     same way on each path the claim names.
+
+## SA-0421 (b-0f5493)
+
+One writer, two reviews, and the delegate's fixes after the second. The
+writer took about 34 minutes for the draft and 5 for the revision. The
+reviews took about 11 and 9 minutes.
+
+Round 1 found two blockers. The over-bound member was a clean event, so a
+version that returned the handed event whenever it bounded passed. The
+other was measured by the delegate: `append`'s new return type broke `ty`
+at two test call sites outside `touches`. Round 1 also found the refused
+write undriven in `run_task`'s closure, and DESIGN.md text that claimed
+too much. The delegate's hand edit had missed a second DESIGN.md sentence,
+which the writer had not named either.
+
+Round 2 found no blocker. The budget cleared REBUT's history by $0.32, so
+it rose to $60. Two DESIGN.md sentences named too few emitters.
+
+## What SA-0421 adds
+
+80. A change to a function's return type runs `ty check` on the prototype.
+    Every site that passes the function as a value is in `touches`.
+81. A hand edit to a protected document greps the whole document for each
+    claim the change falsifies, not only the sentence the item names.

@@ -383,6 +383,9 @@ a writer takes is not reserved, so a batch's follow-up minted it twice.
 **Placed 2026-11-21**, from the spec loop's run 82: **b-216235**. A
 batch's spec review revises a spec over a mutant its clone cannot see.
 
+**Placed 2026-11-21**, with `SA-0421`: **b-394871**. Print-only emitters
+and tokenless session logs still print the cell's token.
+
 **Closed since they were placed here.** Each id stays so its record's tier still resolves.
 - ~~**36**~~, ~~**37**~~, ~~**38**~~, ~~**48**~~, ~~**52**~~, ~~**60**~~, ~~**72**~~, ~~**103**~~, ~~**104**~~, ~~**113**~~, ~~**135**~~, ~~**138**~~, ~~**142**~~, ~~**144**~~, ~~**146**~~, ~~**147**~~, ~~**148**~~, ~~**149**~~, ~~**152**~~, ~~**153**~~.
 - ~~**158**~~, ~~**159**~~, ~~**168**~~, ~~**169**~~, ~~**171**~~, ~~**177**~~, ~~**b-122686**~~, ~~**b-606ea3**~~, ~~**b-60732c**~~, ~~**b-7c41e0**~~, ~~**b-afec7c**~~, ~~**b-b5f379**~~, ~~**b-f2a9d1**~~, ~~**b-044ae7**~~, ~~**b-08a36a**~~, ~~**b-17fb8b**~~, ~~**b-1c7019**~~, ~~**b-3e0dbe**~~, ~~**b-461729**~~, ~~**b-5d5b56**~~.
