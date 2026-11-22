@@ -44,7 +44,7 @@ forbidden:
   - tests/test_package.py
   - tests/test_queued_specs.py
   - tests/test_scheduler.py
-budget_usd: 58
+budget_usd: 60
 max_attempts: 3
 max_turns: 260
 acceptance:
