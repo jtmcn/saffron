@@ -464,10 +464,10 @@ class EventLog:
         # happened. `append` never raises; this is how anyone can tell.
         self.failed = False
 
-    def append(self, event: Event) -> None:
-        """Write one line, flushed. Never raises: a cell that cannot write its
-        own log is not a cell whose task should die on that account — the
-        caller has nothing useful to do with the failure either way.
+    def append(self, event: Event) -> Event:
+        """Write one line, flushed. Returns the event redacted, unchanged if refused. Never raises:
+        a cell that cannot write its own log is not a cell whose task should die on that
+        account — the caller has nothing useful to do with the failure either way.
 
         An `Agent` event's own `event` dict is bounded here, at the size its
         `json.dumps` serialization reaches — never at the size of the whole
@@ -475,6 +475,9 @@ class EventLog:
         time. Measured on one 5 MB stdout line wrapped in nine bytes of JSON:
         5 MB written before this bound; 16517 characters now for 5 MB of `"`,
         the worst case, since writing escapes each stored character once."""
+        # The fallback for any raise below, including one from redaction
+        # itself: the parameter, never a half-redacted intermediate.
+        redacted_event = event
         try:
             # Redacted first, before the size bound, so a credential the
             # bound's cut would split is never written in part (item 46).
@@ -499,6 +502,9 @@ class EventLog:
                         detail=new_detail,
                         redacted=tuple(seen),
                     )
+            # Returned to the caller below, pre-bound: what printed differs
+            # from what is stored only in the one case the bound rewrites.
+            redacted_event = event
             if isinstance(event, Agent) and event.event is not None:
                 serialized = json.dumps(event.event)
                 if len(serialized) > BOUND_CHARS:
@@ -517,11 +523,12 @@ class EventLog:
             with self._path.open("a") as handle:
                 handle.write(json.dumps(payload) + "\n")
                 handle.flush()
+            return redacted_event
         except (OSError, RecursionError, TypeError, ValueError):
             # What the statements above can raise, and no wider, so a programming error surfaces.
             # `self.failed` marks the silence, so it never reads as "nothing happened".
             self.failed = True
-            return
+            return redacted_event
 
 
 def _shape_ok(value: object, hint: object) -> bool:

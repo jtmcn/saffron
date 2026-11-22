@@ -801,13 +801,13 @@ def run_task(
         log_path = out_dir / spec.id / "events.jsonl"
 
         def emit(event: Event) -> None:
+            # `failed` never resets, so its flip is seen once.
+            was_failed = log.failed
+            event = log.append(event)
             line = describe(event)
             if line:
                 print(line)
-            # `failed` never resets, so its flip is seen once. Printed, never
-            # appended: the log is what failed.
-            was_failed = log.failed
-            log.append(event)
+            # Printed, never appended: the log is what failed.
             if log.failed and not was_failed:
                 print(f"warning: {log_path} refused a write; events may be missing")
 
