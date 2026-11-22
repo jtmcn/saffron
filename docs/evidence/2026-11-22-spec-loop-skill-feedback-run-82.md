@@ -27,7 +27,7 @@ and a stale citation in `SA-0419` was fixed in #1288.
    b-216235.
 2. **REBUT died on an API error, and nothing retried it.** The task halted
    at `REBUTTAL_UNJUDGED` after $13.87. Three host probes were left for a
-   person.
+   person. Filed as b-53354f.
 3. **`saffron adopt` refused the halted task.** So #1290 merged with no
    adopted task, and `driver.py size` could not measure it. Recorded on
    b-619b7d.
@@ -64,7 +64,7 @@ and a stale citation in `SA-0419` was fixed in #1288.
 ## Summary: what Saffron should absorb next
 
 1. **REBUT retries an agent that exited on an API error.** A phase change,
-   with no item yet. Item 2 is the evidence.
+   on b-53354f. Item 2 is the evidence.
 2. **The host checks a spec's mutants before its spec review.** A phase
    change, on b-216235. Item 1 is the evidence.
 3. **A record push runs under a time limit.** A tool change, on b-65eb8f.
