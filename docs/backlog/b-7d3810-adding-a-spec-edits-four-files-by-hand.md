@@ -82,3 +82,8 @@ prints.
   prints three of the four edits. `partial`, because the `PRIORITY.md` edit is
   still by hand. Its first use wrote this commit's smoke-test paragraph.
 - 2026-10-19: the spec loop's run 44 found an edit `bookkeeping` misses. Retiring `SA-0280`, `SA-0282` and `SA-0283` owed no smoke change, it said. Yet `test_no_real_spec_is_refused_on_its_own_acceptance_criteria` in `tests/test_scheduler.py` names the `.claude` refusals by literal list, and needed the three ids.
+- 2026-11-22: `driver.py priority` now reports the fourth edit. It names each
+  open record with no tier, and `check_priority` names each one the index does
+  not place under its tier. Placing it stays by hand. Step 5 of the spec loop
+  runs the command. The run 44 miss above still stands, so the item stays
+  partial.

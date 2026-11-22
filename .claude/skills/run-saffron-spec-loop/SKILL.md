@@ -333,6 +333,14 @@ docs/backlog/*.md` for each pull request, and move each hit's number to `prs`. C
 each move to `done/` before `make check`. An uncommitted move fails
 `test_queued_specs.py` with a message that names the test and not the move.
 
+Once every status is set, run `uv run .claude/skills/run-saffron-spec-loop/driver.py
+priority --write` and commit what it changes with the statuses. Inside the tier
+sections it strikes each done or superseded id and unstrikes any other. It folds
+each paragraph about closed items only into its tier's closed list, which takes
+each newly closed id at its end. It also recounts the costs paragraph. Then it
+runs `check_priority` and names each open item with no tier. It exits 1 until
+both are clean, and placing an item stays by hand.
+
 Step 3 linked the stack before this PR existed. Once it is open, link it on
 top, so it reads back based on the last layer and is marked ready:
 
@@ -376,9 +384,10 @@ It exits 1 and names each gap: a scored round with no `labels.json`, a finding
 with no label or an unknown value, or a missing `blocker_followed` field. It
 names a schema-2 label that reads a later review round which never ran.
 
-**Done when** every kept finding has an item, every spec's origin item names
-its PR, every fixed or kept finding the critic missed has a rejection line, and
-`driver.py labels` exits 0. This PR reads back based on the last layer.
+**Done when** every kept finding has an item and every spec's origin item
+names its PR. Each fixed or kept finding the critic missed has a rejection line.
+`driver.py labels` and `driver.py priority` exit 0. This PR reads back based on
+the last layer.
 
 ## 6. Hand off to the next delegate
 
