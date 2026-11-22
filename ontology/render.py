@@ -149,6 +149,7 @@ SHAPE_SETS = {
     "sh:path factory:endedBecause": "BatchStopReason",
     "sh:path factory:severity": "Severity",
     "factory:PreflightOutcomeShape": "PreflightOutcome",
+    "factory:RunStatusShape": "RunStatus",
     "factory:EventKindShape": "EventKind",
     "factory:FactKindShape": "FactKind",
 }

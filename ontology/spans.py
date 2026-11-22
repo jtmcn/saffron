@@ -25,6 +25,7 @@ SETS = {
     "Gate role": ("GateRole", "comma"),
     "Core gates": ("CoreGate", "comma"),
     "Preflight outcome": ("PreflightOutcome", "or-plain"),
+    "Run status": ("RunStatus", "or-comma"),
     "Event kind": ("EventKind", "comma"),
     "Fact kind": ("FactKind", "comma"),
 }

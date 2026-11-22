@@ -1,12 +1,13 @@
 ---
 id: b-60f950
 title: 'No vocabulary owns the run statuses `SA-0419` closes, so `ABORTED` means whatever its writer needed'
-status: open
+status: done
 tier: 3
 outside_cell: true
 filed: 2026-11-20
 specs: []
 prs: []
+closed: 2026-11-22
 commits: []
 cites: [§4.1]
 related: [b-7431a2, 164]
@@ -51,3 +52,6 @@ Land it after `SA-0419` merges, since the test reads the set it declares.
 ## Record
 
 - 2026-11-20: filed beside `SA-0419`.
+- 2026-11-22: done by hand. `factory:RunStatus` declares the three statuses,
+  with a shape, a negative fixture and a `CONTEXT.md` entry. A test holds it to
+  the ledger's tuple, and `DESIGN.md` §4.1 names the set.

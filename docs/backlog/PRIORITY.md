@@ -279,7 +279,7 @@ ends a task unjudged on one API error, with no retry.
 
 ### Tier 3 — real, not urgent
 
-**Placed 2026-11-20**, with `SA-0419`: **b-60f950**. No vocabulary owns the
+**Placed 2026-11-20**, with `SA-0419`: ~~**b-60f950**~~. No vocabulary owns the
 run statuses `SA-0419` makes a closed set.
 
 **Placed 2026-11-20**, with `SA-0418`: **b-d0a813**. The vocabulary has no

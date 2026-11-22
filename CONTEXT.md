@@ -343,6 +343,12 @@ So does a start that preflight refuses before any cell exists (`SA-0244`). So
 this is not the batch-start **Preflight** under Repos (backlog item 113). What a
 NULL means is open (backlog item b-eac388).
 
+**Run status**: `RUNNING`, `COMPLETE`, or `ABORTED`. What `runs.status` holds. A
+run is minted `RUNNING`, and `finish_run` writes one of the other two when it
+ends (`SA-0419`). `ABORTED` covers every way a run stops before its work ends: a
+machine that never started, a Ctrl-C, and any other exception in a long task
+(backlog item 164). No narrower word is defined here, since the code writes none.
+
 **Phase**: A named stage in the cell pipeline: DIAGNOSE, IMPLEMENT, GATE ⇄ REPAIR,
 REVIEW, REBUT, PACKAGE. Written in bare caps. A stack batch also labels attempts
 SPEC_REVIEW and SPEC_WRITING. Each is a host-invoked session before the cell, and
