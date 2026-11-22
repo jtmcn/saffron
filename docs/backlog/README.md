@@ -58,7 +58,9 @@ item's `specs:` list in the same commit.
 ## Closing an item
 
 **The pull request that finishes an item closes it in its own diff**: `status: done`,
-`closed:`, its own number in `prs:`, and a dated `## Record` entry. Never write "open until
+`closed:`, its own number in `prs:`, and a dated `## Record` entry. Then
+`uv run .claude/skills/run-saffron-spec-loop/driver.py priority --write` brings
+`PRIORITY.md` level with it. Never write "open until
 this merges". The record lands only if the pull request merges, so the item is already done
 by the time anyone reads it. #287 did this in five records, and four of them stayed open on
 `main` until #296.

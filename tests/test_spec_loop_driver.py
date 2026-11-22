@@ -4688,3 +4688,119 @@ def test_stack_names_a_leftover_gh_stack_rebase_and_its_age_before_linking(
     assert f"{state.resolve()} is a gh stack rebase left on 2026-09-21" in err
     assert "day(s) old" in err
     assert not [c for c in ran if c[:3] == ["gh", "stack", "link"]]
+
+
+# ------------------------------------------------------------ priority
+
+
+def _pr_item(item_id, status, tier):
+    from records.kinds import BacklogItem
+
+    closed = status in ("done", "superseded", "wontfix")
+    return BacklogItem(
+        id=item_id,
+        title="t",
+        status=status,
+        tier=tier,
+        filed="2026-11-01",
+        closed="2026-11-02" if closed else None,
+        prs=[5] if closed else [],
+        superseded_by="b-aaaaa1" if status == "superseded" else None,
+    )
+
+
+_PR_TEXT = """# Priority
+
+### Tier 1 — first
+
+**Placed 1**: **b-aaaaa1** and **b-aaaaa2**. One is open.
+
+**Placed 2**: **b-aaaaa3** and **b-aaaaa4**. Both are closed.
+
+### Tier 3 — last
+
+**Placed 3**: **b-ccccc1**.
+
+**What this ordering costs, recounted on 2026-01-01.** Tier 1 holds 9 open
+items.
+
+---
+
+After the tiers.
+"""
+
+
+def _pr_items():
+    return {
+        "b-aaaaa1": _pr_item("b-aaaaa1", "open", 1),
+        "b-aaaaa2": _pr_item("b-aaaaa2", "done", 1),
+        "b-aaaaa3": _pr_item("b-aaaaa3", "superseded", 1),
+        "b-aaaaa4": _pr_item("b-aaaaa4", "wontfix", 1),
+        "b-ccccc1": _pr_item("b-ccccc1", "partial", 3),
+    }
+
+
+def test_priority_folds_a_closed_paragraph_and_strikes_a_closed_id_in_a_kept_one():
+    out, changes = driver.reconcile_priority(_PR_TEXT, _pr_items(), "2026-11-22")
+    assert "**b-aaaaa1** and ~~**b-aaaaa2**~~. One is open." in out
+    assert "**Placed 2**" not in out
+    # The folded paragraph's ids join the closed list, and a wontfix is never struck.
+    assert "- ~~**b-aaaaa3**~~." in out
+    assert "- Closed as wontfix: **b-aaaaa4**." in out
+    assert "~~**b-aaaaa4**~~" not in out
+    assert "~~**b-aaaaa2**~~." not in out.split(driver.PRIORITY_CLOSED_HEAD)[1]
+    assert out.endswith("---\n\nAfter the tiers.\n")
+    assert "tier 1: struck b-aaaaa2, which is done" in changes
+    assert "tier 1: folded a paragraph naming only closed b-aaaaa3, b-aaaaa4" in changes
+
+
+def test_priority_is_a_fixed_point_and_keeps_the_costs_date_while_counts_hold():
+    out, _ = driver.reconcile_priority(_PR_TEXT, _pr_items(), "2026-11-22")
+    assert "recounted on 2026-11-22.** Tier 1 holds 1 open" in out
+    assert "tier 3 holds 1. So tier 3 holds 50% of the" in out
+    again, changes = driver.reconcile_priority(out, _pr_items(), "2026-12-31")
+    assert (again, changes) == (out, [])
+    items = _pr_items()
+    items["b-ccccc1"] = _pr_item("b-ccccc1", "open", 2)
+    moved, changes = driver.reconcile_priority(out, items, "2026-12-31")
+    assert "recounted on 2026-12-31.** Tier 1 holds 1 open" in moved
+    assert "tier 3: recounted the costs paragraph" in changes
+
+
+def _pr_record(item):
+    lines = [f"id: {item.id}", "title: T", f"status: {item.status}"]
+    lines += [f"tier: {item.tier}", "filed: 2026-11-01"]
+    if item.closed:
+        lines += ["closed: 2026-11-02", "prs: [5]"]
+    if item.superseded_by:
+        lines.append(f"superseded_by: {item.superseded_by}")
+    body = "## Problem\n\nx\n\n## Done looks like\n\ny\n\n## Record\n\n- 2026-11-01: filed.\n"
+    return "---\n" + "\n".join(lines) + "\n---\n\n" + body
+
+
+def test_priority_dry_run_writes_nothing_and_exits_1_until_the_index_is_level(
+    tmp_path, monkeypatch, capsys
+):
+    backlog = tmp_path / "docs" / "backlog"
+    backlog.mkdir(parents=True)
+    items = _pr_items()
+    for item in items.values():
+        (backlog / f"{item.id}-slug.md").write_text(_pr_record(item))
+    (backlog / "PRIORITY.md").write_text(_PR_TEXT)
+    monkeypatch.setattr(driver, "REPO", tmp_path)
+
+    assert driver.cmd_priority(SimpleNamespace(write=False)) == 1
+    assert "tier 1: struck b-aaaaa2, which is done" in capsys.readouterr().out
+    assert (backlog / "PRIORITY.md").read_text() == _PR_TEXT
+    assert driver.cmd_priority(SimpleNamespace(write=True)) == 0
+    assert (backlog / "PRIORITY.md").read_text() != _PR_TEXT
+    capsys.readouterr()
+    assert driver.cmd_priority(SimpleNamespace(write=False)) == 0
+    assert "PRIORITY.md matches the records" in capsys.readouterr().out
+
+    # Placing an open item is the delegate's call, so the command names it and fails.
+    (backlog / "b-ddddd1-slug.md").write_text(
+        _pr_record(_pr_item("b-ddddd1", "open", 2))
+    )
+    assert driver.cmd_priority(SimpleNamespace(write=True)) == 1
+    assert "unplaced: b-ddddd1 is open" in capsys.readouterr().out
