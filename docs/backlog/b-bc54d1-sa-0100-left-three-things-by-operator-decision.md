@@ -4,7 +4,7 @@ title: '`SA-0100` left three things by operator decision: DESIGN''s one writer, 
 status: open
 tier: 2
 filed: 2026-09-18
-specs: [SA-0100]
+specs: [SA-0100, SA-0423]
 prs: []
 commits: []
 cites: [§6, §5.7]
@@ -40,3 +40,7 @@ operator left each out of #339 on purpose. Line numbers below are at
 
 - 2026-09-18: filed from the spec loop's run 7 (stack #335 ← #338 ← #339 ←
   #342 ← #340). Surfaced by #339.
+- 2026-11-22: `SA-0423` queued for all three. A pushed branch's queue line
+  carries its stat, and a failed queue line write is said, never raised, in
+  `run_task` and in `_finish`. The `DESIGN.md` §6 edit lands by hand in its
+  pull request.
