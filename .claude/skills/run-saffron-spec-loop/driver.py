@@ -3715,27 +3715,49 @@ def cmd_bookkeeping(args) -> int:
 PRIORITY_CLOSED_HEAD = "**Closed since they were placed here.**"
 PRIORITY_COSTS_HEAD = "**What this ordering costs"
 _PRIORITY_TIER = re.compile(r"^### Tier (\d)\b")
-# `check_priority`'s scope rule: another heading or a rule ends a tier.
-_PRIORITY_END = re.compile(r"^#{2,3} |^---\s*$")
+_PRIORITY_HEADING = re.compile(r"^#{2,3} ")
 _PRIORITY_DATE = re.compile(r"recounted (?:in grooming )?on (\d{4}-\d{2}-\d{2})")
+_PRIORITY_LEAD = re.compile(r"\*\*~*(\d+)\b")  # `**79 comes first.**` names item 79
 _PRIORITY_OPEN = ("open", "partial")
 _PRIORITY_STRIKABLE = (
     "done",
     "superseded",
-)  # `check_priority` refuses a struck wontfix
+)  # `check_priority` refuses any other struck
+_PRIORITY_PER_LINE = 20
+
+
+def _priority_ends_tier(line: str) -> bool:
+    """`check_priority`'s own scope rule, so the two never credit different lines."""
+    return bool(_PRIORITY_HEADING.match(line)) or line.strip() == "---"
+
+
+def _priority_id() -> str:
+    from records.kinds import RANDOM_ID
+
+    return rf"({RANDOM_ID}|\d+)"
 
 
 def _priority_bold() -> str:
-    """An id in bold, struck or not, as `check_priority` reads one."""
-    from records.kinds import RANDOM_ID
-
-    return rf"\*\*({RANDOM_ID}|\d+)\*\*"
+    """An id alone in bold, struck or not, as `check_priority` reads one."""
+    return rf"\*\*{_priority_id()}\*\*"
 
 
 def _priority_ids(text: str) -> list:
     from records.kinds import as_id
 
     return [as_id(m) for m in re.findall(_priority_bold(), text)]
+
+
+def _priority_mentions(text: str) -> set:
+    """Every id a paragraph is about: bold, cited as `item N`, a random id in
+    plain text, or a number opening a bold span. A paragraph about an open
+    item is never folded, whichever form names it."""
+    from records.kinds import RANDOM_ID, as_id
+    from records.rules import cited_items
+
+    found = set(_priority_ids(text)) | cited_items(text)
+    found |= {as_id(m) for m in re.findall(rf"\b{RANDOM_ID}\b", text)}
+    return found | {as_id(m) for m in _PRIORITY_LEAD.findall(text)}
 
 
 def _priority_order(items: dict):
@@ -3747,66 +3769,93 @@ def _priority_order(items: dict):
     return key
 
 
-def _priority_closed_list(tier: int, items: dict, named: set) -> str | None:
-    def closed(statuses) -> list:
-        ids = [
+def _priority_closed_list(
+    tier: int, items: dict, named: set, old: str | None
+) -> str | None:
+    """The tier's closed list. Lines already there keep their order and bytes,
+    and a newly closed id joins the end, so two closing branches touch one line."""
+    from records.kinds import as_id
+
+    def wanted(statuses) -> set:
+        return {
             n
             for n, m in items.items()
             if m.tier == tier and m.status in statuses and n not in named
-        ]
-        return sorted(ids, key=_priority_order(items))
+        }
 
-    struck, wontfix = closed(_PRIORITY_STRIKABLE), closed(("wontfix",))
+    struck, wontfix = wanted(_PRIORITY_STRIKABLE), wanted(("wontfix",))
     if not struck and not wontfix:
         return None
+    rows: list[list] = []
+    for line in (old or "").split("\n")[1:]:
+        if line.startswith("- ~~"):
+            ids = [as_id(m) for m in re.findall(_priority_bold(), line)]
+            rows.append([n for n in ids if n in struck])
+    rows = [row for row in rows if row]
+    placed = {n for row in rows for n in row}
+    for n in sorted(struck - placed, key=_priority_order(items)):
+        if not rows or len(rows[-1]) >= _PRIORITY_PER_LINE:
+            rows.append([])
+        rows[-1].append(n)
     lines = [
         f"{PRIORITY_CLOSED_HEAD} Each id stays so its record's tier still resolves."
     ]
-    for start in range(0, len(struck), 20):
-        chunk = struck[start : start + 20]
-        lines.append("- " + ", ".join(f"~~**{n}**~~" for n in chunk) + ".")
+    lines += ["- " + ", ".join(f"~~**{n}**~~" for n in row) + "." for row in rows]
     if wontfix:
-        lines.append(
-            "- Closed as wontfix: " + ", ".join(f"**{n}**" for n in wontfix) + "."
+        listed = ", ".join(
+            f"**{n}**" for n in sorted(wontfix, key=_priority_order(items))
         )
+        lines.append(f"- Closed as wontfix: {listed}.")
     return "\n".join(lines)
+
+
+def _priority_count(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"
 
 
 def _priority_costs(items: dict, date: str) -> str:
     import textwrap
 
     live = [m for m in items.values() if m.status in _PRIORITY_OPEN]
-    by_tier = {t: sum(1 for m in live if m.tier == t) for t in (1, 2, 3)}
+    by_tier = {t: sum(1 for m in live if m.tier == t) for t in (0, 1, 2, 3)}
+    tiers = [t for t in (0, 1, 2, 3) if t or by_tier[0]]
+    parts = [f"tier {t} holds {by_tier[t]}" for t in tiers]
+    lead = _priority_count(by_tier[tiers[0]], "open item", "open items")
+    parts[0] = f"Tier {tiers[0]} holds {lead}"
     untiered = sum(1 for m in live if m.tier is None)
     share = round(100 * by_tier[3] / len(live)) if live else 0
     outside = sum(1 for m in live if m.outside_cell)
+    total = _priority_count(len(live), "open item", "open items")
     text = (
-        f"{PRIORITY_COSTS_HEAD}, recounted on {date}.** Tier 1 holds {by_tier[1]} "
-        f"open items, tier 2 holds {by_tier[2]} and tier 3 holds {by_tier[3]}. "
-        f"So tier 3 holds {share}% of the backlog. That is the deliberate "
-        "consequence of ranking by the milestone rather than by what is nearest "
-        f"to hand. {outside} of the {len(live)} open items are outside a cell, "
-        "since a cell cannot reach their files."
+        f"{PRIORITY_COSTS_HEAD}, recounted on {date}.** {', '.join(parts[:-1])} "
+        f"and {parts[-1]}. So tier 3 holds {share}% of the backlog. That is the "
+        "deliberate consequence of ranking by the milestone rather than by what "
+        f"is nearest to hand. {outside} of the {total} "
+        f"{'is' if outside == 1 else 'are'} outside a cell, since a cell cannot "
+        "reach their files."
     )
     if untiered:
-        text += f" {untiered} carry no tier yet."
+        text += f" {_priority_count(untiered, 'carries', 'carry')} no tier yet."
     return textwrap.fill(text, width=79)
 
 
 def reconcile_priority(text: str, items: dict, today: str) -> tuple[str, list[str]]:
     """`PRIORITY.md` brought level with the records, and one line per change.
 
-    Each closed id still in bold is struck. A tier paragraph that names only
-    closed items is dropped. Each closed item of a tier that its prose no longer
-    names joins the tier's closed list. The costs paragraph is recounted, and
-    keeps its date while the counts hold. Placing an open item is a judgement,
-    so the caller reports those and this leaves them alone.
+    A done or superseded id in bold is struck, and any other struck id is not.
+    A tier paragraph about closed items only is dropped. Each closed item of a
+    tier that its prose no longer names joins the tier's closed list. The costs
+    paragraph is recounted, and keeps its date while the counts hold. Text
+    outside the tiers is left as it is. Placing an open item is a judgement, so
+    the caller reports those.
     """
+    from records.kinds import as_id
+
     sections: list[tuple[int | None, list[str]]] = []
     tier, buf = None, []
     for line in text.split("\n"):
         heading = _PRIORITY_TIER.match(line)
-        if heading or (tier is not None and _PRIORITY_END.match(line)):
+        if heading or (tier is not None and _priority_ends_tier(line)):
             sections.append((tier, buf))
             tier, buf = (int(heading.group(1)) if heading else None), [line]
             continue
@@ -3819,59 +3868,72 @@ def reconcile_priority(text: str, items: dict, today: str) -> tuple[str, list[st
         if tier is None:
             rebuilt.append("\n".join(lines))
             continue
-        body = "\n".join(lines[1:]).strip("\n")
-        old_list = None
-        kept: list[str] = []
-        for para in re.split(r"\n[ \t]*\n", body) if body else []:
+        paras = [p.strip("\n") for p in re.split(r"\n[ \t]*\n", "\n".join(lines[1:]))]
+        paras = [p for p in paras if p.strip()]
+        old_list, kept = None, []
+        for at, para in enumerate(paras):
             if para.startswith(PRIORITY_CLOSED_HEAD):
                 old_list = para
+                if at != len(paras) - 1:
+                    changes.append(
+                        f"tier {tier}: moved the closed list to the tier's end"
+                    )
                 continue
             if para.startswith(PRIORITY_COSTS_HEAD):
                 found = _PRIORITY_DATE.search(para)
-                same = found and _priority_costs(items, found.group(1)) == para
+                same = (
+                    found is not None and _priority_costs(items, found.group(1)) == para
+                )
                 kept.append(para if same else _priority_costs(items, today))
                 if not same:
                     changes.append(f"tier {tier}: recounted the costs paragraph")
                 continue
-            known = [n for n in dict.fromkeys(_priority_ids(para)) if n in items]
-            if known and all(items[n].status not in _PRIORITY_OPEN for n in known):
-                names = ", ".join(map(str, known))
-                changes.append(
-                    f"tier {tier}: folded a paragraph naming only closed {names}"
-                )
+            about = [n for n in _priority_mentions(para) if n in items]
+            bold = [n for n in _priority_ids(para) if n in items]
+            if bold and all(items[n].status not in _PRIORITY_OPEN for n in about):
+                changes.append(f"tier {tier}: folded {para.splitlines()[0][:70]!r}")
                 continue
 
-            def strike(match: re.Match[str], tier: int = tier) -> str:
-                from records.kinds import as_id
+            def mark(match: re.Match[str], tier: int = tier) -> str:
+                raw, n = match.group(0), as_id(match.group(2))
+                if n not in items:
+                    return raw
+                struck, should = (
+                    bool(match.group(1)),
+                    items[n].status in _PRIORITY_STRIKABLE,
+                )
+                if struck == should:
+                    return raw
+                changes.append(
+                    f"tier {tier}: {'struck' if should else 'unstruck'} {n}, "
+                    f"which is {items[n].status}"
+                )
+                return (
+                    f"~~**{match.group(2)}**~~" if should else f"**{match.group(2)}**"
+                )
 
-                n = as_id(match.group(1))
-                if n in items and items[n].status in _PRIORITY_STRIKABLE:
-                    changes.append(
-                        f"tier {tier}: struck {n}, which is {items[n].status}"
-                    )
-                    return f"~~{match.group(0)}~~"
-                return match.group(0)
-
-            kept.append(re.sub(rf"(?<!~){_priority_bold()}(?!~)", strike, para))
+            pattern = rf"(~~)?\*\*{_priority_id()}\*\*(?(1)~~|(?!~))"
+            kept.append(re.sub(pattern, mark, para))
         named = {n for para in kept for n in _priority_ids(para)}
-        new_list = _priority_closed_list(tier, items, named)
+        new_list = _priority_closed_list(tier, items, named, old_list)
         if new_list is not None:
             kept.append(new_list)
         if new_list != old_list:
             changes.append(
-                f"tier {tier}: rebuilt the closed list from each record's tier"
+                f"tier {tier}: brought the closed list level with each record's tier"
             )
         rebuilt.append(lines[0] + "\n\n" + "\n\n".join(kept) + "\n")
-    out = re.sub(r"\n{3,}", "\n\n", "\n".join(rebuilt)).rstrip("\n") + "\n"
-    return out, changes
+    return "\n".join(rebuilt), changes
 
 
 def cmd_priority(args) -> int:
-    """Bring `PRIORITY.md` level with the records, and name each open item it
-    places nowhere. Exits 1 on a dry run that finds work, so a step can use it
-    as its check."""
+    """Bring `PRIORITY.md` level with the records, then ask `check_priority`,
+    the rule `tests/records` applies, whether the result holds. Exits 1 while a
+    rewrite is left, a violation stands, or an open item has no tier. Step 5
+    reads that exit as its check."""
     from records.kinds import KINDS, BacklogItem
     from records.load import RecordError, load
+    from records.rules import check_priority
 
     try:
         records = load(KINDS["backlog"], REPO)
@@ -3885,22 +3947,33 @@ def cmd_priority(args) -> int:
     path = REPO / KINDS["backlog"].directory / "PRIORITY.md"
     text = path.read_text()
     new, changes = reconcile_priority(text, items, dt.date.today().isoformat())
-    named = set(_priority_ids(new))
-    unplaced = sorted(
-        (n for n, m in items.items() if m.status in _PRIORITY_OPEN and n not in named),
-        key=_priority_order(items),
-    )
+    if new != text and not changes:
+        changes.append("respaced the tier sections")
     for line in changes:
         print(line)
-    for n in unplaced:
-        print(f"unplaced: {n} is {items[n].status} and PRIORITY.md names it nowhere")
+    with tempfile.TemporaryDirectory() as scratch:
+        probe = Path(scratch) / "PRIORITY.md"
+        probe.write_text(new)
+        violations = check_priority(records, probe)
+    for v in violations:
+        where = "PRIORITY.md" if v.path == probe else v.path.relative_to(REPO)
+        print(f"{where}: {v.field}: {v.message}")
+    untiered = sorted(
+        (n for n, m in items.items() if m.status in _PRIORITY_OPEN and m.tier is None),
+        key=_priority_order(items),
+    )
+    for n in untiered:
+        print(
+            f"unplaced: {n} is {items[n].status} with no tier. Set `tier:`, then name it under that tier"
+        )
     if args.write and new != text:
         path.write_text(new)
         print(f"wrote {path.relative_to(REPO)}")
-    if not changes and not unplaced:
+    pending = new != text and not args.write
+    if not pending and not violations and not untiered:
         print("PRIORITY.md matches the records")
         return 0
-    return 1 if unplaced or not args.write else 0
+    return 1
 
 
 def main() -> int:

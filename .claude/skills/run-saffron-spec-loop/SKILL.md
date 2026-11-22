@@ -334,10 +334,12 @@ each move to `done/` before `make check`. An uncommitted move fails
 `test_queued_specs.py` with a message that names the test and not the move.
 
 Once every status is set, run `uv run .claude/skills/run-saffron-spec-loop/driver.py
-priority --write` and commit what it changes with the statuses. It strikes each
-closed id, and folds each tier paragraph that names only closed items into that
-tier's closed list. It also recounts the costs paragraph. It names each open item
-the index places nowhere, and exits 1 until you place it by hand.
+priority --write` and commit what it changes with the statuses. Inside the tier
+sections it strikes each done or superseded id and unstrikes any other. It folds
+each paragraph about closed items only into its tier's closed list, which takes
+each newly closed id at its end. It also recounts the costs paragraph. Then it
+runs `check_priority` and names each open item with no tier. It exits 1 until
+both are clean, and placing an item stays by hand.
 
 Step 3 linked the stack before this PR existed. Once it is open, link it on
 top, so it reads back based on the last layer and is marked ready:

@@ -4693,7 +4693,7 @@ def test_stack_names_a_leftover_gh_stack_rebase_and_its_age_before_linking(
 # ------------------------------------------------------------ priority
 
 
-def _pr_item(item_id, status, tier):
+def _pr_item(item_id, status, tier, *, outside_cell=False):
     from records.kinds import BacklogItem
 
     closed = status in ("done", "superseded", "wontfix")
@@ -4706,6 +4706,7 @@ def _pr_item(item_id, status, tier):
         closed="2026-11-02" if closed else None,
         prs=[5] if closed else [],
         superseded_by="b-aaaaa1" if status == "superseded" else None,
+        outside_cell=outside_cell,
     )
 
 
@@ -4740,6 +4741,11 @@ def _pr_items():
     }
 
 
+def _pr_tier(text, n):
+    """The text of tier `n`'s section, heading excluded."""
+    return text.split(f"### Tier {n}")[1].split("### Tier")[0].split("\n---")[0]
+
+
 def test_priority_folds_a_closed_paragraph_and_strikes_a_closed_id_in_a_kept_one():
     out, changes = driver.reconcile_priority(_PR_TEXT, _pr_items(), "2026-11-22")
     assert "**b-aaaaa1** and ~~**b-aaaaa2**~~. One is open." in out
@@ -4751,25 +4757,116 @@ def test_priority_folds_a_closed_paragraph_and_strikes_a_closed_id_in_a_kept_one
     assert "~~**b-aaaaa2**~~." not in out.split(driver.PRIORITY_CLOSED_HEAD)[1]
     assert out.endswith("---\n\nAfter the tiers.\n")
     assert "tier 1: struck b-aaaaa2, which is done" in changes
-    assert "tier 1: folded a paragraph naming only closed b-aaaaa3, b-aaaaa4" in changes
+    assert (
+        "tier 1: folded '**Placed 2**: **b-aaaaa3** and **b-aaaaa4**. Both are closed.'"
+        in changes
+    )
+
+
+def test_priority_unstrikes_an_id_whose_record_is_not_done_or_superseded():
+    items = _pr_items()
+    text = _PR_TEXT.replace("**b-ccccc1**.", "~~**b-ccccc1**~~ and ~~**b-aaaaa4**~~.")
+    out, changes = driver.reconcile_priority(text, items, "2026-11-22")
+    assert "**Placed 3**: **b-ccccc1** and **b-aaaaa4**." in out
+    assert "tier 3: unstruck b-ccccc1, which is partial" in changes
+    assert "tier 3: unstruck b-aaaaa4, which is wontfix" in changes
+
+
+def test_priority_keeps_a_paragraph_about_an_open_item_named_outside_a_bold_id():
+    items = {
+        79: _pr_item(79, "partial", 1),
+        80: _pr_item(80, "done", 1),
+        "b-aaaaa2": _pr_item("b-aaaaa2", "done", 1),
+        "b-aaaaa5": _pr_item("b-aaaaa5", "open", 1),
+    }
+    text = (
+        "### Tier 1 — first\n\n"
+        "**79 comes first.** It waits on a pass. **80** closed.\n\n"
+        "**Placed**: ~~**b-aaaaa2**~~, which b-aaaaa5 still needs.\n\n"
+        "**Placed**: **80**, beside item 79.\n"
+    )
+    out, changes = driver.reconcile_priority(text, items, "2026-11-22")
+    assert "**79 comes first.** It waits on a pass. ~~**80**~~ closed." in out
+    assert "which b-aaaaa5 still needs." in out
+    assert "beside item 79." in out
+    assert not [c for c in changes if "folded" in c]
 
 
 def test_priority_is_a_fixed_point_and_keeps_the_costs_date_while_counts_hold():
     out, _ = driver.reconcile_priority(_PR_TEXT, _pr_items(), "2026-11-22")
-    assert "recounted on 2026-11-22.** Tier 1 holds 1 open" in out
-    assert "tier 3 holds 1. So tier 3 holds 50% of the" in out
+    flat = " ".join(out.split())
+    assert "recounted on 2026-11-22.** Tier 1 holds 1 open item, tier 2 holds 0" in flat
+    assert "tier 3 holds 1. So tier 3 holds 50% of the" in flat
     again, changes = driver.reconcile_priority(out, _pr_items(), "2026-12-31")
     assert (again, changes) == (out, [])
     items = _pr_items()
-    items["b-ccccc1"] = _pr_item("b-ccccc1", "open", 2)
+    items["b-eeeee1"] = _pr_item("b-eeeee1", "open", 3)
     moved, changes = driver.reconcile_priority(out, items, "2026-12-31")
-    assert "recounted on 2026-12-31.** Tier 1 holds 1 open" in moved
+    flat = " ".join(moved.split())
+    assert "recounted on 2026-12-31.** Tier 1 holds 1 open item" in flat
+    assert "tier 3 holds 2. So tier 3 holds 67%" in flat
     assert "tier 3: recounted the costs paragraph" in changes
+
+
+def test_priority_costs_count_tier_0_and_untiered_items_and_take_the_singular():
+    items = _pr_items()
+    items["b-00000a"] = _pr_item("b-00000a", "open", 0, outside_cell=True)
+    items["b-00000b"] = _pr_item("b-00000b", "open", None)
+    costs = " ".join(driver._priority_costs(items, "2026-11-22").split())
+    assert (
+        "Tier 0 holds 1 open item, tier 1 holds 1, tier 2 holds 0 and tier 3 holds 1."
+        in costs
+    )
+    assert "1 of the 4 open items is outside a cell" in costs
+    assert costs.endswith("1 carries no tier yet.")
+
+
+def test_priority_reads_a_costs_paragraph_after_two_blank_lines_and_moves_a_closed_list():
+    text = _PR_TEXT.replace("\n\n**What this", "\n\n\n**What this")
+    first, _ = driver.reconcile_priority(_PR_TEXT, _pr_items(), "2026-11-22")
+    out, changes = driver.reconcile_priority(text, _pr_items(), "2026-11-22")
+    assert "Tier 1 holds 9 open" not in out
+    assert "tier 3: recounted the costs paragraph" in changes
+    # A paragraph placed after a tier's closed list sends the list back to the end.
+    late = first.replace("### Tier 3", "**Placed 9**: **b-aaaaa1**.\n\n### Tier 3")
+    tier_1 = _pr_tier(late, 1)
+    assert tier_1.index("**Placed 9**") > tier_1.index(driver.PRIORITY_CLOSED_HEAD)
+    out, changes = driver.reconcile_priority(late, _pr_items(), "2026-11-22")
+    tier_1 = _pr_tier(out, 1)
+    assert tier_1.index("**Placed 9**") < tier_1.index(driver.PRIORITY_CLOSED_HEAD)
+    assert "tier 1: moved the closed list to the tier's end" in changes
+
+
+def test_priority_appends_a_newly_closed_id_and_leaves_the_listed_lines_alone():
+    items = {f"b-{n:06x}": _pr_item(f"b-{n:06x}", "done", 2) for n in range(1, 22)}
+    items["b-aaaaa1"] = _pr_item("b-aaaaa1", "open", 2)
+    text = "### Tier 2 — mid\n\n**Placed**: **b-aaaaa1**.\n"
+    out, _ = driver.reconcile_priority(text, items, "2026-11-22")
+    before = [line for line in out.splitlines() if line.startswith("- ~~")]
+    assert [line.count("~~**") for line in before] == [20, 1]
+    items["b-000000"] = _pr_item("b-000000", "done", 2)
+    out, _ = driver.reconcile_priority(out, items, "2026-11-22")
+    after = [line for line in out.splitlines() if line.startswith("- ~~")]
+    assert after[0] == before[0]
+    assert after[1] == "- ~~**b-000015**~~, ~~**b-000000**~~."
+
+
+def test_priority_ends_a_tier_where_check_priority_does_at_an_indented_rule():
+    items = {
+        "b-aaaaa1": _pr_item("b-aaaaa1", "open", 1),
+        "b-aaaaa2": _pr_item("b-aaaaa2", "done", 1),
+    }
+    text = "### Tier 1 — first\n\n**Placed**: **b-aaaaa1**.\n\n ---\n\nA note on **b-aaaaa2**.\n"
+    out, _ = driver.reconcile_priority(text, items, "2026-11-22")
+    assert "- ~~**b-aaaaa2**~~." in _pr_tier(out, 1)
+    assert out.endswith(" ---\n\nA note on **b-aaaaa2**.\n")
 
 
 def _pr_record(item):
     lines = [f"id: {item.id}", "title: T", f"status: {item.status}"]
-    lines += [f"tier: {item.tier}", "filed: 2026-11-01"]
+    if item.tier is not None:
+        lines.append(f"tier: {item.tier}")
+    lines.append("filed: 2026-11-01")
     if item.closed:
         lines += ["closed: 2026-11-02", "prs: [5]"]
     if item.superseded_by:
@@ -4778,17 +4875,20 @@ def _pr_record(item):
     return "---\n" + "\n".join(lines) + "\n---\n\n" + body
 
 
+def _pr_tree(tmp_path, monkeypatch, items, text=_PR_TEXT):
+    backlog = tmp_path / "docs" / "backlog"
+    backlog.mkdir(parents=True)
+    for item in items.values():
+        (backlog / f"{item.id}-slug.md").write_text(_pr_record(item))
+    (backlog / "PRIORITY.md").write_text(text)
+    monkeypatch.setattr(driver, "REPO", tmp_path)
+    return backlog
+
+
 def test_priority_dry_run_writes_nothing_and_exits_1_until_the_index_is_level(
     tmp_path, monkeypatch, capsys
 ):
-    backlog = tmp_path / "docs" / "backlog"
-    backlog.mkdir(parents=True)
-    items = _pr_items()
-    for item in items.values():
-        (backlog / f"{item.id}-slug.md").write_text(_pr_record(item))
-    (backlog / "PRIORITY.md").write_text(_PR_TEXT)
-    monkeypatch.setattr(driver, "REPO", tmp_path)
-
+    backlog = _pr_tree(tmp_path, monkeypatch, _pr_items())
     assert driver.cmd_priority(SimpleNamespace(write=False)) == 1
     assert "tier 1: struck b-aaaaa2, which is done" in capsys.readouterr().out
     assert (backlog / "PRIORITY.md").read_text() == _PR_TEXT
@@ -4798,9 +4898,18 @@ def test_priority_dry_run_writes_nothing_and_exits_1_until_the_index_is_level(
     assert driver.cmd_priority(SimpleNamespace(write=False)) == 0
     assert "PRIORITY.md matches the records" in capsys.readouterr().out
 
-    # Placing an open item is the delegate's call, so the command names it and fails.
-    (backlog / "b-ddddd1-slug.md").write_text(
-        _pr_record(_pr_item("b-ddddd1", "open", 2))
-    )
+
+def test_priority_fails_on_what_check_priority_refuses_and_on_an_untiered_item(
+    tmp_path, monkeypatch, capsys
+):
+    items = _pr_items()
+    # Named only under tier 3, while its record now says tier 2.
+    items["b-ccccc1"] = _pr_item("b-ccccc1", "partial", 2)
+    items["b-ddddd1"] = _pr_item("b-ddddd1", "open", None)
+    _pr_tree(tmp_path, monkeypatch, items)
     assert driver.cmd_priority(SimpleNamespace(write=True)) == 1
-    assert "unplaced: b-ddddd1 is open" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    # Matched without the word before the id, which the citation check reads.
+    assert " b-ccccc1 is tier 2, but PRIORITY.md does not name it under tier 2" in out
+    assert "unplaced: b-ddddd1 is open with no tier. Set `tier:`, then name it" in out
+    assert "PRIORITY.md matches the records" not in out
