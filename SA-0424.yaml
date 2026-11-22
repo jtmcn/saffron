@@ -1,0 +1,5 @@
+tests/test_events.py::test_a_log_tells_a_write_it_could_not_make_from_an_event_it_could_not_serialize:
+  file: saffron/events.py
+  find: "except (OSError, RecursionError, TypeError, ValueError):"
+  replace: "except (RecursionError, TypeError, ValueError):"
+  case: a write the disk refused, which must mark the log and never leave append
