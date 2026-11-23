@@ -29,7 +29,7 @@ from saffron.credentials import (
     OWN_TOKEN_DESCRIPTION,
     matches_own_token,
 )
-from saffron.events import Event, EventLog, PhaseStart, describe
+from saffron.events import Event, EventLog, PhaseStart, append_and_warn
 from saffron.gates.baseline import render
 from saffron.gates.contract import split_lines
 from saffron.gates.core.scope import scope_gate
@@ -691,10 +691,7 @@ def package(
         log = EventLog(outcome.task_dir, token=token)
 
         def emit(event: Event) -> None:
-            line = describe(event)
-            if line:
-                print(line)
-            log.append(event)
+            append_and_warn(event, log=log)
 
     def _emit_package(detail: str) -> None:
         """Every `PACKAGE:` line this phase prints, fanned out through
@@ -1193,10 +1190,7 @@ def push_unpackaged_work(
         log = EventLog(outcome.task_dir, token=token)
 
         def emit(event: Event) -> None:
-            line = describe(event)
-            if line:
-                print(line)
-            log.append(event)
+            append_and_warn(event, log=log)
 
     def _say(detail: str) -> None:
         emit(

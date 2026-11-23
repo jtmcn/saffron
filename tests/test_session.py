@@ -1589,10 +1589,10 @@ def _drive(
     `patch_print=False`: leave `session.print` alone and pass a custom `emit`,
     so `capsys` observes real stdout while `capture` still sees `emit` (item 43).
 
-    `use_default_emit`: skip the `emit=`/`session.print` doubles above and
-    call `run_one_cell` exactly as `cli.py` does — no `emit` argument at all
-    — so a test can exercise `_default_emit`/`EventLog` for real, against
-    `tmp_path / "out" / spec.spec_id`.
+    `use_default_emit`: skip the `emit=`/`session.print` doubles above.
+    Call `run_one_cell` with no `emit` argument at all, the shape a caller
+    that passes none gets. A test can then exercise `_default_emit`/
+    `EventLog` for real, against `tmp_path / "out" / spec.spec_id`.
 
     `capture`: an optional list that, alongside `cell.watched`'s described
     strings, also collects the raw `Event` each one was built from — for a
@@ -18143,6 +18143,81 @@ def test_the_printed_log_names_each_new_failure_beneath_its_count(
     assert [e.failures for e in rebut_lines] == [
         ("[format] x.py:? E1: m", "[lint] x.py:? E1: m"),
         ("[format] x.py:? E1: m",),
+    ]
+
+
+def test_the_default_emitter_warns_once_for_each_fault_its_log_raised(tmp_path, capsys):
+    """`session._default_emit` prints the same two warnings `run_task`
+    does, each naming its log's `path`. Each prints once per log, on the
+    line right after the event that raised it, the last event a log is
+    handed included. Neither warning is appended."""
+    from saffron.events import EventLog, read_log
+
+    log_dir = tmp_path / "A"
+    log = EventLog(log_dir)
+    path = log_dir / "events.jsonl"
+
+    phase1 = PhaseStart(
+        timestamp=1.0, spec_id="X", phase="PACKAGE", label="PACKAGE", detail="first"
+    )
+    one = Agent(timestamp=2.0, spec_id="X", raw=True, line="one", event={"s": {1, 2}})
+    two = Agent(timestamp=3.0, spec_id="X", raw=True, line="two", event={"n": 10**5000})
+    phase2 = PhaseStart(
+        timestamp=4.0, spec_id="X", phase="PACKAGE", label="PACKAGE", detail="second"
+    )
+    for event in (phase1, one, two, phase2):
+        session._default_emit(event, log=log)
+
+    assert [type(e).__name__ for e in read_log(log_dir)] == ["PhaseStart", "PhaseStart"]
+
+    path.unlink()
+    path.mkdir()
+
+    phase3 = PhaseStart(
+        timestamp=5.0, spec_id="X", phase="PACKAGE", label="PACKAGE", detail="third"
+    )
+    phase4 = PhaseStart(
+        timestamp=6.0, spec_id="X", phase="PACKAGE", label="PACKAGE", detail="fourth"
+    )
+    session._default_emit(phase3, log=log)
+    session._default_emit(phase4, log=log)
+
+    printed = capsys.readouterr().out.splitlines()
+    serialize = f"warning: {path} could not serialize an event and left it out"
+    refused = f"warning: {path} refused a write; events may be missing"
+    assert printed == [
+        "PACKAGE: first",
+        "agent: (raw) one",
+        serialize,
+        "agent: (raw) two",
+        "PACKAGE: second",
+        "PACKAGE: third",
+        refused,
+        "PACKAGE: fourth",
+    ]
+
+    # A log refusing from its own start.
+    refusing_dir = tmp_path / "B"
+    refusing_dir.mkdir()
+    (refusing_dir / "events.jsonl").mkdir()
+    refusing_log = EventLog(refusing_dir)
+    lone_phase = PhaseStart(
+        timestamp=1.0, spec_id="X", phase="PACKAGE", label="PACKAGE", detail="lone"
+    )
+    session._default_emit(lone_phase, log=refusing_log)
+    assert capsys.readouterr().out.splitlines() == [
+        "PACKAGE: lone",
+        f"warning: {refusing_dir / 'events.jsonl'} refused a write; events may be missing",
+    ]
+
+    # A fresh log, one unserializable event.
+    fresh_log = EventLog(tmp_path / "C")
+    lone_bad = Agent(timestamp=1.0, spec_id="X", raw=True, line="bad", event={"s": {1}})
+    session._default_emit(lone_bad, log=fresh_log)
+    assert capsys.readouterr().out.splitlines() == [
+        "agent: (raw) bad",
+        f"warning: {tmp_path / 'C' / 'events.jsonl'} could not serialize an "
+        "event and left it out",
     ]
 
 

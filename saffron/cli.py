@@ -120,6 +120,8 @@ def _record_events(out_dir: Path) -> Callable[[RecordAppend], None]:
     event to."""
 
     def sink(event: RecordAppend) -> None:
+        # `failed` goes unread here on purpose. The record already holds
+        # the fact. A missing line is only for a reader of `events.jsonl`.
         EventLog(out_dir / event.spec_id).append(event)
 
     return sink
