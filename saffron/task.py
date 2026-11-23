@@ -968,6 +968,21 @@ def run_task(
             return
         written = True
 
+    def _append_end_line(state: str, line: index_report.QueueLine) -> None:
+        """Both of `run_task`'s own end-of-task writes, guarded like
+        `_write_live`'s: a failed write here must not turn a task that
+        already finished into an infrastructure exit (`SA-0423`). The
+        status line and the rest of the branch still run after this,
+        write or no write."""
+        try:
+            index_report.append_queue_line(
+                out_dir,
+                line,
+                header=index_report.accept_rate_header(ledger),
+            )
+        except Exception as exc:
+            print(f"{spec.id}: the {state} row could not be written: {exc}")
+
     # Held around the cell alone, let go before PACKAGE: a second home's
     # task must not touch this spec id's names while this cell is live (`b-d9ed45`).
     try:
@@ -1089,16 +1104,17 @@ def run_task(
                 combined_note = f"{package_note}; {pushed.note}"
                 # This overwrites a refusal's `_finish` row, since `append_queue_line`
                 # upserts on `(repo, spec_id)`. A raised PACKAGE wrote none.
-                index_report.append_queue_line(
-                    out_dir,
+                _append_end_line(
+                    "EXHAUSTED",
                     package_phase.queue_line(
                         outcome,
                         repo_name=repo.name,
                         spec_id=spec.id,
                         state="EXHAUSTED",
                         note=combined_note,
+                        added=pushed.added or 0,
+                        removed=pushed.removed or 0,
                     ),
-                    header=index_report.accept_rate_header(ledger),
                 )
                 print(f"{spec.id:<10} EXHAUSTED  {combined_note}")
                 outcome.state = "EXHAUSTED"
@@ -1120,16 +1136,17 @@ def run_task(
             )
             # `_finish` never ran, so `link` stays empty, even on a row that
             # carries a pull request. A pushed branch is already in `note`.
-            index_report.append_queue_line(
-                out_dir,
+            _append_end_line(
+                outcome.state,
                 package_phase.queue_line(
                     outcome,
                     repo_name=repo.name,
                     spec_id=spec.id,
                     state=outcome.state,
                     note=pushed.note,
+                    added=pushed.added or 0,
+                    removed=pushed.removed or 0,
                 ),
-                header=index_report.accept_rate_header(ledger),
             )
             print(f"{spec.id:<10} {outcome.state}  {pushed.note}")
     finally:

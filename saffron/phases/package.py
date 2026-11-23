@@ -764,6 +764,7 @@ def package(
                     PackageResult(
                         state=_state("MERGE_FAILED"), branch=branch, note=str(gone)
                     ),
+                    say=_emit_package,
                 )
             target_branch, target_head = parent_branch, parent_head
 
@@ -813,6 +814,7 @@ def package(
                     branch=branch,
                     note=f"conflicts with {target_branch}",
                 ),
+                say=_emit_package,
             )
 
         def _refuse(leaked: list[str], where: str, **counts) -> PackageResult:
@@ -830,6 +832,7 @@ def package(
                     note=f"credential in {where}: {'; '.join(leaked)}",
                     **counts,
                 ),
+                say=_emit_package,
             )
 
         if leaked := find_credentials(patch.read_text(), token=token):
@@ -924,6 +927,7 @@ def package(
                     added=added,
                     removed=removed,
                 ),
+                say=_emit_package,
             )
 
         # DIFF_FLAGS, not a bare diff: `diff.noprefix` in the operator's global
@@ -990,6 +994,7 @@ def package(
                     added=added,
                     removed=removed,
                 ),
+                say=_emit_package,
             )
 
         # Before open_draft_pr: the push already landed, and a gh failure
@@ -1019,6 +1024,7 @@ def package(
                 added=added,
                 removed=removed,
             ),
+            say=_emit_package,
         )
     finally:
         # The worktree otherwise leaks on every raise path, including the
@@ -1078,10 +1084,20 @@ def queue_line(
     )
 
 
-def _finish(ledger, outcome, out_dir: Path, spec, repo_name: str, result):
+def _finish(
+    ledger,
+    outcome,
+    out_dir: Path,
+    spec,
+    repo_name: str,
+    result,
+    *,
+    say: Callable[[str], None],
+):
     """Persist and append. A PACKAGE that *raises* reaches neither, and that is
     deliberate: an index line whose link points at a pull request that was
-    never opened is worse than no line."""
+    never opened is worse than no line. A failed queue-line write is handed
+    to `say` instead, and this still returns `result`."""
     ledger.set_task_package(
         outcome.task_id,
         result.state,
@@ -1091,20 +1107,23 @@ def _finish(ledger, outcome, out_dir: Path, spec, repo_name: str, result):
         added=result.added,
         removed=result.removed,
     )
-    index_report.append_queue_line(
-        out_dir,
-        queue_line(
-            outcome,
-            repo_name=repo_name,
-            spec_id=spec.id,
-            state=result.state,
-            note=result.note,
-            added=result.added or 0,
-            removed=result.removed or 0,
-            link=result.pr_url,
-        ),
-        header=index_report.accept_rate_header(ledger),
-    )
+    try:
+        index_report.append_queue_line(
+            out_dir,
+            queue_line(
+                outcome,
+                repo_name=repo_name,
+                spec_id=spec.id,
+                state=result.state,
+                note=result.note,
+                added=result.added or 0,
+                removed=result.removed or 0,
+                link=result.pr_url,
+            ),
+            header=index_report.accept_rate_header(ledger),
+        )
+    except Exception as exc:
+        say(f"the {result.state} row could not be written: {exc}")
     return result
 
 
@@ -1113,12 +1132,15 @@ class PushResult:
     """What trying to push a task's unpackaged work produced. Deliberately not
     `PackageResult`: that type's `state` field feeds `_finish` — a ledger
     state write and a queue line — and neither happens here (§0's own
-    boundary: this is not packaging)."""
+    boundary: this is not packaging). `added` and `removed` are `None` when
+    nothing pushed, or when the stat itself could not be read (`SA-0423`)."""
 
     pushed: bool
     branch: str = ""
     pushed_sha: str = ""
     note: str = ""
+    added: int | None = None
+    removed: int | None = None
 
 
 def push_unpackaged_work(
@@ -1327,6 +1349,19 @@ def push_unpackaged_work(
                 _say(f"could not remove {scratch}: {stuck}")
 
     ledger.record_push(outcome.task_id, pushed_sha)
+    added: int | None = None
+    removed: int | None = None
+    try:
+        added, removed = mirror_ops.diff_stat(mirror, tree_base, pushed_sha)
+    except (mirror_ops.GitError, OSError) as exc:
+        _say(f"could not read the diff stat of {pushed_sha[:12]}: {exc}")
     note = f"pushed {branch} @ {pushed_sha[:12]}"
     _say(note)
-    return PushResult(pushed=True, branch=branch, pushed_sha=pushed_sha, note=note)
+    return PushResult(
+        pushed=True,
+        branch=branch,
+        pushed_sha=pushed_sha,
+        note=note,
+        added=added,
+        removed=removed,
+    )
