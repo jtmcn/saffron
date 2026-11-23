@@ -21,7 +21,7 @@ A gate is an executable that prints one JSON object on stdout and nothing else t
 - A run that broke part-way is `error` for the whole run, never `fail` on what it collected.
 - `skip` names no tool, carries no failures and exits `0`.
 - `code` is stable across runs. The baseline matches on `(gate, file, code, message)` with digits collapsed, so a line number inside `code` breaks it.
-- `detail` is optional, and the baseline never matches on it. It holds a reason that varies between runs, such as a test's assertion text.
+- `detail` is optional, and the baseline never matches on it. It holds a reason that can differ from one gate result to the next, such as a test's assertion text.
 - Diagnostics go to stderr. A stray line on stdout makes the result unparseable, which is `error`.
 
 ## The `tests` gate

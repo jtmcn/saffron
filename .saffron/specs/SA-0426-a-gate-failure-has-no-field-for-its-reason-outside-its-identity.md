@@ -223,7 +223,8 @@ acceptance:
       ` - ` and the failure's detail when it is non-empty. The detail is
       escaped as the message is, and an empty detail leaves the row as your
       base renders it. The witness renders one body with a blocking failure
-      whose detail holds a pipe, a blocking failure with no detail, and an
+      whose detail holds a pipe, a newline and an `@org` mention, a blocking
+      failure with no detail, and an
       advisory failure with a detail, and compares each row whole.
     witness: tests/test_report.py::test_a_new_failures_row_ends_its_message_with_its_detail
     positive_case: >-
@@ -233,6 +234,7 @@ acceptance:
     wrong_versions:
       - "`_failure_rows` renders each row as your base does and drops the detail."
       - "`_failure_rows` appends the detail outside `_cell`, so its pipe splits the row."
+      - "`_failure_rows` escapes the detail's pipe alone, so its newline splits the row and its mention stays live."
       - "`_new_failures` hands the advisory table its failures with the detail cleared."
       - "`_failure_rows` always appends ` - `, so a row with no detail ends with the separator."
     covers:
@@ -246,6 +248,8 @@ acceptance:
         members:
           - member: non-empty, holding a pipe
             driven_by: "`_failure_rows` appends the detail outside `_cell`, so its pipe splits the row."
+          - member: non-empty, holding a newline and a mention
+            driven_by: "`_failure_rows` escapes the detail's pipe alone, so its newline splits the row and its mention stays live."
           - member: empty
             driven_by: "`_failure_rows` always appends ` - `, so a row with no detail ends with the separator."
 ---
