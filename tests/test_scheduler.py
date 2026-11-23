@@ -3722,9 +3722,9 @@ def test_a_stack_order_stacks_on_one_earlier_pull_request_and_refuses_a_spec_nam
 
 
 def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledger):
-    """Re-measured 2026-11-22 for SA-0424, refused. Sets: SA-0338-0343, 0350-0356,
+    """Re-measured 2026-11-22 for SA-0425, refused. Sets: SA-0338-0343, 0350-0356,
     0360-0365, 0368, 0369, 0371-0378, 0380, 0381, 0384-0390, 0393-0396, 0399-0411,
-    0414-0419, 0421-0424. Candidates: SA-0338, 0360-0365, 0368, 0369, 0371-0376, 0380,
+    0414-0419, 0421-0425. Candidates: SA-0338, 0360-0365, 0368, 0369, 0371-0376, 0380,
     0381, 0384-0390, 0393-0395, 0400, 0403, 0405, 0406, 0408-0410, 0415-0419, 0421.
 
     Re-measured 2026-09-25, a hundred-and-first time: the spec loop's run 17
@@ -4493,6 +4493,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0422",
         "SA-0423",
         "SA-0424",
+        "SA-0425",
     }
     directory = tmp_path / "specs"
     _arrange_measured_queue(REAL_SPECS, directory, measured)
@@ -4687,6 +4688,7 @@ def test_saffron_queue_smoke_reproduces_this_repos_measured_queue(tmp_path, ledg
         "SA-0422",
         "SA-0423",
         "SA-0424",
+        "SA-0425",
     ]
     # A precondition, not the glob check: `done/` holds far more specs than the
     # queue above, so that exact list is a check rather than a scan of nothing.
