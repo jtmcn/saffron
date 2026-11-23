@@ -96,10 +96,6 @@ cannot run. The follow-up writer's first draft never parses. The record's
 git calls can prompt and drop git's reason. A cell makes CONNECTs no git
 call explains.
 
-**Placed 2026-11-20**, from `SA-0417`'s spec review: **b-0f5493**. Each event's
-terminal line prints before its log redacts it, so the token reaches the
-`launchd` log file.
-
 **Placed 2026-10-17**, from the spec loop's run 43: **b-3a79a0**. The loop's
 driver orders a stack by `depends_on`, not by the stack base a batch built.
 
@@ -274,10 +270,14 @@ ends a task unjudged on one API error, with no retry.
 - ~~**b-5e443c**~~, ~~**b-65e7e2**~~, ~~**b-6f7f8d**~~, ~~**b-865399**~~, ~~**b-a70ec1**~~, ~~**b-ce93aa**~~, ~~**b-0c1d69**~~, ~~**b-250dc7**~~, ~~**b-25766a**~~, ~~**b-602d00**~~, ~~**b-e8027b**~~, ~~**b-343c21**~~, ~~**b-cafacd**~~, ~~**b-db95e1**~~, ~~**b-1adb50**~~, ~~**b-466005**~~, ~~**b-6377cf**~~, ~~**b-cde96b**~~, ~~**b-dce9a4**~~, ~~**b-04a5d9**~~.
 - ~~**b-b0cd68**~~, ~~**b-bff670**~~, ~~**b-c375d6**~~, ~~**b-e0cd57**~~, ~~**b-2e7c4d**~~, ~~**b-38d45f**~~, ~~**b-47659f**~~, ~~**b-66d1c3**~~, ~~**b-78ccc7**~~, ~~**b-00534f**~~, ~~**b-209696**~~, ~~**b-23a149**~~, ~~**b-60ff2e**~~, ~~**b-970f53**~~, ~~**b-c94a2f**~~, ~~**b-0a08bf**~~, ~~**b-2247dd**~~, ~~**b-4e1b6d**~~, ~~**b-708c8a**~~, ~~**b-8e30bd**~~.
 - ~~**b-a1d649**~~, ~~**b-e0e1cf**~~, ~~**b-5df2a7**~~, ~~**b-cf50dc**~~, ~~**b-52e670**~~, ~~**b-e9153f**~~, ~~**b-9efbe2**~~, ~~**b-f5ceaf**~~, ~~**b-cd1566**~~, ~~**b-bba47a**~~, ~~**b-d31930**~~, ~~**b-2da959**~~, ~~**b-f73cd0**~~, ~~**b-998bb7**~~, ~~**b-781ea4**~~, ~~**b-a68b24**~~, ~~**b-009d51**~~, ~~**b-1b05be**~~, ~~**b-b9365d**~~, ~~**b-8e12c1**~~.
-- ~~**b-549012**~~, ~~**b-719346**~~, ~~**b-e0044f**~~, ~~**b-e9dd4c**~~, ~~**b-3cf039**~~, ~~**b-7c118b**~~, ~~**b-c5da95**~~, ~~**b-31e3c8**~~, ~~**b-3df181**~~, ~~**b-879e72**~~, ~~**b-c7858c**~~, ~~**b-cbb6e7**~~, ~~**b-d1c277**~~, ~~**b-c12d39**~~, ~~**b-16c819**~~, ~~**b-96508a**~~, ~~**b-1b5747**~~, ~~**b-d9a027**~~, ~~**b-c7fd81**~~.
+- ~~**b-549012**~~, ~~**b-719346**~~, ~~**b-e0044f**~~, ~~**b-e9dd4c**~~, ~~**b-3cf039**~~, ~~**b-7c118b**~~, ~~**b-c5da95**~~, ~~**b-31e3c8**~~, ~~**b-3df181**~~, ~~**b-879e72**~~, ~~**b-c7858c**~~, ~~**b-cbb6e7**~~, ~~**b-d1c277**~~, ~~**b-c12d39**~~, ~~**b-16c819**~~, ~~**b-96508a**~~, ~~**b-1b5747**~~, ~~**b-d9a027**~~, ~~**b-c7fd81**~~, ~~**b-0f5493**~~.
 - Closed as wontfix: **b-8d5e55**, **b-593d50**.
 
 ### Tier 3 — real, not urgent
+
+**Placed 2026-11-22**, from the spec loop's run 83: **b-708b05**.
+`cell_name_lock` restates `home_lock`'s holder parser, and a contender in
+the write window names a stale holder.
 
 **Placed 2026-11-20**, with `SA-0418`: **b-d0a813**. The vocabulary has no
 word for an attempt a cell opened, and `SA-0418` dates a task by one.
@@ -537,7 +537,7 @@ risk — not, as an earlier draft of this note said, that `.gitignore` in
 *tracked* half only: a `.gitignore` naming itself reaches no diff at all.
 
 **What this ordering costs, recounted on 2026-11-22.** Tier 1 holds 7 open
-items, tier 2 holds 64 and tier 3 holds 145. So tier 3 holds 67% of the
+items, tier 2 holds 63 and tier 3 holds 146. So tier 3 holds 68% of the
 backlog. That is the deliberate consequence of ranking by the milestone rather
 than by what is nearest to hand. 22 of the 216 open items are outside a cell,
 since a cell cannot reach their files.

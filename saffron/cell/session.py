@@ -133,10 +133,10 @@ def _default_emit(event: Event, *, log: EventLog) -> None:
     so a disk-full night still reaches its terminal state — it just stops
     growing `events.jsonl`, which `EventLog.failed` is the breadcrumb for.
     """
+    event = log.append(event)
     line = describe(event)
     if line:
         print(line)
-    log.append(event)
 
 
 def spec_drift(gates_dir: Path, spec_id: str, spec_sha: str) -> str | None:

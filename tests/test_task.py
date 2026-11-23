@@ -635,8 +635,8 @@ def test_a_log_that_failed_on_its_first_write_still_warns(
             if self._first:
                 self._first = False
                 self.failed = True
-                return
-            super().append(event)
+                return event
+            return super().append(event)
 
     monkeypatch.setattr(task_module, "EventLog", _FailFirst)
     _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
@@ -684,9 +684,9 @@ def test_a_log_that_starts_failing_partway_through_still_warns(
         def append(self, event):
             self._count += 1
             if self._count <= 2:
-                super().append(event)
-            else:
-                self.failed = True
+                return super().append(event)
+            self.failed = True
+            return event
 
     monkeypatch.setattr(task_module, "EventLog", _FailAfterTwo)
     _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
@@ -753,6 +753,141 @@ def test_run_task_redacts_the_cells_own_token_from_its_log(
     assert only.line is not None
     assert "before " in only.line and " after" in only.line
     assert token not in only.line
+
+
+def test_run_tasks_default_emit_prints_no_credential(tmp_path, monkeypatch, capsys):
+    """The `emit` `run_task` builds when handed none prints `describe` of
+    what the log already redacted, the same contract `_default_emit` keeps
+    (b-0f5493)."""
+    from saffron.credentials import OWN_TOKEN_DESCRIPTION
+    from saffron.events import Agent, describe
+
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
+
+    token = "cct-" + "5a9f3e7c21d4b8"
+    github = "gh" + "p_" + "a" * 20
+    aws = "AKIA" + "A" * 16
+    api_key = "sk-ant-" + "api03-" + "a" * 20
+    pad = "x" * 150
+
+    def _unredacted(text: str) -> bool:
+        return any(s in text for s in (token, token[:10], "ghp_", github, aws, api_key))
+
+    def _events(spec_id: str) -> list[Agent]:
+        return [
+            Agent(
+                timestamp=1.0,
+                spec_id=spec_id,
+                raw=False,
+                event={"type": "text", "text": f"before {token} and {github} after"},
+            ),
+            Agent(
+                timestamp=2.0,
+                spec_id=spec_id,
+                raw=False,
+                event={
+                    "type": "tool_use",
+                    "name": "Bash",
+                    "input": {"command": f"{token} {github}"},
+                },
+            ),
+            Agent(
+                timestamp=3.0,
+                spec_id=spec_id,
+                raw=True,
+                line=f"before {token} and {aws} after",
+            ),
+            Agent(
+                timestamp=4.0,
+                spec_id=spec_id,
+                raw=False,
+                detail=f"before {token} and {api_key} after",
+            ),
+            Agent(timestamp=5.0, spec_id=spec_id, raw=True, line=pad + token),
+            Agent(timestamp=6.0, spec_id=spec_id, raw=True, line=pad + github),
+        ]
+
+    out_dir = tmp_path / "out"
+    events = _events("SY-20")
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-20",
+        state="NOT_IMPLEMENTED",
+        task_id=20,
+        out_dir=out_dir,
+        events=events,
+        token=token,
+    )
+    printed = [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("agent: ")
+    ]
+    assert len(printed) == len(events)
+    for line in printed:
+        assert not _unredacted(line)
+        assert "(redacted: " in line
+    for line in printed[:5]:
+        assert OWN_TOKEN_DESCRIPTION in line
+    stored = [e for e in read_log(out_dir / "SY-20") if isinstance(e, Agent)]
+    assert len(stored) == len(events)
+    for line, logged in zip(printed, stored, strict=True):
+        assert line == describe(logged)
+
+    # `events.jsonl` pre-created as a directory: every write is refused, and
+    # the same six lines still print redacted, beside one warning.
+    dir_out_dir = tmp_path / "out-dir"
+    dir_task_dir = dir_out_dir / "SY-21"
+    dir_task_dir.mkdir(parents=True)
+    (dir_task_dir / "events.jsonl").mkdir()
+    dir_events = _events("SY-21")
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-21",
+        state="NOT_IMPLEMENTED",
+        task_id=21,
+        out_dir=dir_out_dir,
+        events=dir_events,
+        token=token,
+    )
+    output = capsys.readouterr().out
+    printed_refused = [
+        line for line in output.splitlines() if line.startswith("agent: ")
+    ]
+    assert len(printed_refused) == len(dir_events)
+    for line in printed_refused:
+        assert not _unredacted(line)
+        assert "(redacted: " in line
+    for line in printed_refused[:5]:
+        assert OWN_TOKEN_DESCRIPTION in line
+    assert output.count("refused a write") == 1
+
+    # Handed no token, the log still redacts the three shapes, and the
+    # token prints as it came.
+    none_out_dir = tmp_path / "out-none"
+    none_events = _events("SY-22")
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-22",
+        state="NOT_IMPLEMENTED",
+        task_id=22,
+        out_dir=none_out_dir,
+        events=none_events,
+        token=None,
+    )
+    printed_none = [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("agent: ")
+    ]
+    assert len(printed_none) == len(none_events)
+    for line in printed_none[:5]:
+        assert token[:10] in line
+    for line in printed_none:
+        assert not any(s in line for s in ("ghp_", github, aws, api_key))
 
 
 def test_a_handoff_carries_both_halves_or_neither():

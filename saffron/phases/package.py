@@ -660,7 +660,7 @@ def package(
     parent_branch: str | None = None,
     exhausted: bool = False,
     gh: GhRunner = run_gh,
-    emit: Callable[[Event], None] | None = None,
+    emit: Callable[[Event], object] | None = None,
 ) -> PackageResult:
     """§5.7, host-side, after the cell is gone.
 

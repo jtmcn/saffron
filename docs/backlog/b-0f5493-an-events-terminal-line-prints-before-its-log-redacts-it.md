@@ -1,11 +1,12 @@
 ---
 id: b-0f5493
 title: "An event's terminal line prints before its log redacts it, so the cell's token reaches the launchd log file"
-status: open
+status: done
+closed: 2026-11-22
 tier: 2
 filed: 2026-11-20
 specs: [SA-0421]
-prs: []
+prs: [1296]
 commits: []
 cites: [§5.7]
 related: [b-3a3081, 46]
@@ -32,3 +33,5 @@ listed shape, and asserts that neither reaches stdout.
 
 - 2026-11-20: filed from `SA-0417`'s first spec review. The spec kept it out
   of scope to stay inside its size ceiling.
+- 2026-11-22: done. `SA-0421` (#1296) redacts each event with the
+  token its emit path holds before it prints the event's line.
