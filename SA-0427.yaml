@@ -1,0 +1,28 @@
+tests/test_cell_name_lock.py::test_both_locks_read_their_holder_with_one_parser:
+  file: saffron/cell_name_lock.py
+  find: '@contextmanager
+
+    def lock(root: Path, spec_id: str, text: str) -> Iterator[None]:'
+  replace: "def _read_holder(handle) -> tuple[int | None, str | None]:\n    handle.seek(0)\n    line = handle.readline().rstrip(\"\\n\")\n    pid_text, _, holder_text = line.partition(\" \")\n    try:\n        pid: int | None = int(pid_text)\n    except ValueError:\n        pid = None\n    return pid, (holder_text or None)\n\n\n@contextmanager\ndef lock(root: Path, spec_id: str, text: str) -> Iterator[None]:"
+  case: a cell_name_lock that keeps a holder parser of its own
+tests/test_cell_name_lock.py::test_a_contender_in_a_holders_write_window_names_no_stale_holder:
+  file: saffron/cell_name_lock.py
+  find: '@contextmanager
+
+    def lock(root: Path, spec_id: str, text: str) -> Iterator[None]:'
+  replace: "@contextmanager\ndef lock(root: Path, spec_id: str, text: str) -> Iterator[None]:\n    entered = False\n    try:\n        with _lock(root, spec_id, text):\n            entered = True\n            yield\n    finally:\n        if entered:\n            _lock_path(root, spec_id).write_text(f\"{os.getpid()} {text}\\n\")\n\n\n@contextmanager\ndef _lock(root: Path, spec_id: str, text: str) -> Iterator[None]:"
+  case: a spec-id lock whose released file still names its last holder
+tests/test_home_lock.py::test_a_contender_in_a_holders_write_window_names_no_stale_holder:
+  file: saffron/home_lock.py
+  find: '@contextmanager
+
+    def lock(home: Path, command: str) -> Iterator[None]:'
+  replace: "@contextmanager\ndef lock(home: Path, command: str) -> Iterator[None]:\n    entered = False\n    try:\n        with _lock(home, command):\n            entered = True\n            yield\n    finally:\n        if entered:\n            (home / _LOCK_NAME).write_text(f\"{os.getpid()} {command}\\n\")\n\n\n@contextmanager\ndef _lock(home: Path, command: str) -> Iterator[None]:"
+  case: a home lock whose released file still names its last holder
+tests/test_cell_name_lock.py::test_each_lock_empties_its_file_before_its_handle_closes:
+  file: saffron/cell_name_lock.py
+  find: '@contextmanager
+
+    def lock(root: Path, spec_id: str, text: str) -> Iterator[None]:'
+  replace: "@contextmanager\ndef lock(root: Path, spec_id: str, text: str) -> Iterator[None]:\n    entered = False\n    try:\n        with _lock(root, spec_id, text):\n            entered = True\n            yield\n    finally:\n        if entered:\n            os.truncate(_lock_path(root, spec_id), 0)\n\n\n@contextmanager\ndef _lock(root: Path, spec_id: str, text: str) -> Iterator[None]:"
+  case: a spec-id lock that empties its file after its handle closes
