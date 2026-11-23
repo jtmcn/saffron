@@ -113,7 +113,7 @@ First **170**, then **b-2e0b97**, then **108** and ~~**b-ca3bc6**~~. Then
 
 **From the operator visibility plan and the spec loop's runs 5 to 10**, in
 this order: **43**, **66**, ~~**67**~~, **98**, ~~**157**~~, ~~**172**~~, **b-eac388**,
-**b-bc54d1**, ~~**b-63ac52**~~, **b-952c34**, ~~**b-60d804**~~,
+~~**b-bc54d1**~~, ~~**b-63ac52**~~, **b-952c34**, ~~**b-60d804**~~,
 **b-281f0a** and **b-7d3810**. Then **160**, which is what
 item 141's close left. The Gate-only cell's suite is in a file because the
 ledger has no owner column that fits it.
@@ -540,10 +540,10 @@ risk — not, as an earlier draft of this note said, that `.gitignore` in
 `integrity.gate_config` already routes the edit to a person. That is the
 *tracked* half only: a `.gitignore` naming itself reaches no diff at all.
 
-**What this ordering costs, recounted on 2026-11-22.** Tier 1 holds 7 open
-items, tier 2 holds 64 and tier 3 holds 146. So tier 3 holds 67% of the
+**What this ordering costs, recounted on 2026-11-23.** Tier 1 holds 7 open
+items, tier 2 holds 63 and tier 3 holds 146. So tier 3 holds 68% of the
 backlog. That is the deliberate consequence of ranking by the milestone rather
-than by what is nearest to hand. 22 of the 217 open items are outside a cell,
+than by what is nearest to hand. 22 of the 216 open items are outside a cell,
 since a cell cannot reach their files.
 
 **Placed 2026-11-04**, from the spec loop's run 53: **b-8c6696**, ~~**b-a19ffd**~~
