@@ -1,11 +1,12 @@
 ---
 id: b-bc54d1
 title: '`SA-0100` left three things by operator decision: DESIGN''s one writer, a +0/−0 row, and an unshielded write'
-status: open
+status: done
+closed: 2026-11-23
 tier: 2
 filed: 2026-09-18
 specs: [SA-0100, SA-0423]
-prs: []
+prs: [1305]
 commits: []
 cites: [§6, §5.7]
 related: [165, b-990bd9, 171]
@@ -44,3 +45,5 @@ operator left each out of #339 on purpose. Line numbers below are at
   carries its stat, and a failed queue line write is said, never raised, in
   `run_task` and in `_finish`. The `DESIGN.md` §6 edit lands by hand in its
   pull request.
+- 2026-11-23: done. `SA-0423` (#1305) landed by hand. Batch 104 ran it
+  twice, and each cell raised after REBUT when its container refused an exec.
