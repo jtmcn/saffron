@@ -614,14 +614,13 @@ def _resolve_stacked_on(
 class Refused:
     """A task rejected before any cell starts (`CONTEXT.md`'s **Refusal**).
 
-    A `consumes` or `removes` entry fails to resolve, or reads outside
-    `touches`, at the tree base. A stack batch's recorded spec text (ADR 7)
-    fails a gate 0 refusal that needs no GitHub. An open parent's state is
-    in `STALE_PUSH_STATES` with no push there, unless it already landed
-    (`SA-0330`). Or another home's cell already holds the spec id's lock
-    (`cell_name_lock.LockHeld`, `b-d9ed45`). Carries only `reason`, the
-    same text `run_task` prints on the refused line. No run and no task
-    row exist for a caller to read anything else back from."""
+    A `consumes` entry did not resolve at the tree base, or its reader could
+    not read it there. A `removes` entry's reader there lies outside `touches`.
+    A gate 0 refusal that needs no GitHub refused a stack batch's recorded
+    spec text (ADR 7). An open parent's state is in `STALE_PUSH_STATES` with
+    no push there and no landing (`SA-0330`). Or another home holds the spec
+    id's lock (`b-d9ed45`). Carries only `reason`, the refused line's text.
+    No run and no task row exist for a caller to read anything else back from."""
 
     reason: str
 
@@ -630,7 +629,7 @@ class Refused:
 _RAISED_IN_PACKAGE = "_saffron_raised_in_package"
 
 # Fixed per user: neither `HOME`, `TMPDIR` nor a batch tree, so every home
-# of this user's meets at one lock file per spec id (`b-d9ed45`).
+# of this user meets at one lock file per spec id (`b-d9ed45`).
 CELL_NAME_LOCK_ROOT = Path(f"/tmp/saffron-cell-names-{os.getuid()}")
 
 
@@ -772,11 +771,11 @@ def run_task(
 
     A given `handoff` replaces `_resolve_stacked_on` (`SA-0143`). A `task_id`
     rebinds `spec`, `spec_sha` and `ceilings` to the recorded text (ADR 7).
-    `state` on the outcome is PACKAGE's own. `Refused` comes before any cell:
-    an unresolved `consumes` or `removes` reader outside `touches`, a refused
-    recorded text, or open parents on no one chain. So does a stale
-    `STALE_PUSH_STATES` parent (`SA-0330`), a bad mutant (`SA-0338`), or a
-    held spec-id lock (`b-d9ed45`). A base the mirror lacks raises `GitError`."""
+    `state` on the outcome is PACKAGE's own. `Refused` comes before any cell: an
+    unresolved `consumes`, a refused recorded text, or open parents on no one
+    chain. So do a stale `STALE_PUSH_STATES` parent (`SA-0330`), a `removes`
+    reader outside `touches`, a mutant `SA-0338` refuses and a held spec-id
+    lock (`b-d9ed45`). A base the mirror lacks raises `GitError`."""
     if task_id is not None:
         recorded = _recorded_spec_text(ledger, task_id, spec, base)
         if isinstance(recorded, Refused):

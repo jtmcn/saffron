@@ -1,5 +1,5 @@
 """`saffron/cell_name_lock.py`: one spec-id lock shared by every home of one
-user (`CONTEXT.md`'s **One name per spec id**, backlog item b-d9ed45).
+user (`DESIGN.md` §5.1's one name per spec id, backlog item b-d9ed45).
 
 Never imports `saffron.cell_name_lock` at module scope. Every witness drives
 it through `run_task`, or imports it from inside a test body. A reverted
@@ -152,14 +152,26 @@ def _read_marker(proc: subprocess.Popen, *, timeout_s: float = 30.0) -> str:
     raise AssertionError("the holder never printed its root marker in time")
 
 
-def holder_main(out_dir: str, spec_id: str) -> None:
+def _raised(fn) -> BaseException | None:
+    """What `fn` raised, `_SpyStop` included, or `None`. `pytest.raises`
+    lets a `KeyboardInterrupt` subclass stop the whole session."""
+    try:
+        fn()
+    except BaseException as exc:
+        return exc
+    return None
+
+
+def holder_main(out_dir: str, spec_id: str, root: str | None = None) -> None:
     """Run in a bare subprocess, with no pytest and no conftest fixture: a
     real `run_task` for `spec_id` whose cell prints this process's own
     `CELL_NAME_LOCK_ROOT`, then waits on stdin before returning
-    `NOT_IMPLEMENTED`.
+    `NOT_IMPLEMENTED`. `root`, when given, replaces the per-uid default.
     """
     from unittest import mock
 
+    if root is not None:
+        task_module.CELL_NAME_LOCK_ROOT = Path(root)
     out = Path(out_dir)
 
     def _waiting_cell(*_a, **_k):
@@ -218,41 +230,56 @@ def test_a_task_whose_spec_id_another_process_holds_is_refused_before_any_runtim
     home_a.mkdir()
     home_b.mkdir()
 
-    # The real default root is shared with every run on this host. A stale
-    # lock from an earlier one must not be read as this test's own listing.
-    stale_root = Path(f"/tmp/saffron-cell-names-{os.getuid()}")
-    for stale_name in ("sy-1.lock", "sy-2.lock"):
-        (stale_root / stale_name).unlink(missing_ok=True)
+    # A root of this test's own: the host's default holds other runs' live locks.
+    lock_root = tmp_path / "locks"
 
     holder = _popen_import(
         repo_root,
         "holder_main",
-        f"{str(home_a)!r}, 'SY-1'",
+        f"{str(home_a)!r}, 'SY-1', {str(lock_root)!r}",
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
     try:
-        real_root = Path(_read_marker(holder)[len("root=") :])
-        # The autouse conftest fixture isolated this process's own default.
-        # Put it back, so home B meets the subprocess holder above.
-        monkeypatch.setattr(task_module, "CELL_NAME_LOCK_ROOT", real_root)
+        assert Path(_read_marker(holder)[len("root=") :]) == lock_root
+        # Home B meets the subprocess holder at the same root.
+        monkeypatch.setattr(task_module, "CELL_NAME_LOCK_ROOT", lock_root)
         # The claim names a single `sy-1.lock`, lowercased: not `SY-1.lock`,
         # not a `.pid` file, and no second file for any other spelling.
-        assert [p.name for p in real_root.iterdir()] == ["sy-1.lock"]
+        assert [p.name for p in lock_root.iterdir()] == ["sy-1.lock"]
 
         calls: list[list[str]] = []
         monkeypatch.setattr(runtime, "_call", _call_spy(calls))
 
         capsys.readouterr()
-        result = _run_in_thread(lambda: _run_task_for(home_b, "SY-1"))
+        result: object = None
+
+        def _contend() -> None:
+            nonlocal result
+            result = _run_in_thread(lambda: _run_task_for(home_b, "SY-1"))
+
+        raised = _raised(_contend)
+        assert raised is None, repr(raised)
         assert isinstance(result, task_module.Refused)
         # Exact, not a substring match: `repo` in place of `out_dir` would
         # still contain `str(home_a)` as a path prefix.
         expected_reason = f"SY-1's cell is held by pid {holder.pid}'s {home_a}"
         assert result.reason == expected_reason
         assert f"SY-1       refused  {expected_reason}" in capsys.readouterr().out
+        assert calls == []
+
+        # The lowercase spelling meets the same lock.
+        lower: object = None
+
+        def _contend_lower() -> None:
+            nonlocal lower
+            lower = _run_in_thread(lambda: _run_task_for(home_b, "sy-1"))
+
+        raised = _raised(_contend_lower)
+        assert raised is None, repr(raised)
+        assert isinstance(lower, task_module.Refused), lower
         assert calls == []
 
         try:
@@ -278,8 +305,6 @@ def test_a_task_whose_spec_id_another_process_holds_is_refused_before_any_runtim
         if holder.poll() is None:
             holder.kill()
         holder.wait()
-        for stale_name in ("sy-1.lock", "sy-2.lock"):
-            (stale_root / stale_name).unlink(missing_ok=True)
 
 
 def test_run_task_holds_the_spec_ids_lock_until_its_cell_returns_or_raises(
@@ -446,8 +471,8 @@ def test_a_lock_root_that_is_unsafe_raises_before_any_runtime_call(
     symlinked_root = tmp_path / "symlinked-root"
     symlinked_root.symlink_to(real_dir, target_is_directory=True)
     monkeypatch.setattr(task_module, "CELL_NAME_LOCK_ROOT", symlinked_root)
-    with pytest.raises(cell_name_lock.LockRootUnsafe):
-        _run_task_for(out_dir, "SY-1")
+    raised = _raised(lambda: _run_task_for(out_dir, "SY-1"))
+    assert isinstance(raised, cell_name_lock.LockRootUnsafe), repr(raised)
     assert list(real_dir.iterdir()) == []
     assert calls == []
 
@@ -460,8 +485,8 @@ def test_a_lock_root_that_is_unsafe_raises_before_any_runtime_call(
 
     with monkeypatch.context() as mp:
         mp.setattr(os, "getuid", lambda: real_uid + 1)
-        with pytest.raises(cell_name_lock.LockRootUnsafe):
-            _run_task_for(out_dir, "SY-1")
+        raised = _raised(lambda: _run_task_for(out_dir, "SY-1"))
+    assert isinstance(raised, cell_name_lock.LockRootUnsafe), repr(raised)
     assert calls == []
 
     held = cell_name_lock.lock(owned_dir, "SY-1", str(out_dir))
@@ -469,10 +494,10 @@ def test_a_lock_root_that_is_unsafe_raises_before_any_runtime_call(
     try:
         with monkeypatch.context() as mp:
             mp.setattr(os, "getuid", lambda: real_uid + 1)
-            with pytest.raises(cell_name_lock.LockRootUnsafe):
-                _run_task_for(out_dir, "SY-1")
+            raised = _raised(lambda: _run_task_for(out_dir, "SY-1"))
     finally:
         held.__exit__(None, None, None)
+    assert isinstance(raised, cell_name_lock.LockRootUnsafe), repr(raised)
     assert calls == []
 
     # 4. A symlink in place of `sy-1.lock`.
@@ -482,6 +507,7 @@ def test_a_lock_root_that_is_unsafe_raises_before_any_runtime_call(
     target_file = tmp_path / "symlink-target.txt"
     target_file.write_text("not a lock")
     lock_file.symlink_to(target_file)
-    with pytest.raises(OSError):
-        _run_task_for(out_dir, "SY-1")
+    raised = _raised(lambda: _run_task_for(out_dir, "SY-1"))
+    assert isinstance(raised, OSError), repr(raised)
+    assert target_file.read_text() == "not a lock"
     assert calls == []

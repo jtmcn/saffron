@@ -24,6 +24,7 @@ import stat
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import TextIO
 
 
 class LockRootUnsafe(Exception):
@@ -43,13 +44,16 @@ class LockHeld(Exception):
     `str()` is the text `run_task` uses as its refusal reason.
     """
 
-    def __init__(self, spec_id: str, holder_pid: int, holder_text: str) -> None:
+    def __init__(
+        self, spec_id: str, holder_pid: int | None, holder_text: str | None
+    ) -> None:
         self.spec_id = spec_id
         self.holder_pid = holder_pid
         self.holder_text = holder_text
-        super().__init__(
-            f"{spec_id}'s cell is held by pid {holder_pid}'s {holder_text}"
-        )
+        # `None` is a holder caught between its truncate and its write.
+        pid = holder_pid if holder_pid is not None else "unknown"
+        text = holder_text if holder_text is not None else "unknown"
+        super().__init__(f"{spec_id}'s cell is held by pid {pid}'s {text}")
 
 
 def _lock_path(root: Path, spec_id: str) -> Path:
@@ -70,15 +74,15 @@ def _ensure_root_safe(root: Path) -> None:
         raise LockRootUnsafe(f"{root} is not owned by uid {os.getuid()}")
 
 
-def _read_holder(handle) -> tuple[int, str]:
+def _read_holder(handle: TextIO) -> tuple[int | None, str | None]:
     handle.seek(0)
     line = handle.readline().rstrip("\n")
     pid_text, _, holder_text = line.partition(" ")
     try:
-        pid = int(pid_text)
+        pid: int | None = int(pid_text)
     except ValueError:
-        pid = -1
-    return pid, holder_text
+        pid = None
+    return pid, (holder_text or None)
 
 
 @contextmanager
