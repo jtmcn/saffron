@@ -240,6 +240,10 @@ batch's open layer.
 passes until a parent moves them, then stops the batch. A finish drafts a
 follow-up its own batch refuses, so nothing pushes.
 
+**Placed 2026-11-22**, from the spec loop's run 83: **b-18fa39**. A
+failed test reaches the follow-up writer as its node id alone, so a draft
+is redrafted blind and pooled.
+
 **Placed 2026-11-04**, from the spec loop's run 53: **b-bece8b**, **b-0ac661**,
 **b-f011f3** and ~~**b-249808**~~. A by-hand merge of a `PLAN_REJECTED` parent left
 its child refused. A fix to the plan checkpoint could not pass it. A lost
@@ -537,9 +541,9 @@ risk — not, as an earlier draft of this note said, that `.gitignore` in
 *tracked* half only: a `.gitignore` naming itself reaches no diff at all.
 
 **What this ordering costs, recounted on 2026-11-22.** Tier 1 holds 7 open
-items, tier 2 holds 63 and tier 3 holds 146. So tier 3 holds 68% of the
+items, tier 2 holds 64 and tier 3 holds 146. So tier 3 holds 67% of the
 backlog. That is the deliberate consequence of ranking by the milestone rather
-than by what is nearest to hand. 22 of the 216 open items are outside a cell,
+than by what is nearest to hand. 22 of the 217 open items are outside a cell,
 since a cell cannot reach their files.
 
 **Placed 2026-11-04**, from the spec loop's run 53: **b-8c6696**, ~~**b-a19ffd**~~

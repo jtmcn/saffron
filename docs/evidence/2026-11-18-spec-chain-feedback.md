@@ -296,3 +296,24 @@ wrong versions, and 20 died. The two survivors behave like correct code.
     one pool, not only one session per stage.
 90. A change that narrows when a predicate fires reads every existing test
     that drove the old predicate, whether or not it still passes.
+
+## SA-0426 (b-18fa39)
+
+One writer, two reviews, and the delegate's own last edit. The delegate
+first rebuilt finish 103's draft from the mirror and measured pytest's
+80-column cut. The draft took about 28 minutes and the revision about 20.
+Each review took 7 to 8 minutes.
+
+Round 1 found one blocker. A test outside `touches` requires `GATES.md` to
+name every failure field, and `GATES.md` is forbidden. The prototype ran
+its witnesses and not the suite. Round 1 also found two readers the new
+field reached: `migrate`'s top-up and the PR body's table. Round 2 found
+no blocker. One concern named a witness whose detail held a pipe alone,
+where the claim says the detail is escaped as the message is.
+
+## What SA-0426 adds
+
+91. A spec that adds a contract field runs the whole suite on its
+    prototype, since a test may enumerate the fields.
+92. A witness for an escape drives every character class the escape
+    handles, not only the first one.
