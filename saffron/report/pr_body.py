@@ -266,9 +266,14 @@ def _failure_rows(failures: Sequence[NewFailure]) -> list[str]:
             if failure.line is not None
             else failure.file
         )
+        message = (
+            f"{failure.message} - {failure.detail}"
+            if failure.detail
+            else failure.message
+        )
         lines.append(
             f"| `{_cell(gate)}` | {_cell(where)} | `{_cell(failure.code)}` "
-            f"| {_cell(failure.message)} |"
+            f"| {_cell(message)} |"
         )
     return lines
 

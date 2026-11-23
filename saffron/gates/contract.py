@@ -56,6 +56,11 @@ class Failure(BaseModel):
     `criteria` can read a witness's outcome only where an enumerating gate keys
     its failures that way; where it does not, `criteria` skips (§5.4)."""
     message: str = ""
+    detail: str = Field(default="", exclude_if=lambda v: v == "")
+    """Extra text a gate reports beside its message — the `tests` gate's own
+    pytest reason, kept apart from `message` so `identity` never reads it.
+    Left out of a dump when empty, so a failure without one dumps exactly the
+    keys it dumped before this field existed."""
 
 
 class Location(BaseModel):
