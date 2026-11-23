@@ -4,7 +4,7 @@ title: "A failed test reaches a writer and the log as its node id alone, so a fo
 status: open
 tier: 2
 filed: 2026-11-22
-specs: []
+specs: [SA-0426]
 prs: []
 commits: []
 cites: [§5.4]
@@ -15,7 +15,7 @@ related: [b-4a9207, b-703e64]
 
 Found in the spec loop's run 83, finish 103.
 
-The finish judged the follow-up draft `SA-0426` and the finishing suite failed
+The finish judged a follow-up draft, then also numbered `SA-0426`, and the finishing suite failed
 `test_the_backlog_records_hold`. The writer got the failure back and
 redrafted twice, and the finish then pooled all four findings. Neither the
 writer nor the log saw why the test failed.
