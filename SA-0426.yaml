@@ -1,0 +1,20 @@
+tests/test_contract.py::test_a_failures_detail_parses_and_defaults_to_empty:
+  file: saffron/gates/contract.py
+  find: 'message: str = ""'
+  replace: "message: str = \"\"\n\n    def model_post_init(self, _context):\n        object.__setattr__(self, \"detail\", \"\")"
+  case: a detail that parses and is then reset to empty after validation
+tests/test_saffron_gates.py::test_the_tests_gate_carries_pytests_reason_as_a_failures_detail:
+  file: saffron/gates/contract.py
+  find: 'message: str = ""'
+  replace: "message: str = \"\"\n\n    def model_post_init(self, _context):\n        object.__setattr__(self, \"detail\", \"\")"
+  case: a tests gate detail reset to empty after validation
+tests/test_baseline.py::test_failures_differing_only_in_detail_share_one_identity:
+  file: saffron/gates/contract.py
+  find: normalize_message(failure.message))
+  replace: normalize_message(failure.message + failure.detail))
+  case: an identity that reads the detail, so differing details stop cancelling
+tests/test_baseline.py::test_render_ends_a_failures_line_with_its_detail:
+  file: saffron/gates/baseline.py
+  find: 'def render(new_failure: NewFailure) -> str:'
+  replace: "def render(new_failure: NewFailure) -> str:\n    failure = new_failure.failure.model_copy(update={\"detail\": \"\"})\n    return _render(NewFailure(new_failure.gate, failure))\n\n\ndef _render(new_failure: NewFailure) -> str:"
+  case: a render that drops the detail for every location form
