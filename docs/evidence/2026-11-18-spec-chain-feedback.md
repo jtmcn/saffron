@@ -273,3 +273,26 @@ died. The survivor behaves like correct code.
     construct, and never says that a mutant pins it.
 88. A child's prototype builds on its parent's open pull request when one
     exists, not on the parent's prototype.
+
+## SA-0425 (b-f582ee, b-b8f0d9)
+
+One writer, two reviews, and a final writer round. The delegate first
+reproduced the defect on main with a stub that raised deaths into
+`_RebutCap`. The draft took about 52 minutes. Each review took 8 to 9
+minutes.
+
+Round 1 found one blocker. In the verdict stage, a death followed by a
+second lens met the refusal branch, which set the cut. Every witness row
+had one lens. Round 1 also found that an older test drove its cut with a
+turn ceiling. It stayed green under the new rule and stopped guarding
+`SA-0407`'s reset. Round 2 found no blocker. Two concerns named members
+reached only through a sequence of sessions in one stage. A third named
+the bare words "stage" and "pool" a cell would copy. The writer ran 22
+wrong versions, and 20 died. The two survivors behave like correct code.
+
+## What SA-0425 adds
+
+89. A rule keyed on spend drives each sequence of sessions that can share
+    one pool, not only one session per stage.
+90. A change that narrows when a predicate fires reads every existing test
+    that drove the old predicate, whether or not it still passes.

@@ -4,7 +4,7 @@ title: The state clause of REBUT's cut check is pinned by no test, so a cap cut 
 status: open
 tier: 3
 filed: 2026-10-19
-specs: []
+specs: [SA-0425]
 prs: []
 commits: []
 cites: [§5.6]
