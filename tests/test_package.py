@@ -2127,13 +2127,13 @@ def test_a_failed_queue_row_in_finish_is_said_and_its_result_still_returns(
         return [line for e in packageable.events if (line := describe(e))]
 
     # 1) `append_queue_line` raises `OSError`, and `gh` opens a pull request.
-    def _append_raises_os_error(*_a, **_k):
+    def _raiser_os_error(*_a, **_k):
         raise OSError("disk fell over")
 
     def fake_gh(argv):
         return sp.CompletedProcess(argv, 0, stdout="https://github.com/o/r/pull/1\n")
 
-    monkeypatch.setattr(index_report, "append_queue_line", _append_raises_os_error)
+    monkeypatch.setattr(index_report, "append_queue_line", _raiser_os_error)
     packageable.events.clear()
     result1 = package(packageable.outcome, gh=fake_gh, **packageable.kwargs)
 
@@ -2163,13 +2163,7 @@ def test_a_failed_queue_row_in_finish_is_said_and_its_result_still_returns(
     runtime_error = CellRuntimeError("the queue store is locked")
     unlisted_error = _Unlisted("an exception nobody declared")
 
-    def _append_raises(exc):
-        def _raise(*_a, **_k):
-            raise exc
-
-        return _raise
-
-    def _header_raises(exc):
+    def _raiser(exc):
         def _raise(*_a, **_k):
             raise exc
 
@@ -2179,28 +2173,28 @@ def test_a_failed_queue_row_in_finish_is_said_and_its_result_still_returns(
         (
             "append_queue_line",
             lambda e: monkeypatch.setattr(
-                index_report, "append_queue_line", _append_raises(e)
+                index_report, "append_queue_line", _raiser(e)
             ),
             value_error,
         ),
         (
             "accept_rate_header",
             lambda e: monkeypatch.setattr(
-                index_report, "accept_rate_header", _header_raises(e)
+                index_report, "accept_rate_header", _raiser(e)
             ),
             operational_error,
         ),
         (
             "append_queue_line",
             lambda e: monkeypatch.setattr(
-                index_report, "append_queue_line", _append_raises(e)
+                index_report, "append_queue_line", _raiser(e)
             ),
             runtime_error,
         ),
         (
             "append_queue_line",
             lambda e: monkeypatch.setattr(
-                index_report, "append_queue_line", _append_raises(e)
+                index_report, "append_queue_line", _raiser(e)
             ),
             unlisted_error,
         ),
@@ -2226,11 +2220,11 @@ def test_a_failed_queue_row_in_finish_is_said_and_its_result_still_returns(
 
     interrupt = _Stop("operator pressed Ctrl-C")
 
-    def _append_raises_interrupt(*_a, **_k):
+    def _raiser_interrupt(*_a, **_k):
         raise interrupt
 
     packageable.ledger.set_task_state(packageable.task_id, "READY_FOR_REVIEW")
-    monkeypatch.setattr(index_report, "append_queue_line", _append_raises_interrupt)
+    monkeypatch.setattr(index_report, "append_queue_line", _raiser_interrupt)
     with pytest.raises(_Stop) as excinfo_interrupt:
         package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
     assert excinfo_interrupt.value is interrupt
@@ -3901,7 +3895,9 @@ def test_pushed_unpackaged_work_carries_its_branchs_diff_stat_against_its_tree_b
 
     assert first.pushed is True
     assert (first.added, first.removed) == (None, None)
-    assert recorded and recorded[0][1] == packageable.base
+    assert [(base, head) for _, base, head in recorded] == [
+        (packageable.base, first.pushed_sha)
+    ]
     remote_head = remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=work)
     assert remote_head == first.pushed_sha
     assert (
