@@ -3311,3 +3311,27 @@ critic's own, so they have no line.
 - `SA-0419` (#1290): `finish_run`'s docstring dropped the sentence that a
   refused append raises with the status written, where the spec asked for
   a rewording. **Bucket 3**. **Landed:** a review commit on #1290.
+- `SA-0421` (#1296): no witness drove the `None` half of the second
+  claim, so an emit path that redacted only with a token passed.
+  **Bucket 1**. **Landed:** a review commit on #1296.
+- `SA-0421` (#1296): the first witness's `None` half printed one raw line,
+  so a path that redacted all but one event passed. **Bucket 1**.
+  **Landed:** a review commit on #1296.
+- `SA-0421` (#1296): no witness asserted the `(redacted: ` suffix on a
+  refused write, so a refused line that printed raw passed. **Bucket 1**.
+  **Landed:** a review commit on #1296.
+- `SA-0421` (#1296): `append`'s docstring said a refused write left the
+  line unchanged, where it stores none. **Bucket 3**. **Landed:** a review
+  commit on #1296.
+- `SA-0422` (#1299): the first witness took the real host lock root and
+  deleted live locks there. **Bucket 2**. **Landed:** a review commit on
+  #1299.
+- `SA-0422` (#1299): a spy's `KeyboardInterrupt` escaped `pytest.raises`
+  and interrupted the session. **Bucket 1**. **Landed:** a review commit
+  on #1299.
+- `SA-0422` (#1299): no witness asserted a symlink target's text after a
+  refusal, and none drove a lowercase contender. **Bucket 1**. **Landed:**
+  a review commit on #1299.
+- `SA-0422` (#1299): the copied holder helper printed `-1` where
+  `home_lock` prints `unknown`. **Bucket 3**. **Landed:** a review commit
+  on #1299.

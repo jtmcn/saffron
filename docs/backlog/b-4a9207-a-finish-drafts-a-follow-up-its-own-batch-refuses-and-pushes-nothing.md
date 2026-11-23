@@ -75,3 +75,8 @@ gate that failed.
   lines cut before `_validate` reads it, so it is no longer pooled. Finish 85
   wrote no follow-up, so the cut met no live draft. Fixing a one-line
   finding in the finishing layer stays open.
+- 2026-11-22: run 83's finish 103 hit the same shape. The writer's
+  `SA-0426` draft cited bare file names, so 11 citations did not resolve.
+  The redraft then failed `test_the_backlog_records_hold` in the finishing
+  suite. The log does not name the violation, and the finish pooled all four
+  findings.
