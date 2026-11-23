@@ -3,7 +3,7 @@ id: SA-0427
 title: "A contender in a lock's write window names the last holder, and two copies parse the holder's line"
 type: bug
 priority: 3
-estimated_lines: 25
+estimated_lines: 29
 estimate_measured: true
 touches:
   - saffron/cell_name_lock.py
@@ -160,27 +160,69 @@ acceptance:
           - member: the file, still there and empty
             driven_by: "Release unlinks the lock file instead of emptying it."
   - claim: >-
-      Each lock empties its file while it still holds the `flock`, before
-      the handle that holds it closes. So a holder that takes the lock the
-      instant the last one lets go keeps the line it wrote. The witness
-      takes each lock once under `tmp_path`, with `os.fdopen` patched for
-      that call alone so that closing the handle lets a successor take a raw
-      `flock` and write `4242 next`. After the block the file still reads
-      that line, for `cell_name_lock` and for `home_lock`.
-    witness: tests/test_cell_name_lock.py::test_each_lock_empties_its_file_before_its_handle_closes
+      `cell_name_lock.lock` empties its file while it still holds the `flock`,
+      before it lets the lock go by an unlock or by its handle's close, on
+      return and on raise. So a holder that takes the lock the instant this
+      one lets go keeps the line it wrote. The witness takes the lock under a `tmp_path` root twice, once
+      with a block that returns and once with one that raises a `RuntimeError`. A probe
+      patches `os.fdopen` and `fcntl.flock` for that call alone. When the
+      lock's handle unlocks or closes, the probe reads the file, then a
+      successor opens it with `O_TRUNC`, takes a raw `flock` and writes
+      `4242 next`. The witness asserts the probe saw a release, the file
+      read empty at that release, and after the block it reads `4242 next`.
+    witness: tests/test_cell_name_lock.py::test_the_spec_id_lock_empties_its_file_before_it_lets_go
     positive_case: >-
-      The successor's `flock` is granted and its line is written, through
-      the same patched close the assertion reads after.
+      The probe records a release and its successor's `flock` is granted,
+      through the same patched close or unlock whose reading must be empty.
     wrong_versions:
       - "`cell_name_lock` empties its file by path after its handle closes."
-      - "`home_lock` empties its file by path after its handle closes."
+      - "`cell_name_lock` unlocks with `LOCK_UN`, then empties its file, then closes."
+      - "`cell_name_lock` empties its file before its close after a block that returns, and not after one that raises."
     covers:
-      - set: the locks
+      - set: how cell_name_lock lets the lock go
         members:
-          - member: "`cell_name_lock`"
+          - member: by its handle's close
             driven_by: "`cell_name_lock` empties its file by path after its handle closes."
-          - member: "`home_lock`"
+          - member: by an explicit unlock before the close
+            driven_by: "`cell_name_lock` unlocks with `LOCK_UN`, then empties its file, then closes."
+      - set: how the block it guards ends
+        members:
+          - member: it returns
+            driven_by: tests/test_cell_name_lock.py::test_the_spec_id_lock_empties_its_file_before_it_lets_go
+          - member: it raises an `Exception`
+            driven_by: "`cell_name_lock` empties its file before its close after a block that returns, and not after one that raises."
+  - claim: >-
+      `home_lock.lock` empties its file while it still holds the `flock`,
+      before it lets the lock go by an unlock or by its handle's close, on
+      return and on raise. So a holder that takes the lock the instant this
+      one lets go keeps the line it wrote. The witness drives `cli.main` for `saffron cell` on a home under `tmp_path` twice, once
+      with a block that returns and once with one that raises a `RuntimeError`, so `cli.main` exits 2. A probe
+      patches `os.fdopen` and `fcntl.flock` for that call alone. When the
+      lock's handle unlocks or closes, the probe reads the file, then a
+      successor opens it with `O_TRUNC`, takes a raw `flock` and writes
+      `4242 next`. The witness asserts the probe saw a release, the file
+      read empty at that release, and after the block it reads `4242 next`.
+    witness: tests/test_home_lock.py::test_the_home_lock_empties_its_file_before_it_lets_go
+    positive_case: >-
+      The probe records a release and its successor's `flock` is granted,
+      through the same patched close or unlock whose reading must be empty.
+    wrong_versions:
+      - "`home_lock` empties its file by path after its handle closes."
+      - "`home_lock` unlocks with `LOCK_UN`, then empties its file, then closes."
+      - "`home_lock` empties its file before its close after a block that returns, and not after one that raises."
+    covers:
+      - set: how home_lock lets the lock go
+        members:
+          - member: by its handle's close
             driven_by: "`home_lock` empties its file by path after its handle closes."
+          - member: by an explicit unlock before the close
+            driven_by: "`home_lock` unlocks with `LOCK_UN`, then empties its file, then closes."
+      - set: how the block it guards ends
+        members:
+          - member: it returns
+            driven_by: tests/test_home_lock.py::test_the_home_lock_empties_its_file_before_it_lets_go
+          - member: it raises an `Exception`
+            driven_by: "`home_lock` empties its file before its close after a block that returns, and not after one that raises."
 ---
 
 ## Context
@@ -245,12 +287,14 @@ changes.
    `lock`s, after the holder's line is written. Truncate the file to empty
    however the block ends. That covers a return, an `Exception` and a
    `BaseException` such as `KeyboardInterrupt`. Truncate through the open
-   handle, before it closes, while the `flock` is still held. Never unlink
-   the file. Never truncate on the refusal path, where the contender holds
+   handle, before it closes, while the `flock` is still held. Unlock by
+   the close alone, or by an explicit unlock after the truncate. Never
+   unlink the file. Never truncate on the refusal path, where the contender holds
    no lock and the line is the live holder's.
 3. **Two stale sentences.** Each exception's comment or docstring says
    `None` means a holder between its truncate and its write. Say instead
-   that it means a holder between its `flock` and its write. Add to each
+   that it means a holder "between its flock and its write, or between its
+   release truncate and its close". Add to each
    `lock`'s docstring that release empties the file before the lock goes.
 
 ## Out of scope
@@ -307,17 +351,34 @@ and each witness here takes its own root or home under `tmp_path` too.
   `monkeypatch.setattr` on each module's name and calls the real function.
 - **`tests/test_home_lock.py`.** Never import `saffron.home_lock` there, as
   its docstring says. Drive `cli.main` with `_argv`, and patch
-  `cli._run_cell` for the holder and `cli._batch` with a stub that fails
-  the test if any refused contender reaches it. Read each contender's
+  `cli._run_cell` for the holder. Patch `cli._batch` with a stub that
+  appends to a list, and assert the list stays empty. A raise there would
+  not fail the test, since `cli.main` turns an `Exception` into exit 2. Read each contender's
   output with `capsys.readouterr()` and compare whole strings. The home is
   a fresh directory under `tmp_path` for each of the three cases, passed as
   `--home`.
-- **Before the close.** Patch `os.fdopen` with `monkeypatch.context()` for
-  the one `lock` call. The stand-in calls the real `os.fdopen`, then sets
-  `close` on the handle it returns to a function of the test's own. That
-  function calls the real close, then opens the lock file, takes a raw
-  `flock` and writes `4242 next` once. A prototype measured `with handle`
-  reaching that `close` on its exit, under this host's Python. The `types`
-  gate passed the plain assignment there. Assert the successor was reached, so a lock that never
-  closes through that handle fails rather than passing blind. Close the
-  successor's descriptor in a `finally`.
+- **Before the lock goes.** One probe serves both witnesses. Define it in
+  `tests/test_cell_name_lock.py`, and import it into
+  `tests/test_home_lock.py` the way that file imports from
+  `tests/test_cli.py`. Take the lock once before the probe, so the file
+  exists and the probe can tell the lock's own descriptor by `os.fstat`.
+  - The probe patches `os.fdopen` and `fcntl.flock` with
+    `pytest.MonkeyPatch.context()`. Its `os.fdopen` calls the real one,
+    then sets `close` on the lock's handle to a function of the test's own.
+    That function calls the real close, then marks the release. Its
+    `fcntl.flock` calls the real one, then marks the release on a
+    `LOCK_UN` for the lock's descriptor.
+  - The first release mark reads the file. Then a successor opens it with
+    `O_TRUNC`, takes a raw `flock` with the real `fcntl.flock`, and writes
+    `4242 next`. A successor that truncates leaves exactly its own line,
+    so the reading after the block passes at your base. The reading at
+    release is what fails your base.
+  - Assert a release was seen, so a lock that never lets go through the
+    probe fails rather than passing blind. Close the successor's
+    descriptor in a `finally`.
+  - Measured on a prototype, under the host's Python 3.14 and under
+    Python 3.12.14 through `uv run --python 3.12`: `with handle` reaches the
+    replaced `close` on its exit. Both witnesses pass with the change and
+    fail with both lock modules at your base. The `types` gate, which
+    checks for Python 3.12 (`pyproject.toml`), passes the plain assignment
+    to `close`.
