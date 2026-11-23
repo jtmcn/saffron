@@ -1,0 +1,10 @@
+tests/test_session.py::test_a_rebut_session_that_dies_is_never_read_as_a_pool_cut:
+  file: saffron/cell/session.py
+  find: self.spent += failed.attempt.cost_usd_est if failed.attempt else 0.0
+  replace: 'self.spent += failed.attempt.cost_usd_est if failed.attempt else 0.0; self.cut = self.cut or (str(failed) if self.spent >= self.limit else None)'
+  case: a death with no result event, an api_error result or a turn ceiling at or past its pool, in any stage
+tests/test_session.py::test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing:
+  file: saffron/cell/session.py
+  find: ' and result.state == "REBUTTAL_UNJUDGED"'
+  replace: ''
+  case: a REBUT a pool cut that the gate re-run ended GATE_ERROR or red
