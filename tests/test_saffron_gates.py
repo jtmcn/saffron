@@ -357,16 +357,16 @@ def test_a_warning_a_failing_test_prints_leaves_every_failure_keyed_on_its_node_
 
 def test_the_tests_gate_carries_pytests_reason_as_a_failures_detail(tmp_path):
     """The gate's own subprocess pins `COLUMNS` to 400 regardless of the
-    environment it runs in. `COLUMNS=80` here must not truncate either
-    reason, not even the node id long enough to crowd one out at eighty
-    columns (b-18fa39)."""
+    environment it runs in. `COLUMNS=80` here must not truncate any
+    reason. The short line fits at eighty columns, and the long node id
+    crowds its reason out there (b-18fa39)."""
     (tmp_path / "test_detail.py").write_text(
         "import pytest\n"
         "@pytest.fixture\n"
         "def broken():\n"
         "    raise RuntimeError('fixture blew up here')\n"
-        "def test_a_short_name_with_a_clear_and_specific_failure_reason():\n"
-        "    assert 1 == 2, 'one is never ever equal to two here'\n"
+        "def test_short_name():\n"
+        "    assert 1 == 2, 'one is not two'\n"
         "def test_setup_error_case(broken):\n"
         "    pass\n"
         "def test_this_node_id_is_deliberately_long_enough_to_crowd_out_the_assertion_reason_at_eighty_columns_wide():\n"
@@ -384,13 +384,9 @@ def test_the_tests_gate_carries_pytests_reason_as_a_failures_detail(tmp_path):
     assert result.status == "fail", result.summary
     by_code = {f.code: f for f in result.failures}
 
-    short = by_code[
-        "test_detail.py::test_a_short_name_with_a_clear_and_specific_failure_reason"
-    ]
-    assert short.message == (
-        "FAILED test_detail.py::test_a_short_name_with_a_clear_and_specific_failure_reason"
-    )
-    assert short.detail == "AssertionError: one is never ever equal to two here"
+    short = by_code["test_detail.py::test_short_name"]
+    assert short.message == "FAILED test_detail.py::test_short_name"
+    assert short.detail == "AssertionError: one is not two"
 
     long_name = (
         "test_detail.py::test_this_node_id_is_deliberately_long_enough_to_"

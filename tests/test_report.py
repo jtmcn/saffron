@@ -360,7 +360,7 @@ def test_the_new_failures_section_names_advisory_new_failures_apart_from_blockin
 def test_a_new_failures_row_ends_its_message_with_its_detail():
     """`_failure_rows` joins a non-empty detail to the message after ` - `.
     The join sits inside the one `_cell` call, so it is escaped exactly as
-    the message is (§5.4). An empty detail leaves the row as base renders
+    the message is (§5.7). An empty detail leaves the row as base renders
     it."""
     blocking_with_detail = NewFailure(
         "tests",
