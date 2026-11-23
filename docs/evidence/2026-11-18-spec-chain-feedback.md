@@ -247,3 +247,29 @@ writer ran 41 wrong versions, and all died.
     `Exception` subclass on each path, since named kinds share bases.
 85. A guard's upper edge is driven too: the statement before the guarded
     one raises, and the witness expects it to escape.
+
+## SA-0424 (b-9eceda)
+
+One writer, two reviews, and a final writer round. The writer took about
+56 minutes for the draft and 18 for the first revision. Each review took
+about 13 minutes.
+
+Round 1 found one blocker. The spec let a cell split `append`'s one
+`except` clause, so the mutant's `find` could match twice or never. A
+warning printed one event late passed every emitter witness, because a
+second event always followed each fault. The writer measured that it
+survived. Round 1 also found that step 6 was built on the prototype's
+`SA-0421` rather than the open pull request. Round 2 found one blocker.
+The only two-fault log met its faults in one order, so a version that
+swapped which flag triggers each warning passed. It also found that the
+spec paraphrased the mutant. The writer ran 55 wrong versions, and 54
+died. The survivor behaves like correct code.
+
+## What SA-0424 adds
+
+86. A claim over two faults drives both orders, and a fault as the log's
+    last event.
+87. A spec whose mutant pins a construct tells the cell to keep that
+    construct, and never says that a mutant pins it.
+88. A child's prototype builds on its parent's open pull request when one
+    exists, not on the parent's prototype.

@@ -72,7 +72,8 @@ acceptance:
       sets `write_refused` and `failed` and not `unserializable`, and so
       does a fourth whose `Path.open` hands back a file whose `write`
       raises a full disk's `OSError`. One log takes an unserializable
-      event, then a refused write, and holds both flags. A test-local
+      event, then a refused write, and another log takes a refused write,
+      then an unserializable event. Each holds both flags. A test-local
       `Exception` subclass raised from `asdict`, then from `Path.open`,
       leaves `append` each time, and `failed` stays false.
     witness: tests/test_events.py::test_a_log_tells_a_write_it_could_not_make_from_an_event_it_could_not_serialize
@@ -93,13 +94,13 @@ acceptance:
       - "`failed` reads `write_refused` alone."
       - "`failed` reads `unserializable` alone."
       - "Each fault clears the other flag, so a log that met both holds one."
+      - "`append` returns early once `write_refused` holds, so a later unserializable event sets nothing."
       - "A `ValueError` from the write is re-raised, so a NUL byte in the path leaves `append`."
       - "A `ValueError` from before the write is re-raised, so the 5001-digit integer leaves `append`."
       - "A `RecursionError` from before the write is re-raised."
       - "A `TypeError` from before the write is re-raised."
       - "An unserializable event stops every later write."
       - "A fault before the write sets neither flag."
-      - "The clause no longer names `OSError`."
       - "`write` and `flush` move out of the `try`, so a `write` that raises leaves `append`."
       - "`append` catches `Exception`."
       - "`append` catches `Exception` but re-raises one from before the write."
@@ -135,9 +136,7 @@ acceptance:
             driven_by: "A fault before the write sets neither flag."
       - set: the kinds a fault in the write raises
         members:
-          - member: "`OSError`"
-            driven_by: "The clause no longer names `OSError`."
-          - member: "`OSError`, marked as the write's"
+          - member: "`OSError`, caught and marked as the write's"
             driven_by: "Every fault sets `unserializable`."
           - member: "`ValueError`, from a NUL byte in the path"
             driven_by: "The fault is told by its exception type: an `OSError` sets `write_refused`, and any other sets `unserializable`."
@@ -151,8 +150,10 @@ acceptance:
             driven_by: "`failed` reads `unserializable` alone."
           - member: the next event landing, after a fault before the write
             driven_by: "An unserializable event stops every later write."
-          - member: both flags, after both faults
+          - member: both flags, unserializable first
             driven_by: "Each fault clears the other flag, so a log that met both holds one."
+          - member: both flags, refused first
+            driven_by: "`append` returns early once `write_refused` holds, so a later unserializable event sets nothing."
       - set: the upper edge, a kind `append` does not catch
         members:
           - member: raised before the write, from `asdict`
@@ -182,7 +183,11 @@ acceptance:
       log read back holds the task's `Ceilings` and the first `PhaseStart`,
       and nothing else. In a second task the double emits a `PhaseStart`,
       then a raw line whose `event` holds a set as the task's last event,
-      and the serialize warning prints right after that line.
+      and the serialize warning prints right after that line. In a third
+      task a directory sits at `events.jsonl` before the task starts, so
+      its `Ceilings` line is refused and the refusal follows it. The
+      double then emits one raw line whose `event` holds a set, and only
+      the serialize warning follows that line.
     witness: tests/test_task.py::test_run_tasks_log_warnings_name_its_path_and_say_which_fault
     positive_case: >-
       The log read back holds the `Ceilings` and the `PhaseStart` the task
@@ -198,6 +203,7 @@ acceptance:
       - "No warning prints at all."
       - "The serialize warning prints when `unserializable` turns true, and the refusal's when `failed` does."
       - "Each warning prints one event late: the flags are read before `append`, and a fault's warning prints ahead of the next event's line."
+      - "The refusal prints when `write_refused` turns true, and the serialize warning when `failed` does."
     covers:
       - set: the faults that warn
         members:
@@ -205,6 +211,8 @@ acceptance:
             driven_by: "The serialize warning prints when `unserializable` turns true, and the refusal's when `failed` does."
           - member: an unserializable event
             driven_by: "One warning, the refusal's, prints when `failed` first turns true, as at your base."
+          - member: an unserializable event after a refused write
+            driven_by: "The refusal prints when `write_refused` turns true, and the serialize warning when `failed` does."
           - member: any fault at all
             driven_by: "No warning prints at all."
       - set: the path a warning names
@@ -282,15 +290,19 @@ acceptance:
       writes both lines and prints them alone. With a directory where
       `events.jsonl` was, a second push prints its first line, the warning
       and its second line. Then `package()` opens a pull request with
-      `append_queue_line` raising, so it emits two lines, and it prints its
-      first line, the warning and its second line. Last, a credential in
+      `append_queue_line` raising, so it emits two lines. Into a clean log
+      it prints exactly those two lines. With a directory where
+      `events.jsonl` was, it prints its first line, the warning and its
+      second line. Last, a credential in
       the patch makes `package()` and then `push_unpackaged_work()` each
       emit one refusal line, and each prints that line and then the
       warning.
     witness: tests/test_package.py::test_packages_default_emitters_warn_naming_their_logs_own_path
     positive_case: >-
       The first push's two lines read back from the log, so the clean
-      half's missing warning is seen beside a write that landed.
+      half's missing warning is seen beside a write that landed. The clean
+      `package()` call prints both its lines, so its missing warning is
+      read from output that holds lines.
     wrong_versions:
       - "`package()`'s default prints no warning, as at your base."
       - "`push_unpackaged_work()`'s default prints no warning, as at your base."
@@ -302,6 +314,8 @@ acceptance:
       - "`push_unpackaged_work()`'s default prints the warning before the event's line."
       - "`package()`'s default prints the warning one event late, ahead of the next event's line."
       - "`push_unpackaged_work()`'s default prints the warning one event late, ahead of the next event's line."
+      - "`package()`'s default prints the warning once per log after its first line, refused or not."
+      - "`push_unpackaged_work()`'s default prints the warning once per log after its first line, refused or not."
     covers:
       - set: the PACKAGE defaults that build a log
         members:
@@ -309,6 +323,12 @@ acceptance:
             driven_by: "`package()`'s default prints no warning, as at your base."
           - member: "`push_unpackaged_work()`"
             driven_by: "`push_unpackaged_work()`'s default prints no warning, as at your base."
+      - set: a log that takes every write
+        members:
+          - member: "`package()`, printing no warning"
+            driven_by: "`package()`'s default prints the warning once per log after its first line, refused or not."
+          - member: "`push_unpackaged_work()`, printing no warning"
+            driven_by: "`push_unpackaged_work()`'s default prints the warning once per log after its first line, refused or not."
       - set: the path a warning names
         members:
           - member: "`package()`'s log's own `path`"
@@ -422,9 +442,8 @@ changes.
    opens the file or writes sets `write_refused`. A fault before that sets
    `unserializable`. Keep `append`'s one `try` and its one existing
    `except` line exactly as your base spells it, the same four kinds in
-   the same order. A mutant on the ref pins that line, and a second
-   clause or a reworded one fails the `witness` gate. Tell the two faults
-   apart inside the `try`. Serialize the payload into a local before
+   the same order. Add no second clause. Tell the two faults apart inside
+   the `try`. Serialize the payload into a local before
    `mkdir`, rather than inside the `write` call. Then set a local flag
    right before `mkdir`, and read it in the existing handler. Make
    `failed` a property, true when either flag is. `append` still never
@@ -472,12 +491,12 @@ changes.
 
 ## Notes for the agent
 
-**Edit or new.** The first claim edits `append`'s existing body, and a
-mutant on the ref pins its one `except` line for the witness. That is why
-step 2 keeps the line as it is. The rest is new code:
-a property, two flags and one function the emitters share. No `find`
-written now pins their spelling, so the last three witnesses stand alone,
-and `witness` reports `skip` for each.
+**Edit or new.** The first claim edits `append`'s existing body. The
+second edits `run_task`'s existing `emit` closure, and the third and
+fourth edit the existing default emitters. Their new spelling, a property,
+two flags and one function the emitters share, is yours. No `find` written
+now pins it, so the last three witnesses stand alone, and `witness`
+reports `skip` for each.
 
 **What the third witness leaves.** It calls `_default_emit` directly.
 `run_one_cell`'s default and `cli.py`'s `_spec_session_emit` each build
@@ -524,12 +543,11 @@ does, and pass `_no_gh` to `package()`.
 
 **Size.** The prototype sat at `5ce13547` on the diff of `SA-0421`'s
 pull request branch, review commit included. `SA-0422`'s and `SA-0423`'s
-prototype diffs sat above it.
-With `size_gate` it measured 438 changed tokens outside the test paths,
-and 1326 under them. `estimated_lines` is 438 over four, rounded up. It
-held all six steps and the four witnesses. `ty check`, ruff,
-`prose_limit --tree`, `.saffron/gates/structure` and the dead gate were
-clean. Each witness failed with the source reverted. Every wrong version
-listed above failed its witness there. The five touched test files passed,
-700 tests. The whole suite passed on the earlier stack, which carried a
-prototype of `SA-0421`, 5466 tests.
+prototype diffs sat above it. With `size_gate` it measured 438 changed
+tokens outside the test paths, and 1451 under them. `estimated_lines` is
+438 over four, rounded up. It held all six steps and the four witnesses.
+`ty check`, ruff, `prose_limit --tree`, `.saffron/gates/structure` and the
+dead gate were clean. Each witness failed with the source reverted. Every
+wrong version listed above failed its witness there. The whole suite
+passed on that stack, 5466 tests. The four witnesses also passed under the
+host's CPython 3.12.14, a macOS build rather than the cell image.
