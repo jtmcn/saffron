@@ -3,14 +3,18 @@ id: SA-0426
 title: "A gate failure has no field for its reason outside its identity, so a failed test reaches a writer and a repair turn as its node id alone"
 type: bug
 priority: 2
-estimated_lines: 23
+estimated_lines: 35
 estimate_measured: true
 touches:
   - saffron/gates/contract.py
   - saffron/gates/baseline.py
+  - saffron/record/migrate.py
+  - saffron/report/pr_body.py
   - tests/test_contract.py
   - tests/test_baseline.py
   - tests/test_saffron_gates.py
+  - tests/test_record_migrate.py
+  - tests/test_report.py
 forbidden:
   - DESIGN.md
   - CONTEXT.md
@@ -30,7 +34,12 @@ forbidden:
   - saffron/gates/core/**
   - saffron/gates/runner.py
   - saffron/gates/suite.py
-  - saffron/record/**
+  - saffron/record/fold.py
+  - saffron/record/contract.py
+  - saffron/record/refs.py
+  - saffron/record/memory.py
+  - saffron/record/routed.py
+  - saffron/view/**
   - saffron/ledger.py
   - saffron/finish.py
   - saffron/task.py
@@ -48,9 +57,9 @@ forbidden:
   - tests/test_ledger.py
   - tests/test_queued_specs.py
   - tests/test_scheduler.py
-budget_usd: 34
+budget_usd: 64
 max_attempts: 3
-max_turns: 120
+max_turns: 290
 acceptance:
   - claim: >-
       A gate failure carries an optional `detail` string. `parse_gate_json`
@@ -178,13 +187,74 @@ acceptance:
       whose detail is empty.
     witness: tests/test_cli.py::test_a_finish_writes_its_suite_comparison_beside_its_findings
     preserves: true
+  - claim: >-
+      `saffron migrate`'s top-up sets aside each failure's `detail` in a
+      `gate_result` fact, since no ledger row stores it. The witness records a
+      failing gate result through a `Ledger` writing to a live record. One
+      failure carries a detail and one does not, and the held fact keeps the
+      first's detail. `migrate` over that record migrates the task, refuses
+      nothing and appends nothing. The same `migrate` still refuses a held
+      fact whose failure's message differs from its row.
+    witness: tests/test_record_migrate.py::test_a_live_gate_results_failure_detail_is_set_aside
+    positive_case: >-
+      A held fact whose failure carries a differing message is refused,
+      through the same `migrate` call and the same `the record holds N
+      fact(s) that disagree` reason.
+    wrong_versions:
+      - "`_normalized` compares a `gate_result` fact's failures as your base does."
+      - "`_normalized` drops a failure's `detail` only when it is empty."
+      - "`detail` joins the four top-level `gate_result` keys set aside, which no failure's own key reaches."
+      - "`_normalized` sets aside every key of every failure, so a differing message agrees."
+    covers:
+      - set: the held fact's failures
+        members:
+          - member: a failure carrying a detail
+            driven_by: "`_normalized` drops a failure's `detail` only when it is empty."
+          - member: a failure carrying none
+            driven_by: tests/test_record_migrate.py::test_a_live_gate_results_failure_detail_is_set_aside
+      - set: what the top-up decides
+        members:
+          - member: agrees and gains nothing
+            driven_by: "`detail` joins the four top-level `gate_result` keys set aside, which no failure's own key reaches."
+          - member: disagrees and is refused
+            driven_by: "`_normalized` sets aside every key of every failure, so a differing message agrees."
+  - claim: >-
+      A pull request body's new-failure tables end each row's message with
+      ` - ` and the failure's detail when it is non-empty. The detail is
+      escaped as the message is, and an empty detail leaves the row as your
+      base renders it. The witness renders one body with a blocking failure
+      whose detail holds a pipe, a blocking failure with no detail, and an
+      advisory failure with a detail, and compares each row whole.
+    witness: tests/test_report.py::test_a_new_failures_row_ends_its_message_with_its_detail
+    positive_case: >-
+      The blocking and the advisory rows with a detail end with ` - ` and
+      their detail, in the same body whose row with no detail ends at its
+      message.
+    wrong_versions:
+      - "`_failure_rows` renders each row as your base does and drops the detail."
+      - "`_failure_rows` appends the detail outside `_cell`, so its pipe splits the row."
+      - "`_new_failures` hands the advisory table its failures with the detail cleared."
+      - "`_failure_rows` always appends ` - `, so a row with no detail ends with the separator."
+    covers:
+      - set: the tables `_failure_rows` builds
+        members:
+          - member: the blocking new-failure table
+            driven_by: "`_failure_rows` renders each row as your base does and drops the detail."
+          - member: the advisory new-failure table
+            driven_by: "`_new_failures` hands the advisory table its failures with the detail cleared."
+      - set: the detail
+        members:
+          - member: non-empty, holding a pipe
+            driven_by: "`_failure_rows` appends the detail outside `_cell`, so its pipe splits the row."
+          - member: empty
+            driven_by: "`_failure_rows` always appends ` - `, so a row with no detail ends with the separator."
 ---
 
 ## Context
 
 Backlog item **b-18fa39**, filed from the spec loop's finish 103. It cites
 `DESIGN.md` §5.4. Every line below was read at `a55e55ce`. Your base adds
-only the hand edit the notes describe, outside every file cited here.
+only the two hand edits the notes describe, outside every file cited here.
 
 **The failure model.** `Failure` holds `file`, `line`, `code` and `message`
 (`saffron/gates/contract.py:45-58`). It sets no `extra` policy, so pydantic
@@ -229,6 +299,22 @@ result's dump into its `gate_result` fact (`saffron/ledger.py:2411-2416`).
 The fold reads each failure's keys by name and ignores the rest
 (`saffron/ledger.py:978-984`).
 
+**The top-up.** `saffron migrate` derives each `gate_result` fact from
+ledger rows. `_failure_payload` writes `file`, `line`, `code` and `message`
+and no `detail` (`saffron/record/migrate.py:332-338`). The top-up compares a
+held fact with its derived twin through `_agrees`
+(`saffron/record/migrate.py:104-113`). `_normalized` sets aside
+only four top-level keys of a `gate_result` (`saffron/record/migrate.py:83-101`).
+A held fact whose failure carries a detail therefore disagrees, and the task
+is refused (`saffron/record/migrate.py:224-228`).
+
+**The pull request body.** `_failure_rows` builds the
+`gate | where | code | message` rows, and its message cell is
+`failure.message` alone (`saffron/report/pr_body.py:256-273`). `_new_failures`
+calls it for the blocking table and the advisory one
+(`saffron/report/pr_body.py:292`, `:306`). `_cell` escapes a pipe, turns a
+newline into a space and defangs a mention (`saffron/report/pr_body.py:153-164`).
+
 ## Problem
 
 A failed test reaches a writer, a repair turn and a finish's log as its node
@@ -244,16 +330,28 @@ key, as the notes describe, and `Failure` drops it. Make these changes.
    after ` - `, on the same line. An empty detail adds nothing. One line,
    because each reader above puts one rendered failure on one line. The
    ` - ` separator is pytest's own.
+4. **The top-up sets the detail aside.** `_normalized` drops `detail` from
+   each failure of a `gate_result` payload, on both sides of the compare.
+   `_failure_payload` stays as it is. Keep `_normalized`'s docstring naming
+   the four top-level keys, since
+   `test_the_normalized_docstring_counts_every_set_aside_gate_result_key`
+   reads that count.
+5. **The body's tables show the detail.** `_failure_rows` joins a non-empty
+   detail to the message after ` - `. The join sits inside the one `_cell`
+   call, so the detail is escaped as the message is. The same separator as `render`, so a
+   reader sees one shape in a log and in a body.
 
 ## Out of scope
 
 - **Storing the detail in the ledger.** The `failures` table has no column
   for it (`saffron/ledger.py:983`), and both readers build a `Failure`
   without it (`saffron/ledger.py:2478-2486`, `saffron/record/migrate.py:266-275`).
-  Nothing renders a failure read back from the ledger. Every `render` caller
-  above reads a suite's own comparison, parsed from the gate's stdout. A
-  `gate_result` fact does carry a non-empty `detail` in its dump, and the
-  fold ignores it.
+  Every `render` caller above, and `_failure_rows`, reads a suite's own
+  comparison, parsed from the gate's stdout. A `gate_result` fact does
+  carry a non-empty `detail` in its dump, and the fold ignores it.
+- **The view's failure table.** `saffron serve` reads failures from the
+  ledger's own rows (`saffron/view/server.py:706-714`), and the fold drops
+  the detail. Its table keeps showing the message alone.
 - **`DESIGN.md` §5.4's gate contract example.** It shows four failure keys
   and already leaves out `collected`, `uncollected` and `locations`.
 - **Every other gate.** None sends a `detail`, so each failure keeps its
@@ -270,6 +368,14 @@ splits each `FAILED` or `ERROR` line at the first ` - `. The part before is
 new key, so that edit is safe before yours lands. Criterion 4's witness
 calls the amended gate as a subprocess. Do not edit the gate.
 
+**`GATES.md` is amended by hand at your base too.** `.claude/**` is
+forbidden here. The operator added a contract bullet to
+`.claude/skills/setup-saffron/GATES.md`, saying `detail` is optional and the
+baseline never matches on it.
+`tests/test_setup_saffron.py::test_gates_md_names_every_contract_field`
+requires that file to name every `Failure` field, so it passes at your base
+and stays green once `detail` exists.
+
 **Why `COLUMNS`.** pytest fits each `FAILED` line in its short summary to
 the terminal width, 80 under captured output. A node id that leaves no room
 drops the ` - ` reason, and a shorter one keeps it, cut to fit. Measured on
@@ -285,30 +391,49 @@ splits the same way. A handed name that could not be collected, and the
 **What `message` holds.** Before the hand edit, `message` was the whole
 summary line. A short node id's line carried its reason, and a long one's
 did not. Now `message` is always the line with no reason, so every
-identity the gate reports drops the assertion text. Base and head each call
+identity the gate reports drops the assertion text. A pull request body's
+table showed a short node id's reason through `message`. Step 5 brings it
+back through `detail`. Base and head each call
 the same amended gate inside one task, so a baseline still cancels.
 
-**Edit or new.** Each criterion edits existing code. Three mutants on the
+**Edit or new.** Each criterion edits existing code. Five mutants on the
 ref pin text that exists at your base and survives the change, in
-`contract.py` and `baseline.py`. Criterion 4's witness shares criterion 1's
-mutant. The `preserves` witness exists at your base and passes there.
+`contract.py`, `baseline.py`, `migrate.py` and `pr_body.py`. Criterion 4's
+witness shares criterion 1's mutant. The `preserves` witness exists at your
+base and passes there.
 
 **The witnesses.**
 
 - Criterion 2: give the two details no digits, since `normalize_message`
   collapses each span of digits, so two details of digits alone would match.
+  Keep the assertion that the surviving failure holds its own detail. At
+  your base `Failure` ignores `detail`, so the identity and subtraction
+  halves pass there unchanged. That assertion is what fails at your base,
+  as `criteria` requires. It also catches a subtraction that hands back the
+  baseline's failure, or a copy without its detail.
 - Criterion 4: copy the shape of
   `test_a_warning_a_failing_test_prints_leaves_every_failure_keyed_on_its_node_id`
   (`tests/test_saffron_gates.py:323-355`). Pass `COLUMNS=80` in the
   subprocess's environment, so a gate that left the width alone would lose
   the long node id's reason. Compare each failure's `message` and `detail`
   whole, keyed by its code.
-- Criteria 1, 2 and 4 read `detail` from a parsed or built `Failure`, so
-  each fails at your base, where `Failure` has no such attribute. Criterion
-  3's fails there because `render` leaves the detail out.
+- Criterion 6: build the `Ledger` over a `MemoryRecord`, as
+  `test_a_live_ref_whose_rebut_reached_no_verdict_and_no_rebuttal_tops_up`
+  does (`tests/test_record_migrate.py:2881-2884`). Read the held facts from
+  that record. Seed a fresh `MemoryRecord` with them for each half, through
+  `_assert_agrees_and_gains_nothing` and `_assert_disagrees`
+  (`tests/test_record_migrate.py:2203-2230`).
+- Criterion 7: render through `render_pr_body` with `advisory_failures`, as
+  `test_the_new_failures_section_names_advisory_new_failures_apart_from_blocking_ones`
+  does (`tests/test_report.py:298-330`).
+- Criteria 1, 2 and 4 read `detail` from a parsed or built `Failure`.
+  Criterion 6 reads it from a fact a `Failure` dumped. So each fails at
+  your base. Criteria 3
+  and 7 fail there because `render` and `_failure_rows` leave the detail
+  out.
 
-**Size.** A prototype on your base's code held all three changes and the
-four new witnesses. `size_gate` measured 91 changed tokens outside the test paths,
+**Size.** A prototype on your base held all five changes and the six new
+witnesses. `size_gate` measured 139 changed tokens outside the test paths,
 and `estimated_lines` is that over four. `ty check` was clean, and each new
 witness failed with the source reverted. Every wrong version listed above
 failed its witness there.
