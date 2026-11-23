@@ -420,8 +420,8 @@ parameter, which `package()` fills with `_emit_package`. Neither exists at
 emits two lines only on `SA-0423`.
 
 **Who sets `failed` today.** Two doubles in `tests/test_task.py` subclass
-`EventLog` and set it by hand: `_FailFirst` (`tests/test_task.py:625-639`)
-and `_FailAfterTwo` (`:674-689`). `test_events.py` asserts it after an
+`EventLog` and set it by hand: `_FailFirst` (`tests/test_task.py:628-642`)
+and `_FailAfterTwo` (`:677-692`). `test_events.py` asserts it after an
 unserializable event (`tests/test_events.py:840`) and reads it false twice
 (`:1054`, `:2894`). `SA-0421`'s
 `test_the_default_emitters_line_carries_no_credential` reads it after
