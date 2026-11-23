@@ -4,7 +4,7 @@ title: "A REBUT session that dies at or past its pool reads as a pool cut, so a 
 type: bug
 priority: 2
 depends_on: [SA-0424]
-estimated_lines: 21
+estimated_lines: 25
 estimate_measured: true
 touches:
   - saffron/cell/session.py
@@ -46,14 +46,14 @@ acceptance:
       A REBUT session that fails without the budget signal is never a pool
       cut, whatever it spent. That covers a death with no result event, an
       `api_error` result, a turn ceiling and a failure carrying no attempt.
-      The task ends where `run_rebut` put it. A pool cut is the budget
-      signal `cut_off_at_budget_cap` reads, at any spend, or the pool
-      refusing a call it cannot cover, unless a session in that stage
-      already failed without the signal. Each cut still ends `EXHAUSTED`
+      The task ends where `run_rebut` put it. The budget signal
+      `cut_off_at_budget_cap` reads is a cut at any spend, even after a
+      death in the same REBUT stage. A refusal of a call the stage's pool
+      cannot cover is a cut too, unless a death without the signal brought
+      that stage's spend to its limit. Each cut still ends `EXHAUSTED`
       with its stage's line. The witness drives one REBUT per row through
       `_rebut_capped` and reads the outcome's state, the `TaskOutcome`
-      event and the last REBUT line. Every row but the last also reads
-      the queued state. In each of the three
+      event, the queued state and the last REBUT line. In each of the three
       stages, a death with no result event at its pool, past it and under
       it ends `REBUTTAL_UNJUDGED`. So do an `api_error` result and a turn
       ceiling past the pool. The first two stages name the session's own
@@ -71,10 +71,12 @@ acceptance:
       at the pool, it ends `REBUTTAL_UNJUDGED`. After one that ends on the
       budget signal, it ends `EXHAUSTED`. An extraction that dies at its
       pool, then a first verdict that spends the verdicts' pool, still
-      ends `EXHAUSTED` on the refused second verdict. A REBUT whose
-      three sessions each spend their pool to the cent and succeed ends
-      `READY_FOR_REVIEW`. The witness checks every row before it asserts
-      once, on the list of rows that disagreed.
+      ends `EXHAUSTED` on the refused second verdict. Two rows start the
+      verdicts with a death under the verdicts' pool. In one a second
+      lens spends the rest and a third is refused. In the other the second
+      ends on the budget signal. Each ends `EXHAUSTED` with the verdict
+      line. The witness checks every row before it asserts once, on the
+      list of rows that disagreed.
     witness: tests/test_session.py::test_a_rebut_session_that_dies_is_never_read_as_a_pool_cut
     positive_case: >-
       In each stage the budget-signal and refusal rows read `EXHAUSTED` and
@@ -98,6 +100,8 @@ acceptance:
       - "A session that succeeds and spends its pool to the cent sets the cut."
       - "A refusal always sets the cut, even after a death in the same stage."
       - "A death keeps later stages' refusals from cutting, since `open` does not clear it."
+      - "Any death marks its REBUT stage, at any spend, so a refusal after a death under the verdicts' pool is no cut."
+      - "Any death marks its REBUT stage, and the mark keeps a later budget signal from cutting."
     covers:
       - set: the ending kind, in each stage
         members:
@@ -127,6 +131,10 @@ acceptance:
             driven_by: "The budget signal is no longer a cut."
           - member: a refused verdict after a death in the extraction stage
             driven_by: "A death keeps later stages' refusals from cutting, since `open` does not clear it."
+          - member: a refused third verdict after a death under the verdicts' pool and a lens that spent the rest
+            driven_by: "Any death marks its REBUT stage, at any spend, so a refusal after a death under the verdicts' pool is no cut."
+          - member: the budget signal after a death under the verdicts' pool
+            driven_by: "Any death marks its REBUT stage, and the mark keeps a later budget signal from cutting."
           - member: a success that spends its pool to the cent, then REBUT ends unjudged
             driven_by: "A session that succeeds and spends its pool to the cent sets the cut."
           - member: the old rule itself
@@ -277,13 +285,17 @@ that `run_rebut` ended `GATE_ERROR` would then read as `EXHAUSTED`.
 ## Notes for the agent
 
 **Where the change goes.** `_RebutCap`'s wrapper decides whether a failed
-session sets `cut`. That condition reads the budget signal alone. A failure
-without it marks the current stage, and `open` clears that mark. The
-refusal branch sets `cut` only in a stage with no such mark. Keep `spent` counting every failed session's cost, since
-the next stage's pool reads it. `cut_off_at_budget_cap` is defined below
+session sets `cut`. That condition reads the budget signal alone. A
+failure without it marks its REBUT stage when it brings that stage's spend
+to its limit. Only then did the death empty that pool. `open`
+clears the mark. The refusal branch sets `cut` only in a REBUT stage with
+no mark. Keep `spent` counting every failed session's cost, since the
+extraction's pool and the verdicts' pool read it. `cut_off_at_budget_cap` is defined below
 the class in the same module, and Python resolves it when the wrapper is
 called. Update the class docstring's last sentence to say what `cut` now
-holds.
+holds. In that docstring and in any comment, write "REBUT stage", never a
+bare "stage", and name each pool, such as "the verdicts' pool". `CONTEXT.md`
+lists both bare words under _Avoid_.
 
 **Some deaths are deaths by design.** Take a budget and a turn ceiling
 that trip together, with no budget signal on the attempt. Or take a
@@ -295,12 +307,12 @@ death, not a cut, and that is intended.
 Its rows `a`, `c`, `f` and `h` fail with `_cut_off_turn`, a turn
 ceiling's attempt, spent at or past the pool. Each expects `EXHAUSTED`.
 Under the new rule each ends `REBUTTAL_UNJUDGED`. Give each the attempt of
-`_budget_cut_turn` at the same cost. Rows `c`, `f` and `h` keep their
-message, "budget spent", which row `h`'s line assertion reads. Row `a`
-asserts no message, so rename its "provider crashed" to say the budget
-ended it.
+`_budget_cut_turn` at the same cost, with the message "budget spent".
+Rows `c`, `f` and `h` already carry it, and row `h`'s line assertion reads
+it. Row `a`'s "provider crashed" becomes "budget spent" too.
 `test_a_rebut_carries_its_unread_and_unanswered_counts_past_a_pool_cut`
-drives its cut the same way and takes the same change. So does cell 5 of
+drives its cut the same way and takes the same change, its message
+included. So does cell 5 of
 `test_beside_a_lens_with_an_error_rebuts_own_stops_stand_and_a_cut_ends_incomplete`.
 It drives its cap cut with `_cut_off_turn(cost=10.25)`. That stays green
 under the new rule but no longer cuts, so it stops guarding the reset
@@ -326,8 +338,17 @@ the extraction after a $6.00 fix, and $16.00 for the verdicts after $8.50.
 A verdict row needs HEAD moved, so pass `rebut_commits=1` there. A
 refused extraction re-prompt needs an extraction that is not the schema,
 spent to the pool. A refused verdict needs two blockers, the first verdict
-spending the pool. `_rebut_capped` files one blocker per verdict cost past
-the first two costs, so four costs give two blocker lenses. A claimed fix is the test module's `_CLAIMED_FIX`.
+spending the verdicts' pool. `_rebut_capped` files one blocker per
+verdict cost past the first two costs, so four costs give two blocker
+lenses. Its third lens is adequacy, whose blocker needs a probe that
+`_BLOCKER` lacks. So a row with three verdicts needs `_rebut_capped` to
+take the lenses that file, such as correctness, contract and conventions.
+A claimed fix is the test module's `_CLAIMED_FIX`.
+
+**Two wrong versions match the right code.** "A later success clears the
+mark" and "the mark keeps a later budget signal from cutting" change
+nothing. A marked REBUT stage has no money left, so every later call is
+refused before it starts.
 
 **This change is an edit.** Each criterion has a mutant in
 `saffron/cell/session.py`, kept on `refs/saffron/mutants`.
