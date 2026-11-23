@@ -317,3 +317,25 @@ where the claim says the detail is escaped as the message is.
     prototype, since a test may enumerate the fields.
 92. A witness for an escape drives every character class the escape
     handles, not only the first one.
+
+## SA-0427 (b-708b05)
+
+One writer, two reviews, and a final writer round. The draft took about 37
+minutes, the revision about 23 and the final round about 20. Each review
+took 6 to 8 minutes.
+
+Round 1 found no blocker and four concerns, all on one ordering criterion.
+Its witness was red against its mutant and never measured against base,
+where nothing truncates on release. It drove one of two locks and one
+ending, and its seam was measured on a newer Python than the cell runs.
+Round 2 found no blocker. One concern named two claims that the release
+window contradicted. Another named a docstring already at its line limit.
+The last three named wrong versions no command had run. The final round
+killed all ten.
+
+## What SA-0427 adds
+
+93. A witness for an ordering runs against base as well as its mutant,
+    since base may already satisfy the order by doing nothing.
+94. A spec that adds a sentence to a docstring counts that docstring's
+    lines at base against the gate's limit.

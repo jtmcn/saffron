@@ -4,7 +4,7 @@ title: "cell_name_lock restates home_lock's holder parser, and a contender in th
 status: open
 tier: 3
 filed: 2026-11-22
-specs: []
+specs: [SA-0427]
 prs: []
 commits: []
 cites: [§5.1]
