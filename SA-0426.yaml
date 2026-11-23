@@ -18,3 +18,13 @@ tests/test_baseline.py::test_render_ends_a_failures_line_with_its_detail:
   find: 'def render(new_failure: NewFailure) -> str:'
   replace: "def render(new_failure: NewFailure) -> str:\n    failure = new_failure.failure.model_copy(update={\"detail\": \"\"})\n    return _render(NewFailure(new_failure.gate, failure))\n\n\ndef _render(new_failure: NewFailure) -> str:"
   case: a render that drops the detail for every location form
+tests/test_record_migrate.py::test_a_live_gate_results_failure_detail_is_set_aside:
+  file: saffron/record/migrate.py
+  find: return replace(fact, at="", payload=payload)
+  replace: 'return replace(fact, at="", payload=payload if fact.kind != "gate_result" else {k: v for k, v in fact.payload.items() if k not in _GATE_RESULT_SET_ASIDE})'
+  case: a held gate_result whose failures carry a detail, compared as at base
+tests/test_report.py::test_a_new_failures_row_ends_its_message_with_its_detail:
+  file: saffron/report/pr_body.py
+  find: 'def _failure_rows(failures: Sequence[NewFailure]) -> list[str]:'
+  replace: "def _failure_rows(failures: Sequence[NewFailure]) -> list[str]:\n    return _rows([NewFailure(g, f.model_copy(update={\"detail\": \"\"})) for g, f in failures])\n\n\ndef _rows(failures: Sequence[NewFailure]) -> list[str]:"
+  case: a body table that drops the detail in either table
