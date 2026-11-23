@@ -32,6 +32,11 @@ What stays outside, deliberately, except the refusals named below:
 - **A stale parent.** No scan reads whether a `STALE_PUSH_STATES` parent's
   latest run pushed, so `_resolve_stacked_on` refuses that child (`SA-0330`,
   `b-e9dd4c`).
+- **A held spec-id lock.** A cell's pre-clean cannot tell a live cell on
+  another home from a dead process's leftover. `run_task` takes
+  `cell_name_lock.lock` around `run_one_cell`, after every refusal above.
+  A second home's task then refuses before it touches any container or
+  volume name, naming the holder (`b-d9ed45`).
 - **`CELL_EXIT`.** An exit code is the process contract `saffron cell` owes a
   script, not a fact about a task; `run_batch` would have to ignore it.
 - **The `CLAUDE_CODE_OAUTH_TOKEN` read.** Scoped to the invocation
@@ -43,6 +48,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import tempfile
 import time
@@ -52,7 +58,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import get_args
 
-from saffron import mutants, preflight, spec_review
+from saffron import cell_name_lock, mutants, preflight, spec_review
 from saffron.agents import context
 from saffron.agents.findings import Finding
 from saffron.cell import runtime
@@ -608,20 +614,24 @@ def _resolve_stacked_on(
 class Refused:
     """A task rejected before any cell starts (`CONTEXT.md`'s **Refusal**).
 
-    A `consumes` entry did not resolve at the tree base, or the reader could
-    not read it there. Or a `removes` entry's reader at the tree base lies
-    outside `touches`. Or, for a task holding a stack batch's recorded spec
-    text (ADR 7), a gate 0 refusal that needs no GitHub refused that text.
-    Or an open parent's state is in `STALE_PUSH_STATES` with no push there,
-    unless it already landed (`SA-0330`). Carries only `reason`, the same
-    text `run_task` prints on the refused line. No run and no task row
-    exist for a caller to read anything else back from."""
+    A `consumes` or `removes` entry fails to resolve, or reads outside
+    `touches`, at the tree base. A stack batch's recorded spec text (ADR 7)
+    fails a gate 0 refusal that needs no GitHub. An open parent's state is
+    in `STALE_PUSH_STATES` with no push there, unless it already landed
+    (`SA-0330`). Or another home's cell already holds the spec id's lock
+    (`cell_name_lock.LockHeld`, `b-d9ed45`). Carries only `reason`, the
+    same text `run_task` prints on the refused line. No run and no task
+    row exist for a caller to read anything else back from."""
 
     reason: str
 
 
 # The attribute a marked exception carries, private to this module.
 _RAISED_IN_PACKAGE = "_saffron_raised_in_package"
+
+# Fixed per user: neither `HOME`, `TMPDIR` nor a batch tree, so every home
+# of this user's meets at one lock file per spec id (`b-d9ed45`).
+CELL_NAME_LOCK_ROOT = Path(f"/tmp/saffron-cell-names-{os.getuid()}")
 
 
 def mark_raised_in_package(exc: BaseException) -> None:
@@ -762,11 +772,11 @@ def run_task(
 
     A given `handoff` replaces `_resolve_stacked_on` (`SA-0143`). A `task_id`
     rebinds `spec`, `spec_sha` and `ceilings` to the recorded text (ADR 7).
-    `state` on the outcome is PACKAGE's own. `Refused` comes before any cell: an
-    unresolved `consumes`, a refused recorded text, open parents on no one chain,
-    or a stale `STALE_PUSH_STATES` parent (`SA-0330`). So does a `removes`
-    reader outside `touches`, or a mutant that is inline, disclosed or unreadable on the
-    ref (`SA-0338`). A base the mirror lacks raises `GitError`."""
+    `state` on the outcome is PACKAGE's own. `Refused` comes before any cell:
+    an unresolved `consumes` or `removes` reader outside `touches`, a refused
+    recorded text, or open parents on no one chain. So does a stale
+    `STALE_PUSH_STATES` parent (`SA-0330`), a bad mutant (`SA-0338`), or a
+    held spec-id lock (`b-d9ed45`). A base the mirror lacks raises `GitError`."""
     if task_id is not None:
         recorded = _recorded_spec_text(ledger, task_id, spec, base)
         if isinstance(recorded, Refused):
@@ -959,47 +969,56 @@ def run_task(
             return
         written = True
 
+    # Held around the cell alone, let go before PACKAGE: a second home's
+    # task must not touch this spec id's names while this cell is live (`b-d9ed45`).
     try:
-        outcome = run_one_cell(
-            cell_spec,
-            repo=repo,
-            mirror=base.mirror,
-            ledger=ledger,
-            out_dir=out_dir,
-            emit=emit,
-            on_state=_write_live,
-            token=token,
-        )
-    except BaseException as cell_exc:
-        if written:
+        with cell_name_lock.lock(CELL_NAME_LOCK_ROOT, spec.id, str(out_dir)):
             try:
-                index_report.append_queue_line(
-                    out_dir,
-                    _live_row("ORPHANED"),
-                    header=index_report.accept_rate_header(ledger),
-                )
-            except Exception as exc:
-                print(
-                    f"{spec.id}: the live row for ORPHANED could not be written: {exc}"
-                )
-        # b-f582ee: a packageable patch can outlive this raise, so a raise
-        # `ready_task` admits names `saffron package` rather than stranding it.
-        if isinstance(cell_exc, Exception):
-            try:
-                ready = ready_task(
-                    spec.id,
+                outcome = run_one_cell(
+                    cell_spec,
                     repo=repo,
-                    repo_id=repo_id,
+                    mirror=base.mirror,
                     ledger=ledger,
                     out_dir=out_dir,
-                    mirror_path=base.mirror,
+                    emit=emit,
+                    on_state=_write_live,
+                    token=token,
                 )
-            except Exception:
-                ready = None
-            if isinstance(ready, ReadyTask):
-                print(f"{spec.id:<10} ORPHANED  saffron package {spec.id}")
-                mark_raised_in_package(cell_exc)
-        raise
+            except BaseException as cell_exc:
+                if written:
+                    try:
+                        index_report.append_queue_line(
+                            out_dir,
+                            _live_row("ORPHANED"),
+                            header=index_report.accept_rate_header(ledger),
+                        )
+                    except Exception as exc:
+                        print(
+                            f"{spec.id}: the live row for ORPHANED could not"
+                            f" be written: {exc}"
+                        )
+                # b-f582ee: a raise `ready_task` admits names `saffron
+                # package`, rather than stranding its packageable patch.
+                if isinstance(cell_exc, Exception):
+                    try:
+                        ready = ready_task(
+                            spec.id,
+                            repo=repo,
+                            repo_id=repo_id,
+                            ledger=ledger,
+                            out_dir=out_dir,
+                            mirror_path=base.mirror,
+                        )
+                    except Exception:
+                        ready = None
+                    if isinstance(ready, ReadyTask):
+                        print(f"{spec.id:<10} ORPHANED  saffron package {spec.id}")
+                        mark_raised_in_package(cell_exc)
+                raise
+    except cell_name_lock.LockHeld as held:
+        reason = str(held)
+        print(f"{spec.id:<10} refused  {reason}")
+        return Refused(reason=reason)
     # Everything below runs only when `run_one_cell` returned, never
     # when it raised: that path above already re-raised past this point.
     try:

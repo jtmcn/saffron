@@ -7,6 +7,7 @@ from typing import Protocol
 
 import pytest
 
+from saffron import task as task_module
 from saffron.cell import runtime
 from saffron.ledger import Ledger
 from saffron.record.routed import RoutedRecord
@@ -123,6 +124,24 @@ def no_network_git_push(request, monkeypatch):
     if request.node.get_closest_marker("cell"):
         return
     monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "file")
+
+
+@pytest.fixture(autouse=True)
+def cell_name_lock_root(tmp_path_factory, monkeypatch):
+    """Every test's spec-id locks meet under their own fresh directory, not
+    the real per-uid default (`saffron.task.CELL_NAME_LOCK_ROOT`).
+    Otherwise two suites on one host would refuse each other's `SY-1`.
+
+    `raising=False`: a reverted source carries no such attribute, and the
+    witnesses for it must still fail the test rather than skip collection.
+    A test of the real default root overrides this itself.
+    """
+    monkeypatch.setattr(
+        task_module,
+        "CELL_NAME_LOCK_ROOT",
+        tmp_path_factory.mktemp("cell-name-lock"),
+        raising=False,
+    )
 
 
 def bare_repo(path: Path) -> Path:
