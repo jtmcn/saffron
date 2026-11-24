@@ -132,6 +132,22 @@ class WitnessPatterns(BaseModel):
     witness_name: str | None = None
     witness_body: str | None = None
     constants: list[ConstantPattern] = Field(default_factory=list)
+    assertion: str | None = None
+    """Matched at the start of a failure's `detail`. A match reads as an
+    assertion, so a witness whose every detail misses it only raised."""
+
+    @field_validator("assertion")
+    @classmethod
+    def _assertion_is_checkable(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        try:
+            re.compile(value)
+        except re.error as exc:
+            raise ValueError(
+                f"witness assertion {value!r} is not a valid regular expression: {exc}"
+            ) from exc
+        return value
 
     @field_validator("witness_name")
     @classmethod

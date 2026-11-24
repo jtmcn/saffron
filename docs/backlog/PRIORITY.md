@@ -280,6 +280,9 @@ ends a task unjudged on one API error, with no retry.
 
 ### Tier 3 — real, not urgent
 
+**Placed 2026-11-24**, with `SA-0431`: **b-84cf18**. The glossary has no
+entry for a REVIEW edit's `raised` outcome.
+
 **Placed 2026-11-23**, from the spec loop's run 84: **b-e0e720**, then
 **b-1349d9**. The `prose` gate reads no attribute docstring. "Emitter" names
 two things, and §4.7 says `append` sets `failed`.
