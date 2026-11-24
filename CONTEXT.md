@@ -981,8 +981,9 @@ and a green re-gate under `saffron adopt` moves it to `READY_FOR_REVIEW`
 (`SA-0313`). That re-gate can move a `MERGE_FAILED` task the same way.
 
 **Adopt**: What the operator does with `saffron adopt` to attach a by-hand pull
-request to a spec's newest `NOT_IMPLEMENTED`, `READY_FOR_REVIEW`, `EXHAUSTED` or
-`MERGE_FAILED` task that carries none. It also takes a task that already carries
+request to a spec's newest task that carries none. That task is `NOT_IMPLEMENTED`,
+`READY_FOR_REVIEW`, `EXHAUSTED`, `MERGE_FAILED`, `REBUTTAL_UNJUDGED` or `ORPHANED`
+(`SA-0429`). It also takes a task that already carries
 that same pull request. Adopt records the pull request's head as the task's
 pushed sha, unless a `READY_FOR_REVIEW` task already holds one. It re-gates a task in any of those states but
 `READY_FOR_REVIEW`, and a green re-gate of that head moves the task to
@@ -990,8 +991,9 @@ pushed sha, unless a `READY_FOR_REVIEW` task already holds one. It re-gates a ta
 batch's top layer, if it ran after every layer. Otherwise adopt prints that no end
 review reads it (`SA-0373`). Without the move the state stays, and adopt can run
 again on the same pull request. `reconcile` then asks GitHub about it, unless the
-task stayed `MERGE_FAILED`. A merge makes the task `MERGED` and admits its
-dependents (`SA-0264`).
+task stayed `MERGE_FAILED` or `ORPHANED`. A merge makes the task `MERGED` and admits its
+dependents (`SA-0264`). Adopt records a `REBUTTAL_UNJUDGED` task's head in no
+state, so the task is no stack base until a green re-gate moves it (`SA-0429`).
 _Avoid_: "import", "link" (linking is what `gh stack link` does to a stack).
 
 **Merge train**: The serial post-approval process: rebase onto current `main`,
