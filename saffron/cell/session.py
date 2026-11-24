@@ -1150,9 +1150,9 @@ def run_one_cell(
 
     The default lives here, not in `_drive_cell` (which does not yet know
     `task_dir` when this is called): a caller that hands no `emit` gets both
-    consumers `_default_emit` describes — the terminal, and one `EventLog`
-    at this run's own `task_dir` — built once, so the two agree on the
-    object they are being handed rather than each constructing their own.
+    consumers `_default_emit` describes: the terminal and one `EventLog` at
+    this run's own `task_dir`. Both are built once. So the two agree on the
+    object they are handed, and neither constructs its own.
 
     Thin, because teardown learns two of the outcome's fields *after* every
     `return` inside `_drive_cell`: a `finally` cannot reach a value already

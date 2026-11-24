@@ -467,16 +467,14 @@ class EventLog:
 
     @property
     def path(self) -> Path:
-        """The file `append` writes. A caller can name it in a warning
-        without rederiving `task_dir / "events.jsonl"` itself, the
-        `ponytail:` `run_task` carried before this existed."""
+        """The file `append` writes, so a warning names it without
+        rederiving `task_dir / "events.jsonl"`."""
         return self._path
 
     @property
     def failed(self) -> bool:
-        """True once either fault below has. Read-only: `append` is the only
-        writer, through `write_refused`/`unserializable`, now that the two
-        faults are told apart."""
+        """True once either flag holds. `append` is the only writer, through
+        `write_refused` and `unserializable`."""
         return self.write_refused or self.unserializable
 
     def append(self, event: Event) -> Event:
@@ -493,8 +491,8 @@ class EventLog:
         # The fallback for any raise below, including one from redaction
         # itself: the parameter, never a half-redacted intermediate.
         redacted_event = event
-        # Flips right before the directory is made, never earlier. A
-        # fault above counts `unserializable`, at or after `write_refused`.
+        # Flips right before the directory is made. A fault before it counts
+        # `unserializable`, and one at or after it counts `write_refused`.
         began_write = False
         try:
             # Redacted first, before the size bound, so a credential the

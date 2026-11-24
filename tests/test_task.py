@@ -794,8 +794,8 @@ def test_run_tasks_log_warnings_name_its_path_and_say_which_fault(
     def _index(line: str) -> int:
         return lines1.index(line)
 
-    assert lines1.count(serialize1) == 1
-    assert lines1.count(refused1) == 1
+    # The whole set of warnings, so one naming another path fails too.
+    assert [w for w in lines1 if w.startswith("warning:")] == [serialize1, refused1]
     assert _index("agent: (raw) one") < _index(serialize1)
     assert _index(serialize1) < _index("agent: (raw) two")
     assert _index("agent: (raw) two") < _index("PACKAGE: first")
@@ -818,9 +818,8 @@ def test_run_tasks_log_warnings_name_its_path_and_say_which_fault(
     lines2 = out2.splitlines()
     path2 = str(log_dir2 / "events.jsonl")
     serialize2 = f"warning: {path2} could not serialize an event and left it out"
-    assert lines2.count(serialize2) == 1
+    assert [w for w in lines2 if w.startswith("warning:")] == [serialize2]
     assert lines2.index("agent: (raw) last-line") < lines2.index(serialize2)
-    assert f"warning: {path2} refused a write; events may be missing" not in lines2
 
     # --- Task 3: the log already refusing before the task's own Ceilings line.
     log_dir3 = out_dir / "SY-23" / "sub"
@@ -845,10 +844,9 @@ def test_run_tasks_log_warnings_name_its_path_and_say_which_fault(
         i for i, line in enumerate(lines3) if line.startswith("ceilings:")
     )
     assert lines3[ceilings_idx + 1] == refused3
-    assert lines3.count(refused3) == 1
     bad_idx = lines3.index("agent: (raw) only-bad")
     assert lines3[bad_idx + 1] == serialize3
-    assert lines3.count(serialize3) == 1
+    assert [w for w in lines3 if w.startswith("warning:")] == [refused3, serialize3]
 
 
 def test_run_task_redacts_the_cells_own_token_from_its_log(
