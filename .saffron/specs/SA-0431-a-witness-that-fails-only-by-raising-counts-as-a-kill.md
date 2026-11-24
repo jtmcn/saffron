@@ -4,7 +4,7 @@ title: "A witness that fails only by raising counts as a kill, in the `witness` 
 type: bug
 priority: 2
 risk: elevated
-estimated_lines: 146
+estimated_lines: 150
 estimate_measured: true
 pending_symbols:
   - saffron/repos/policy.py::assertion
@@ -22,6 +22,7 @@ touches:
   - tests/test_parent_versions.py
   - tests/test_regate.py
   - saffron/report/pr_body.py
+  - saffron/phases/rebut.py
   - tests/test_report.py
 forbidden:
   - DESIGN.md
@@ -91,8 +92,7 @@ acceptance:
       and both clauses. An unproven criterion beside a raise puts the clause
       ahead of the note. A derived criterion that raises is named. Under the
       pattern `^KeyError\b` a `KeyError` detail reads died and `assert 1 ==
-      2` reads raised. Under this repo's own declared pattern, a `Failed:`
-      reason is no raise and a `KeyError` reason is one.
+      2` reads raised.
     witness: tests/test_witness_gate.py::test_a_witness_that_fails_only_by_raising_reads_as_raised_and_moves_no_status
     positive_case: >-
       The survivor beside a raise reads `fail` with one `survived-mutant`
@@ -141,8 +141,6 @@ acceptance:
             driven_by: "With no pattern declared every non-empty detail reads as raised."
           - member: a `KeyError` detail and an `assert` detail under a pattern naming `KeyError`
             driven_by: "Whenever a pattern is declared, core matches its own words `assert`, `AssertionError` and `Failed` instead."
-          - member: a `Failed:` reason under this repo's own pattern
-            driven_by: "Whenever a pattern is declared, core matches its own words `assert`, `AssertionError` and `Failed` instead."
       - set: the verdicts a raise can sit beside
         members:
           - member: a raise alone
@@ -174,13 +172,15 @@ acceptance:
       pass it on, and `GateSuite` passes `policy.witness.assertion`. So a
       task's `witness` gate judges raises under the repo's declared pattern
       and under no other. A raise there adds no new failure to the
-      comparison. The witness drives `GateSuite.against` three times over
+      comparison. The witness drives `GateSuite.against` five times over
       one `preserves` criterion with a mutant, against a tree whose killing
       `tests` result carries one failure's detail. Under a policy declaring
       `^assert\b`, a `KeyError` detail reads `pass`, no new failure and the
       raised clause. An `assert` detail reads `pass` and the base summary.
       Under a policy declaring no pattern, the `KeyError` detail reads the
-      base summary too.
+      base summary too. Under a policy declaring `^KeyError\b`, the
+      `KeyError` detail reads the base summary and the `assert` detail reads
+      the raised clause.
     witness: tests/test_suite.py::test_the_suite_hands_witness_its_policys_assertion_and_a_raise_blocks_nothing
     positive_case: >-
       The `assert` detail reads the died count through the same `witness`
@@ -191,6 +191,7 @@ acceptance:
       - "`run_suite` takes the keyword and does not hand it to `run_witness`."
       - "`run_witness` takes the keyword and does not hand it to `witness_gate`."
       - "`GateSuite` passes a fixed pattern rather than the policy's own, so an undeclared pattern still judges raises."
+      - "`GateSuite` passes the literal `^assert\\b` whenever the policy declares any pattern."
     covers:
       - set: the hops from the policy to the gate
         members:
@@ -202,6 +203,8 @@ acceptance:
             driven_by: "`run_witness` takes the keyword and does not hand it to `witness_gate`."
           - member: a policy declaring no pattern
             driven_by: "`GateSuite` passes a fixed pattern rather than the policy's own, so an undeclared pattern still judges raises."
+          - member: a policy declaring a pattern that names `KeyError`
+            driven_by: "`GateSuite` passes the literal `^assert\\b` whenever the policy declares any pattern."
   - claim: >-
       `_apply_criterion_probes` takes a required keyword `assertion` and
       hands it to `witness_gate`. A pair whose witness raised under that
@@ -218,8 +221,10 @@ acceptance:
       `find`, reads `error` with the summary "the raised edit's line could
       not be read". A read that stops the cell reads `error` and asks the
       same pair again in a fresh cell. With no pattern the same raise reads
-      `killed`. The witness drives `_run_apply_criterion_probes` over eight
-      pairs in two cells: a criterion probe, a wrong version and a parent's
+      `killed`, and under a pattern naming `KeyError` a `KeyError` reason
+      reads `killed` and an `assert` reason reads `raised`. The witness
+      drives `_run_apply_criterion_probes` over nine pairs in two cells,
+      with eleven `tests` results: a criterion probe, a wrong version and a parent's
       version that raise, a wrong version killed by an assertion, a survivor,
       two raises whose read returns `None` and lacks the `find`, a raise
       whose read stops the first cell, and a raise whose line shares no
@@ -229,7 +234,7 @@ acceptance:
       `check_probe` and `anchored_blockers`, and six findings in all. Beside
       an unanchored lens concern, `rebut_concerns` returns the five and
       `anchored_concerns` counts five. It then drives one raise under no
-      pattern.
+      pattern, and two pairs under `^KeyError\b`.
     witness: tests/test_session.py::test_a_witness_that_only_raises_under_an_edit_reads_raised_and_files_a_concern
     positive_case: >-
       The survivor reaches `check_probe` and `anchored_blockers` through the
@@ -249,6 +254,7 @@ acceptance:
       - "With no pattern the raise still reads `raised`."
       - "`rebut_concerns` still needs every concern anchored, so an unanchored raise reaches neither REBUT nor the count."
       - "`rebut_concerns` drops the anchor check for every concern, so an unanchored lens concern is counted too."
+      - "`_apply_criterion_probes` swaps in a literal `assert` pattern whenever any pattern is declared."
     covers:
       - set: the kinds of pair a raise can come from
         members:
@@ -292,29 +298,34 @@ acceptance:
             driven_by: "A raise reads `killed` and files nothing, as at your base."
           - member: no pattern
             driven_by: "With no pattern the raise still reads `raised`."
+          - member: a pattern naming `KeyError`
+            driven_by: "`_apply_criterion_probes` swaps in a literal `assert` pattern whenever any pattern is declared."
   - claim: >-
       `_drive_cell` passes `policy.witness.assertion` to
       `_apply_criterion_probes`. The witness drives one cell through REVIEW
-      under a policy declaring `^assert\b`, with two wrong versions on one
+      under a policy declaring `^KeyError\b`, with two wrong versions on one
       criterion. Its witness fails the first with an `assert` detail and the
       second with a `KeyError` detail. The task ends `READY_FOR_REVIEW`.
-      `wrong-versions.json` records `killed` then `raised`, and
+      `wrong-versions.json` records `raised` then `killed`, and
       `findings.json`'s `adequacy` entry holds one concern, at the raised
       edit's line, naming that version.
     witness: tests/test_session.py::test_a_drive_hands_review_its_policys_assertion_for_each_wrong_version
     positive_case: >-
-      The first version reads `killed` through the same `wrong-versions.json`
-      record, so the second's `raised` is read where the drive does record an
-      outcome.
+      The second version reads `killed` through the same
+      `wrong-versions.json` record, so the first's `raised` is read where the
+      drive does record a kill.
     wrong_versions:
       - "`_drive_cell` passes `None`, so both versions read `killed`."
       - "`_drive_cell` passes a pattern that matches nothing, so both versions read `raised`."
+      - "`_drive_cell` passes the literal `^assert\\b` whenever the policy declares any pattern."
     covers:
       - set: the details the drive's witness fails with
         members:
           - member: an `assert` detail
-            driven_by: "`_drive_cell` passes a pattern that matches nothing, so both versions read `raised`."
+            driven_by: "`_drive_cell` passes the literal `^assert\\b` whenever the policy declares any pattern."
           - member: a `KeyError` detail
+            driven_by: "`_drive_cell` passes a pattern that matches nothing, so both versions read `raised`."
+          - member: the pattern being declared at all
             driven_by: "`_drive_cell` passes `None`, so both versions read `killed`."
   - claim: >-
       A recorded `raised` version is asked again as a `killed` one is, by
@@ -362,11 +373,11 @@ acceptance:
       at the task's base to `_apply_criterion_probes`. A revived version
       that raised prints its own line, `regate: <spec> wrong version raised:
       <version> (<summary>)`, and adds no new failure. The witness builds
-      the wrong-version fixture with `^assert` declared at the task's base
-      and `^KeyError` at `main`. It calls `regate` with the task's own first
-      version failed by a `KeyError` detail. The first two pair lines read
+      the wrong-version fixture with `^KeyError` declared at the task's base
+      and `^assert` at `main`. It calls `regate` with the task's own first
+      version failed by an `assert` detail. The first two pair lines read
       `raised: v1` then `survived: v2`, and the last line counts three new
-      failures. A second `regate` with an `assert` detail prints no raised
+      failures. A second `regate` with a `KeyError` detail prints no raised
       line.
     witness: tests/test_regate.py::test_regate_prints_a_version_that_only_raised_and_counts_it_nowhere
     positive_case: >-
@@ -374,15 +385,18 @@ acceptance:
       the missing raised line is read where pair lines do print.
     wrong_versions:
       - "`regate` passes `None`, so the version reads `killed` and prints nothing."
-      - "`regate` reads the pattern from the checkout's policy at `main`, so `KeyError` reads as an assertion."
+      - "`regate` reads the pattern from the checkout's policy at `main`, so `assert` reads as an assertion."
       - "`regate` counts a raised version as a new failure."
+      - "`regate` passes the literal `^assert\\b` whenever the policy declares any pattern."
     covers:
       - set: the policies `regate` could read
         members:
           - member: the policy exported at the task's base
             driven_by: "`regate` passes `None`, so the version reads `killed` and prints nothing."
           - member: the checkout's policy at `main`
-            driven_by: "`regate` reads the pattern from the checkout's policy at `main`, so `KeyError` reads as an assertion."
+            driven_by: "`regate` reads the pattern from the checkout's policy at `main`, so `assert` reads as an assertion."
+          - member: a base pattern that names `KeyError`
+            driven_by: "`regate` passes the literal `^assert\\b` whenever the policy declares any pattern."
       - set: what a raised version adds to the count
         members:
           - member: no new failure
@@ -548,11 +562,16 @@ review and asks nothing more. `_drive_cell` passes
 `_apply_criterion_probes`'s docstring (`saffron/cell/session.py:2110`) and
 in `regate`'s comment on reviving a version (`saffron/regate.py:245`).
 
+Two more sentences say only a host-filed survivor, or only an anchored
+concern, reaches REBUT. Reword them for a host-filed concern too: the
+docstring line in `saffron/phases/rebut.py:827` and the comment above
+`rebut_concerns`'s call in `saffron/cell/session.py:3727`.
+
 **In `saffron/regate.py`**, pass `policy.witness.assertion`
 (`saffron/regate.py:285`). Its pair loop already prints every outcome
 but `killed` and counts only `survived` (`saffron/regate.py:303-311`).
 In `tests/test_regate.py`, `_write_wv_policy` (`:2208`) declares
-`witness: assertion:` as `^assert` in the base policy and `^KeyError` in
+`witness: assertion:` as `^KeyError` in the base policy and `^assert` in
 the moved one.
 
 ## Out of scope
@@ -577,6 +596,13 @@ the moved one.
   one `unverified` because "its REVIEW probe did not survive"
   (`saffron/qualify.py:95`, `:282`). A raised edit did not survive its
   witness, so that sentence holds for it.
+- **A stacked layer's unanchored raise**. `qualify._decide` files any
+  unanchored finding `unanchored` (`saffron/qualify.py:276-277`). An
+  unanchored raised concern reads so in a stacked layer, as an unanchored
+  host-filed survivor does at base.
+- **REVIEW's per-lens line**. `_describe` counts only anchored concerns
+  (`saffron/phases/review.py:970`), so an unanchored raised concern counts
+  in the state line's concerns and not in its lens's line.
 - **The vocabulary**. `raised` is a new outcome word. Backlog item
   **b-84cf18** files its `CONTEXT.md` and `DESIGN.md` §5.4.1 entries,
   `outside_cell: true`.
@@ -614,7 +640,7 @@ at base. Read the `witness` result from `comparison.run.results`.
 `read_at_head` stub receives the container name, so the stopping read can
 raise `runtime.CellRuntimeError` in `gate-1` alone. Spy on
 `saffron.probe.check_probe` with `monkeypatch.setattr`, wrapping the real
-function. Script ten `tests` results: one per pair, one more for the
+function. Script eleven `tests` results: one per pair, one more for the
 survivor's second ask and one for the pair asked again.
 
 **The drive witness** follows
@@ -634,5 +660,7 @@ inside the lines it holds.
 that reads the "could not be anchored" line. Build both findings with
 `_finding` and pass no `rebut_result`.
 
-**Size**. A prototype changed 146 lines outside `tests/` by `git diff
---numstat`, and `size` counted 528 tokens there.
+**Size**. A prototype changed 150 lines outside `tests/` by `git diff
+--numstat`, read as is and not trimmed to fit. `size` counted 499
+tokens there, under its ceiling of 1300. `driver.py check` prices the 150
+lines at its measured overrun and blocks, and the operator accepted that.
