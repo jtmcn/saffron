@@ -227,12 +227,23 @@ def _write_spec(
 
 def _fake_gh(prs):
     """A `GhRunner` that never leaves the process — `prs` is the parsed JSON
-    `gh pr list --json ...` would have printed."""
-    payload = json.dumps(prs)
+    `gh pr list --json ...` would have printed.
+
+    Filtered to the `--json` argument's own fields (`SA-0430`). A witness
+    that never asked `gh` for `headRefOid` must never see one."""
 
     def gh(argv):
+        try:
+            fields = argv[argv.index("--json") + 1].split(",")
+        except (ValueError, IndexError):
+            fields = None
+        filtered = (
+            prs
+            if fields is None
+            else [{key: pr[key] for key in fields if key in pr} for pr in prs]
+        )
         return subprocess.CompletedProcess(
-            argv, returncode=0, stdout=payload, stderr=""
+            argv, returncode=0, stdout=json.dumps(filtered), stderr=""
         )
 
     return gh
@@ -520,6 +531,492 @@ def test_resuming_its_own_task_is_not_refused_by_its_own_open_pr(tmp_path, ledge
 
     assert refusals == []
     assert [c.task_id for c in candidates] == [task_id]
+
+
+# --------------------------------------------- refusal: an ORPHANED resume's own PR
+
+
+def _outcome(directory, repo_id, ledger, spec_id, **kwargs):
+    """The one candidate and the one refusal `build_queue` produced for
+    `spec_id`'s own file, or `None` for whichever side it did not reach.
+    `SA-0430`'s own tests drive several spec ids in one `build_queue` call,
+    so each lookup names which spec it means rather than a list position."""
+    candidates, refusals = build_queue(directory, repo_id, ledger, **kwargs)
+    candidate = next((c for c in candidates if c.path.name == f"{spec_id}.md"), None)
+    refusal = next((r for r in refusals if r.path.name == f"{spec_id}.md"), None)
+    return candidate, refusal
+
+
+_BOTH_SCANS = ({}, {"stack": True})
+
+
+def test_an_orphaned_task_carrying_a_pull_request_url_is_refused_not_resumed(
+    tmp_path, ledger
+):
+    """When the newest re-queueing row at a `spec_sha` is `ORPHANED` and any
+    `ORPHANED` row there carries a `pr_url`, `build_queue` refuses the spec
+    as `open_pr_on_spec`. It names the newest such url, never "another
+    task", with or without a `repo_slug`, in both scans (`SA-0430`)."""
+    directory = _spec_dir(tmp_path)
+    repo_id = _repo(ledger)
+    gh_none = _fake_gh([])
+
+    def outcome(spec_id, **kwargs):
+        return _outcome(directory, repo_id, ledger, spec_id, **kwargs)
+
+    # One ORPHANED row, through `adopt_pull_request`: resumes in both scans
+    # before its url is set, then refuses after, with or without a slug.
+    _write(directory, "TE-301.md", id="TE-301")
+    adopted_sha = _sha(directory / "TE-301.md")
+    adopted_task = _task_at(
+        ledger, repo_id, spec_id="TE-301", spec_sha=adopted_sha, state="ORPHANED"
+    )
+    for kwargs in _BOTH_SCANS:
+        candidate, refusal = outcome("TE-301", **kwargs)
+        assert candidate is not None and candidate.task_id == adopted_task
+        assert refusal is None
+
+    ledger.adopt_pull_request(adopted_task, "https://example/pull/101")
+
+    for kwargs in (
+        {},
+        {"stack": True},
+        {"repo_slug": "o/r", "gh": gh_none},
+        {"repo_slug": "o/r", "gh": gh_none, "stack": True},
+    ):
+        candidate, refusal = outcome("TE-301", **kwargs)
+        assert candidate is None
+        assert refusal is not None
+        assert refusal.kind == "open_pr_on_spec"
+        assert "https://example/pull/101" in refusal.reason
+        assert "another task" not in refusal.reason
+
+    # The same shape through `task_package`, then a later `task_state`
+    # fact that returns the row to `ORPHANED` without touching the url.
+    _write(directory, "TE-302.md", id="TE-302")
+    package_sha = _sha(directory / "TE-302.md")
+    package_task = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-302",
+        spec_sha=package_sha,
+        state="GATE_ERROR",
+    )
+    set_task_package(
+        ledger,
+        package_task,
+        "READY_FOR_REVIEW",
+        branch="saffron/TE-302",
+        pushed_sha="b" * 40,
+        pr_url="https://example/pull/102",
+    )
+    ledger.set_task_state(package_task, "ORPHANED")
+
+    for kwargs in _BOTH_SCANS:
+        candidate, refusal = outcome("TE-302", **kwargs)
+        assert candidate is None
+        assert refusal is not None
+        assert refusal.kind == "open_pr_on_spec"
+        assert "https://example/pull/102" in refusal.reason
+        assert "another task" not in refusal.reason
+
+    # A newer row in another re-queue state above the url-carrying ORPHANED
+    # row still resumes: the *newest* row decides, not any row.
+    _write(directory, "TE-303.md", id="TE-303")
+    gate_error_sha = _sha(directory / "TE-303.md")
+    older_orphaned = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-303",
+        spec_sha=gate_error_sha,
+        state="ORPHANED",
+    )
+    ledger.adopt_pull_request(older_orphaned, "https://example/pull/103")
+    newer_gate_error = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-303",
+        spec_sha=gate_error_sha,
+        state="GATE_ERROR",
+    )
+    for kwargs in _BOTH_SCANS:
+        candidate, refusal = outcome("TE-303", **kwargs)
+        assert candidate is not None and candidate.task_id == newer_gate_error
+        assert refusal is None
+
+    # A newest ORPHANED row with its own url above both refuses again,
+    # naming its own url and not the older one.
+    _write(directory, "TE-304.md", id="TE-304")
+    newest_sha = _sha(directory / "TE-304.md")
+    first_orphaned = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-304",
+        spec_sha=newest_sha,
+        state="ORPHANED",
+    )
+    ledger.adopt_pull_request(first_orphaned, "https://example/pull/104")
+    _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-304",
+        spec_sha=newest_sha,
+        state="GATE_ERROR",
+    )
+    newest_orphaned = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-304",
+        spec_sha=newest_sha,
+        state="ORPHANED",
+    )
+    ledger.adopt_pull_request(newest_orphaned, "https://example/pull/105")
+    for kwargs in _BOTH_SCANS:
+        candidate, refusal = outcome("TE-304", **kwargs)
+        assert candidate is None
+        assert refusal is not None
+        assert "https://example/pull/105" in refusal.reason
+        assert "https://example/pull/104" not in refusal.reason
+
+    # A newer url-less ORPHANED row above an adopted one, with its own push
+    # and url, refuses on the older url.
+    _write(directory, "TE-305.md", id="TE-305")
+    urlless_sha = _sha(directory / "TE-305.md")
+    adopted_with_push = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-305",
+        spec_sha=urlless_sha,
+        state="ORPHANED",
+    )
+    ledger.record_push(adopted_with_push, "c" * 40)
+    ledger.adopt_pull_request(adopted_with_push, "https://example/pull/106")
+    _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-305",
+        spec_sha=urlless_sha,
+        state="ORPHANED",
+    )
+    for kwargs in _BOTH_SCANS:
+        candidate, refusal = outcome("TE-305", **kwargs)
+        assert candidate is None
+        assert refusal is not None
+        assert "https://example/pull/106" in refusal.reason
+
+    # A `CHANGES_REQUESTED` row's own url does not count: it, and a newer
+    # url-less `ORPHANED` row minted above it, both still resume.
+    _write(directory, "TE-306.md", id="TE-306")
+    cr_sha = _sha(directory / "TE-306.md")
+    cr_task = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-306",
+        spec_sha=cr_sha,
+        state="GATE_ERROR",
+    )
+    set_task_package(
+        ledger,
+        cr_task,
+        "CHANGES_REQUESTED",
+        branch="saffron/TE-306",
+        pushed_sha="d" * 40,
+        pr_url="https://example/pull/107",
+    )
+    for kwargs in _BOTH_SCANS:
+        candidate, refusal = outcome("TE-306", **kwargs)
+        assert candidate is not None and candidate.task_id == cr_task
+        assert refusal is None
+
+    minted_above_cr = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-306",
+        spec_sha=cr_sha,
+        state="ORPHANED",
+    )
+    for kwargs in _BOTH_SCANS:
+        candidate, refusal = outcome("TE-306", **kwargs)
+        assert candidate is not None and candidate.task_id == minted_above_cr
+        assert refusal is None
+
+
+def test_an_orphaned_task_beside_another_head_on_its_branch_is_refused_not_resumed(
+    tmp_path, ledger
+):
+    """An `ORPHANED` resume with no url anywhere on its `spec_sha` still
+    refuses, beside a pull request no task owns (`SA-0430`). That pull
+    request sits on the spec's own branch. Its `headRefOid` is non-empty
+    and no *non*-`ORPHANED` row recorded it as `pushed_sha`. Its url is no
+    such row's `pr_url` either. An `ORPHANED` row's own push or url owns
+    nothing."""
+    directory = _spec_dir(tmp_path)
+    repo_id = _repo(ledger)
+
+    def outcome(spec_id, gh, **kwargs):
+        return _outcome(
+            directory, repo_id, ledger, spec_id, repo_slug="o/r", gh=gh, **kwargs
+        )
+
+    # The shape spec loop session 84 met: one ORPHANED row, no push, beside
+    # a foreign pull request on its own branch.
+    _write(directory, "TE-307.md", id="TE-307")
+    no_push_sha = _sha(directory / "TE-307.md")
+    no_push_task = _task_at(
+        ledger, repo_id, spec_id="TE-307", spec_sha=no_push_sha, state="ORPHANED"
+    )
+    gh_foreign = _fake_gh(
+        [
+            {
+                "headRefName": "saffron/TE-307",
+                "headRefOid": "f" * 40,
+                "url": "https://example/pull/200",
+                "files": [],
+            }
+        ]
+    )
+    for kwargs in _BOTH_SCANS:
+        candidate, refusal = outcome("TE-307", gh_foreign, **kwargs)
+        assert candidate is None
+        assert refusal is not None
+        assert refusal.kind == "open_pr_on_spec"
+        assert "https://example/pull/200" in refusal.reason
+        assert "another task" not in refusal.reason
+
+    # The same row after it pushed: refused beside a pull request at its own
+    # push, because an ORPHANED row's own push owns nothing.
+    ledger.record_push(no_push_task, "e" * 40)
+    gh_own_push = _fake_gh(
+        [
+            {
+                "headRefName": "saffron/TE-307",
+                "headRefOid": "e" * 40,
+                "url": "https://example/pull/201",
+                "files": [],
+            }
+        ]
+    )
+    for kwargs in _BOTH_SCANS:
+        candidate, refusal = outcome("TE-307", gh_own_push, **kwargs)
+        assert candidate is None
+        assert refusal is not None
+        assert "https://example/pull/201" in refusal.reason
+
+    # It resumes beside one on another branch, one with no `headRefOid`, and
+    # one with an empty one.
+    for pr in (
+        {
+            "headRefName": "saffron/TE-OTHER-BRANCH",
+            "headRefOid": "g" * 40,
+            "url": "https://example/pull/202",
+            "files": [],
+        },
+        {
+            "headRefName": "saffron/TE-307",
+            "url": "https://example/pull/203",
+            "files": [],
+        },
+        {
+            "headRefName": "saffron/TE-307",
+            "headRefOid": "",
+            "url": "https://example/pull/204",
+            "files": [],
+        },
+    ):
+        gh_harmless = _fake_gh([pr])
+        for kwargs in _BOTH_SCANS:
+            candidate, refusal = outcome("TE-307", gh_harmless, **kwargs)
+            assert candidate is not None and candidate.task_id == no_push_task
+            assert refusal is None
+
+    # After the row moves to `CHANGES_REQUESTED`, a pull request at another
+    # head no longer refuses it.
+    set_task_package(
+        ledger,
+        no_push_task,
+        "CHANGES_REQUESTED",
+        branch="saffron/TE-307",
+        pushed_sha="e" * 40,
+        pr_url="",
+    )
+    for kwargs in _BOTH_SCANS:
+        candidate, refusal = outcome("TE-307", gh_foreign, **kwargs)
+        assert candidate is not None and candidate.task_id == no_push_task
+        assert refusal is None
+
+    # A dead revision's rows: `CHANGES_REQUESTED` carries url U and push A,
+    # above which a url-less, push-less `ORPHANED` row was minted.
+    _write(directory, "TE-309.md", id="TE-309")
+    dead_sha = _sha(directory / "TE-309.md")
+    changes_requested = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-309",
+        spec_sha=dead_sha,
+        state="GATE_ERROR",
+    )
+    set_task_package(
+        ledger,
+        changes_requested,
+        "CHANGES_REQUESTED",
+        branch="saffron/TE-309",
+        pushed_sha="A" * 40,
+        pr_url="https://example/pull/U",
+    )
+    minted_above_dead = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-309",
+        spec_sha=dead_sha,
+        state="ORPHANED",
+    )
+    # U at head A, or either alone, is owned and resumes. Neither is
+    # unowned, and that one refuses.
+    for url, head, refused in (
+        ("https://example/pull/U", "A" * 40, False),
+        ("https://example/pull/U", "h" * 40, False),
+        ("https://example/pull/other", "A" * 40, False),
+        ("https://example/pull/other", "h" * 40, True),
+    ):
+        gh_revision = _fake_gh(
+            [
+                {
+                    "headRefName": "saffron/TE-309",
+                    "headRefOid": head,
+                    "url": url,
+                    "files": [],
+                }
+            ]
+        )
+        for kwargs in _BOTH_SCANS:
+            candidate, refusal = outcome("TE-309", gh_revision, **kwargs)
+            if refused:
+                assert candidate is None
+                assert refusal is not None
+                assert url in refusal.reason
+            else:
+                assert candidate is not None
+                assert candidate.task_id == minted_above_dead
+                assert refusal is None
+
+    # A newer `GATE_ERROR` row resumes beside a foreign pull request, and a
+    # newest `ORPHANED` row above both refuses again.
+    _write(directory, "TE-310.md", id="TE-310")
+    above_sha = _sha(directory / "TE-310.md")
+    _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-310",
+        spec_sha=above_sha,
+        state="ORPHANED",
+    )
+    gate_error_above = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-310",
+        spec_sha=above_sha,
+        state="GATE_ERROR",
+    )
+    gh_above = _fake_gh(
+        [
+            {
+                "headRefName": "saffron/TE-310",
+                "headRefOid": "i" * 40,
+                "url": "https://example/pull/205",
+                "files": [],
+            }
+        ]
+    )
+    for kwargs in _BOTH_SCANS:
+        candidate, refusal = outcome("TE-310", gh_above, **kwargs)
+        assert candidate is not None and candidate.task_id == gate_error_above
+        assert refusal is None
+
+    newest_above = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-310",
+        spec_sha=above_sha,
+        state="ORPHANED",
+    )
+    for kwargs in _BOTH_SCANS:
+        candidate, refusal = outcome("TE-310", gh_above, **kwargs)
+        assert candidate is None
+        assert refusal is not None
+        assert "https://example/pull/205" in refusal.reason
+    assert newest_above > gate_error_above
+
+    # A newer url-less `ORPHANED` row is refused above a pushed url-less
+    # one, beside a pull request at that push.
+    _write(directory, "TE-311.md", id="TE-311")
+    pushed_urlless_sha = _sha(directory / "TE-311.md")
+    pushed_urlless = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-311",
+        spec_sha=pushed_urlless_sha,
+        state="ORPHANED",
+    )
+    ledger.record_push(pushed_urlless, "j" * 40)
+    _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-311",
+        spec_sha=pushed_urlless_sha,
+        state="ORPHANED",
+    )
+    gh_pushed_urlless = _fake_gh(
+        [
+            {
+                "headRefName": "saffron/TE-311",
+                "headRefOid": "j" * 40,
+                "url": "https://example/pull/206",
+                "files": [],
+            }
+        ]
+    )
+    for kwargs in _BOTH_SCANS:
+        candidate, refusal = outcome("TE-311", gh_pushed_urlless, **kwargs)
+        assert candidate is None
+        assert refusal is not None
+        assert "https://example/pull/206" in refusal.reason
+
+    # It is refused above an adopted one too, beside the adopted pull
+    # request at its push.
+    _write(directory, "TE-312.md", id="TE-312")
+    adopted_below_sha = _sha(directory / "TE-312.md")
+    adopted_below = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-312",
+        spec_sha=adopted_below_sha,
+        state="ORPHANED",
+    )
+    ledger.record_push(adopted_below, "k" * 40)
+    ledger.adopt_pull_request(adopted_below, "https://example/pull/207")
+    _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-312",
+        spec_sha=adopted_below_sha,
+        state="ORPHANED",
+    )
+    gh_adopted_below = _fake_gh(
+        [
+            {
+                "headRefName": "saffron/TE-312",
+                "headRefOid": "k" * 40,
+                "url": "https://example/pull/207",
+                "files": [],
+            }
+        ]
+    )
+    for kwargs in _BOTH_SCANS:
+        candidate, refusal = outcome("TE-312", gh_adopted_below, **kwargs)
+        assert candidate is None
+        assert refusal is not None
+        assert refusal.kind == "open_pr_on_spec"
+        assert "https://example/pull/207" in refusal.reason
 
 
 def test_no_repo_slug_skips_the_github_backed_refusals(tmp_path, ledger):
