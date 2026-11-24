@@ -2628,25 +2628,22 @@ def test_a_live_gate_results_failure_detail_is_set_aside(tmp_path: Path) -> None
 
     # The top-up sets aside only `detail`: a held failure whose `message`
     # disagrees with the row is still refused.
-    seeded = MemoryRecord()
-    for fact in held:
-        if fact.kind == "gate_result":
-            failures = fact.payload["failures"]
-            fact = replace(
-                fact,
-                payload={
-                    **fact.payload,
-                    "failures": [
-                        {**failures[0], "message": "a different message"},
-                        failures[1],
-                    ],
-                },
-            )
-        seeded.append(key, fact)
-    refused = migrate(source_path, seeded)
-    assert dict(refused.refused) == {
-        key: f"the record holds {len(held)} fact(s) that disagree"
-    }
+    modified_held = [
+        replace(
+            fact,
+            payload={
+                **fact.payload,
+                "failures": [
+                    {**fact.payload["failures"][0], "message": "a different message"},
+                    fact.payload["failures"][1],
+                ],
+            },
+        )
+        if fact.kind == "gate_result"
+        else fact
+        for fact in held
+    ]
+    _assert_disagrees(source_path, key, modified_held)
 
 
 def test_the_normalized_docstring_counts_every_set_aside_gate_result_key() -> None:
