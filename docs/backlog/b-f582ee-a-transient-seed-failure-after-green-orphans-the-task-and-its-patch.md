@@ -75,3 +75,4 @@ command can package it, and says which command does.
   now packages an `ORPHANED` task whose cell went green and reviewed clean,
   and `run_task` names that command. A runtime death read as `EXHAUSTED` is
   still open.
+- 2026-11-23: batch 104 orphaned `SA-0423` twice. Each time the container refused an exec after REBUT ("no PID data from sync pipe"), and the runtime kept no logs. The proxy and two networks outlived teardown. The operator took the patch by hand as #1305.

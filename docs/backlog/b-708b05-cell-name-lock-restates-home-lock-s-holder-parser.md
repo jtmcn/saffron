@@ -1,11 +1,12 @@
 ---
 id: b-708b05
 title: "cell_name_lock restates home_lock's holder parser, and a contender in the write window names a stale holder"
-status: open
+status: done
+closed: 2026-11-23
 tier: 3
 filed: 2026-11-22
 specs: [SA-0427]
-prs: []
+prs: [1309]
 commits: []
 cites: [§5.1]
 related: [b-d9ed45]
@@ -31,3 +32,4 @@ names no stale holder, and a test drives that window.
 ## Record
 
 - 2026-11-22: filed from finish 103's pooled end review findings.
+- 2026-11-23: done by `SA-0427` (#1309), batch 105. One parser, and each lock empties its file before it lets go.

@@ -1,11 +1,12 @@
 ---
 id: b-18fa39
 title: "A failed test reaches a writer and the log as its node id alone, so a follow-up draft is redrafted blind and pooled"
-status: open
+status: done
+closed: 2026-11-23
 tier: 2
 filed: 2026-11-22
 specs: [SA-0426]
-prs: []
+prs: [1308]
 commits: []
 cites: [§5.4]
 related: [b-4a9207, b-703e64]
@@ -42,3 +43,4 @@ test failed.
 
 - 2026-11-22: filed from finish 103 in the spec loop's run 83. The draft
   cited b-d9ed45 in its `## Context`, and the item did not list it back.
+- 2026-11-23: done by `SA-0426` (#1308), batch 105. A failure carries its reason in `detail`, outside its identity.

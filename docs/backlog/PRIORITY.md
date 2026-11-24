@@ -240,10 +240,6 @@ batch's open layer.
 passes until a parent moves them, then stops the batch. A finish drafts a
 follow-up its own batch refuses, so nothing pushes.
 
-**Placed 2026-11-22**, from the spec loop's run 83: **b-18fa39**. A
-failed test reaches the follow-up writer as its node id alone, so a draft
-is redrafted blind and pooled.
-
 **Placed 2026-11-04**, from the spec loop's run 53: **b-bece8b**, **b-0ac661**,
 **b-f011f3** and ~~**b-249808**~~. A by-hand merge of a `PLAN_REJECTED` parent left
 its child refused. A fix to the plan checkpoint could not pass it. A lost
@@ -275,13 +271,14 @@ ends a task unjudged on one API error, with no retry.
 - ~~**b-b0cd68**~~, ~~**b-bff670**~~, ~~**b-c375d6**~~, ~~**b-e0cd57**~~, ~~**b-2e7c4d**~~, ~~**b-38d45f**~~, ~~**b-47659f**~~, ~~**b-66d1c3**~~, ~~**b-78ccc7**~~, ~~**b-00534f**~~, ~~**b-209696**~~, ~~**b-23a149**~~, ~~**b-60ff2e**~~, ~~**b-970f53**~~, ~~**b-c94a2f**~~, ~~**b-0a08bf**~~, ~~**b-2247dd**~~, ~~**b-4e1b6d**~~, ~~**b-708c8a**~~, ~~**b-8e30bd**~~.
 - ~~**b-a1d649**~~, ~~**b-e0e1cf**~~, ~~**b-5df2a7**~~, ~~**b-cf50dc**~~, ~~**b-52e670**~~, ~~**b-e9153f**~~, ~~**b-9efbe2**~~, ~~**b-f5ceaf**~~, ~~**b-cd1566**~~, ~~**b-bba47a**~~, ~~**b-d31930**~~, ~~**b-2da959**~~, ~~**b-f73cd0**~~, ~~**b-998bb7**~~, ~~**b-781ea4**~~, ~~**b-a68b24**~~, ~~**b-009d51**~~, ~~**b-1b05be**~~, ~~**b-b9365d**~~, ~~**b-8e12c1**~~.
 - ~~**b-549012**~~, ~~**b-719346**~~, ~~**b-e0044f**~~, ~~**b-e9dd4c**~~, ~~**b-3cf039**~~, ~~**b-7c118b**~~, ~~**b-c5da95**~~, ~~**b-31e3c8**~~, ~~**b-3df181**~~, ~~**b-879e72**~~, ~~**b-c7858c**~~, ~~**b-cbb6e7**~~, ~~**b-d1c277**~~, ~~**b-c12d39**~~, ~~**b-16c819**~~, ~~**b-96508a**~~, ~~**b-1b5747**~~, ~~**b-d9a027**~~, ~~**b-c7fd81**~~, ~~**b-0f5493**~~.
+- ~~**b-18fa39**~~.
 - Closed as wontfix: **b-8d5e55**, **b-593d50**.
 
 ### Tier 3 — real, not urgent
 
-**Placed 2026-11-22**, from the spec loop's run 83: **b-708b05**.
-`cell_name_lock` restates `home_lock`'s holder parser, and a contender in
-the write window names a stale holder.
+**Placed 2026-11-23**, from the spec loop's run 84: **b-e0e720**, then
+**b-1349d9**. The `prose` gate reads no attribute docstring. "Emitter" names
+two things, and §4.7 says `append` sets `failed`.
 
 **Placed 2026-11-20**, with `SA-0418`: **b-d0a813**. The vocabulary has no
 word for an attempt a cell opened, and `SA-0418` dates a task by one.
@@ -349,7 +346,7 @@ Each line keeps the order it was filed in.
   ~~**77**~~, **90**, **92**, **96**, ~~**100**~~, **101** and **108**.
 - Filed 2026-09-12 to 2026-09-19: ~~**116**~~, **121**, ~~**122**~~, **130**, **134**,
   ~~**150**~~, ~~**151**~~, **155**, **156**, **174** and **b-d6bff7**.
-- From spec loop runs 7 to 10: ~~**b-990bd9**~~, ~~**b-7431a2**~~, **b-9eceda**, **b-bc9951**,
+- From spec loop runs 7 to 10: ~~**b-990bd9**~~, ~~**b-7431a2**~~, ~~**b-9eceda**~~, **b-bc9951**,
   **b-0281e4**, **b-e9db0e**, **b-397edd**, **b-0e20e9**, ~~**b-98dc4d**~~,
   ~~**b-27b9db**~~, ~~**b-bbf663**~~ and ~~**b-6a9707**~~.
 - From the reviews of #393 and `SA-0120`, and spec loop runs 13 and 14: **b-d5d290**,
@@ -541,9 +538,9 @@ risk — not, as an earlier draft of this note said, that `.gitignore` in
 *tracked* half only: a `.gitignore` naming itself reaches no diff at all.
 
 **What this ordering costs, recounted on 2026-11-23.** Tier 1 holds 7 open
-items, tier 2 holds 63 and tier 3 holds 146. So tier 3 holds 68% of the
+items, tier 2 holds 62 and tier 3 holds 146. So tier 3 holds 68% of the
 backlog. That is the deliberate consequence of ranking by the milestone rather
-than by what is nearest to hand. 22 of the 216 open items are outside a cell,
+than by what is nearest to hand. 23 of the 215 open items are outside a cell,
 since a cell cannot reach their files.
 
 **Placed 2026-11-04**, from the spec loop's run 53: **b-8c6696**, ~~**b-a19ffd**~~
@@ -554,7 +551,7 @@ and **b-9bb8b7**. A spec missed the fixtures that pin the plan's sha. §5.3's
 - ~~**14**~~, ~~**19**~~, ~~**22**~~, ~~**23**~~, ~~**56**~~, ~~**62**~~, ~~**64**~~, ~~**65**~~, ~~**68**~~, ~~**86**~~, ~~**87**~~, ~~**91**~~, ~~**99**~~, ~~**105**~~, ~~**106**~~, ~~**107**~~, ~~**110**~~, ~~**111**~~, ~~**123**~~, ~~**124**~~.
 - ~~**125**~~, ~~**127**~~, ~~**131**~~, ~~**132**~~, ~~**133**~~, ~~**139**~~, ~~**175**~~, ~~**176**~~, ~~**b-a1bdba**~~, ~~**b-4589be**~~, ~~**b-e0bbbf**~~, ~~**b-e403c1**~~, ~~**b-d1d634**~~, ~~**b-ea1d13**~~, ~~**b-5fa523**~~, ~~**b-76953a**~~, ~~**b-0adc85**~~, ~~**b-111c56**~~, ~~**b-26315b**~~, ~~**b-2dea1c**~~.
 - ~~**b-37924b**~~, ~~**b-542beb**~~, ~~**b-ac97c0**~~, ~~**b-50b566**~~, ~~**b-6a692d**~~, ~~**b-f4eb52**~~, ~~**b-589cf6**~~, ~~**b-df59f8**~~, ~~**b-e88930**~~, ~~**b-ca3bc6**~~, ~~**b-dc5212**~~, ~~**b-5aa016**~~, ~~**b-f71105**~~, ~~**b-1c4a14**~~, ~~**b-74a122**~~, ~~**b-206d2c**~~, ~~**b-a64578**~~, ~~**b-d0baf7**~~, ~~**b-25b7ba**~~, ~~**b-e4cb58**~~.
-- ~~**b-60f950**~~.
+- ~~**b-60f950**~~, ~~**b-708b05**~~.
 - Closed as wontfix: **9**, **10**, **b-1e5572**, **b-013138**, **b-830dc7**, **b-6ac0cd**, **b-7eb6d3**, **b-1fc93b**, **b-8971e6**, **b-8693ef**.
 
 ---

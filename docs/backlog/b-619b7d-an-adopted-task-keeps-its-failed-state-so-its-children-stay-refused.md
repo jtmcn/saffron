@@ -60,3 +60,4 @@ as `regate` then `adopt`. A test drives each route and starts a child on it.
 - 2026-11-22: recurred in the spec loop's run 82. `saffron adopt` refused
   `SA-0419`'s `REBUTTAL_UNJUDGED` task, whose REBUT died on an API error. So
   #1290 merged with no adopted task.
+- 2026-11-23: recurred twice in the spec loop's run 84. `saffron adopt` refused `SA-0423`'s `ORPHANED` task (#1305) and `SA-0424`'s `REBUTTAL_UNJUDGED` task (#1310). Each by-hand pull request merged with no adopted task, and `SA-0425` stayed refused behind `SA-0424`.
