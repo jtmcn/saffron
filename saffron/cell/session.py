@@ -191,7 +191,7 @@ class _RebutCap:
     way a failed turn already reads to every caller here. `cut` holds the
     error of a budget signal, or of a refusal no death already explained
     (b-f582ee). A session with no signal that empties a REBUT stage's own
-    pool only marks that stage. `open` clears the mark for the one after it.
+    pool only marks that REBUT stage. `open` clears the mark for the next.
     """
 
     def __init__(
@@ -245,7 +245,7 @@ class _RebutCap:
                     self.cut = self.cut or str(failed)
                 elif self.spent >= self.limit:
                     # A signal-less death that empties this REBUT stage's own
-                    # pool marks the stage. The runtime failed it, not the pool.
+                    # pool marks that REBUT stage. The runtime failed it, not its pool.
                     self.emptied_by_death = True
                 raise
             self.spent += attempt.cost_usd_est

@@ -6201,8 +6201,8 @@ def test_a_rebut_session_that_dies_is_never_read_as_a_pool_cut(monkeypatch, tmp_
             {},
             "EXHAUSTED",
         ),
-        # Two blocker lenses: the first death marks the pool, and the
-        # refusal that follows is not a second cut.
+        # Two blocker lenses: the first death marks the verdict REBUT stage,
+        # and the refusal that follows is not a second cut.
         (
             "verdict-two-blockers-first-dies-at-pool",
             (6.00, 2.50, _wall_cut_turn(cost=7.50), 0.01),
@@ -6239,6 +6239,42 @@ def test_a_rebut_session_that_dies_is_never_read_as_a_pool_cut(monkeypatch, tmp_
         ),
     ]
 
+    # Each row's last REBUT line: a death names its own error, or that a lens
+    # produced no verdict, and a cut names its own REBUT stage's pool.
+    no_arg = "made no argument: "
+    wall = no_arg + "the agent produced no result event"
+    rebuttal_cut = "REBUT ran out of its $10.00 budget"
+    extraction_cut = "REBUT's extraction ran out of its $4.00 reserve"
+    verdict_cut = "REBUT's verdict ran out of its $2.00 reserve"
+    no_verdict = "produced no verdict"
+    lines = {
+        "rebuttal-death-under": wall,
+        "rebuttal-death-at": wall,
+        "rebuttal-death-past": wall,
+        "rebuttal-api-error-past": no_arg + "api_error",
+        "rebuttal-turn-ceiling-past": no_arg + "turn ceiling",
+        "rebuttal-no-attempt": no_arg + "boom",
+        "rebuttal-signal-terminal-reason-alone-under": rebuttal_cut,
+        "rebuttal-signal-subtype-alone-at": rebuttal_cut,
+        "extraction-death-under": wall,
+        "extraction-death-at": wall,
+        "extraction-death-past": wall,
+        "extraction-signal-subtype-alone-under": extraction_cut,
+        "extraction-signal-terminal-reason-alone-at": extraction_cut,
+        "extraction-refused-reprompt": extraction_cut,
+        "extraction-claims-uncommitted-fix": no_arg + "claimed a fix",
+        "extraction-dies-then-verdict-refused": verdict_cut,
+        "verdict-death-under": no_verdict,
+        "verdict-death-at": no_verdict,
+        "verdict-death-past": no_verdict,
+        "verdict-signal-terminal-reason-alone-under": verdict_cut,
+        "verdict-signal-subtype-alone-at": verdict_cut,
+        "verdict-two-blockers-first-dies-at-pool": no_verdict,
+        "verdict-two-blockers-first-ends-on-signal": verdict_cut,
+        "verdict-three-blockers-second-spends-rest-third-refused": verdict_cut,
+        "verdict-three-blockers-second-ends-on-signal": verdict_cut,
+    }
+
     disagreed = []
     for name, costs, extra, expected_state in rows:
         outcome, ledger, _cell, capture = _rebut_capped(
@@ -6256,6 +6292,7 @@ def test_a_rebut_session_that_dies_is_never_read_as_a_pool_cut(monkeypatch, tmp_
             "queued_state": queued["state"],
             "rebut_result_is_none": outcome.rebut_result is None,
             "line_says_ran_out": "ran out" in rebut_start.detail,
+            "line_names_its_cause": lines[name] in rebut_start.detail,
         }
         expected = {
             "state": expected_state,
@@ -6263,6 +6300,7 @@ def test_a_rebut_session_that_dies_is_never_read_as_a_pool_cut(monkeypatch, tmp_
             "queued_state": expected_state,
             "rebut_result_is_none": cut,
             "line_says_ran_out": cut,
+            "line_names_its_cause": True,
         }
         if actual != expected:
             disagreed.append((name, actual, expected))
