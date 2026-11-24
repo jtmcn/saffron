@@ -357,6 +357,59 @@ def test_the_new_failures_section_names_advisory_new_failures_apart_from_blockin
     assert _new_failures_span(render((blocking,), (advisory,))) == both + "\n"
 
 
+def test_a_new_failures_row_ends_its_message_with_its_detail():
+    """`_failure_rows` joins a non-empty detail to the message after ` - `.
+    The join sits inside the one `_cell` call, so it is escaped exactly as
+    the message is (§5.7). An empty detail leaves the row as base renders
+    it."""
+    blocking_with_detail = NewFailure(
+        "tests",
+        Failure(
+            file="tests/test_a.py",
+            code="failed",
+            message="assert 1 == 2",
+            detail="AssertionError: a | b\nping @org",
+        ),
+    )
+    blocking_no_detail = NewFailure(
+        "tests",
+        Failure(file="tests/test_b.py", code="failed", message="assert 3 == 4"),
+    )
+    advisory_with_detail = NewFailure(
+        "size",
+        Failure(
+            file="",
+            code="diff-too-large",
+            message="1651 changed tokens",
+            detail="see the diff below",
+        ),
+    )
+    lint_pass = [
+        GateResult(gate="lint", status="pass", tool="lint 1.0", summary="clean")
+    ]
+
+    rendered = render_pr_body(
+        SPEC,
+        lint_pass,
+        [blocking_with_detail, blocking_no_detail],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=1,
+        transcript_path="/t",
+        advisory_failures=[advisory_with_detail],
+    )
+    span = _new_failures_span(rendered)
+    assert (
+        "| `tests` | tests/test_a.py | `failed` "
+        "| assert 1 == 2 - AssertionError: a \\| b ping @​org |"
+    ) in span
+    assert "| `tests` | tests/test_b.py | `failed` | assert 3 == 4 |" in span
+    assert (
+        "| `size` |  | `diff-too-large` | 1651 changed tokens - see the diff below |"
+    ) in span
+
+
 def test_the_body_and_the_template_declare_the_same_spine():
     """One shape, two producers. `.github/pull_request_template.md` is what a
     person fills in; this body is rendered from the ledger. They cannot be one

@@ -24,7 +24,8 @@ import stat
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TextIO
+
+from saffron.home_lock import _read_holder
 
 
 class LockRootUnsafe(Exception):
@@ -50,7 +51,8 @@ class LockHeld(Exception):
         self.spec_id = spec_id
         self.holder_pid = holder_pid
         self.holder_text = holder_text
-        # `None` is a holder caught between its truncate and its write.
+        # `None` is a holder between its flock and its write, or between
+        # its release truncate and its close.
         pid = holder_pid if holder_pid is not None else "unknown"
         text = holder_text if holder_text is not None else "unknown"
         super().__init__(f"{spec_id}'s cell is held by pid {pid}'s {text}")
@@ -74,17 +76,6 @@ def _ensure_root_safe(root: Path) -> None:
         raise LockRootUnsafe(f"{root} is not owned by uid {os.getuid()}")
 
 
-def _read_holder(handle: TextIO) -> tuple[int | None, str | None]:
-    handle.seek(0)
-    line = handle.readline().rstrip("\n")
-    pid_text, _, holder_text = line.partition(" ")
-    try:
-        pid: int | None = int(pid_text)
-    except ValueError:
-        pid = None
-    return pid, (holder_text or None)
-
-
 @contextmanager
 def lock(root: Path, spec_id: str, text: str) -> Iterator[None]:
     """Hold `spec_id`'s lock under `root` for as long as the block runs, by
@@ -92,10 +83,10 @@ def lock(root: Path, spec_id: str, text: str) -> Iterator[None]:
     at once, naming the holder the file names.
 
     Opened `O_RDWR | O_CREAT | O_NOFOLLOW`, never `O_TRUNC`: a contender
-    this refuses still reads the holder's line out of the file, and a
-    symlink in its place raises `OSError` rather than being followed. Only
-    once the lock is taken does this truncate and write `text` beside this
-    process's own pid.
+    this refuses still reads the holder's line, and a symlink in its place
+    raises `OSError` rather than being followed. Once taken, this truncates
+    and writes `text` beside this process's pid, then empties the file
+    again before the lock lets go.
     """
     _ensure_root_safe(root)
     path = _lock_path(root, spec_id)
@@ -111,4 +102,11 @@ def lock(root: Path, spec_id: str, text: str) -> Iterator[None]:
         handle.truncate()
         handle.write(f"{os.getpid()} {text}\n")
         handle.flush()
-        yield
+        try:
+            yield
+        finally:
+            # Emptied while the flock is still held, so the next holder's
+            # window names `unknown`, never this one's stale line.
+            handle.seek(0)
+            handle.truncate()
+            handle.flush()

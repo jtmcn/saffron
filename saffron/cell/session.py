@@ -44,6 +44,7 @@ from saffron.events import (
     TaskOutcome,
     Teardown,
     Terminal,
+    append_and_warn,
     describe,
 )
 
@@ -126,17 +127,16 @@ _PROBE_CELL_STOPPED = "the probe cell stopped before this edit's answer was reco
 
 
 def _default_emit(event: Event, *, log: EventLog) -> None:
-    """What `run_one_cell` fans an event out to when the caller (every direct
-    caller today, and `cli.py`, which is forbidden here and never passes
-    `emit`) hands it none: the terminal an operator watches, and one durable
-    `EventLog` at `task_dir`. `EventLog.append` never raises (§0's own rule),
-    so a disk-full night still reaches its terminal state — it just stops
-    growing `events.jsonl`, which `EventLog.failed` is the breadcrumb for.
+    """What `run_one_cell` fans an event out to when the caller hands it
+    none: the terminal an operator watches, and one durable `EventLog` at
+    `task_dir`. `cli.py` builds this same default for the spec sessions
+    (`_spec_session_emit`), never as a caller of `run_one_cell` itself.
+    `EventLog.append` never raises (§0's own rule). A disk-full night still
+    reaches its terminal state. It stops growing `events.jsonl` instead.
+    `write_refused` and `unserializable` are the breadcrumbs.
+    `append_and_warn` prints a warning naming which.
     """
-    event = log.append(event)
-    line = describe(event)
-    if line:
-        print(line)
+    append_and_warn(event, log=log)
 
 
 def spec_drift(gates_dir: Path, spec_id: str, spec_sha: str) -> str | None:
@@ -1148,12 +1148,11 @@ def run_one_cell(
     Returns what the cell produced, terminal state included. Every transition
     is printed, because v0.5's whole point is that the operator watches it.
 
-    The default lives here, not in `cli.py` (forbidden to this spec) and not
-    in `_drive_cell` (which does not yet know `task_dir` when this is called):
-    a caller that hands no `emit` gets both consumers `_default_emit`
-    describes — the terminal, and one `EventLog` at this run's own
-    `task_dir` — built once, so the two agree on the object they are being
-    handed rather than each constructing their own.
+    The default lives here, not in `_drive_cell` (which does not yet know
+    `task_dir` when this is called): a caller that hands no `emit` gets both
+    consumers `_default_emit` describes: the terminal and one `EventLog` at
+    this run's own `task_dir`. Both are built once. So the two agree on the
+    object they are handed, and neither constructs its own.
 
     Thin, because teardown learns two of the outcome's fields *after* every
     `return` inside `_drive_cell`: a `finally` cannot reach a value already

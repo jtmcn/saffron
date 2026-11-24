@@ -24,7 +24,7 @@ import pytest
 from saffron import task as task_module
 from saffron.agents.findings import Finding
 from saffron.cell.session import CellOutcome
-from saffron.events import Ceilings, Event, Teardown, read_log
+from saffron.events import Agent, Ceilings, Event, PhaseStart, Teardown, read_log
 from saffron.gates.contract import GateResult
 from saffron.intake import History, Spec, parse_spec
 from saffron.ledger import Ledger, TaskState
@@ -637,7 +637,7 @@ def test_a_log_that_failed_on_its_first_write_still_warns(
         def append(self, event):
             if self._first:
                 self._first = False
-                self.failed = True
+                self.write_refused = True
                 return event
             return super().append(event)
 
@@ -688,7 +688,7 @@ def test_a_log_that_starts_failing_partway_through_still_warns(
             self._count += 1
             if self._count <= 2:
                 return super().append(event)
-            self.failed = True
+            self.write_refused = True
             return event
 
     monkeypatch.setattr(task_module, "EventLog", _FailAfterTwo)
@@ -716,6 +716,137 @@ def test_a_log_that_starts_failing_partway_through_still_warns(
     logged = read_log(out_dir / "SY-11")
     assert len(logged) == 2, "only the two appends that ran before the flip land"
     assert logged[1] == events[0]
+
+
+def test_run_tasks_log_warnings_name_its_path_and_say_which_fault(
+    tmp_path, monkeypatch, capsys
+):
+    """`run_task`'s own `emit` closure names its log by the `EventLog` it
+    built, never a path rederived from `out_dir` and the spec id. One
+    warning per fault prints once per log, on the line right after the
+    event that raised it. The serialize warning never lands in the log,
+    and neither does the refusal's."""
+
+    class _OneBelow(task_module.EventLog):
+        """Writes one directory below the task's own, so a warning that
+        named `out_dir / spec.id / "events.jsonl"` would point at a file
+        that never exists."""
+
+        def __init__(self, task_dir, **kwargs):
+            super().__init__(Path(task_dir) / "sub", **kwargs)
+
+    monkeypatch.setattr(task_module, "EventLog", _OneBelow)
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
+
+    out_dir = tmp_path / "out"
+
+    def _phase(ts: float, detail: str) -> PhaseStart:
+        return PhaseStart(
+            timestamp=ts,
+            spec_id="irrelevant",
+            phase="PACKAGE",
+            label="PACKAGE",
+            detail=detail,
+        )
+
+    def _raw_set(ts: float, line: str) -> Agent:
+        return Agent(
+            timestamp=ts, spec_id="irrelevant", raw=True, line=line, event={"s": {1, 2}}
+        )
+
+    def _raw_huge(ts: float, line: str) -> Agent:
+        return Agent(
+            timestamp=ts,
+            spec_id="irrelevant",
+            raw=True,
+            line=line,
+            event={"n": 10**5000},
+        )
+
+    # --- Task 1: both faults, the second on-disk corruption happening mid-task.
+    one, two = _raw_set(1.0, "one"), _raw_huge(2.0, "two")
+    first_phase, last_phase = _phase(3.0, "first"), _phase(4.0, "last")
+    log_dir = out_dir / "SY-21" / "sub"
+
+    def _on_cell_1(kwargs):
+        logged = read_log(log_dir)
+        assert [type(e).__name__ for e in logged] == ["Ceilings", "PhaseStart"]
+        (log_dir / "events.jsonl").unlink()
+        (log_dir / "events.jsonl").mkdir()
+        kwargs["emit"](last_phase)
+
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-21",
+        state="EXHAUSTED",
+        task_id=1,
+        out_dir=out_dir,
+        events=[one, two, first_phase],
+        on_cell=_on_cell_1,
+    )
+    out1 = capsys.readouterr().out
+    lines1 = out1.splitlines()
+    path1 = str(log_dir / "events.jsonl")
+    refused1 = f"warning: {path1} refused a write; events may be missing"
+    serialize1 = f"warning: {path1} could not serialize an event and left it out"
+
+    def _index(line: str) -> int:
+        return lines1.index(line)
+
+    # The whole set of warnings, so one naming another path fails too.
+    assert [w for w in lines1 if w.startswith("warning:")] == [serialize1, refused1]
+    assert _index("agent: (raw) one") < _index(serialize1)
+    assert _index(serialize1) < _index("agent: (raw) two")
+    assert _index("agent: (raw) two") < _index("PACKAGE: first")
+    assert _index("PACKAGE: first") < _index("PACKAGE: last")
+    assert _index("PACKAGE: last") < _index(refused1)
+
+    # --- Task 2: one fault only, no corruption.
+    phase_two, bad_two = _phase(1.0, "only"), _raw_set(2.0, "last-line")
+    log_dir2 = out_dir / "SY-22" / "sub"
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-22",
+        state="EXHAUSTED",
+        task_id=2,
+        out_dir=out_dir,
+        events=[phase_two, bad_two],
+    )
+    out2 = capsys.readouterr().out
+    lines2 = out2.splitlines()
+    path2 = str(log_dir2 / "events.jsonl")
+    serialize2 = f"warning: {path2} could not serialize an event and left it out"
+    assert [w for w in lines2 if w.startswith("warning:")] == [serialize2]
+    assert lines2.index("agent: (raw) last-line") < lines2.index(serialize2)
+
+    # --- Task 3: the log already refusing before the task's own Ceilings line.
+    log_dir3 = out_dir / "SY-23" / "sub"
+    log_dir3.mkdir(parents=True)
+    (log_dir3 / "events.jsonl").mkdir()
+    bad_three = _raw_set(1.0, "only-bad")
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-23",
+        state="EXHAUSTED",
+        task_id=3,
+        out_dir=out_dir,
+        events=[bad_three],
+    )
+    out3 = capsys.readouterr().out
+    lines3 = out3.splitlines()
+    path3 = str(log_dir3 / "events.jsonl")
+    refused3 = f"warning: {path3} refused a write; events may be missing"
+    serialize3 = f"warning: {path3} could not serialize an event and left it out"
+    ceilings_idx = next(
+        i for i, line in enumerate(lines3) if line.startswith("ceilings:")
+    )
+    assert lines3[ceilings_idx + 1] == refused3
+    bad_idx = lines3.index("agent: (raw) only-bad")
+    assert lines3[bad_idx + 1] == serialize3
+    assert [w for w in lines3 if w.startswith("warning:")] == [refused3, serialize3]
 
 
 def test_run_task_redacts_the_cells_own_token_from_its_log(

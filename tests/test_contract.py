@@ -128,6 +128,43 @@ def test_a_gate_result_reads_as_version_1_and_refuses_any_other():
         assert "[1]" in str(excinfo.value)
 
 
+def test_a_failures_detail_parses_and_defaults_to_empty():
+    raw = json.dumps(
+        {
+            "gate": "tests",
+            "status": "fail",
+            "failures": [
+                {
+                    "file": "a.py",
+                    "line": 1,
+                    "code": "arg-type",
+                    "message": "bad arg",
+                    "detail": "AssertionError: expected 1 got 2",
+                },
+                {
+                    "file": "b.py",
+                    "line": 2,
+                    "code": "return-value",
+                    "message": "bad return",
+                },
+            ],
+        }
+    )
+    result = parse_gate_json(raw, expected_gate="tests")
+    with_detail, without_detail = result.failures
+    assert with_detail.detail == "AssertionError: expected 1 got 2"
+    assert without_detail.detail == ""
+
+    with_dump = with_detail.model_dump(mode="json")
+    without_dump = without_detail.model_dump(mode="json")
+    assert with_dump["detail"] == "AssertionError: expected 1 got 2"
+    assert "detail" not in without_dump
+
+    result_dump = result.model_dump(mode="json")
+    assert result_dump["failures"][0]["detail"] == "AssertionError: expected 1 got 2"
+    assert "detail" not in result_dump["failures"][1]
+
+
 def test_a_gate_may_report_the_names_it_collected():
     raw = json.dumps(
         {

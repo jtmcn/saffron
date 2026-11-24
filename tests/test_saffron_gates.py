@@ -355,6 +355,54 @@ def test_a_warning_a_failing_test_prints_leaves_every_failure_keyed_on_its_node_
     ]
 
 
+def test_the_tests_gate_carries_pytests_reason_as_a_failures_detail(tmp_path):
+    """The gate's own subprocess pins `COLUMNS` to 400 regardless of the
+    environment it runs in. `COLUMNS=80` here must not truncate any
+    reason. The short line fits at eighty columns, and the long node id
+    crowds its reason out there (b-18fa39)."""
+    (tmp_path / "test_detail.py").write_text(
+        "import pytest\n"
+        "@pytest.fixture\n"
+        "def broken():\n"
+        "    raise RuntimeError('fixture blew up here')\n"
+        "def test_short_name():\n"
+        "    assert 1 == 2, 'one is not two'\n"
+        "def test_setup_error_case(broken):\n"
+        "    pass\n"
+        "def test_this_node_id_is_deliberately_long_enough_to_crowd_out_the_assertion_reason_at_eighty_columns_wide():\n"
+        "    assert False, 'this reason should not fit comfortably at eighty columns wide'\n"
+    )
+    done = subprocess.run(
+        [str(GATES / "tests")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env={**os.environ, "COLUMNS": "80"},
+    )
+    result = parse_gate_json(done.stdout, expected_gate="tests")
+    assert result.status == "fail", result.summary
+    by_code = {f.code: f for f in result.failures}
+
+    short = by_code["test_detail.py::test_short_name"]
+    assert short.message == "FAILED test_detail.py::test_short_name"
+    assert short.detail == "AssertionError: one is not two"
+
+    long_name = (
+        "test_detail.py::test_this_node_id_is_deliberately_long_enough_to_"
+        "crowd_out_the_assertion_reason_at_eighty_columns_wide"
+    )
+    long = by_code[long_name]
+    assert long.message == f"FAILED {long_name}"
+    assert long.detail == (
+        "AssertionError: this reason should not fit comfortably at eighty columns wide"
+    )
+
+    setup_error = by_code["test_detail.py::test_setup_error_case"]
+    assert setup_error.message == "ERROR test_detail.py::test_setup_error_case"
+    assert setup_error.detail == "RuntimeError: fixture blew up here"
+
+
 def test_a_flag_pytest_itself_rejects_is_an_error(tmp_path):
     """The mechanism breaking is `error`, charged to nobody (§5.4). The summary
     names it, where the later no-parsed-failures branch would not."""

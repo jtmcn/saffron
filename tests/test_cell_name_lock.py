@@ -8,6 +8,7 @@ source then fails an assertion here, rather than a collection error.
 
 from __future__ import annotations
 
+import fcntl
 import os
 import queue
 import re
@@ -511,3 +512,226 @@ def test_a_lock_root_that_is_unsafe_raises_before_any_runtime_call(
     assert isinstance(raised, OSError), repr(raised)
     assert target_file.read_text() == "not a lock"
     assert calls == []
+
+
+def _fd_identity(fd: int) -> tuple[int, int]:
+    info = os.fstat(fd)
+    return (info.st_dev, info.st_ino)
+
+
+def _relock_as_successor(lock_path: Path) -> None:
+    """A second holder takes the released lock and writes its own line."""
+    fd = os.open(lock_path, os.O_RDWR | os.O_TRUNC)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        os.write(fd, b"4242 next\n")
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+class _ReleaseProbe:
+    """Watches one lock file across a `pytest.MonkeyPatch.context()`, and
+    marks the instant its holder's `flock` first lets go: by an explicit
+    `LOCK_UN` or by the handle's own `close`, whichever fires first. The
+    first such signal reads `path`, then runs `on_release`, a successor
+    that retakes the file. Shared by `tests/test_home_lock.py`, imported
+    the way that file imports from `tests/test_cli.py`.
+    """
+
+    def __init__(self, path: Path, on_release) -> None:
+        self._path = path
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            self._identity = _fd_identity(fd)
+        finally:
+            os.close(fd)
+        self._on_release = on_release
+        self.released = False
+        self.content_at_release: str | None = None
+
+    def _mark(self) -> None:
+        if self.released:
+            return
+        self.released = True
+        self.content_at_release = self._path.read_text()
+        self._on_release()
+
+    def patch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        real_fdopen = os.fdopen
+        real_flock = fcntl.flock
+
+        def _fdopen(fd, *args, **kwargs):
+            handle = real_fdopen(fd, *args, **kwargs)
+            if _fd_identity(handle.fileno()) == self._identity:
+                real_close = handle.close
+
+                def _close():
+                    real_close()
+                    self._mark()
+
+                handle.close = _close
+            return handle
+
+        def _flock(fd_or_handle, operation):
+            real_flock(fd_or_handle, operation)
+            # A bit test, so `LOCK_UN | LOCK_NB` counts as an unlock too.
+            if operation & fcntl.LOCK_UN:
+                fd = (
+                    fd_or_handle
+                    if isinstance(fd_or_handle, int)
+                    else fd_or_handle.fileno()
+                )
+                if _fd_identity(fd) == self._identity:
+                    self._mark()
+
+        monkeypatch.setattr(os, "fdopen", _fdopen)
+        monkeypatch.setattr(fcntl, "flock", _flock)
+
+
+def test_both_locks_read_their_holder_with_one_parser(tmp_path, monkeypatch):
+    from saffron import cell_name_lock, home_lock
+
+    assert cell_name_lock._read_holder is home_lock._read_holder
+
+    real_read_holder = home_lock._read_holder
+    calls: list[str] = []
+
+    def _spy(name: str):
+        def _wrapped(handle):
+            calls.append(name)
+            return real_read_holder(handle)
+
+        return _wrapped
+
+    monkeypatch.setattr(cell_name_lock, "_read_holder", _spy("cell_name_lock"))
+    monkeypatch.setattr(home_lock, "_read_holder", _spy("home_lock"))
+
+    lock_root = tmp_path / "locks"
+    lock_root.mkdir()
+    cell_path = cell_name_lock._lock_path(lock_root, "SY-1")
+    fd = os.open(cell_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        os.write(fd, b"4242 holder-a\n")
+        os.fsync(fd)
+        with (
+            pytest.raises(cell_name_lock.LockHeld) as exc_info,
+            cell_name_lock.lock(lock_root, "SY-1", "contender"),
+        ):
+            pass
+        reason = str(exc_info.value)
+        assert "4242" in reason
+        assert "holder-a" in reason
+    finally:
+        os.close(fd)
+
+    home = tmp_path / "home"
+    home.mkdir()
+    home_path = home / home_lock._LOCK_NAME
+    fd2 = os.open(home_path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd2, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        os.write(fd2, b"4343 saffron batch\n")
+        os.fsync(fd2)
+        with (
+            pytest.raises(home_lock.HomeLocked) as exc_info2,
+            home_lock.lock(home, "saffron cell"),
+        ):
+            pass
+        reason2 = str(exc_info2.value)
+        assert "4343" in reason2
+        assert "saffron batch" in reason2
+    finally:
+        os.close(fd2)
+
+    assert calls == ["cell_name_lock", "home_lock"]
+
+
+def test_a_contender_in_a_holders_write_window_names_no_stale_holder(tmp_path):
+    from saffron import cell_name_lock
+
+    root = tmp_path / "locks"
+    this_pid = os.getpid()
+
+    def _in_block_refusal() -> None:
+        with (
+            pytest.raises(cell_name_lock.LockHeld) as exc_info,
+            cell_name_lock.lock(root, "SY-1", "irrelevant"),
+        ):
+            pass
+        reason = str(exc_info.value)
+        assert re.search(rf"\b{this_pid}\b", reason)
+        assert "the-holder" in reason
+
+    def _stale_window_refusal() -> None:
+        path = cell_name_lock._lock_path(root, "SY-1")
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+            def _contend() -> None:
+                with cell_name_lock.lock(root, "SY-1", "irrelevant"):
+                    pass
+
+            raised = _raised(_contend)
+            assert isinstance(raised, cell_name_lock.LockHeld), repr(raised)
+            assert str(raised) == "SY-1's cell is held by pid unknown's unknown"
+        finally:
+            os.close(fd)
+
+    def _ending(mode: str) -> None:
+        with cell_name_lock.lock(root, "SY-1", "the-holder"):
+            _in_block_refusal()
+            _in_block_refusal()
+            if mode == "return":
+                return
+            if mode == "raise":
+                raise RuntimeError("the holder raised")
+            raise _SpyStop("the holder was interrupted")
+
+    for mode in ("return", "raise", "interrupt"):
+        raised = _raised(lambda mode=mode: _ending(mode))
+        if mode == "return":
+            assert raised is None, repr(raised)
+        elif mode == "raise":
+            assert isinstance(raised, RuntimeError), repr(raised)
+        else:
+            assert isinstance(raised, _SpyStop), repr(raised)
+        assert cell_name_lock._lock_path(root, "SY-1").is_file()
+        assert cell_name_lock._lock_path(root, "SY-1").read_text() == ""
+        _stale_window_refusal()
+
+
+def test_the_spec_id_lock_empties_its_file_before_it_lets_go(tmp_path):
+    from saffron import cell_name_lock
+
+    root = tmp_path / "locks"
+    with cell_name_lock.lock(root, "SY-1", "warmup"):
+        pass
+    lock_path = cell_name_lock._lock_path(root, "SY-1")
+
+    def _ending(mode: str) -> None:
+        with cell_name_lock.lock(root, "SY-1", "the-holder"):
+            if mode == "return":
+                return
+            if mode == "raise":
+                raise RuntimeError("the holder raised")
+            raise _SpyStop("the holder was interrupted")
+
+    for mode in ("return", "raise", "interrupt"):
+        probe = _ReleaseProbe(lock_path, lambda: _relock_as_successor(lock_path))
+        with pytest.MonkeyPatch.context() as mp:
+            probe.patch(mp)
+            raised = _raised(lambda mode=mode: _ending(mode))
+
+        if mode == "return":
+            assert raised is None, repr(raised)
+        elif mode == "raise":
+            assert isinstance(raised, RuntimeError), repr(raised)
+        else:
+            assert isinstance(raised, _SpyStop), repr(raised)
+
+        assert probe.released, "the probe never saw a release"
+        assert probe.content_at_release == ""
+        assert lock_path.read_text() == "4242 next\n"

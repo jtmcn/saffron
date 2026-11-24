@@ -2570,6 +2570,82 @@ def test_a_gate_results_locations_is_set_aside_like_collected(tmp_path: Path) ->
     )
 
 
+def test_a_live_gate_results_failure_detail_is_set_aside(tmp_path: Path) -> None:
+    """The ledger stores no `detail` column, so a live ref's `gate_result`
+    fact carries one where its derived twin cannot (b-18fa39). `_normalized`
+    sets it aside on both sides of the compare. The top-up still refuses a
+    held fact whose own failure message disagrees with its row."""
+    from saffron.record.migrate import migrate
+
+    live = MemoryRecord()
+    ledger = Ledger(tmp_path / "source.db", record=live)
+    repo_id = ledger.upsert_repo("saffron", "/o", "/m.git", None)
+
+    _, task_id = _task(ledger, repo_id, "SA-9801")
+    attempt_id = ledger.open_attempt(task_id, phase="GATING")
+    ledger.close_attempt(
+        attempt_id,
+        session_id="s1",
+        subtype="success",
+        terminal_reason=None,
+        num_turns=1,
+        cost_usd_est=1.0,
+    )
+    ledger.record_gate_result(
+        GateResult(
+            gate="tests",
+            status="fail",
+            tool="pytest 8.0",
+            failures=[
+                Failure(
+                    file="a.py",
+                    code="t.py::test_a",
+                    message="assertion failed",
+                    detail="AssertionError: nope",
+                ),
+                Failure(
+                    file="b.py", code="t.py::test_b", message="assertion failed too"
+                ),
+            ],
+        ),
+        attempt_id=attempt_id,
+        baseline=[],
+    )
+
+    key = _key(ledger, task_id)
+    source_path = tmp_path / "source.db"
+    ledger.close()
+
+    held = list(live.read(key))
+    gate_result = next(f for f in held if f.kind == "gate_result")
+    assert gate_result.payload["failures"][0]["detail"] == "AssertionError: nope"
+    assert "detail" not in gate_result.payload["failures"][1]
+
+    result = migrate(source_path, live)
+    assert result.migrated == [key]
+    assert result.refused == []
+    assert list(live.read(key)) == held
+
+    # The top-up sets aside only `detail`: a held failure whose `message`
+    # disagrees with the row is still refused.
+    modified_held = [
+        replace(
+            fact,
+            payload={
+                **fact.payload,
+                "failures": [
+                    {**fact.payload["failures"][0], "message": "a different message"},
+                    fact.payload["failures"][1],
+                ],
+            },
+        )
+        if fact.kind == "gate_result"
+        else fact
+        for fact in held
+    ]
+    _assert_disagrees(source_path, key, modified_held)
+
+
 def test_the_normalized_docstring_counts_every_set_aside_gate_result_key() -> None:
     """`_normalized`'s docstring names one `gate_result` count, the
     frozenset's own length, so a stale or second count fails."""

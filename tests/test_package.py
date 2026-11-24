@@ -1779,6 +1779,135 @@ def test_the_refusal_to_push_is_emitted_and_the_log_never_learns_the_leak(packag
     assert FAKE_KEY not in (task_dir / "events.jsonl").read_text()
 
 
+def test_packages_default_emitters_warn_naming_their_logs_own_path(
+    packageable, monkeypatch, capsys
+):
+    """Handed no `emit`, `package()` and `push_unpackaged_work()` each print
+    the refusal's warning, naming the `path` of the `EventLog` they built.
+    Each prints once per log, on the line right after the event its
+    refused write raised. A log that takes every write prints none."""
+    from saffron.events import read_log
+    from saffron.phases.package import push_unpackaged_work
+    from saffron.repos import mirror as mirror_module
+
+    class _OneBelow(package_phase.EventLog):
+        def __init__(self, task_dir, **kwargs):
+            super().__init__(Path(task_dir) / "sub", **kwargs)
+
+    monkeypatch.setattr(package_phase, "EventLog", _OneBelow)
+
+    task_dir = packageable.outcome.task_dir
+    log_path = task_dir / "sub" / "events.jsonl"
+    push_kwargs = {
+        k: v for k, v in packageable.unpackaged_kwargs.items() if k != "emit"
+    }
+    package_kwargs = {k: v for k, v in packageable.kwargs.items() if k != "emit"}
+
+    real_diff_stat = mirror_module.diff_stat
+
+    def _boom_diff_stat(*_a, **_k):
+        raise mirror_module.GitError("the stat broke")
+
+    packageable.outcome.state = "EXHAUSTED"
+    monkeypatch.setattr(mirror_module, "diff_stat", _boom_diff_stat)
+
+    # A first push, into a clean log: both of its lines print, alone.
+    first = push_unpackaged_work(packageable.outcome, **push_kwargs)
+    assert first.pushed is True
+    printed = capsys.readouterr().out.splitlines()
+    assert len(printed) == 2
+    assert "the stat broke" in printed[0]
+    assert printed[1].startswith("PACKAGE: pushed ")
+    assert [type(e).__name__ for e in read_log(log_path.parent)] == [
+        "PhaseStart",
+        "PhaseStart",
+    ]
+
+    # A directory where `events.jsonl` was: a second push's first line, then
+    # the warning, then its second line.
+    log_path.unlink()
+    log_path.mkdir()
+    second = push_unpackaged_work(packageable.outcome, **push_kwargs)
+    assert second.pushed is True
+    printed = capsys.readouterr().out.splitlines()
+    assert len(printed) == 3
+    assert "the stat broke" in printed[0]
+    assert printed[1] == f"warning: {log_path} refused a write; events may be missing"
+    assert printed[2].startswith("PACKAGE: pushed ")
+
+    # Cleared, and `diff_stat` restored, before `package()` runs.
+    log_path.rmdir()
+    monkeypatch.setattr(mirror_module, "diff_stat", real_diff_stat)
+    packageable.outcome.state = "READY_FOR_REVIEW"
+
+    real_append_queue_line = package_phase.index_report.append_queue_line
+
+    def _boom_append_queue_line(*_a, **_k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(
+        package_phase.index_report, "append_queue_line", _boom_append_queue_line
+    )
+
+    def _opens_pr(argv):
+        return sp.CompletedProcess(argv, 0, stdout="https://x/pull/9\n")
+
+    result = package(packageable.outcome, gh=_opens_pr, **package_kwargs)
+    assert result.state == "READY_FOR_REVIEW"
+    printed = capsys.readouterr().out.splitlines()
+    assert printed == [
+        "PACKAGE: https://x/pull/9",
+        "PACKAGE: the READY_FOR_REVIEW row could not be written: disk full",
+    ]
+
+    # A directory where `events.jsonl` was: its first line, the warning once,
+    # then its second line.
+    log_path.unlink()
+    log_path.mkdir()
+    result = package(packageable.outcome, gh=_opens_pr, **package_kwargs)
+    assert result.state == "READY_FOR_REVIEW"
+    printed = capsys.readouterr().out.splitlines()
+    assert printed == [
+        "PACKAGE: https://x/pull/9",
+        f"warning: {log_path} refused a write; events may be missing",
+        "PACKAGE: the READY_FOR_REVIEW row could not be written: disk full",
+    ]
+    log_path.rmdir()
+    log_path.touch()
+
+    # The row write restored, and the log corrupted again: each credential
+    # refusal below emits one event, printed then its warning.
+    monkeypatch.setattr(
+        package_phase.index_report, "append_queue_line", real_append_queue_line
+    )
+    log_path.unlink()
+    log_path.mkdir()
+
+    work = packageable.work
+    git(work, "checkout", "-q", "cell")
+    (work / "config.py").write_text(f'ANTHROPIC_API_KEY = "{FAKE_KEY}"\n')
+    git(work, "add", "-A")
+    git(work, "commit", "-qm", "the agent hardcoded a key")
+    (task_dir / "patch.diff").write_text(
+        git(work, "diff", *DIFF_FLAGS, f"{packageable.base}..HEAD") + "\n"
+    )
+    git(work, "checkout", "-q", "main")
+
+    refused = package(packageable.outcome, gh=_no_gh, **package_kwargs)
+    assert refused.state == "MERGE_FAILED"
+    printed = capsys.readouterr().out.splitlines()
+    assert len(printed) == 2
+    assert printed[0].startswith("PACKAGE: refusing to push — ")
+    assert printed[1] == f"warning: {log_path} refused a write; events may be missing"
+
+    pushed_refusal = push_unpackaged_work(packageable.outcome, **push_kwargs)
+    assert pushed_refusal.pushed is False
+    printed = capsys.readouterr().out.splitlines()
+    assert len(printed) == 2
+    assert "credential in the patch" in printed[0]
+    assert printed[1] == f"warning: {log_path} refused a write; events may be missing"
+
+
 def test_the_bodys_diff_is_pinned_against_the_operators_gitconfig(packageable):
     """`diff.noprefix` is a global anyone may set, and it rewrites every path
     the host parses out of the diff. Without `DIFF_FLAGS`, §7's gate-gaming

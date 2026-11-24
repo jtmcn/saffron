@@ -72,6 +72,7 @@ from saffron.events import (
     EventLog,
     Preflight,
     Teardown,
+    append_and_warn,
     describe,
 )
 from saffron.gates.core.scope import matches
@@ -806,19 +807,9 @@ def run_task(
         # get `events.jsonl`. A print-only default is the defect item 43 is
         # about, and is not this.
         log = EventLog(out_dir / spec.id, token=token)
-        # ponytail: re-derives `EventLog`'s private path, since it has no accessor.
-        log_path = out_dir / spec.id / "events.jsonl"
 
         def emit(event: Event) -> None:
-            # `failed` never resets, so its flip is seen once.
-            was_failed = log.failed
-            event = log.append(event)
-            line = describe(event)
-            if line:
-                print(line)
-            # Printed, never appended: the log is what failed.
-            if log.failed and not was_failed:
-                print(f"warning: {log_path} refused a write; events may be missing")
+            append_and_warn(event, log=log)
 
     # Emitted here, not by either caller: a ceiling printed on one path only
     # is the defect this module ends.

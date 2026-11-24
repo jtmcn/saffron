@@ -1,11 +1,12 @@
 ---
 id: b-9eceda
 title: '`EventLog` has no public path, and `failed` is one bit for two different faults'
-status: open
+status: done
+closed: 2026-11-23
 tier: 3
 filed: 2026-09-18
 specs: [SA-0424]
-prs: []
+prs: [1310]
 commits: []
 cites: [§4.1]
 related: [167, 46]
@@ -50,3 +51,4 @@ spec named these as left out.
 
 - 2026-09-18: filed from the spec loop's run 7 (stack #335 ← #338 ← #339 ←
   #342 ← #340). Surfaced by #342.
+- 2026-11-23: done by `SA-0424` (#1310), taken by hand after batch 105 ended `REBUTTAL_UNJUDGED`.

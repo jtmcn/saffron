@@ -845,6 +845,144 @@ def test_append_never_raises_on_a_dict_a_cell_authored(tmp_path):
     assert [type(e).__name__ for e in read_log(tmp_path)] == ["Teardown"]
 
 
+class _Boom(Exception):
+    """A kind `append`'s own `except` does not name, so it must leave."""
+
+
+def test_a_log_tells_a_write_it_could_not_make_from_an_event_it_could_not_serialize(
+    tmp_path, monkeypatch
+):
+    """`EventLog` gains a `path`, the file `append` writes, and two flags.
+    `write_refused` holds once a fault raised while `append` made the task
+    directory, opened the file or wrote to it. `unserializable` holds once a
+    fault raised before that, while `append` bounded or serialized one
+    event, and the next event still lands. `failed` is true once either
+    holds, and both can hold together. A raise of a kind `append` does not
+    catch still leaves it."""
+    from saffron.events import BOUND_CHARS  # local: kept out of the revert's collection
+
+    clean_dir = tmp_path / "clean"
+    log = EventLog(clean_dir)
+    assert log.path == clean_dir / "events.jsonl"
+    first = Teardown(timestamp=1.0, spec_id="SA", step="container", ok=True)
+    log.append(first)
+    assert read_log(clean_dir) == [first]
+    assert (log.write_refused, log.unserializable, log.failed) == (False, False, False)
+
+    # Six events fail before any write: four on `event`, two on
+    # `usage` with no `event`, so only the payload's own `json.dumps` meets it.
+    deep = json.loads("[" * 1000 + "]" * 1000)
+    # Built by arithmetic: converting to a string hits the same digit
+    # limit the size bound's `json.dumps` trips, before `append` runs.
+    huge = 10**5000
+    unserializable_cases = [
+        Agent(timestamp=1.0, spec_id="X", raw=False, event={"s": {1, 2}}),
+        # Past the bound, so only the bound's own `json.dumps` can meet the set.
+        Agent(
+            timestamp=1.5,
+            spec_id="X",
+            raw=False,
+            event={"s": {1, 2}, "pad": "x" * BOUND_CHARS},
+        ),
+        Agent(timestamp=2.0, spec_id="X", raw=False, event={"n": huge}),
+        Agent(timestamp=3.0, spec_id="X", raw=False, event={"d": deep}),
+        Agent(timestamp=4.0, spec_id="X", raw=False, usage={"s": {1, 2}}),
+        Agent(timestamp=5.0, spec_id="X", raw=False, usage={"n": huge}),
+    ]
+    for i, bad in enumerate(unserializable_cases):
+        case_dir = tmp_path / f"unserializable-{i}"
+        log = EventLog(case_dir)
+        log.append(bad)
+        assert (log.unserializable, log.write_refused, log.failed) == (
+            True,
+            False,
+            True,
+        ), bad
+        later = Teardown(timestamp=9.0, spec_id="X", step="later", ok=True)
+        log.append(later)
+        assert read_log(case_dir) == [later]
+
+    # Four faults land at or after the write. A directory at the file, a
+    # file for the task directory, a NUL byte in its name, or a disk OSError.
+    dir_case = tmp_path / "dir-case"
+    dir_case.mkdir()
+    (dir_case / "events.jsonl").mkdir()
+    log = EventLog(dir_case)
+    log.append(Teardown(timestamp=1.0, spec_id="X", step="s", ok=True))
+    assert (log.write_refused, log.unserializable, log.failed) == (True, False, True)
+
+    file_case = tmp_path / "file-case"
+    file_case.write_text("occupied by a file, not a directory")
+    log = EventLog(file_case)
+    log.append(Teardown(timestamp=1.0, spec_id="X", step="s", ok=True))
+    assert (log.write_refused, log.unserializable, log.failed) == (True, False, True)
+
+    nul_case = tmp_path / "nul-case\x00bad"
+    log = EventLog(nul_case)
+    log.append(Teardown(timestamp=1.0, spec_id="X", step="s", ok=True))
+    assert (log.write_refused, log.unserializable, log.failed) == (True, False, True)
+
+    class _FullDiskHandle:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+        def write(self, data):
+            raise OSError(28, "No space left on device")
+
+        def flush(self):
+            pass
+
+    full_disk_case = tmp_path / "full-disk-case"
+    log = EventLog(full_disk_case)
+    with monkeypatch.context() as patched:
+        patched.setattr(Path, "open", lambda self, *a, **k: _FullDiskHandle())
+        log.append(Teardown(timestamp=1.0, spec_id="X", step="s", ok=True))
+    assert (log.write_refused, log.unserializable, log.failed) == (True, False, True)
+
+    # Both flags on one log, each order: unserializable then refused, and
+    # refused then unserializable.
+    both_a = tmp_path / "both-a"
+    log = EventLog(both_a)
+    log.append(Agent(timestamp=1.0, spec_id="X", raw=False, event={"s": {1, 2}}))
+    assert (log.unserializable, log.write_refused) == (True, False)
+    both_a.mkdir(parents=True, exist_ok=True)
+    (both_a / "events.jsonl").mkdir()
+    log.append(Teardown(timestamp=2.0, spec_id="X", step="s", ok=True))
+    assert (log.unserializable, log.write_refused, log.failed) == (True, True, True)
+
+    both_b = tmp_path / "both-b"
+    both_b.mkdir()
+    (both_b / "events.jsonl").mkdir()
+    log = EventLog(both_b)
+    log.append(Teardown(timestamp=1.0, spec_id="X", step="s", ok=True))
+    assert (log.write_refused, log.unserializable) == (True, False)
+    log.append(Agent(timestamp=2.0, spec_id="X", raw=False, event={"s": {1, 2}}))
+    assert (log.write_refused, log.unserializable, log.failed) == (True, True, True)
+
+    # A kind `append` does not catch still leaves it, from both sides of the
+    # flag: before the directory is made, and at the write itself.
+    boom_dir = tmp_path / "boom"
+    log = EventLog(boom_dir)
+    with monkeypatch.context() as patched:
+        patched.setattr(
+            "saffron.events.asdict", lambda *a, **k: (_ for _ in ()).throw(_Boom())
+        )
+        with pytest.raises(_Boom):
+            log.append(Teardown(timestamp=1.0, spec_id="X", step="s", ok=True))
+    assert (log.write_refused, log.unserializable, log.failed) == (False, False, False)
+
+    with monkeypatch.context() as patched:
+        patched.setattr(
+            Path, "open", lambda self, *a, **k: (_ for _ in ()).throw(_Boom())
+        )
+        with pytest.raises(_Boom):
+            log.append(Teardown(timestamp=2.0, spec_id="X", step="s", ok=True))
+    assert (log.write_refused, log.unserializable, log.failed) == (False, False, False)
+
+
 # --- SA-0068: an oversized `Agent.event` is bounded, not just the raw line --
 
 

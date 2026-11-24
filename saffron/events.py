@@ -460,9 +460,22 @@ class EventLog:
         # The cell's own token, for `append`'s redaction. Never read from
         # the environment here (item 46).
         self._token = token
-        # A disk-full night must not render as a night in which nothing
-        # happened. `append` never raises; this is how anyone can tell.
-        self.failed = False
+        # `append` never raises. These flags are how a disk-full night
+        # still tells, and which of the two faults it was.
+        self.write_refused = False
+        self.unserializable = False
+
+    @property
+    def path(self) -> Path:
+        """The file `append` writes, so a warning names it without
+        rederiving `task_dir / "events.jsonl"`."""
+        return self._path
+
+    @property
+    def failed(self) -> bool:
+        """True once either flag holds. `append` is the only writer, through
+        `write_refused` and `unserializable`."""
+        return self.write_refused or self.unserializable
 
     def append(self, event: Event) -> Event:
         """Write one line, flushed, and return the event redacted, before the
@@ -470,14 +483,17 @@ class EventLog:
         own log is not a cell whose task should die on that account.
 
         An `Agent` event's own `event` dict is bounded here, at the size its
-        `json.dumps` serialization reaches — never at the size of the whole
-        written line, which would cut an already-bounded raw line a second
-        time. Measured on one 5 MB stdout line wrapped in nine bytes of JSON:
-        5 MB written before this bound; 16517 characters now for 5 MB of `"`,
-        the worst case, since writing escapes each stored character once."""
+        `json.dumps` serialization reaches, never the whole written line.
+        Measured on one 5 MB stdout line in nine bytes of JSON: 5 MB
+        written before the bound, 16517 characters for 5 MB of `"`.
+
+        Sets `write_refused` or `unserializable`. See `began_write` below."""
         # The fallback for any raise below, including one from redaction
         # itself: the parameter, never a half-redacted intermediate.
         redacted_event = event
+        # Flips right before the directory is made. A fault before it counts
+        # `unserializable`, and one at or after it counts `write_refused`.
+        began_write = False
         try:
             # Redacted first, before the size bound, so a credential the
             # bound's cut would split is never written in part (item 46).
@@ -519,16 +535,45 @@ class EventLog:
             # Every read of the cell's dict sits in this try. `asdict` drops an event 1000 deep,
             # but a bounded one copies a string and a `usage` held to `_USAGE_BOUND_CHARS`.
             payload = {"kind": type(event).__name__, **asdict(event)}
+            # Serialized before the directory is made: an unserializable
+            # `usage` counts `unserializable`, never `write_refused`.
+            line_text = json.dumps(payload) + "\n"
+            began_write = True
             self._path.parent.mkdir(parents=True, exist_ok=True)
             with self._path.open("a") as handle:
-                handle.write(json.dumps(payload) + "\n")
+                handle.write(line_text)
                 handle.flush()
             return redacted_event
         except (OSError, RecursionError, TypeError, ValueError):
             # What the statements above can raise, and no wider, so a programming error surfaces.
-            # `self.failed` marks the silence, so it never reads as "nothing happened".
-            self.failed = True
+            # `began_write` marks which silence this was, so it never reads as "nothing happened".
+            if began_write:
+                self.write_refused = True
+            else:
+                self.unserializable = True
             return redacted_event
+
+
+def append_and_warn(event: Event, *, log: EventLog) -> Event:
+    """`log.append(event)`, then the event's own line. Then a warning for
+    each flag this append turned true, read before and after the call,
+    so only this append's own fault prints. The one route `run_task`'s
+    own closure, `_default_emit`, and PACKAGE's two defaults share,
+    naming the log by `log.path` (`DESIGN.md` §4.7, §5.7).
+
+    Neither warning lands in the log. Returns the event `append`
+    redacted, so a caller that prints nothing else still sees what
+    was stored."""
+    had_write_refused, had_unserializable = log.write_refused, log.unserializable
+    redacted = log.append(event)
+    line = describe(redacted)
+    if line:
+        print(line)
+    if log.write_refused and not had_write_refused:
+        print(f"warning: {log.path} refused a write; events may be missing")
+    if log.unserializable and not had_unserializable:
+        print(f"warning: {log.path} could not serialize an event and left it out")
+    return redacted
 
 
 def _shape_ok(value: object, hint: object) -> bool:
