@@ -3,7 +3,7 @@ id: SA-0430
 title: "The queue resumes an `ORPHANED` task beside a pull request a green cell would push over"
 type: bug
 priority: 2
-estimated_lines: 198
+estimated_lines: 253
 estimate_measured: true
 touches:
   - saffron/scheduler.py
@@ -50,22 +50,26 @@ risk: standard
 acceptance:
   - claim: >-
       When the newest re-queueing task at a spec's `spec_sha` is `ORPHANED`
-      and its row carries a `pr_url`, `build_queue` does not resume it. It
-      refuses the spec as `open_pr_on_spec`, and the reason names that url
-      and does not say "another task". The same row resumes before the url
-      is set. The witness sets the url two ways, through
+      and its own row carries a `pr_url`, `build_queue` does not resume it.
+      It refuses the spec as `open_pr_on_spec`, and the reason names that
+      row's url and does not say "another task". The same row resumes
+      before the url is set. The witness sets the url two ways, through
       `adopt_pull_request` and through a `set_task_package` write followed
       by a return to `ORPHANED`. It reads the plain scan and the
       `stack=True` scan, each with no `repo_slug` and with a `gh` listing no
       pull request. A newer re-queueing row in another state above the
-      url-carrying one still resumes, and a newest `ORPHANED` row with a url
-      above it refuses again. A `CHANGES_REQUESTED` row carrying its own url
-      still resumes.
+      url-carrying one still resumes. A newest `ORPHANED` row with its own
+      url above both refuses again, naming its own url and not the older
+      one. A `CHANGES_REQUESTED` row carrying its own url still resumes, and
+      so does a newer url-less `ORPHANED` row minted above it.
     witness: tests/test_scheduler.py::test_an_orphaned_task_carrying_a_pull_request_url_is_refused_not_resumed
     wrong_versions:
       - "Any re-queueing row with a url refuses its spec, `CHANGES_REQUESTED` included."
       - "The check reads the oldest re-queueing row at the `spec_sha` rather than the one the scan resumes."
       - "Any `ORPHANED` row with a url at the `spec_sha` refuses the spec, even under a newer row in another re-queue state."
+      - "The refusal fires only when every re-queueing row at the `spec_sha` is `ORPHANED`."
+      - "The url is read from any row at the `spec_sha`, so a newer url-less `ORPHANED` row refuses on an older row's url."
+      - "The reason names the oldest url at the `spec_sha` rather than the resumed row's own."
       - "The url check is made only when a `repo_slug` is passed."
       - "The refusal is added to the plain scan only, so a `stack=True` scan still resumes the task."
       - "The refusal is added to the `stack=True` scan only."
@@ -98,8 +102,10 @@ acceptance:
             driven_by: tests/test_scheduler.py::test_an_orphaned_task_carrying_a_pull_request_url_is_refused_not_resumed
           - member: a newer `GATE_ERROR` row above the url-carrying `ORPHANED` row
             driven_by: "Any `ORPHANED` row with a url at the `spec_sha` refuses the spec, even under a newer row in another re-queue state."
-          - member: a newest url-carrying `ORPHANED` row above both
-            driven_by: "The check reads the oldest re-queueing row at the `spec_sha` rather than the one the scan resumes."
+          - member: a newest `ORPHANED` row with its own url above both
+            driven_by: "The refusal fires only when every re-queueing row at the `spec_sha` is `ORPHANED`."
+          - member: "a `CHANGES_REQUESTED` row with a url under a newer url-less `ORPHANED` row"
+            driven_by: "The url is read from any row at the `spec_sha`, so a newer url-less `ORPHANED` row refuses on an older row's url."
       - set: the re-queue states carrying a url
         members:
           - member: "`ORPHANED`"
@@ -109,48 +115,78 @@ acceptance:
     positive_case: >-
       The same witness reads each `ORPHANED` row resumed on its own
       `task_id` by both scans before its url is set, and the
-      `CHANGES_REQUESTED` control resumed by both scans after, so the
-      refusals it reads come from scans that resume.
+      `CHANGES_REQUESTED` control and the row minted above it resumed by
+      both scans after, so the refusals it reads come from scans that
+      resume.
   - claim: >-
       When the newest re-queueing task is `ORPHANED` with no `pr_url`,
       `build_queue` refuses the spec as `open_pr_on_spec` if `gh` lists an
-      open pull request on the task's own branch whose head is a non-empty
-      sha other than the row's `pushed_sha`. The reason names that pull
-      request's url and does not say "another task". The scan asks `gh` for
-      each pull request's head. The witness drives a row with no push, the
-      shape spec loop session 84 met, and the same row after a push. The task still resumes
-      beside a pull request at its own pushed head, one on another branch,
-      one with no head field, and one with an empty head. After the row
-      moves to `CHANGES_REQUESTED`, a pull request at another head no longer
-      refuses it. Both scans read each case.
+      open pull request on the spec's branch that no task at the
+      `spec_sha` owns. Its head is a non-empty sha no row at the `spec_sha`
+      records as `pushed_sha`, and its url is no row's `pr_url`. The reason
+      names that url and does not say "another task". The scan asks `gh`
+      for each pull request's head. The witness drives one `ORPHANED` row
+      with no push, the shape spec loop session 84 met, and the same row
+      after a push. It still resumes beside a pull request at its own
+      pushed head, one on another branch, one with no head field, and one
+      with an empty head. After the row moves to `CHANGES_REQUESTED`, a pull
+      request at another head no longer refuses it. A dead revision's rows
+      come next. A `CHANGES_REQUESTED` row carries url U and push A, and a
+      newer url-less, push-less `ORPHANED` row was minted above it. That
+      row resumes beside U at head A, U at another head, and another url at
+      head A, and is refused beside another url at another head. A newer
+      `GATE_ERROR` row above an `ORPHANED` row resumes beside a foreign pull
+      request, and a newest `ORPHANED` row above both refuses again. Both
+      scans read each case.
     witness: tests/test_scheduler.py::test_an_orphaned_task_beside_another_head_on_its_branch_is_refused_not_resumed
     wrong_versions:
       - "The scan never asks `gh` for the head field, so no listed pull request carries one."
-      - "Any open pull request on the task's branch refuses it, whatever its head."
-      - "A pull request with no head field, or an empty one, refuses the task because it differs from the row's `pushed_sha`."
+      - "Any open pull request on the spec's branch refuses the task, whatever its head and url."
+      - "A pull request with no head field, or an empty one, refuses the task because it differs from every recorded push."
       - "An open pull request on any branch with another head refuses the task."
       - "Only a row with a `pushed_sha` is compared, so an unpushed row resumes."
       - "The head check covers every re-queue state, `CHANGES_REQUESTED` included."
       - "The head check is added to the plain scan only."
+      - "The head is compared with the newest row's `pushed_sha` alone, so a dead revision's minted row is refused beside its own pull request."
+      - "The rows' urls are not read, so a pull request a row carries is refused once its head moves."
+      - "The rows' heads are not read, so a pull request at a recorded push is refused under another url."
+      - "The check reads the oldest re-queueing row at the `spec_sha` rather than the one the scan resumes."
+      - "Any `ORPHANED` row at the `spec_sha` with a foreign pull request on its branch refuses the spec, even under a newer row in another re-queue state."
     covers:
-      - set: the row's push
+      - set: the resumed row's push
         members:
           - member: no push (the `SA-0423` row of spec loop session 84)
             driven_by: "Only a row with a `pushed_sha` is compared, so an unpushed row resumes."
           - member: a recorded push
             driven_by: tests/test_scheduler.py::test_an_orphaned_task_beside_another_head_on_its_branch_is_refused_not_resumed
-      - set: the open pull requests `gh` lists
+      - set: the open pull requests `gh` lists beside one `ORPHANED` row
         members:
           - member: own branch, another head
             driven_by: "The scan never asks `gh` for the head field, so no listed pull request carries one."
           - member: own branch, the row's pushed head
-            driven_by: "Any open pull request on the task's branch refuses it, whatever its head."
+            driven_by: "Any open pull request on the spec's branch refuses the task, whatever its head and url."
           - member: another branch, another head
             driven_by: "An open pull request on any branch with another head refuses the task."
           - member: own branch, no head field
-            driven_by: "A pull request with no head field, or an empty one, refuses the task because it differs from the row's `pushed_sha`."
+            driven_by: "A pull request with no head field, or an empty one, refuses the task because it differs from every recorded push."
           - member: own branch, an empty head
-            driven_by: "A pull request with no head field, or an empty one, refuses the task because it differs from the row's `pushed_sha`."
+            driven_by: "A pull request with no head field, or an empty one, refuses the task because it differs from every recorded push."
+      - set: the pull requests beside a dead revision's minted `ORPHANED` row
+        members:
+          - member: the revision's url U at its push A
+            driven_by: "The head is compared with the newest row's `pushed_sha` alone, so a dead revision's minted row is refused beside its own pull request."
+          - member: U at another head
+            driven_by: "The rows' urls are not read, so a pull request a row carries is refused once its head moves."
+          - member: another url at A
+            driven_by: "The rows' heads are not read, so a pull request at a recorded push is refused under another url."
+          - member: another url at another head
+            driven_by: tests/test_scheduler.py::test_an_orphaned_task_beside_another_head_on_its_branch_is_refused_not_resumed
+      - set: the row orders at one `spec_sha`
+        members:
+          - member: a newer `GATE_ERROR` row above an `ORPHANED` row
+            driven_by: "Any `ORPHANED` row at the `spec_sha` with a foreign pull request on its branch refuses the spec, even under a newer row in another re-queue state."
+          - member: a newest `ORPHANED` row above both
+            driven_by: "The check reads the oldest re-queueing row at the `spec_sha` rather than the one the scan resumes."
       - set: the re-queue states
         members:
           - member: "`ORPHANED`"
@@ -165,9 +201,10 @@ acceptance:
             driven_by: "The head check is added to the plain scan only."
     positive_case: >-
       The same witness reads the task resumed on its own `task_id` by both
-      scans beside a pull request at its own pushed head, so the refusal it
-      reads at another head comes from a scan that sees the pull request
-      and resumes past one it owns.
+      scans beside a pull request at its own pushed head, and the minted row
+      resumed beside its revision's own pull request. So each refusal it
+      reads comes from a scan that sees the pull request and resumes past
+      one a task owns.
   - claim: >-
       A `CHANGES_REQUESTED` task still resumes beside its own open pull
       request.
@@ -224,9 +261,15 @@ the url and keeps the row's state (`saffron/ledger.py:1889-1915`). `SA-0429`
 adds `ORPHANED` to the states adopt takes, and a red re-gate keeps it
 `ORPHANED` with the url. A `task_package` fact sets `pr_url` beside the
 state (`saffron/ledger.py:1004-1018`), and a later `task_state` fact leaves
-it (`saffron/ledger.py:993-999`). So a `CHANGES_REQUESTED` task whose
-resumed cell dies keeps its own url. The home ledger holds 60 `ORPHANED`
+it (`saffron/ledger.py:993-999`). The home ledger holds 60 `ORPHANED`
 rows and none carries a url.
+
+**A resumed candidate's cell runs on a fresh task.** Plain `saffron batch`
+and a `--stack` night each mint one (`saffron/cli.py:828-843`,
+`saffron/cli.py:1600-1640`). The older task keeps its state (`DESIGN.md`
+§4.2.1). So a revision whose cell dies leaves a fresh `ORPHANED` row with
+no url and no push. It sits above the `CHANGES_REQUESTED` row whose own
+pull request stays open at that row's pushed head.
 
 **The ledger already serves both fields.** `tasks_by_repo` selects `pr_url`
 and `pushed_sha` for every task (`saffron/ledger.py:1295-1312`).
@@ -241,15 +284,17 @@ and `pushed_sha` for every task (`saffron/ledger.py:1295-1312`).
    pull request, so the reason must not say so. This half reads the ledger
    alone and refuses with or without a `repo_slug`.
 2. **Refuse one beside another head on its branch.** Refuse such a row
-   with no `pr_url` too, for an open pull request on `_branch(spec.id)`.
-   Its head must be a non-empty sha other than the row's `pushed_sha`. A row with no push differs from any such head. Add the
-   head field to `_open_prs`'s `--json` list for this. A pull request that
+   with no `pr_url` too, beside a pull request no task owns. It is open on
+   `_branch(spec.id)`. Its head is a non-empty sha no row
+   there records as `pushed_sha`, and its url is no row's `pr_url`. Read
+   every row at the `spec_sha`, not the resumed one alone, because of the
+   fresh task above. Add the head field to `_open_prs`'s `--json` list. A pull request that
    reports no head, or an empty one, refuses nothing. That keeps
    `_open_prs`'s best-effort reading (`saffron/scheduler.py:326-340`).
 3. **Leave every other resume as it is.** A `CHANGES_REQUESTED` task keeps
    the exemption `open_pr_refusal` gives it. So does every other re-queue
-   state, and an `ORPHANED` row beside a pull request at its own pushed
-   head. Leave `open_pr_refusal`'s signature as it is, since
+   state, and an `ORPHANED` row beside a pull request a task at its
+   `spec_sha` pushed or carries. Leave `open_pr_refusal`'s signature as it is, since
    `saffron/batch.py:477` and `saffron/batch.py:717` call it.
 4. **Keep the site count honest.** `tests/test_refusal_count.py:39` pins one
    `open_pr_on_spec` site in `scheduler.py`. A new `return` of that kind is
@@ -258,27 +303,24 @@ and `pushed_sha` for every task (`saffron/ledger.py:1295-1312`).
 
 ## Out of scope
 
-- **`SA-0429`'s criterion 1 for a kept `ORPHANED` task.** It says the
-  plain scan offers an adopted `ORPHANED` parent again. So does its note
-  "The witness reads each kept shape's own refusal". Criterion 1 here refuses that
-  parent. Measured with both prototypes applied, `SA-0429`'s witness fails at
-  `('orphaned', 'red', False)`. The operator orders the two specs and
-  amends `SA-0429`. `tests/test_cli.py` stays forbidden here.
+- **`SA-0429`'s witness.** `SA-0429` declares `depends_on: [SA-0430]`. Its
+  criterion 1 already reads criterion 1 here refusing an adopted
+  `ORPHANED` parent. `tests/test_cli.py` stays forbidden here.
 - **An older url-carrying `ORPHANED` row under a newer re-queueing row.**
   The scan resumes the newer row, as at base. Its green cell pushes to the
   same branch. Gate 0's `ponytail:` keeps that ceiling.
-- **A by-hand pull request at the row's own pushed head.** It resumes, as
-  at base. Its head is the task's own work, and PACKAGE's lease still pushes
+- **A by-hand pull request at a recorded push.** It resumes, as at
+  base. Its head is the task's own work, and PACKAGE's lease still pushes
   over it.
 - **A url on a row whose pull request has since closed or merged.**
   `reconcile` skips a url on a row outside two sets
   (`saffron/reconcile.py:180-183`). `ORPHANED` is in neither
   `PR_PENDING_STATES` nor `MERGE_ONLY_STATES`. Such a spec stays refused until it is retired.
-- **A revision whose cell died.** A `CHANGES_REQUESTED` task resumed and
-  then cut to `ORPHANED` keeps its own url, so criterion 1 refuses it. Only `task_package` writes `pr_url` (`saffron/ledger.py:1005`). At
-  this base `saffron adopt` refuses `ORPHANED`
-  (`saffron/cli.py:3171-3173`). `saffron package` refuses a task carrying
-  a url (`saffron/task.py:1382-1385`). The home ledger holds no such row.
+- **A revision whose cell died.** Its fresh `ORPHANED` row carries no url.
+  Criterion 1 leaves it, and criterion 2 resumes it beside its revision's
+  own pull request. Only `task_package` writes `pr_url`
+  (`saffron/ledger.py:1005`), so in practice only `SA-0429`'s adopt puts a
+  url on an `ORPHANED` row.
 - **The child's refusal text.** A `stack=True` scan refuses a child of such
   a parent with "so merge it, or rerun it". That remedy no longer reaches
   the parent. The line is `_stack_order`'s and stays as it is.
@@ -294,7 +336,8 @@ report `skip`.
 
 **Seed rows the way the ledger writes them.** `_task_at`
 (`tests/test_scheduler.py:49-55`) creates a task on `saffron/<id>` and sets
-its state. Put a url on with `ledger.adopt_pull_request`, or with
+its state. Each call adds a newer row at its `spec_sha`, as a batch mints
+one. Put a url on with `ledger.adopt_pull_request`, or with
 `set_task_package` (`tests/test_scheduler.py:58-64`) and then
 `set_task_state` back to `ORPHANED`. Record a push with
 `ledger.record_push`. Two seeded specs that share a body share a
@@ -313,9 +356,9 @@ on one branch only.
 the home ledger. Task 476 is `ORPHANED` with no url. `gh pr list` showed no
 open pull request on a `saffron/` branch on 2026-11-23.
 
-**The size estimate prices past 80%.** `check` multiplies the measured 198
-lines by 1.77 and reads 1404 tokens against the `bug` ceiling of 1300. The
-real `size` gate leaves out `tests/`, and the prototype changed 49 lines of
+**The size estimate prices past 80%.** `check` multiplies the measured 253
+lines by 1.77 and reads 1792 tokens against the `bug` ceiling of 1300. The
+real `size` gate leaves out `tests/`, and the prototype changed 63 lines of
 `saffron/scheduler.py`. `size` is advisory at `standard`.
 
 **What the prototype measured.** Seven test files passed with the change

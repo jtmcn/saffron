@@ -328,7 +328,8 @@ prototype before this spec's ledger change, for both shapes.
   The adopted url also keeps `saffron package` away
   (`saffron/task.py:1382-1385`), and `push_unpackaged_work` as well
   (`saffron/phases/package.py:1244-1248`). Its spec stays refused until a
-  green re-adopt moves the task, or the operator retires the spec.
+  green re-adopt moves the task, a newer re-queueing row is minted above
+  it, or the operator retires the spec.
 - **Two refusal lines name the wrong cause after a kept adopt.** One is
   the `stack=True` scan's (`saffron/scheduler.py:1095-1098`). The other is
   the resolver's (`saffron/task.py:597-600`). Each says the parent pushed
@@ -398,13 +399,11 @@ fetch.
 `REBUTTAL_UNJUDGED` rows the plain scan takes the child while the state is
 kept. The `stack=True` scan and the resolver refuse it. For the
 `ORPHANED` row both scans take nothing. `SA-0430` refuses the parent on its
-adopted url. The plain scan's reason reads "task 1 is ORPHANED beside pull
-request https://github.com/owner/repo/pull/91, and resuming it would push
-over that head". The child's reads "depends_on SA-95100 is ORPHANED, which
-is not MERGED". The `stack=True` scan refuses the parent with the same
-reason. Its child line ends "SA-95100 has no waiting task, so merge it, or
-rerun it". These were measured on the prototype with `SA-0430`'s diff
-beneath it. Read each reason's kind and the url or parent id it names.
+adopted url. Each scan refuses the parent as `open_pr_on_spec`, with a
+reason naming the adopted url. It refuses the child as `depends_on`, with a
+reason naming the parent's id. These were measured on the prototype with
+`SA-0430`'s diff beneath it. Read each refusal's kind and the url or
+parent id it names, never its full text.
 
 **The stack-layer witness seeds its tasks with `_seed_stack_task`**
 (`tests/test_adopt_stack_layer.py:21-43`), one batch holding one layer at
