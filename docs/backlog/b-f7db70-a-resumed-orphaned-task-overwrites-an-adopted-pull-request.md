@@ -4,7 +4,7 @@ title: "A kept `ORPHANED` task is resumed past its adopted pull request, and a g
 status: open
 tier: 2
 filed: 2026-11-23
-specs: []
+specs: [SA-0430]
 prs: []
 commits: []
 cites: [§3.3, §5.7]
@@ -36,3 +36,4 @@ over such a row, before and after the url is set, is the witness.
 ## Record
 
 - 2026-11-23: filed from the spec loop's run 85.
+- 2026-11-23: specced as `SA-0430`.
