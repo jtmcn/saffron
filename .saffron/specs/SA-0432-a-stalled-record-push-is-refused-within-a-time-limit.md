@@ -46,9 +46,9 @@ forbidden:
   - tests/test_adopt_stack_layer.py
   - tests/test_ledger_fold_task.py
   - tests/test_queued_specs.py
-budget_usd: 58
+budget_usd: 62
 max_attempts: 3
-max_turns: 210
+max_turns: 220
 risk: standard
 acceptance:
   - claim: >-
@@ -112,23 +112,33 @@ acceptance:
       A `KeyboardInterrupt` raised while a record push waits reaches the
       caller unchanged, and leaves no process behind. Ctrl-C raises it, and
       so does SIGTERM under `_guarding_sigterm`. The witness raises it from
-      a `SIGALRM` handler 1.5 seconds into `RefsRecord.push` against the
-      same stand-in. It reads at least five beats at the interrupt, then the
-      count unchanged one second later.
+      a `SIGALRM` handler 2.5 seconds into a push against the same
+      stand-in. It drives `RefsRecord.push`, then `RefsRecord.append` with a
+      `remote`. For each it reads at least five new beats at the interrupt,
+      then the count unchanged one second later.
     witness: tests/test_record_refs.py::test_an_interrupted_push_leaves_no_process_behind
     wrong_versions:
       - "The process group is killed on the timeout alone, so an interrupt leaves git's `ssh` alive."
       - "The interrupt is caught and raised again as a `RecordError`."
+      - "The process group is killed on an interrupt in `push` alone, so an interrupt in `append` with a `remote` leaves git's `ssh` alive."
+    covers:
+      - set: the calls that start a record push
+        members:
+          - member: "`RefsRecord.push`"
+            driven_by: tests/test_record_refs.py::test_an_interrupted_push_leaves_no_process_behind
+          - member: "`RefsRecord.append` on a record built with `remote`"
+            driven_by: "The process group is killed on an interrupt in `push` alone, so an interrupt in `append` with a `remote` leaves git's `ssh` alive."
     positive_case: >-
-      The beat file holds at least five beats when the interrupt lands, so
-      the flat count after it reads a stand-in that was alive.
+      The beat file gains at least five beats before each interrupt lands,
+      so the flat count after it reads a stand-in that was alive.
   - claim: >-
       Where the host sets neither `GIT_SSH_COMMAND` nor `core.sshCommand`,
       each record push hands `ssh` `-o ServerAliveInterval=15 -o
       ServerAliveCountMax=4`, and `PUSH_TIMEOUT_S` exceeds 15 times 4.
       Where it sets either, or both, the push adds neither option. The
       witness reads the arguments a stand-in `ssh` receives. It drives
-      neither set, twice, and `GIT_SSH_COMMAND` alone. It drives
+      neither set, through `RefsRecord.push` twice and then through
+      `RefsRecord.append` with a `remote`, and `GIT_SSH_COMMAND` alone. It drives
       `core.sshCommand` alone in the mirror's own config, the global file
       under `HOME`, the file under `XDG_CONFIG_HOME`, a system file named by
       `GIT_CONFIG_SYSTEM`, and the environment's `GIT_CONFIG_COUNT`
@@ -142,7 +152,14 @@ acceptance:
       - "Only the first push in a process gets the keepalive options."
       - "`PUSH_TIMEOUT_S` is 60, no longer than keepalive takes to give up."
       - "`ServerAliveInterval` is 30."
+      - "The keepalive options are built in `push` alone, so `append` with a `remote` keeps `_no_prompt`'s environment."
     covers:
+      - set: the calls that start a record push
+        members:
+          - member: "`RefsRecord.push`"
+            driven_by: "No keepalive option is ever added."
+          - member: "`RefsRecord.append` on a record built with `remote`"
+            driven_by: "The keepalive options are built in `push` alone, so `append` with a `remote` keeps `_no_prompt`'s environment."
       - set: where the host names an ssh command
         members:
           - member: neither `GIT_SSH_COMMAND` nor `core.sshCommand`
@@ -283,6 +300,12 @@ and `tests/test_record_routed.py:429-436`, and `_spy_on_pushes`
 - **The two fetches.** `_fetch_one` and `fetch` stay unbounded
   (`saffron/record/refs.py:129-131`, `saffron/record/refs.py:151-155`).
   Batch 102 stalled on a push.
+- **The `core.sshCommand` sources criterion 4 leaves undriven.**
+  `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_PARAMETERS`, an `include.path` or
+  `includeIf` file, and an empty `core.sshCommand=` all reach `git config
+  --get`. No witness drives them.
+- **A SIGKILL of saffron.** It leaves the push's group alive, as it leaves
+  a gate's or the cell runtime's group today.
 - **An empty `GIT_SSH_COMMAND`.** `_no_prompt` reads one as unset
   (`saffron/record/refs.py:29`). No witness drives it, so read it the same
   way or not, as you choose.
@@ -313,7 +336,7 @@ reaches the caller first.
 
 **The stand-in.** Name it `ssh`. git probes any other basename with `-G`
 first, so it would start twice. That was measured on the host's git
-2.54.0 on macOS, and the cell's image carries git 2.39.5. Set `GIT_ALLOW_PROTOCOL` to
+2.54.0 on macOS. Set `GIT_ALLOW_PROTOCOL` to
 `file:ssh`, as `test_every_network_git_call_asks_for_no_credential` does.
 Let it give up on its own after about 20 seconds, so a wrong version fails
 the witness rather than hanging it. A stand-in that appends to a beat file
@@ -333,3 +356,21 @@ set `GIT_CONFIG_NOSYSTEM`. Drop that last one only for the
 environment first. With neither set, `_no_prompt` starts plain `ssh`, so
 put a logging stand-in named `ssh` first on `PATH`. Set it apart from the
 stand-in that `GIT_SSH_COMMAND` names, so each member reads its own log.
+
+**Measured in the repo's cell image.** On 2026-11-24 the prototype's four
+witnesses and the three spy files passed in `saffron/cell:saffron`, 55
+tests. That image and `saffron/cell-base:python` both carry git 2.47.3,
+not the 2.39.5 older notes name. There an `ssh`-named stand-in started
+once a push, so no `-G` probe ran. `GIT_CONFIG_SYSTEM` and
+`GIT_CONFIG_COUNT` were both honoured. The two witnesses were invoked
+three times. Criterion 3's stand-in beat 26 times before each 2.5 second
+alarm. Criterion 2's beat 19 or 20 times before the 2 second limit. Both
+need five.
+
+**Two things only the image showed.** The checkout was mounted as a git
+worktree, whose `.git` named a host path. So `git config --file` run from
+the checkout exited 128. So give each config write `cwd=tmp_path`. A
+spy's return annotation of `subprocess.Popen[Any]` raised `TypeError` on
+the image's Python 3.12. conftest has already swapped `subprocess.Popen`
+for a function there, and a file without postponed annotations evaluates
+it. Annotate such a spy `Any`.
