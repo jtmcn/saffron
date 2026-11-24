@@ -323,13 +323,14 @@ prototype before this spec's ledger change, for both shapes.
   task adopt placed is the item's later record. This spec places the
   layer and does not touch `finish`.
 - **A kept `ORPHANED` task's next batch.** `SA-0430` owns it. Its scan
-  refuses an `ORPHANED` resume whose row carries a url, so no green cell's
-  PACKAGE pushes over the adopted head (`saffron/phases/package.py:970-975`).
+  refuses an `ORPHANED` resume while any `ORPHANED` row at the `spec_sha`
+  carries a url. So no queued cell resumes over the adopted head, which a
+  green PACKAGE would push over (`saffron/phases/package.py:970-975`).
   The adopted url also keeps `saffron package` away
   (`saffron/task.py:1382-1385`), and `push_unpackaged_work` as well
   (`saffron/phases/package.py:1244-1248`). Its spec stays refused until a
-  green re-adopt moves the task, a newer re-queueing row is minted above
-  it, or the operator retires the spec.
+  green re-adopt moves the task, or the operator retires the spec. A newer
+  row in another re-queue state also lifts it.
 - **Two refusal lines name the wrong cause after a kept adopt.** One is
   the `stack=True` scan's (`saffron/scheduler.py:1095-1098`). The other is
   the resolver's (`saffron/task.py:597-600`). Each says the parent pushed
