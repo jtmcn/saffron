@@ -533,7 +533,7 @@ def test_resuming_its_own_task_is_not_refused_by_its_own_open_pr(tmp_path, ledge
     assert [c.task_id for c in candidates] == [task_id]
 
 
-# --------------------------------------------- refusal: an ORPHANED resume's own PR
+# --------------------------------------------- refusal: an `ORPHANED` resume's own PR
 
 
 def _outcome(directory, repo_id, ledger, spec_id, **kwargs):
@@ -564,7 +564,7 @@ def test_an_orphaned_task_carrying_a_pull_request_url_is_refused_not_resumed(
     def outcome(spec_id, **kwargs):
         return _outcome(directory, repo_id, ledger, spec_id, **kwargs)
 
-    # One ORPHANED row, through `adopt_pull_request`: resumes in both scans
+    # One `ORPHANED` row, through `adopt_pull_request`: resumes in both scans
     # before its url is set, then refuses after, with or without a slug.
     _write(directory, "TE-301.md", id="TE-301")
     adopted_sha = _sha(directory / "TE-301.md")
@@ -620,7 +620,7 @@ def test_an_orphaned_task_carrying_a_pull_request_url_is_refused_not_resumed(
         assert "https://example/pull/102" in refusal.reason
         assert "another task" not in refusal.reason
 
-    # A newer row in another re-queue state above the url-carrying ORPHANED
+    # A newer row in another re-queue state above the url-carrying `ORPHANED`
     # row still resumes: the *newest* row decides, not any row.
     _write(directory, "TE-303.md", id="TE-303")
     gate_error_sha = _sha(directory / "TE-303.md")
@@ -644,7 +644,7 @@ def test_an_orphaned_task_carrying_a_pull_request_url_is_refused_not_resumed(
         assert candidate is not None and candidate.task_id == newer_gate_error
         assert refusal is None
 
-    # A newest ORPHANED row with its own url above both refuses again,
+    # A newest `ORPHANED` row with its own url above both refuses again,
     # naming its own url and not the older one.
     _write(directory, "TE-304.md", id="TE-304")
     newest_sha = _sha(directory / "TE-304.md")
@@ -678,7 +678,7 @@ def test_an_orphaned_task_carrying_a_pull_request_url_is_refused_not_resumed(
         assert "https://example/pull/105" in refusal.reason
         assert "https://example/pull/104" not in refusal.reason
 
-    # A newer url-less ORPHANED row above an adopted one, with its own push
+    # A newer url-less `ORPHANED` row above an adopted one, with its own push
     # and url, refuses on the older url.
     _write(directory, "TE-305.md", id="TE-305")
     urlless_sha = _sha(directory / "TE-305.md")
@@ -690,6 +690,11 @@ def test_an_orphaned_task_carrying_a_pull_request_url_is_refused_not_resumed(
         state="ORPHANED",
     )
     ledger.record_push(adopted_with_push, "c" * 40)
+    # A push alone is no url: the row still resumes before adopt sets one.
+    for kwargs in _BOTH_SCANS:
+        candidate, refusal = outcome("TE-305", **kwargs)
+        assert candidate is not None and candidate.task_id == adopted_with_push
+        assert refusal is None
     ledger.adopt_pull_request(adopted_with_push, "https://example/pull/106")
     _task_at(
         ledger,
@@ -758,7 +763,7 @@ def test_an_orphaned_task_beside_another_head_on_its_branch_is_refused_not_resum
             directory, repo_id, ledger, spec_id, repo_slug="o/r", gh=gh, **kwargs
         )
 
-    # The shape spec loop session 84 met: one ORPHANED row, no push, beside
+    # The shape spec loop session 84 met: one `ORPHANED` row, no push, beside
     # a foreign pull request on its own branch.
     _write(directory, "TE-307.md", id="TE-307")
     no_push_sha = _sha(directory / "TE-307.md")
@@ -784,7 +789,7 @@ def test_an_orphaned_task_beside_another_head_on_its_branch_is_refused_not_resum
         assert "another task" not in refusal.reason
 
     # The same row after it pushed: refused beside a pull request at its own
-    # push, because an ORPHANED row's own push owns nothing.
+    # push, because an `ORPHANED` row's own push owns nothing.
     ledger.record_push(no_push_task, "e" * 40)
     gh_own_push = _fake_gh(
         [

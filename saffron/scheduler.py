@@ -99,10 +99,6 @@ GhRunner = Callable[[list[str]], subprocess.CompletedProcess[str]]
 # `cli._pushed_landed` is the real implementation, bound to a mirror.
 PushedLanded = Callable[[str], bool]
 
-# `_refuse`'s default for `pr_url_by_task`/`pushed_sha_by_task`, a mapping
-# rather than `None` (`SA-0430`).
-_EMPTY_STR_MAP: Mapping[int, str] = {}
-
 
 def run_gh(argv: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(argv, capture_output=True, text=True, check=False)
@@ -1004,8 +1000,6 @@ def _orphaned_pr_refusal(
     if resumed is None or resumed["state"] != "ORPHANED":
         return None
 
-    # One `return` below for both halves, not one per half. That keeps this
-    # a single `open_pr_on_spec` site for `tests/test_refusal_count.py`.
     reason: str | None = None
 
     orphaned_with_url = [
@@ -1024,7 +1018,7 @@ def _orphaned_pr_refusal(
             if row["state"] != "ORPHANED"
             and pushed_sha_by_task.get(int(row["task_id"]), "")
         }
-        # This filter is provably redundant here: no ORPHANED row in `rows`
+        # This filter is provably redundant here: no `ORPHANED` row in `rows`
         # reaches this branch with a url. Kept for safety against a refactor.
         owned_urls = {
             pr_url_by_task.get(int(row["task_id"]), "")
@@ -1065,9 +1059,9 @@ def _refuse(
     markers: Sequence[tuple[str, str]],
     ancestor_branches: frozenset[str],
     edges: Mapping[str, Sequence[str]],
-    rows: Sequence[sqlite3.Row] = (),
-    pr_url_by_task: Mapping[int, str] = _EMPTY_STR_MAP,
-    pushed_sha_by_task: Mapping[int, str] = _EMPTY_STR_MAP,
+    rows: Sequence[sqlite3.Row],
+    pr_url_by_task: Mapping[int, str],
+    pushed_sha_by_task: Mapping[int, str],
     check_dependencies: bool = True,
 ) -> tuple[RefusalKind, str] | None:
     """The kind and reason of the first §4.2.1 refusal this candidate earns, or
