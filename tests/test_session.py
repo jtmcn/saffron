@@ -1524,6 +1524,21 @@ def _budget_cut_turn(
     return implement.AgentFailed("the agent reached its own max_budget_usd", attempt)
 
 
+def _api_error_turn(cost=0.4):
+    """What SA-0419's own REBUT session carried: a `success` subtype with
+    `terminal_reason="api_error"` and `is_error=True`. A death the provider
+    reported, carrying no budget signal of its own (b-f582ee)."""
+    attempt = implement.AttemptResult(
+        session_id="sess-1",
+        subtype="success",
+        terminal_reason="api_error",
+        num_turns=7,
+        cost_usd_est=cost,
+        is_error=True,
+    )
+    return implement.AgentFailed("api_error", attempt)
+
+
 def _stub_the_export(monkeypatch, repo, policy=None, recorded=None, base_files=None):
     """`export_saffron_dir` with no mirror to `git archive` from: the working copy
     stands in for `base_sha`'s tree — except where `policy` makes the two
@@ -5808,18 +5823,20 @@ def _rebut_capped(
     rebut_commits: int = 1,
     extracted: dict | None = None,
     suites=(),
+    lenses: Sequence[str] | None = None,
 ):
     """Drives one cell to `REBUTTING` at any spend, under or past
     `budget_usd`, with REBUT's sessions under `_RebutCap`. `rebut_costs`
     is the rebuttal turn, its extraction turn, then one verdict per lens
-    that filed a blocker, built directly rather than through
-    `_through_rebut`. A cost can be a scripted exception instead, read the
-    way `_run_agent` already reads one. The plan, implement and
-    all four lens turns each cost $0.125, so REBUT starts at $0.75. The
-    first `len(rebut_costs) - 2` lenses file `_BLOCKER`, and the rest file
-    nothing, and each default verdict withdraws its own lens's finding.
+    that filed a blocker. A cost can be a scripted exception instead,
+    read the way `_run_agent` already reads one. The plan, implement
+    and all four lens turns each cost $0.125, so REBUT starts at $0.75.
+    By default the first `len(rebut_costs) - 2` lenses file `_BLOCKER`.
+    `lenses` names them instead, for a caller whose filing order must
+    skip `adequacy`. Each default verdict withdraws its own lens's finding.
     """
     num_verdicts = len(rebut_costs) - 2
+    filing = lenses if lenses is not None else list(review.LENSES)[:num_verdicts]
     cell = _stub_the_runtime(monkeypatch, patch=_ANCHORING_DIFF, suites=suites)
     _rebuttable(monkeypatch, cell, rebut_commits=rebut_commits)
 
@@ -5842,8 +5859,8 @@ def _rebut_capped(
 
     rebuttal_cost, extraction_cost, *verdict_costs = rebut_costs
     lens_turns = [
-        _turn(_block(_BLOCKER if i < num_verdicts else {"findings": []}), cost=0.125)
-        for i in range(4)
+        _turn(_block(_BLOCKER if lens in filing else {"findings": []}), cost=0.125)
+        for lens in review.LENSES
     ]
     verdict_turns = [
         _cost_turn(
@@ -6023,6 +6040,274 @@ def test_a_costly_rebuttal_turn_leaves_its_extraction_and_verdict_their_own_mone
         assert outcome.state == "READY_FOR_REVIEW"
 
 
+def test_a_rebut_session_that_dies_is_never_read_as_a_pool_cut(monkeypatch, tmp_path):
+    """SA-0425, criterion 1 (b-f582ee): a REBUT session that fails without the
+    budget signal is never a pool cut, whatever it spent. That covers a death
+    with no result event, an `api_error` result, a turn ceiling and a failure
+    carrying no attempt. The task ends where `run_rebut` put it, in each of
+    the three REBUT stages, at any spend. The signal `cut_off_at_budget_cap`
+    reads is a cut at any spend, even right after such a death in the same
+    REBUT stage. A refusal is a cut too, unless a death with no signal
+    already emptied that stage. Each row runs once through `_rebut_capped`,
+    and its state, the `TaskOutcome` event, the queued state and the last
+    REBUT line are collected and asserted once."""
+    rows: list[tuple[str, tuple, dict, str]] = [
+        # The rebuttal turn itself, at REBUT_CAP_USD = $10.00.
+        (
+            "rebuttal-death-under",
+            (_wall_cut_turn(cost=3.00), 0.01, 0.01),
+            {"rebut_commits": 0},
+            "REBUTTAL_UNJUDGED",
+        ),
+        (
+            "rebuttal-death-at",
+            (_wall_cut_turn(cost=10.00), 0.01, 0.01),
+            {"rebut_commits": 0},
+            "REBUTTAL_UNJUDGED",
+        ),
+        (
+            "rebuttal-death-past",
+            (_wall_cut_turn(cost=12.00), 0.01, 0.01),
+            {"rebut_commits": 0},
+            "REBUTTAL_UNJUDGED",
+        ),
+        (
+            "rebuttal-api-error-past",
+            (_api_error_turn(cost=11.00), 0.01, 0.01),
+            {"rebut_commits": 0},
+            "REBUTTAL_UNJUDGED",
+        ),
+        (
+            "rebuttal-turn-ceiling-past",
+            (
+                implement.AgentFailed("turn ceiling", _cut_off_turn(cost=10.50)),
+                0.01,
+                0.01,
+            ),
+            {"rebut_commits": 0},
+            "REBUTTAL_UNJUDGED",
+        ),
+        (
+            "rebuttal-no-attempt",
+            (implement.AgentFailed("boom"), 0.01, 0.01),
+            {"rebut_commits": 0},
+            "REBUTTAL_UNJUDGED",
+        ),
+        (
+            "rebuttal-signal-terminal-reason-alone-under",
+            (
+                _budget_cut_turn(cost=3.00, subtype="error_during_execution"),
+                0.01,
+                0.01,
+            ),
+            {"rebut_commits": 0},
+            "EXHAUSTED",
+        ),
+        (
+            "rebuttal-signal-subtype-alone-at",
+            (_budget_cut_turn(cost=10.00, terminal_reason=None), 0.01, 0.01),
+            {"rebut_commits": 0},
+            "EXHAUSTED",
+        ),
+        # The extraction, at a $14.00 reserve after a $6.00 rebuttal turn.
+        (
+            "extraction-death-under",
+            (6.00, _wall_cut_turn(cost=2.00), 0.01),
+            {"rebut_commits": 0},
+            "REBUTTAL_UNJUDGED",
+        ),
+        (
+            "extraction-death-at",
+            (6.00, _wall_cut_turn(cost=8.00), 0.01),
+            {"rebut_commits": 0},
+            "REBUTTAL_UNJUDGED",
+        ),
+        (
+            "extraction-death-past",
+            (6.00, _wall_cut_turn(cost=9.00), 0.01),
+            {"rebut_commits": 0},
+            "REBUTTAL_UNJUDGED",
+        ),
+        # The swap: the extraction's signal reads `subtype` alone where the
+        # rebuttal's own row above reads `terminal_reason` alone.
+        (
+            "extraction-signal-subtype-alone-under",
+            (6.00, _budget_cut_turn(cost=2.00, terminal_reason=None), 0.01),
+            {"rebut_commits": 0},
+            "EXHAUSTED",
+        ),
+        (
+            "extraction-signal-terminal-reason-alone-at",
+            (
+                6.00,
+                _budget_cut_turn(cost=8.00, subtype="error_during_execution"),
+                0.01,
+            ),
+            {"rebut_commits": 0},
+            "EXHAUSTED",
+        ),
+        # A non-schema answer spends the pool to the cent. Its own re-prompt
+        # is refused, and that refusal is the cut.
+        (
+            "extraction-refused-reprompt",
+            (6.00, 8.00, 0.01),
+            {"rebut_commits": 0, "extracted": {}},
+            "EXHAUSTED",
+        ),
+        # A success, not a death, spending the pool to the cent: never a cut.
+        (
+            "extraction-claims-uncommitted-fix",
+            (6.00, 8.00, 0.01),
+            {"rebut_commits": 0, "extracted": _CLAIMED_FIX},
+            "REBUTTAL_UNJUDGED",
+        ),
+        # The extraction dies at its own pool, marked but not cut. `open`
+        # clears the mark for the verdicts, whose own refusal is the cut.
+        (
+            "extraction-dies-then-verdict-refused",
+            (6.00, _wall_cut_turn(cost=8.00), 2.00, 0.01),
+            {"rebut_commits": 1},
+            "EXHAUSTED",
+        ),
+        # The verdicts, at a $16.00 reserve after a $6.00 rebuttal turn and a
+        # $2.50 extraction.
+        (
+            "verdict-death-under",
+            (6.00, 2.50, _wall_cut_turn(cost=3.00)),
+            {},
+            "REBUTTAL_UNJUDGED",
+        ),
+        (
+            "verdict-death-at",
+            (6.00, 2.50, _wall_cut_turn(cost=7.50)),
+            {},
+            "REBUTTAL_UNJUDGED",
+        ),
+        (
+            "verdict-death-past",
+            (6.00, 2.50, _wall_cut_turn(cost=8.00)),
+            {},
+            "REBUTTAL_UNJUDGED",
+        ),
+        (
+            "verdict-signal-terminal-reason-alone-under",
+            (6.00, 2.50, _budget_cut_turn(cost=3.00, subtype="error_during_execution")),
+            {},
+            "EXHAUSTED",
+        ),
+        (
+            "verdict-signal-subtype-alone-at",
+            (6.00, 2.50, _budget_cut_turn(cost=7.50, terminal_reason=None)),
+            {},
+            "EXHAUSTED",
+        ),
+        # Two blocker lenses: the first death marks the verdict REBUT stage,
+        # and the refusal that follows is not a second cut.
+        (
+            "verdict-two-blockers-first-dies-at-pool",
+            (6.00, 2.50, _wall_cut_turn(cost=7.50), 0.01),
+            {},
+            "REBUTTAL_UNJUDGED",
+        ),
+        # The same shape, but the first ends on the signal: that is the cut.
+        (
+            "verdict-two-blockers-first-ends-on-signal",
+            (6.00, 2.50, _budget_cut_turn(cost=7.50), 0.01),
+            {},
+            "EXHAUSTED",
+        ),
+        # Three blocker lenses, never `adequacy`, whose shape `_BLOCKER`
+        # cannot answer. The first death stays under the pool, so a cut.
+        (
+            "verdict-three-blockers-second-spends-rest-third-refused",
+            (6.00, 2.50, _wall_cut_turn(cost=1.00), 6.50, 0.01),
+            {"lenses": ("correctness", "contract", "conventions")},
+            "EXHAUSTED",
+        ),
+        # The same shape, but the second ends on the signal instead: still a cut.
+        (
+            "verdict-three-blockers-second-ends-on-signal",
+            (
+                6.00,
+                2.50,
+                _wall_cut_turn(cost=1.00),
+                _budget_cut_turn(cost=6.50),
+                0.01,
+            ),
+            {"lenses": ("correctness", "contract", "conventions")},
+            "EXHAUSTED",
+        ),
+    ]
+
+    # Each row's last REBUT line: a death names its own error, or that a lens
+    # produced no verdict, and a cut names its own REBUT stage's pool.
+    no_arg = "made no argument: "
+    wall = no_arg + "the agent produced no result event"
+    rebuttal_cut = "REBUT ran out of its $10.00 budget"
+    extraction_cut = "REBUT's extraction ran out of its $4.00 reserve"
+    verdict_cut = "REBUT's verdict ran out of its $2.00 reserve"
+    no_verdict = "produced no verdict"
+    lines = {
+        "rebuttal-death-under": wall,
+        "rebuttal-death-at": wall,
+        "rebuttal-death-past": wall,
+        "rebuttal-api-error-past": no_arg + "api_error",
+        "rebuttal-turn-ceiling-past": no_arg + "turn ceiling",
+        "rebuttal-no-attempt": no_arg + "boom",
+        "rebuttal-signal-terminal-reason-alone-under": rebuttal_cut,
+        "rebuttal-signal-subtype-alone-at": rebuttal_cut,
+        "extraction-death-under": wall,
+        "extraction-death-at": wall,
+        "extraction-death-past": wall,
+        "extraction-signal-subtype-alone-under": extraction_cut,
+        "extraction-signal-terminal-reason-alone-at": extraction_cut,
+        "extraction-refused-reprompt": extraction_cut,
+        "extraction-claims-uncommitted-fix": no_arg + "claimed a fix",
+        "extraction-dies-then-verdict-refused": verdict_cut,
+        "verdict-death-under": no_verdict,
+        "verdict-death-at": no_verdict,
+        "verdict-death-past": no_verdict,
+        "verdict-signal-terminal-reason-alone-under": verdict_cut,
+        "verdict-signal-subtype-alone-at": verdict_cut,
+        "verdict-two-blockers-first-dies-at-pool": no_verdict,
+        "verdict-two-blockers-first-ends-on-signal": verdict_cut,
+        "verdict-three-blockers-second-spends-rest-third-refused": verdict_cut,
+        "verdict-three-blockers-second-ends-on-signal": verdict_cut,
+    }
+
+    disagreed = []
+    for name, costs, extra, expected_state in rows:
+        outcome, ledger, _cell, capture = _rebut_capped(
+            monkeypatch, tmp_path / name, *costs, budget_usd=0.25, **extra
+        )
+        (outcome_event,) = [e for e in capture if isinstance(e, TaskOutcome)]
+        (queued,) = ledger.queue_lines()
+        [*_, rebut_start] = [
+            e for e in capture if isinstance(e, PhaseStart) and e.phase == "REBUT"
+        ]
+        cut = expected_state == "EXHAUSTED"
+        actual = {
+            "state": outcome.state,
+            "outcome_event": outcome_event.outcome,
+            "queued_state": queued["state"],
+            "rebut_result_is_none": outcome.rebut_result is None,
+            "line_says_ran_out": "ran out" in rebut_start.detail,
+            "line_names_its_cause": lines[name] in rebut_start.detail,
+        }
+        expected = {
+            "state": expected_state,
+            "outcome_event": expected_state,
+            "queued_state": expected_state,
+            "rebut_result_is_none": cut,
+            "line_says_ran_out": cut,
+            "line_names_its_cause": True,
+        }
+        if actual != expected:
+            disagreed.append((name, actual, expected))
+
+    assert disagreed == []
+
+
 def test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing(
     monkeypatch, tmp_path
 ):
@@ -6047,7 +6332,9 @@ def test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing(
         (
             "a",
             (
-                implement.AgentFailed("provider crashed", _cut_off_turn(cost=10.25)),
+                implement.AgentFailed(
+                    "budget spent", _budget_cut_turn(cost=10.25).attempt
+                ),
                 0.50,
                 0.75,
             ),
@@ -6059,7 +6346,9 @@ def test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing(
             "c",
             (
                 6.00,
-                implement.AgentFailed("budget spent", _cut_off_turn(cost=8.00)),
+                implement.AgentFailed(
+                    "budget spent", _budget_cut_turn(cost=8.00).attempt
+                ),
                 0.75,
             ),
             {"rebut_commits": 0},
@@ -6072,7 +6361,9 @@ def test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing(
             (
                 6.00,
                 2.50,
-                implement.AgentFailed("budget spent", _cut_off_turn(cost=7.50)),
+                implement.AgentFailed(
+                    "budget spent", _budget_cut_turn(cost=7.50).attempt
+                ),
             ),
             {},
             "REBUT's verdict ran out of its $2.00 reserve",
@@ -6092,7 +6383,9 @@ def test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing(
             (
                 6.00,
                 2.50,
-                implement.AgentFailed("budget spent", _cut_off_turn(cost=7.50)),
+                implement.AgentFailed(
+                    "budget spent", _budget_cut_turn(cost=7.50).attempt
+                ),
                 0.25,
             ),
             {},
@@ -6162,6 +6455,42 @@ def test_a_rebut_the_cap_cut_short_ends_exhausted_with_its_blockers_standing(
     )
     assert outcome6.state == "EXHAUSTED"
     assert outcome6.rebut_result is not None
+
+    # A cut REBUT whose gate re-run ended some other state keeps that state,
+    # its own why and its own `rebut_result` (b-b8f0d9).
+    errored_suite = (
+        [],
+        [],
+        [GateResult(gate="tests", status="error", summary="toolchain missing")],
+    )
+    red_suite = (
+        [],
+        [],
+        _results(Failure(file="a.py", code="E501", message="too long")),
+    )
+    for suites, expected, why_prefix in (
+        (errored_suite, "GATE_ERROR", "the gate re-run ended GATE_ERROR"),
+        (red_suite, "EXHAUSTED", "the gates are red after the rebuttal"),
+    ):
+        outcome7, ledger7, _cell7, capture7 = _run(
+            f"rerun-{expected}",
+            _budget_cut_turn(cost=10.00),
+            0.50,
+            0.75,
+            rebut_commits=1,
+            suites=suites,
+        )
+        assert outcome7.state == expected
+        assert outcome7.rebut_result is not None
+        [*_, rebut_start7] = [
+            e for e in capture7 if isinstance(e, PhaseStart) and e.phase == "REBUT"
+        ]
+        assert rebut_start7.detail.startswith(why_prefix)
+        assert "ran out" not in rebut_start7.detail
+        (queued7,) = ledger7.queue_lines()
+        assert queued7["state"] == expected
+        (outcome_event7,) = [e for e in capture7 if isinstance(e, TaskOutcome)]
+        assert outcome_event7.outcome == expected
 
 
 def test_a_cell_bound_for_package_leaves_no_row_a_reconcile_can_requeue(
@@ -12197,7 +12526,7 @@ def test_a_rebut_carries_its_unread_and_unanswered_counts_past_a_pool_cut(
     outcome, _ledger, _cell, _capture = _rebut_capped(
         monkeypatch,
         tmp_path / "cut",
-        implement.AgentFailed("provider crashed", _cut_off_turn(cost=10.25)),
+        implement.AgentFailed("budget spent", _budget_cut_turn(cost=10.25).attempt),
         0.50,
         0.75,
         0.75,
@@ -18719,7 +19048,7 @@ def test_beside_a_lens_with_an_error_rebuts_own_stops_stand_and_a_cut_ends_incom
         spec=spec,
         turns=[
             *_host_survivor_turns(**errored_turns),
-            implement.AgentFailed("provider crashed", _cut_off_turn(cost=10.25)),
+            _budget_cut_turn(cost=10.25),
         ],
         policy=_PROBE_POLICY,
         gates=("tests",),

@@ -3366,3 +3366,12 @@ critic's own, so they have no line.
   code. **Bucket 3**. **Landed:** a review commit on #1310.
 - `SA-0424` (#1310): two docstrings told the history of removed lines.
   **Bucket 2**. **Landed:** a review commit on #1310.
+
+## 2026-11-24, spec loop run 85 (#1315)
+
+- `SA-0425` (#1315): the criterion 1 witness read each death row's REBUT
+  line only for "ran out", so a line losing its own error survived.
+  **Bucket 3**. **Landed:** a review commit on #1315.
+- `SA-0425` (#1315): two comments wrote a bare "stage" and "pool", which
+  `CONTEXT.md` lists to avoid. **Bucket 1**. **Landed:** a review commit on
+  #1315, and a record line on item 174 for the gate.
