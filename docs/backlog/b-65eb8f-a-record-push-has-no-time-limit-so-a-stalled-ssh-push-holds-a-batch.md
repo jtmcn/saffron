@@ -4,7 +4,7 @@ title: A record push has no time limit, so a stalled ssh push holds a batch for 
 status: open
 tier: 2
 filed: 2026-11-22
-specs: []
+specs: [SA-0432]
 prs: []
 commits: []
 cites: [§4.1]
