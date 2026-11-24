@@ -189,7 +189,9 @@ class _RebutCap:
     costly fix cannot starve the extraction or the verdicts (b-4901d2). A
     call the pool cannot cover is refused with implement.AgentFailed, the
     way a failed turn already reads to every caller here. `cut` holds the
-    error of the current stage's first session the pool cut.
+    error of a budget signal, or of a refusal no death already explained
+    (b-f582ee). A session with no signal that empties a REBUT stage's own
+    pool only marks that stage. `open` clears the mark for the one after it.
     """
 
     def __init__(
@@ -201,12 +203,16 @@ class _RebutCap:
         self.spent = 0.0
         self.stage: Literal["rebuttal", "extraction", "verdict"] = "rebuttal"
         self.cut: str | None = None
+        # A REBUT stage a signal-less death emptied. Read by the refusal
+        # branch below alone, so a refusal that follows is not a second cut.
+        self.emptied_by_death = False
 
     def open(self, stage: Literal["extraction", "verdict"]) -> None:
         """Starts `stage`: a rebuttal turn that ran past its pool leaves nothing."""
         self.limit = max(self.limit, self.spent) + self.reserves[stage]
         self.stage = stage
         self.cut = None
+        self.emptied_by_death = False
 
     def wrap(
         self, agent: Callable[..., implement.AttemptResult]
@@ -219,11 +225,12 @@ class _RebutCap:
             remaining = self.limit - self.spent
             if remaining <= 0:
                 # A verdict or the extraction's own re-prompt meets this.
-                # Every other stage runs one session.
+                # Not a cut beside a REBUT stage a death already emptied.
                 refused = implement.AgentFailed(
                     f"the REBUT {self.stage} pool is already spent"
                 )
-                self.cut = self.cut or str(refused)
+                if not self.emptied_by_death:
+                    self.cut = self.cut or str(refused)
                 raise refused
             try:
                 attempt = agent(
@@ -233,9 +240,13 @@ class _RebutCap:
                 )
             except implement.AgentFailed as failed:
                 self.spent += failed.attempt.cost_usd_est if failed.attempt else 0.0
-                # Spending the pool means the pool cut it, with no later call to refuse.
-                if self.spent >= self.limit:
+                if failed.attempt is not None and cut_off_at_budget_cap(failed.attempt):
+                    # A budget signal is a cut whatever it spent, mark or no mark.
                     self.cut = self.cut or str(failed)
+                elif self.spent >= self.limit:
+                    # A signal-less death that empties this REBUT stage's own
+                    # pool marks the stage. The runtime failed it, not the pool.
+                    self.emptied_by_death = True
                 raise
             self.spent += attempt.cost_usd_est
             return attempt
