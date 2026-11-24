@@ -362,3 +362,29 @@ wrong versions it added.
     not only on a fresh one.
 96. A spec's size estimate is read from the prototype's numstat, never
     fitted to the 80% line.
+
+## SA-0430 (b-f7db70)
+
+One writer, two reviews, and a final writer round. The draft took about 28
+minutes and found that the merged `SA-0429` contradicted it. Each passed
+alone, and together they failed `tests/test_cli.py`. The delegate chose to
+land `SA-0430` first, and the writer amended `SA-0429` in the same commit
+after measuring both prototypes together. The revisions took about 8, 8 and
+8 minutes. Each review took 10 to 11 minutes.
+
+Round 1 found one blocker. Criterion 2 refused a dead revision's retry,
+because a batch mints a fresh task and the dead row carries no push. Round 1
+also found an unpinned row order and a smoke test that still took `SA-0429`.
+Round 2 found no blocker. Its first concern was a hole the fix opened: an
+adopted `ORPHANED` row records the operator's head as its own push. The
+final round closed it, and all 28 declared wrong versions were killed, each
+by its own criterion's witness.
+
+## What SA-0430 adds
+
+97. A spec whose subject overlaps a queued spec's applies both prototypes
+    together and runs both specs' witnesses before its first review.
+98. A rule that grants ownership from a row's recorded push names which
+    writers record that push, adopt included.
+99. Each wrong version is run against its own criterion's witness alone,
+    so a kill is attributed to the witness that claims it.
