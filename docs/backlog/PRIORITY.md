@@ -312,7 +312,7 @@ wrong first line.
 **Placed 2026-10-16**, from the spec loop's run 42: **b-60317d**.
 `reconcile`'s `head_moved` comment says nothing judges a moved head.
 
-**Placed 2026-10-19**, from the spec loop's run 44: **b-b8f0d9**, **b-e9cd43**,
+**Placed 2026-10-19**, from the spec loop's run 44: ~~**b-b8f0d9**~~, **b-e9cd43**,
 **b-524b1a**, **b-62e00a**, **b-b33854**, **b-d149c6**, ~~**b-0094bd**~~, then
 ~~**b-8ef729**~~. Each is a gap a seat found and the stack left alone.
 
@@ -541,10 +541,10 @@ risk — not, as an earlier draft of this note said, that `.gitignore` in
 `integrity.gate_config` already routes the edit to a person. That is the
 *tracked* half only: a `.gitignore` naming itself reaches no diff at all.
 
-**What this ordering costs, recounted on 2026-11-23.** Tier 1 holds 7 open
-items, tier 2 holds 63 and tier 3 holds 146. So tier 3 holds 68% of the
+**What this ordering costs, recounted on 2026-11-24.** Tier 1 holds 7 open
+items, tier 2 holds 63 and tier 3 holds 145. So tier 3 holds 67% of the
 backlog. That is the deliberate consequence of ranking by the milestone rather
-than by what is nearest to hand. 23 of the 216 open items are outside a cell,
+than by what is nearest to hand. 23 of the 215 open items are outside a cell,
 since a cell cannot reach their files.
 
 **Placed 2026-11-04**, from the spec loop's run 53: **b-8c6696**, ~~**b-a19ffd**~~

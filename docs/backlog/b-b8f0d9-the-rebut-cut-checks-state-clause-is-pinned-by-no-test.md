@@ -1,11 +1,12 @@
 ---
 id: b-b8f0d9
 title: The state clause of REBUT's cut check is pinned by no test, so a cap cut that ends another way could read as `EXHAUSTED`
-status: open
+status: done
+closed: 2026-11-24
 tier: 3
 filed: 2026-10-19
 specs: [SA-0425]
-prs: []
+prs: [1315]
 commits: []
 cites: [§5.6]
 related: [120]
@@ -34,3 +35,4 @@ above then fails it.
 ## Record
 
 - 2026-10-19: filed from the spec loop's run 44.
+- 2026-11-24: done by `SA-0425` (#1315), taken by hand. Criterion 2's witness drives a cap cut whose gate re-run ends `error` and one that ends red. Dropping the state clause now fails it on `'EXHAUSTED' == 'GATE_ERROR'`.

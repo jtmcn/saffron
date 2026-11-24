@@ -5,7 +5,7 @@ status: partial
 tier: 1
 filed: 2026-09-30
 specs: [SA-0161, SA-0232, SA-0369, SA-0380, SA-0425]
-prs: [779, 1178, 1179, 1180]
+prs: [779, 1178, 1179, 1180, 1315]
 commits: []
 cites: [§5.1]
 related: [b-8170eb, 45]
@@ -76,3 +76,4 @@ command can package it, and says which command does.
   and `run_task` names that command. A runtime death read as `EXHAUSTED` is
   still open.
 - 2026-11-23: batch 104 orphaned `SA-0423` twice. Each time the container refused an exec after REBUT ("no PID data from sync pipe"), and the runtime kept no logs. The proxy and two networks outlived teardown. The operator took the patch by hand as #1305.
+- 2026-11-24: `SA-0425` (#1315) landed by hand in the spec loop's run 85. A REBUT death without the budget signal now ends `REBUTTAL_UNJUDGED`, never `EXHAUSTED`. Batch 106 then orphaned `SA-0425` on the same container fault, the third after REBUT. In `SA-0423` and `SA-0425` the REBUT agent ran the whole suite in the cell right before the fault (`timeout 400 uv run pytest -q`). The retry and the fault's cause stay open.
