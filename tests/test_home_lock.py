@@ -20,7 +20,12 @@ import pytest
 
 from saffron import cli, preflight
 from saffron.ledger import Ledger
-from tests.test_cell_name_lock import _raised, _ReleaseProbe, _SpyStop
+from tests.test_cell_name_lock import (
+    _raised,
+    _ReleaseProbe,
+    _relock_as_successor,
+    _SpyStop,
+)
 from tests.test_cli import (
     _fake_batch_resolution,
     _seed_repo,
@@ -463,6 +468,7 @@ def test_a_contender_in_a_holders_write_window_names_no_stale_holder(
             expected = 0 if mode == "return" else 2
             assert result_box == [expected]
 
+        assert lock_path.is_file()
         assert lock_path.read_text() == ""
         _stale_window_refusal(f"{mode}-stale")
 
@@ -478,15 +484,6 @@ def test_the_home_lock_empties_its_file_before_it_lets_go(monkeypatch, tmp_path)
     assert result == 0
     lock_path = home / "ledger.lock"
 
-    def _relock_as_successor() -> None:
-        fd = os.open(lock_path, os.O_RDWR | os.O_TRUNC)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            os.write(fd, b"4242 next\n")
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-
     def _holder(mode: str):
         def _run(args, ledger, out_dir):
             if mode == "return":
@@ -498,7 +495,7 @@ def test_the_home_lock_empties_its_file_before_it_lets_go(monkeypatch, tmp_path)
         return _run
 
     for mode in ("return", "raise", "interrupt"):
-        probe = _ReleaseProbe(lock_path, _relock_as_successor)
+        probe = _ReleaseProbe(lock_path, lambda: _relock_as_successor(lock_path))
         result_box: list[int] = []
 
         def _call(mode=mode, result_box=result_box) -> None:

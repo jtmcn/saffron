@@ -519,6 +519,17 @@ def _fd_identity(fd: int) -> tuple[int, int]:
     return (info.st_dev, info.st_ino)
 
 
+def _relock_as_successor(lock_path: Path) -> None:
+    """A second holder takes the released lock and writes its own line."""
+    fd = os.open(lock_path, os.O_RDWR | os.O_TRUNC)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        os.write(fd, b"4242 next\n")
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 class _ReleaseProbe:
     """Watches one lock file across a `pytest.MonkeyPatch.context()`, and
     marks the instant its holder's `flock` first lets go: by an explicit
@@ -564,7 +575,8 @@ class _ReleaseProbe:
 
         def _flock(fd_or_handle, operation):
             real_flock(fd_or_handle, operation)
-            if operation == fcntl.LOCK_UN:
+            # A bit test, so `LOCK_UN | LOCK_NB` counts as an unlock too.
+            if operation & fcntl.LOCK_UN:
                 fd = (
                     fd_or_handle
                     if isinstance(fd_or_handle, int)
@@ -686,6 +698,7 @@ def test_a_contender_in_a_holders_write_window_names_no_stale_holder(tmp_path):
             assert isinstance(raised, RuntimeError), repr(raised)
         else:
             assert isinstance(raised, _SpyStop), repr(raised)
+        assert cell_name_lock._lock_path(root, "SY-1").is_file()
         assert cell_name_lock._lock_path(root, "SY-1").read_text() == ""
         _stale_window_refusal()
 
@@ -698,15 +711,6 @@ def test_the_spec_id_lock_empties_its_file_before_it_lets_go(tmp_path):
         pass
     lock_path = cell_name_lock._lock_path(root, "SY-1")
 
-    def _relock_as_successor() -> None:
-        fd = os.open(lock_path, os.O_RDWR | os.O_TRUNC)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            os.write(fd, b"4242 next\n")
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-
     def _ending(mode: str) -> None:
         with cell_name_lock.lock(root, "SY-1", "the-holder"):
             if mode == "return":
@@ -716,7 +720,7 @@ def test_the_spec_id_lock_empties_its_file_before_it_lets_go(tmp_path):
             raise _SpyStop("the holder was interrupted")
 
     for mode in ("return", "raise", "interrupt"):
-        probe = _ReleaseProbe(lock_path, _relock_as_successor)
+        probe = _ReleaseProbe(lock_path, lambda: _relock_as_successor(lock_path))
         with pytest.MonkeyPatch.context() as mp:
             probe.patch(mp)
             raised = _raised(lambda mode=mode: _ending(mode))
