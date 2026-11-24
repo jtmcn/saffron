@@ -3,7 +3,8 @@ id: SA-0429
 title: "`saffron adopt` refuses a `REBUTTAL_UNJUDGED` or `ORPHANED` task, so a by-hand pull request leaves its children refused"
 type: feature
 priority: 2
-estimated_lines: 356
+depends_on: [SA-0430]
+estimated_lines: 362
 estimate_measured: true
 touches:
   - saffron/cli.py
@@ -57,9 +58,10 @@ acceptance:
       a `stack=True` `build_queue` scan refuses the child, and
       `task._resolve_stacked_on` with no `gh` raises `_StackingRefused`.
       The plain scan takes the child, as it does at base for a waiting
-      parent. While an `ORPHANED` state is kept, the plain scan offers the
-      parent and refuses the child. The `stack=True` scan offers the parent
-      and the child as one order. Adopted again with a fresh head that re-gates
+      parent. While an `ORPHANED` state is kept, the plain scan and the
+      `stack=True` scan both take nothing. Each refuses the parent as
+      `open_pr_on_spec` with a reason naming the adopted url, and the child
+      as `depends_on` naming the parent. Adopted again with a fresh head that re-gates
       green, the task moves to `READY_FOR_REVIEW`. Both scans then take the
       child alone, the `stack=True` scan's `stack_base` names the adopted
       task and its branch, and the resolver fetches that branch. The
@@ -265,7 +267,8 @@ recorded in the row's own state (`saffron/scheduler.py:151-158`), and so
 does the batch's resolver, `task._resolve_stacked_on`
 (`saffron/task.py:593-600`). `ORPHANED` is in `REQUEUE_STATES`
 (`saffron/scheduler.py:164-173`), so the queue offers its spec again
-(`saffron/scheduler.py:1346-1350`). `ORPHANED` is not in
+(`saffron/scheduler.py:1346-1350`). `SA-0430` refuses that resume once the
+row carries a url, as `open_pr_on_spec`. `ORPHANED` is not in
 `DEPENDENCY_WAITING_STATES`, so the plain scan refuses the child
 (`saffron/scheduler.py:756`).
 
@@ -319,18 +322,15 @@ prototype before this spec's ledger change, for both shapes.
 - **`saffron finish` and "holds no layer".** A deferred batch whose only
   task adopt placed is the item's later record. This spec places the
   layer and does not touch `finish`.
-- **A kept `ORPHANED` task's next batch.** The queue offers it again on
-  its own task. Gate 0 exempts a resumed task from the open pull request
-  on its branch (`saffron/scheduler.py:914-920`). A green cell's PACKAGE
-  reads the remote head as its lease and pushes
-  (`saffron/phases/package.py:970-975`), so it replaces the by-hand head.
-  `open_draft_pr` then finds that pull request and returns it to draft
-  (`saffron/phases/package.py:459-470`). All of this holds at base for an
-  `ORPHANED` task beside a by-hand pull request. The adopted url adds two
-  refusals. `saffron package` refuses a task carrying a url
-  (`saffron/task.py:1382-1385`), and so does `push_unpackaged_work`
-  (`saffron/phases/package.py:1244-1248`). How a resumed cell builds its
-  tree was not read. A later spec owns this.
+- **A kept `ORPHANED` task's next batch.** `SA-0430` owns it. Its scan
+  refuses an `ORPHANED` resume while any `ORPHANED` row at the `spec_sha`
+  carries a url. So no queued cell resumes over the adopted head, which a
+  green PACKAGE would push over (`saffron/phases/package.py:970-975`).
+  The adopted url also keeps `saffron package` away
+  (`saffron/task.py:1382-1385`), and `push_unpackaged_work` as well
+  (`saffron/phases/package.py:1244-1248`). Its spec stays refused until a
+  green re-adopt moves the task, or the operator retires the spec. A newer
+  row in another re-queue state also lifts it.
 - **Two refusal lines name the wrong cause after a kept adopt.** One is
   the `stack=True` scan's (`saffron/scheduler.py:1095-1098`). The other is
   the resolver's (`saffron/task.py:597-600`). Each says the parent pushed
@@ -399,9 +399,12 @@ fetch.
 **The witness reads each kept shape's own refusal.** For all three
 `REBUTTAL_UNJUDGED` rows the plain scan takes the child while the state is
 kept. The `stack=True` scan and the resolver refuse it. For the
-`ORPHANED` row the plain scan offers the parent and refuses the child. The
-`stack=True` scan offers the parent and the child as one order. These were
-measured on the prototype.
+`ORPHANED` row both scans take nothing. `SA-0430` refuses the parent on its
+adopted url. Each scan refuses the parent as `open_pr_on_spec`, with a
+reason naming the adopted url. It refuses the child as `depends_on`, with a
+reason naming the parent's id. These were measured on the prototype with
+`SA-0430`'s diff beneath it. Read each refusal's kind and the url or
+parent id it names, never its full text.
 
 **The stack-layer witness seeds its tasks with `_seed_stack_task`**
 (`tests/test_adopt_stack_layer.py:21-43`), one batch holding one layer at
