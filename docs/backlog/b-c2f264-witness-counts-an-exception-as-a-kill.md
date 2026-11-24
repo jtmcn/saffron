@@ -4,7 +4,7 @@ title: The witness gate counts a wrong version killed only by an exception as ca
 status: open
 tier: 2
 filed: 2026-11-20
-specs: []
+specs: [SA-0431]
 prs: []
 commits: []
 cites: [§5.4.1]

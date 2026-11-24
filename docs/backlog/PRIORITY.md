@@ -280,6 +280,9 @@ ends a task unjudged on one API error, with no retry.
 
 ### Tier 3 — real, not urgent
 
+**Placed 2026-11-24**, with `SA-0431`: **b-84cf18**. The glossary has no
+entry for a REVIEW edit's `raised` outcome.
+
 **Placed 2026-11-23**, from the spec loop's run 84: **b-e0e720**, then
 **b-1349d9**. The `prose` gate reads no attribute docstring. "Emitter" names
 two things, and §4.7 says `append` sets `failed`.
@@ -542,9 +545,9 @@ risk — not, as an earlier draft of this note said, that `.gitignore` in
 *tracked* half only: a `.gitignore` naming itself reaches no diff at all.
 
 **What this ordering costs, recounted on 2026-11-24.** Tier 1 holds 7 open
-items, tier 2 holds 63 and tier 3 holds 145. So tier 3 holds 67% of the
+items, tier 2 holds 63 and tier 3 holds 146. So tier 3 holds 68% of the
 backlog. That is the deliberate consequence of ranking by the milestone rather
-than by what is nearest to hand. 23 of the 215 open items are outside a cell,
+than by what is nearest to hand. 24 of the 216 open items are outside a cell,
 since a cell cannot reach their files.
 
 **Placed 2026-11-04**, from the spec loop's run 53: **b-8c6696**, ~~**b-a19ffd**~~
