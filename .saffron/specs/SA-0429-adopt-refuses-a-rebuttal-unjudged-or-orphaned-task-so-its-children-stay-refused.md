@@ -3,7 +3,7 @@ id: SA-0429
 title: "`saffron adopt` refuses a `REBUTTAL_UNJUDGED` or `ORPHANED` task, so a by-hand pull request leaves its children refused"
 type: feature
 priority: 2
-estimated_lines: 351
+estimated_lines: 356
 estimate_measured: true
 touches:
   - saffron/cli.py
@@ -63,11 +63,12 @@ acceptance:
       green, the task moves to `READY_FOR_REVIEW`. Both scans then take the
       child alone, the `stack=True` scan's `stack_base` names the adopted
       task and its branch, and the resolver fetches that branch. The
-      witness drives three parent rows. One is `REBUTTAL_UNJUDGED` with a
-      push recorded in that state and no url. One is `REBUTTAL_UNJUDGED`
-      whose only push came in an earlier state. One is `ORPHANED` with no
-      push. For the first row, a second red adopt on the same pull request,
-      which finds the url already carried, still leaves the child refused.
+      witness drives four parent rows, none with a url. Three are
+      `REBUTTAL_UNJUDGED`: one with a push recorded in that state, one whose
+      only push came in an earlier state, and one with no push. The fourth
+      is `ORPHANED` with no push. For the first row, a second red adopt of
+      the same head on the same pull request finds the url already carried,
+      and still leaves the child refused.
     witness: tests/test_cli.py::test_adopt_admits_a_rebuttal_unjudged_or_orphaned_tasks_child_only_after_a_green_regate
     wrong_versions:
       - "`ORPHANED` stays out of the states adopt takes."
@@ -80,6 +81,8 @@ acceptance:
       - "The ledger writes the untrusted mark into the fact but its apply step still sets `pushed_in_state` to the row's state."
       - "An untrusted push leaves `pushed_in_state` as it stood, so the trust the url's fact gave the row stays."
       - "Adopt records the head untrusted only when the task carries no url yet, so a repeat adopt trusts it."
+      - "Adopt records the head only when it differs from the row's `pushed_sha`, so a same-head repeat stays trusted through the url's fact."
+      - "Adopt records a `REBUTTAL_UNJUDGED` head untrusted only when the row already holds a `pushed_sha`, and otherwise in the `EXHAUSTED` order."
     covers:
       - set: the parent rows adopt meets
         members:
@@ -87,6 +90,8 @@ acceptance:
             driven_by: "An untrusted push leaves `pushed_in_state` as it stood, so the trust the url's fact gave the row stays."
           - member: "`REBUTTAL_UNJUDGED`, its only push recorded in an earlier state"
             driven_by: "Adopt records the untrusted head before the url, so the url's fact trusts it again."
+          - member: "`REBUTTAL_UNJUDGED`, no push at all"
+            driven_by: "Adopt records a `REBUTTAL_UNJUDGED` head untrusted only when the row already holds a `pushed_sha`, and otherwise in the `EXHAUSTED` order."
           - member: "`ORPHANED`, no push (the `SA-0423` row)"
             driven_by: "`ORPHANED` stays out of the states adopt takes."
       - set: the re-gates that keep the state
@@ -101,8 +106,10 @@ acceptance:
         members:
           - member: the first, with no url carried
             driven_by: tests/test_cli.py::test_adopt_admits_a_rebuttal_unjudged_or_orphaned_tasks_child_only_after_a_green_regate
-          - member: a repeat red adopt, with the url carried
-            driven_by: "Adopt records the head untrusted only when the task carries no url yet, so a repeat adopt trusts it."
+          - member: a repeat red adopt of the same head, with the url carried
+            driven_by: "Adopt records the head only when it differs from the row's `pushed_sha`, so a same-head repeat stays trusted through the url's fact."
+          - member: a green re-adopt of a fresh head
+            driven_by: tests/test_cli.py::test_adopt_admits_a_rebuttal_unjudged_or_orphaned_tasks_child_only_after_a_green_regate
       - set: the readers that refuse or admit the child
         members:
           - member: a plain `build_queue` scan
@@ -134,7 +141,7 @@ acceptance:
     covers:
       - set: the states adopt re-gates here
         members:
-          - member: "`REBUTTAL_UNJUDGED`, in both shapes criterion 1 names"
+          - member: "`REBUTTAL_UNJUDGED`, in the three shapes criterion 1 names"
             driven_by: tests/test_cli.py::test_adopt_keeps_a_rebuttal_unjudged_or_orphaned_task_whose_regate_is_red_declined_or_on_another_head
           - member: "`ORPHANED`"
             driven_by: "Adopt records every state's head untrusted, `EXHAUSTED` and `ORPHANED` included."
@@ -291,7 +298,9 @@ prototype before this spec's ledger change, for both shapes.
    row holds, so the untrusted head must come after it. A green re-gate
    then moves the row to `READY_FOR_REVIEW`, a state `_stale_push_state`
    never distrusts. Every other state keeps the order and the trusted push
-   it has at base.
+   it has at base. The comment above the two writes
+   (`saffron/cli.py:3300-3301`) names one order, so reword it to cover
+   both branches.
 4. **Rewrite the comment above `_ADOPTABLE_STATES`.** It must stop saying
    adopt refuses `REBUTTAL_UNJUDGED`. `_adopt`'s docstring sits at the
    ten-line limit the `prose` gate holds, so one added line there fails
@@ -329,8 +338,8 @@ prototype before this spec's ledger change, for both shapes.
   an adopted head no green re-gate judged. Both files stay forbidden, and
   the lines stay as they are.
 - **The window between adopt's two writes.** The url's fact trusts the
-  push (`saffron/ledger.py:1889-1915`), and the untrusted head follows it
-  (`saffron/ledger.py:1795-1801`). A refused append or a kill between them
+  push (`saffron/ledger.py:1889-1915`). The untrusted head follows it,
+  where `saffron/cli.py:3300-3303` writes the two today. A refused append or a kill between them
   leaves the row trusted with a url, and adopting again on the same pull
   request closes it.
 - **`DESIGN.md` and `CONTEXT.md`.** The `ORPHANED` and `REBUTTAL_UNJUDGED`
@@ -354,7 +363,7 @@ pass no keyword, and criterion 5 holds them. `adopt_pull_request` is
 unchanged, and criteria 6 and 7 hold the three older routes.
 
 **The size estimate prices past 80%, and the operator accepts it.** The
-real `size` gate sees only the 44 changed lines outside `tests/`.
+real `size` gate sees only the 48 changed lines outside `tests/`.
 
 **An edit to existing code, and still no criterion declares a mutant.** The
 core change adds two members to a set literal. Six members pass the line
@@ -368,10 +377,12 @@ report `skip`.
 in every test that reaches a re-gate. Its pair outcome records a re-gate
 row, and its bare int is the decline shape.
 
-**Seed the three parent rows the way the ledger writes them.** For the
+**Seed the four parent rows the way the ledger writes them.** For the
 first, set `REBUTTAL_UNJUDGED`, then call `ledger.record_push`. For the
 second, call `record_push` in another state, then set `REBUTTAL_UNJUDGED`.
-For the `ORPHANED` row, set the state and record no push. Seed each
+For the third, set `REBUTTAL_UNJUDGED` and record no push, the row a failed
+`push_unpackaged_work` leaves. For the `ORPHANED` row, set the state and
+record no push. Seed each
 parent's task with the `spec_sha` `intake.load_spec` returns for its file,
 as `tests/test_cli.py:5244` and `tests/test_cli.py:5261` do. A
 `stack=True` scan reads a pushed sha only as forty or sixty-four lowercase
@@ -385,7 +396,7 @@ on a stale row (`saffron/task.py:593-600`). On a trusted one it calls
 that records the branch it was asked for, so the green case reads as a
 fetch.
 
-**The witness reads each kept shape's own refusal.** For both
+**The witness reads each kept shape's own refusal.** For all three
 `REBUTTAL_UNJUDGED` rows the plain scan takes the child while the state is
 kept. The `stack=True` scan and the resolver refuse it. For the
 `ORPHANED` row the plain scan offers the parent and refuses the child. The
