@@ -859,6 +859,8 @@ def test_a_log_tells_a_write_it_could_not_make_from_an_event_it_could_not_serial
     event, and the next event still lands. `failed` is true once either
     holds, and both can hold together. A raise of a kind `append` does not
     catch still leaves it."""
+    from saffron.events import BOUND_CHARS  # local: kept out of the revert's collection
+
     clean_dir = tmp_path / "clean"
     log = EventLog(clean_dir)
     assert log.path == clean_dir / "events.jsonl"
@@ -867,7 +869,7 @@ def test_a_log_tells_a_write_it_could_not_make_from_an_event_it_could_not_serial
     assert read_log(clean_dir) == [first]
     assert (log.write_refused, log.unserializable, log.failed) == (False, False, False)
 
-    # Five events fail before any write: three on `event`, two on
+    # Six events fail before any write: four on `event`, two on
     # `usage` with no `event`, so only the payload's own `json.dumps` meets it.
     deep = json.loads("[" * 1000 + "]" * 1000)
     # Built by arithmetic: converting to a string hits the same digit
@@ -875,6 +877,13 @@ def test_a_log_tells_a_write_it_could_not_make_from_an_event_it_could_not_serial
     huge = 10**5000
     unserializable_cases = [
         Agent(timestamp=1.0, spec_id="X", raw=False, event={"s": {1, 2}}),
+        # Past the bound, so only the bound's own `json.dumps` can meet the set.
+        Agent(
+            timestamp=1.5,
+            spec_id="X",
+            raw=False,
+            event={"s": {1, 2}, "pad": "x" * BOUND_CHARS},
+        ),
         Agent(timestamp=2.0, spec_id="X", raw=False, event={"n": huge}),
         Agent(timestamp=3.0, spec_id="X", raw=False, event={"d": deep}),
         Agent(timestamp=4.0, spec_id="X", raw=False, usage={"s": {1, 2}}),

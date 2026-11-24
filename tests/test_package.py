@@ -1860,6 +1860,21 @@ def test_packages_default_emitters_warn_naming_their_logs_own_path(
         "PACKAGE: the READY_FOR_REVIEW row could not be written: disk full",
     ]
 
+    # A directory where `events.jsonl` was: its first line, the warning once,
+    # then its second line.
+    log_path.unlink()
+    log_path.mkdir()
+    result = package(packageable.outcome, gh=_opens_pr, **package_kwargs)
+    assert result.state == "READY_FOR_REVIEW"
+    printed = capsys.readouterr().out.splitlines()
+    assert printed == [
+        "PACKAGE: https://x/pull/9",
+        f"warning: {log_path} refused a write; events may be missing",
+        "PACKAGE: the READY_FOR_REVIEW row could not be written: disk full",
+    ]
+    log_path.rmdir()
+    log_path.touch()
+
     # The row write restored, and the log corrupted again: each credential
     # refusal below emits one event, printed then its warning.
     monkeypatch.setattr(
