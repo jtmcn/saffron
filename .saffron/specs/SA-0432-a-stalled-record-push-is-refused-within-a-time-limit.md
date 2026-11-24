@@ -92,11 +92,14 @@ acceptance:
       The witness reads at least five new beats at the refusal, then reads
       the count unchanged one second later. It drives `RefsRecord.push` and
       `RefsRecord.append` with a `remote`, each refused less than five
-      seconds after the limit.
+      seconds after the limit. At each refusal it reads the git push
+      process's own `returncode` set, without polling it, so git was
+      reaped.
     witness: tests/test_record_refs.py::test_a_timed_out_push_leaves_no_process_behind
     wrong_versions:
       - "On the timeout the push kills git alone, the way `subprocess.run`'s own timeout does, and leaves the `ssh` git started."
       - "The push starts git in the caller's own process group and kills git's pid alone."
+      - "On the timeout the push kills the group but never waits on git."
     covers:
       - set: the calls that start a record push
         members:
@@ -114,13 +117,15 @@ acceptance:
       so does SIGTERM under `_guarding_sigterm`. The witness raises it from
       a `SIGALRM` handler 2.5 seconds into a push against the same
       stand-in. It drives `RefsRecord.push`, then `RefsRecord.append` with a
-      `remote`. For each it reads at least five new beats at the interrupt,
-      then the count unchanged one second later.
+      `remote`. For each it reads git's own `returncode` set at the
+      interrupt, without polling it. It also reads at least five new beats
+      there, then the count unchanged one second later.
     witness: tests/test_record_refs.py::test_an_interrupted_push_leaves_no_process_behind
     wrong_versions:
       - "The process group is killed on the timeout alone, so an interrupt leaves git's `ssh` alive."
       - "The interrupt is caught and raised again as a `RecordError`."
       - "The process group is killed on an interrupt in `push` alone, so an interrupt in `append` with a `remote` leaves git's `ssh` alive."
+      - "On an interrupt the push kills the group but never waits on git."
     covers:
       - set: the calls that start a record push
         members:
@@ -142,7 +147,10 @@ acceptance:
       `core.sshCommand` alone in the mirror's own config, the global file
       under `HOME`, the file under `XDG_CONFIG_HOME`, a system file named by
       `GIT_CONFIG_SYSTEM`, and the environment's `GIT_CONFIG_COUNT`
-      entries. It drives both set.
+      entries. It drives both set. Where that read of `core.sshCommand`
+      exits other than 0 or 1, the push raises `RecordError` and starts no
+      git push. The witness drives a mirror config git cannot parse, which
+      exits 128.
     witness: tests/test_record_refs.py::test_a_push_asks_ssh_for_keepalive_only_where_the_host_names_no_ssh_command
     wrong_versions:
       - "The keepalive options are added even where `GIT_SSH_COMMAND` is set."
@@ -152,6 +160,7 @@ acceptance:
       - "Only the first push in a process gets the keepalive options."
       - "`PUSH_TIMEOUT_S` is 60, no longer than keepalive takes to give up."
       - "`ServerAliveInterval` is 30."
+      - "Any non-zero exit from the `core.sshCommand` read counts as unset."
       - "The keepalive options are built in `push` alone, so `append` with a `remote` keeps `_no_prompt`'s environment."
     covers:
       - set: the calls that start a record push
@@ -178,6 +187,8 @@ acceptance:
             driven_by: tests/test_record_refs.py::test_a_push_asks_ssh_for_keepalive_only_where_the_host_names_no_ssh_command
           - member: both set
             driven_by: tests/test_record_refs.py::test_a_push_asks_ssh_for_keepalive_only_where_the_host_names_no_ssh_command
+          - member: a mirror config the read cannot parse, exit 128
+            driven_by: "Any non-zero exit from the `core.sshCommand` read counts as unset."
       - set: the pushes of one ref
         members:
           - member: the first push
@@ -188,7 +199,8 @@ acceptance:
       The stand-in on `PATH` that logs no keepalive option for each
       `core.sshCommand` place is the one that logged both options for the
       two pushes with neither set. It logs them again on a push after that
-      loop has unset every place.
+      loop has unset every place. The spy that counts no git push over the
+      unparseable config counted one on the push just before it.
 ---
 
 ## Context
@@ -284,9 +296,8 @@ and `tests/test_record_routed.py:429-436`, and `_spy_on_pushes`
    `git -C <mirror> config --get core.sshCommand` exits 1, append `-o
    ServerAliveInterval=15 -o ServerAliveCountMax=4` to the push's own
    `GIT_SSH_COMMAND`. Any other exit from that read raises `RecordError`,
-   as `_resolve` does for its own. Only the push's environment changes, so
-   `_no_prompt` and every other git call keep theirs. Edit no file under
-   `~/.ssh` and no global git config.
+   as `_resolve` does for its own. Edit no file under `~/.ssh` and no
+   global git config.
 4. **Keep the spies reading the push.** A push that leaves
    `subprocess.run` is invisible to the three spies above. Two of them
    assert that pushes happened (`tests/test_record_routed.py:448`,
@@ -306,6 +317,9 @@ and `tests/test_record_routed.py:429-436`, and `_spy_on_pushes`
   --get`. No witness drives them.
 - **A SIGKILL of saffron.** It leaves the push's group alive, as it leaves
   a gate's or the cell runtime's group today.
+- **The other git calls' environment.** Problem 3 changes only the
+  push's environment, so `_no_prompt` and every other git call keep
+  theirs. No witness drives that.
 - **An empty `GIT_SSH_COMMAND`.** `_no_prompt` reads one as unset
   (`saffron/record/refs.py:29`). No witness drives it, so read it the same
   way or not, as you choose.
@@ -367,10 +381,16 @@ three times. Criterion 3's stand-in beat 26 times before each 2.5 second
 alarm. Criterion 2's beat 19 or 20 times before the 2 second limit. Both
 need five.
 
-**Two things only the image showed.** The checkout was mounted as a git
-worktree, whose `.git` named a host path. So `git config --file` run from
-the checkout exited 128. So give each config write `cwd=tmp_path`. A
+**Two things only the image showed.** The worktree was mounted from the
+host, and its `.git` named a host path. So `git config --file` run from
+the worktree exited 128. So give each config write `cwd=tmp_path`. A
 spy's return annotation of `subprocess.Popen[Any]` raised `TypeError` on
 the image's Python 3.12. conftest has already swapped `subprocess.Popen`
 for a function there, and a file without postponed annotations evaluates
 it. Annotate such a spy `Any`.
+
+**Reading that git was reaped.** Wrap `subprocess.Popen` in the witness
+and keep each git push process it starts. Read `returncode` on the kept
+object, and never call `poll` or `wait` on it, since either would reap
+git itself. Write the unparseable mirror config last in criterion 4's
+witness. Every later git call over that mirror fails.
