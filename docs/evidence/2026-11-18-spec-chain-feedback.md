@@ -339,3 +339,26 @@ killed all ten.
     since base may already satisfy the order by doing nothing.
 94. A spec that adds a sentence to a docstring counts that docstring's
     lines at base against the gate's limit.
+
+## SA-0429 (b-619b7d)
+
+One writer, two reviews, and a final writer round. The draft took about 29
+minutes. The delegate then sent it back before any review, because the
+writer had measured a red adopt that admitted the child and left it out of
+scope. That revision took about 27 minutes, and the next two about 2 and 4.
+Each review took 11 to 12 minutes.
+
+Round 1 found no blocker and three concerns. The size estimate sat 16 lines
+under the prototype, and the measured figure prices past 80% of the
+ceiling. No witness adopted one pull request red twice. A window between
+two ledger writes stays open until adopt is retried. Round 2 found no
+blocker. Its two concerns were members no witness drove: a repeat on the
+same head, and a row with no push. The final round killed all three
+wrong versions it added.
+
+## What SA-0429 adds
+
+95. A claim about a retried command drives the retry on the same input,
+    not only on a fresh one.
+96. A spec's size estimate is read from the prototype's numstat, never
+    fitted to the 80% line.
