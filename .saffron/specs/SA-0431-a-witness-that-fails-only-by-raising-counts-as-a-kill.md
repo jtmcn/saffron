@@ -4,7 +4,7 @@ title: "A witness that fails only by raising counts as a kill, in the `witness` 
 type: bug
 priority: 2
 risk: elevated
-estimated_lines: 132
+estimated_lines: 146
 estimate_measured: true
 pending_symbols:
   - saffron/repos/policy.py::assertion
@@ -21,6 +21,8 @@ touches:
   - tests/test_session.py
   - tests/test_parent_versions.py
   - tests/test_regate.py
+  - saffron/report/pr_body.py
+  - tests/test_report.py
 forbidden:
   - DESIGN.md
   - CONTEXT.md
@@ -44,7 +46,7 @@ forbidden:
   - saffron/qualify.py
   - saffron/cell/worktree.py
   - saffron/agents/**
-  - saffron/report/**
+  - saffron/report/index.py
   - saffron/scheduler.py
   - saffron/cli.py
   - saffron/ledger.py
@@ -57,9 +59,9 @@ forbidden:
   - tests/test_cli.py
   - tests/test_adopt_stack_layer.py
   - tests/test_ledger_fold_task.py
-budget_usd: 64
+budget_usd: 66
 max_attempts: 3
-max_turns: 290
+max_turns: 300
 acceptance:
   - claim: >-
       `witness_gate` takes a keyword `assertion`, a pattern or `None`. A
@@ -68,9 +70,12 @@ acceptance:
       failure's `detail` is non-empty and unmatched by `re.match` with the
       pattern. A raised witness is neither died nor survived. It moves no
       status: a gate whose only verdicts are raises reports `pass`, and
-      raises add no failure to any result. The summary names each raised
-      witness with its first failure's detail, after the died or survived
-      count, and the died count leaves raised witnesses out. A matched
+      raises add no failure to any result. The summary carries one clause
+      naming every raised witness with its first failure's detail, joined by
+      commas. The clause follows the died, survived or miscount count and
+      comes ahead of the "not proven" note, whatever the status. The died
+      count leaves raised witnesses out. The pattern alone decides what
+      reads as an assertion, and core names no word of its own. A matched
       detail, an empty detail beside an unmatched one, one matched detail
       among unmatched ones, a `fail` with no failure and an undeclared
       pattern each read as died, as at base. A derived criterion is judged
@@ -79,9 +84,15 @@ acceptance:
       with no failure and the raised clause. Five kills and an undeclared
       pattern read the base summary. A detail that holds the matched word
       later in its text, beside a second unmatched detail, names its first
-      detail. A kill beside a raise reads `pass` and counts one of two died.
-      A survivor beside a raise reads `fail` with only the survivor's
-      failure and both clauses. A derived criterion that raises is named.
+      detail. A kill beside two raises reads `pass`, counts one of three
+      died and names both raises in one clause. A survivor beside a raise
+      reads `fail` with only the survivor's failure and both clauses. A
+      miscount beside a raise reads `fail` with only the miscount's failure
+      and both clauses. An unproven criterion beside a raise puts the clause
+      ahead of the note. A derived criterion that raises is named. Under the
+      pattern `^KeyError\b` a `KeyError` detail reads died and `assert 1 ==
+      2` reads raised. Under this repo's own declared pattern, a `Failed:`
+      reason is no raise and a `KeyError` reason is one.
     witness: tests/test_witness_gate.py::test_a_witness_that_fails_only_by_raising_reads_as_raised_and_moves_no_status
     positive_case: >-
       The survivor beside a raise reads `fail` with one `survived-mutant`
@@ -103,6 +114,12 @@ acceptance:
       - "The raised clause names the last failure's detail rather than the first."
       - "The pattern is matched against each failure's `message` rather than its `detail`."
       - "A detail reads as an assertion only when it starts with `AssertionError`, whatever the pattern says."
+      - "Whenever a pattern is declared, core matches its own words `assert`, `AssertionError` and `Failed` instead."
+      - "Each raised witness gets a clause of its own."
+      - "Each raised witness replaces the one before it in the clause."
+      - "The clause joins its entries with `; `."
+      - "The clause follows the \"not proven\" note."
+      - "The clause is left out when the gate fails on a miscount alone."
     covers:
       - set: the details a failing witness can show
         members:
@@ -122,6 +139,10 @@ acceptance:
             driven_by: "The pattern is searched anywhere in the detail with `re.search`, so a detail naming the word later reads as an assertion."
           - member: an unmatched detail with no pattern declared
             driven_by: "With no pattern declared every non-empty detail reads as raised."
+          - member: a `KeyError` detail and an `assert` detail under a pattern naming `KeyError`
+            driven_by: "Whenever a pattern is declared, core matches its own words `assert`, `AssertionError` and `Failed` instead."
+          - member: a `Failed:` reason under this repo's own pattern
+            driven_by: "Whenever a pattern is declared, core matches its own words `assert`, `AssertionError` and `Failed` instead."
       - set: the verdicts a raise can sit beside
         members:
           - member: a raise alone
@@ -132,6 +153,18 @@ acceptance:
             driven_by: "The raised clause is left out of a failing gate's summary."
           - member: a raise of a derived criterion
             driven_by: "Only declared criteria are judged for a raise, so a derived criterion that raises reads as died."
+          - member: a raise beside a raise
+            driven_by: "Each raised witness gets a clause of its own."
+          - member: a raise beside a miscount alone
+            driven_by: "The clause is left out when the gate fails on a miscount alone."
+          - member: a raise beside an unproven criterion
+            driven_by: "The clause follows the \"not proven\" note."
+      - set: the ways one clause can name two raises
+        members:
+          - member: both entries kept
+            driven_by: "Each raised witness replaces the one before it in the clause."
+          - member: joined by a comma
+            driven_by: "The clause joins its entries with `; `."
       - set: the details a summary can name for one raised witness
         members:
           - member: its first failure's detail, out of two
@@ -177,19 +210,26 @@ acceptance:
       Its line is read as a survivor's is, and it files one `adequacy`
       concern through `review.raised_finding`, anchored as a survivor's
       finding is, with no probe. It gets no second ask, and it is never a
-      blocker. A line read that returns `None`, or text without the edit's
+      blocker. `review.rebut_concerns` exempts a `HOST_FILED` concern from
+      the anchor check, as `anchored_blockers` exempts a host-filed
+      blocker, so an unanchored raise still reaches REBUT's concerns and
+      `anchored_concerns`. An unanchored lens concern still does not. A
+      line read that returns `None`, or text without the edit's
       `find`, reads `error` with the summary "the raised edit's line could
       not be read". A read that stops the cell reads `error` and asks the
       same pair again in a fresh cell. With no pattern the same raise reads
       `killed`. The witness drives `_run_apply_criterion_probes` over eight
       pairs in two cells: a criterion probe, a wrong version and a parent's
       version that raise, a wrong version killed by an assertion, a survivor,
-      two raises whose read returns `None` and lacks the `find`, and a raise
-      whose read stops the first cell. It asserts every outcome and each
-      raised summary. It asserts the four concerns' claims, lens, line,
-      anchor and probe. It asserts that only the survivor reaches
-      `check_probe` and `anchored_blockers`, and five findings in all. It
-      then drives one raise under no pattern.
+      two raises whose read returns `None` and lacks the `find`, a raise
+      whose read stops the first cell, and a raise whose line shares no
+      token with the diff. It asserts every outcome and each raised summary.
+      It asserts the five concerns' claims, lens, line, anchor and probe,
+      the last one unanchored. It asserts that only the survivor reaches
+      `check_probe` and `anchored_blockers`, and six findings in all. Beside
+      an unanchored lens concern, `rebut_concerns` returns the five and
+      `anchored_concerns` counts five. It then drives one raise under no
+      pattern.
     witness: tests/test_session.py::test_a_witness_that_only_raises_under_an_edit_reads_raised_and_files_a_concern
     positive_case: >-
       The survivor reaches `check_probe` and `anchored_blockers` through the
@@ -207,6 +247,8 @@ acceptance:
       - "The concern carries the edit as its probe."
       - "The concern is appended unanchored, without passing through `anchor`."
       - "With no pattern the raise still reads `raised`."
+      - "`rebut_concerns` still needs every concern anchored, so an unanchored raise reaches neither REBUT nor the count."
+      - "`rebut_concerns` drops the anchor check for every concern, so an unanchored lens concern is counted too."
     covers:
       - set: the kinds of pair a raise can come from
         members:
@@ -236,6 +278,14 @@ acceptance:
             driven_by: "A raise is asked a second time of the whole `tests` gate, as a survivor is."
           - member: a probe on its finding
             driven_by: "The concern carries the edit as its probe."
+      - set: the concerns `rebut_concerns` reads
+        members:
+          - member: an anchored raise
+            driven_by: "A raise files its finding as a blocker, so REBUT is asked to answer it."
+          - member: an unanchored raise
+            driven_by: "`rebut_concerns` still needs every concern anchored, so an unanchored raise reaches neither REBUT nor the count."
+          - member: an unanchored lens concern
+            driven_by: "`rebut_concerns` drops the anchor check for every concern, so an unanchored lens concern is counted too."
       - set: the pattern's two states
         members:
           - member: a declared pattern
@@ -337,6 +387,29 @@ acceptance:
         members:
           - member: no new failure
             driven_by: "`regate` counts a raised version as a new failure."
+  - claim: >-
+      The pull request body's "Not covered" line lists an unanchored
+      finding unless `anchored_blockers` or `rebut_concerns` selected it. So
+      an unanchored host-filed concern, which REBUT and the concern count
+      now see, is not called unseen. The witness renders a body whose
+      reviews hold one unanchored host-filed concern under `adequacy` and
+      one unanchored lens concern under `correctness`. The line counts one
+      finding and names `correctness` alone.
+    witness: tests/test_report.py::test_an_unanchored_host_filed_concern_is_not_listed_as_unseen
+    positive_case: >-
+      The unanchored lens concern is listed through the same "could not be
+      anchored" line, so the host-filed concern's absence is read where an
+      unanchored finding does appear.
+    wrong_versions:
+      - "The line still skips only what `anchored_blockers` selected, as at your base."
+      - "The line skips every concern, so the unanchored lens concern is not listed either."
+    covers:
+      - set: the unanchored concerns the line can meet
+        members:
+          - member: a host-filed concern
+            driven_by: "The line still skips only what `anchored_blockers` selected, as at your base."
+          - member: a lens concern
+            driven_by: "The line skips every concern, so the unanchored lens concern is not listed either."
 ---
 
 ## Context
@@ -439,6 +512,18 @@ Its claim reads, with `{edit}` as below:
 `{edit}` is "the criterion's own edit" with no `version`, and otherwise
 "`{parent or 'the spec'}`'s wrong version `{version!r}`".
 
+In `rebut_concerns`, exempt a concern whose claim starts with `HOST_FILED`
+from the anchor check, as `anchored_blockers` exempts a host-filed blocker
+(`saffron/phases/review.py:982-997`). `anchored_concerns` counts through
+it (`saffron/phases/review.py:1090-1095`), so the queue line and
+`review_state` follow. Rewrite its docstring's "No host-filed carve-out"
+sentences (`saffron/phases/review.py:1026-1027`), which become false.
+
+**In `saffron/report/pr_body.py`**, the "Not covered" section skips only
+what `anchored_blockers` selected when it lists unanchored findings
+(`saffron/report/pr_body.py:664-666`). Skip what `rebut_concerns` selected
+too, and reword the comment above it.
+
 **In `saffron/cell/session.py`**, give `_apply_criterion_probes` a
 required keyword `assertion: str | None` and pass it to `witness_gate`.
 Keep the last `tests` result `_run_tests` returned for the pair. A pair
@@ -455,8 +540,13 @@ review and asks nothing more. `_drive_cell` passes
 
 **In `saffron/parent_versions.py`**, pair a `raised` version as a
 `killed` one (`saffron/parent_versions.py:105`). Name `raised` beside
-`killed` in `describe_parent_versions`'s docstring
-(`saffron/parent_versions.py:187`).
+`killed` in three sentences that would turn false: the module docstring
+(`saffron/parent_versions.py:7`), `own_version_pairs`'s
+(`saffron/parent_versions.py:163`) and `describe_parent_versions`'s
+(`saffron/parent_versions.py:187`). Do the same in the comment on
+`CellSpec.depends_on` (`saffron/cell/session.py:392`), in
+`_apply_criterion_probes`'s docstring (`saffron/cell/session.py:2110`) and
+in `regate`'s comment on reviving a version (`saffron/regate.py:245`).
 
 **In `saffron/regate.py`**, pass `policy.witness.assertion`
 (`saffron/regate.py:285`). Its pair loop already prints every outcome
@@ -496,7 +586,12 @@ the moved one.
 ## Notes for the agent
 
 **Every behaviour is new code inside existing functions.** Each criterion
-declares a witness and no mutant. So `witness` reports `skip` here.
+declares a witness and no mutant. So `witness` reports `skip` here. Three
+call sites are the exception: `assertion=policy.witness.assertion` in
+`suite.py`, `_drive_cell` and `regate.py`. A mutant replacing it with
+`None` would let `witness` judge criteria 2, 4 and 6. None is declared,
+since a mutant lives on `refs/saffron/mutants`. The spec's own pull
+request cannot push that ref, and the exact spelling is the cell's.
 
 **At base each witness fails in its body**, and its module still
 collects. `WitnessPatterns(assertion=...)` and `policy.witness.assertion`
@@ -535,6 +630,9 @@ result is the task's own `v1`. Replace it in `_wv_full_results()`.
 `_apply_criterion_probes`'s docstring is at ten lines already, so reword it
 inside the lines it holds.
 
-**Size**. A prototype changed 132 lines outside `tests/` by `git diff
---numstat`, and `size` counted 465 tokens there. Its tests changed 424
-lines, 1739 tokens that `size` leaves out.
+**The report witness** follows the one beside it in `tests/test_report.py`
+that reads the "could not be anchored" line. Build both findings with
+`_finding` and pass no `rebut_result`.
+
+**Size**. A prototype changed 146 lines outside `tests/` by `git diff
+--numstat`, and `size` counted 528 tokens there.
