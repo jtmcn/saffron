@@ -278,6 +278,8 @@ Design notes:
 
   ORPHANED ◀── any state, on crash/kill; reclaimed by `saffron gc` (§4.5)
               also IMPLEMENT's first bound cut with nothing committed (§4.5)
+              Leaves for `READY_FOR_REVIEW` when `saffron adopt`'s
+              re-gate of a by-hand pull request's head is green (`SA-0429`)
 
   PREFLIGHT_FAILED ◀── the baseline suite errored: the toolchain is broken, not
                        the code, and no model call has happened yet (§5.4)
@@ -335,8 +337,11 @@ Design notes:
                        row can carry an older push. A `--stack` night counts it a
                        miss and refuses its children (§4.2, §5.6, ADR 7).
                        Leaves for `MERGED`, when `reconcile` reads a merge of
-                       a pull request the row carries. Beside a lens with an
-                       error, such a REBUT ends REVIEW_INCOMPLETE instead
+                       a pull request the row carries. Also for
+                       `READY_FOR_REVIEW`, when `saffron adopt`'s re-gate of
+                       that pull request's head is green (`SA-0429`). Beside
+                       a lens with an error, such a REBUT ends
+                       REVIEW_INCOMPLETE instead
   REVIEW_INCOMPLETE ◀── from REVIEWING: a lens produced no findings, because its
                        session failed or its output was not the schema. No
                        pull request opens, and the branch is pushed as a

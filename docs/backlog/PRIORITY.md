@@ -83,6 +83,10 @@ back, and re-verification went red.
 
 ### Tier 2 — the morning after
 
+**Placed 2026-11-23**, from `SA-0429`'s spec chain: **b-f7db70**. A kept
+`ORPHANED` task is resumed past its adopted pull request, and a green cell
+force-pushes over the by-hand head.
+
 **Placed 2026-11-07**, in grooming, from three open items no tier named:
 ~~**b-a714d2**~~, **b-d9ed45**, then ~~**b-2bc0d5**~~. A second batch stamps a live
 task `ORPHANED`, because nothing holds one batch at a time. A second run of one
@@ -538,9 +542,9 @@ risk — not, as an earlier draft of this note said, that `.gitignore` in
 *tracked* half only: a `.gitignore` naming itself reaches no diff at all.
 
 **What this ordering costs, recounted on 2026-11-23.** Tier 1 holds 7 open
-items, tier 2 holds 62 and tier 3 holds 146. So tier 3 holds 68% of the
+items, tier 2 holds 63 and tier 3 holds 146. So tier 3 holds 68% of the
 backlog. That is the deliberate consequence of ranking by the milestone rather
-than by what is nearest to hand. 23 of the 215 open items are outside a cell,
+than by what is nearest to hand. 23 of the 216 open items are outside a cell,
 since a cell cannot reach their files.
 
 **Placed 2026-11-04**, from the spec loop's run 53: **b-8c6696**, ~~**b-a19ffd**~~
