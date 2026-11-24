@@ -3,7 +3,7 @@ id: SA-0429
 title: "`saffron adopt` refuses a `REBUTTAL_UNJUDGED` or `ORPHANED` task, so a by-hand pull request leaves its children refused"
 type: feature
 priority: 2
-estimated_lines: 334
+estimated_lines: 351
 estimate_measured: true
 touches:
   - saffron/cli.py
@@ -43,9 +43,9 @@ forbidden:
   - tests/test_task.py
   - tests/test_session.py
   - tests/test_queued_specs.py
-budget_usd: 40
+budget_usd: 42
 max_attempts: 3
-max_turns: 220
+max_turns: 230
 risk: elevated
 acceptance:
   - claim: >-
@@ -66,7 +66,8 @@ acceptance:
       witness drives three parent rows. One is `REBUTTAL_UNJUDGED` with a
       push recorded in that state and no url. One is `REBUTTAL_UNJUDGED`
       whose only push came in an earlier state. One is `ORPHANED` with no
-      push.
+      push. For the first row, a second red adopt on the same pull request,
+      which finds the url already carried, still leaves the child refused.
     witness: tests/test_cli.py::test_adopt_admits_a_rebuttal_unjudged_or_orphaned_tasks_child_only_after_a_green_regate
     wrong_versions:
       - "`ORPHANED` stays out of the states adopt takes."
@@ -78,6 +79,7 @@ acceptance:
       - "Adopt records the untrusted head before the url, so the url's fact trusts it again."
       - "The ledger writes the untrusted mark into the fact but its apply step still sets `pushed_in_state` to the row's state."
       - "An untrusted push leaves `pushed_in_state` as it stood, so the trust the url's fact gave the row stays."
+      - "Adopt records the head untrusted only when the task carries no url yet, so a repeat adopt trusts it."
     covers:
       - set: the parent rows adopt meets
         members:
@@ -95,6 +97,12 @@ acceptance:
             driven_by: tests/test_cli.py::test_adopt_admits_a_rebuttal_unjudged_or_orphaned_tasks_child_only_after_a_green_regate
           - member: zero new failures on another head
             driven_by: tests/test_cli.py::test_adopt_admits_a_rebuttal_unjudged_or_orphaned_tasks_child_only_after_a_green_regate
+      - set: the adopts on one pull request
+        members:
+          - member: the first, with no url carried
+            driven_by: tests/test_cli.py::test_adopt_admits_a_rebuttal_unjudged_or_orphaned_tasks_child_only_after_a_green_regate
+          - member: a repeat red adopt, with the url carried
+            driven_by: "Adopt records the head untrusted only when the task carries no url yet, so a repeat adopt trusts it."
       - set: the readers that refuse or admit the child
         members:
           - member: a plain `build_queue` scan
@@ -320,6 +328,11 @@ prototype before this spec's ledger change, for both shapes.
   nothing in its state. For a `REBUTTAL_UNJUDGED` task adopt kept, the cause is
   an adopted head no green re-gate judged. Both files stay forbidden, and
   the lines stay as they are.
+- **The window between adopt's two writes.** The url's fact trusts the
+  push (`saffron/ledger.py:1889-1915`), and the untrusted head follows it
+  (`saffron/ledger.py:1795-1801`). A refused append or a kill between them
+  leaves the row trusted with a url, and adopting again on the same pull
+  request closes it.
 - **`DESIGN.md` and `CONTEXT.md`.** The `ORPHANED` and `REBUTTAL_UNJUDGED`
   rows of §3.3 and the **Adopt** entry in `CONTEXT.md` are amended by hand
   in this spec's own commit.
@@ -339,6 +352,9 @@ other callers of `record_push` are PACKAGE's two
 (`saffron/phases/package.py:999`, `saffron/phases/package.py:1345`). They
 pass no keyword, and criterion 5 holds them. `adopt_pull_request` is
 unchanged, and criteria 6 and 7 hold the three older routes.
+
+**The size estimate prices past 80%, and the operator accepts it.** The
+real `size` gate sees only the 44 changed lines outside `tests/`.
 
 **An edit to existing code, and still no criterion declares a mutant.** The
 core change adds two members to a set literal. Six members pass the line
