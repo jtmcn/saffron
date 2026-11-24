@@ -388,3 +388,31 @@ by its own criterion's witness.
     writers record that push, adopt included.
 99. Each wrong version is run against its own criterion's witness alone,
     so a kill is attributed to the witness that claims it.
+
+## SA-0431 (b-c2f264)
+
+One writer, two reviews, and a final writer round. The draft took about 51
+minutes. The writer landed the `witness.assertion` policy field by hand, and
+the operator approved it as drafted. The revisions took about 20 and 7
+minutes. The reviews took about 14 and 11 minutes.
+
+Round 1 found two blockers. Every witness declared a pattern that meant
+"starts with assert", so a core that hard-coded those words passed all six.
+No row held two raised witnesses, so a wrong join passed. Round 1 also found
+that an unanchored host-filed concern never reached REBUT. Round 2 found the
+first blocker's class again, in criteria 4 and 6, and a stale pair count.
+The final round ran every route under a `KeyError` pattern, and all 54
+declared wrong versions were killed, each by its own criterion's witness.
+
+The size estimate rose from 132 to 150 lines as stale sentences came into
+scope. `check` blocks it at `elevated`, and the delegate accepted that,
+since the `size` gate counts 499 of its 1300 tokens.
+
+## What SA-0431 adds
+
+100. A rule that reads a declared pattern drives at least one row under a
+     pattern that disagrees with the obvious default, on every route that
+     reads it.
+101. A claim that names each member of a list drives a row with two members.
+102. A change that lets a finding past a filter reads every docstring and
+     document that says only one kind passes.
