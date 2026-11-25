@@ -200,9 +200,9 @@ REVIEW ran. Put that line in the seats' `{KNOWN}` (step 2c).
 When the branch's copy of the spec differs from the text the cell ran, `record`
 names a file holding that text. Give it to the seats as `{SPEC}`.
 
-Then score the cell's own REVIEW the same way, with `--kind cell` and no
-`--report` or `--commit`. Its round is saved under `cell/` beside the
-other kinds. A non-zero exit is noted and the loop carries on.
+Then save the cell's own REVIEW with `driver.py save-round SA-NNNN --kind cell`,
+with no `--report` or `--commit`. Its round is saved under `cell/` beside the
+other kinds, for its labels. A non-zero exit is noted and the loop carries on.
 
 `drop SA-NNNN --why "…"` takes a spec out of the loop, and `undrop SA-NNNN`
 puts it back.
@@ -220,19 +220,16 @@ puts it back.
    finds the defects — in stack #233 each of four reviews found a witness that
    survived an edit breaking its line, after three clean lenses.
 
-   Save both seats' whole reports, verbatim, and score them with Jev. Jev
-   reads each report's findings block, so a summary cuts the claims it scores
-   (spec loop run 13). A non-zero exit is noted and the loop carries on.
+   Save both seats' whole reports, verbatim, as one review round. The driver
+   reads each report's findings block, so a summary cuts the claims its labels
+   cover (spec loop run 13). A non-zero exit is noted and the loop carries on.
 
    ```bash
-   sed -n 's/^export \(TYPESAFE_API_KEY=\)/\1/p' ~/.secrets > <scratch>/jev.env   # once per loop
-   chmod 600 <scratch>/jev.env
-   uv run --env-file <scratch>/jev.env .claude/skills/run-saffron-spec-loop/driver.py jev SA-NNNN --kind pr-review --report <spec seat> \
+   uv run .claude/skills/run-saffron-spec-loop/driver.py save-round SA-NNNN --kind pr-review --report <spec seat> \
      --report <standards seat> --commit <PR head> --base <the PR's base branch>
    ```
 
-   Pass `--base` every review round. A later review round diffs from the
-   previous review round's commit, or from the merge base again after a restack.
+   Pass `--base` every review round.
 3. **Verify every finding yourself** before acting: read the line and re-run
    its probe with the driver:
    `driver.py probe <file> --find … --replace … --root <worktree> -- uv run pytest …`.
@@ -354,8 +351,8 @@ append it to `.saffron/rejections.md` as its **Adding one** paragraph says, in
 the same PR. A finding answered with no change rejected nothing. Those lines
 are §8's evidence for which gate, `CLAUDE.md` line or lens comes next.
 
-Label every Jev-scored review round, because a score is worth nothing without
-the outcome it predicted. Write `labels.json` beside each round's
+Label every saved review round. The labels are the record of which findings
+were real and what became of them. Write `labels.json` beside each round's
 `findings.json` under `~/.saffron/batches/spec-loop/SA-NNNN/<kind>/round-N/`.
 For each finding id, record these four facts:
 
@@ -371,7 +368,7 @@ ran. `cell_review` is the in-cell REVIEW. On a spec review round,
 `next_spec_round` is the next spec review and `pr_seats` is the first PR seat
 review. On a PR review round, `pr_seats` is the next PR seat review of the same
 pull request, and `next_spec_round` is `null`. A label never reads the review
-round it sits in. Schema 1 read `pr_seats` that way, and it graded nothing
+round it sits in. Schema 1 read `pr_seats` that way, and it measured nothing
 (`docs/evidence/2026-10-02-jev-scores-graded.md`). A defect no findings block
 carried, such as one you found yourself, goes in `run-NN-unscored.json`
 beside the spec folders. Spec loop run 13's files show the shape.
@@ -380,7 +377,7 @@ beside the spec folders. Spec loop run 13's files show the shape.
 uv run .claude/skills/run-saffron-spec-loop/driver.py labels   # every spec in the order
 ```
 
-It exits 1 and names each gap: a scored round with no `labels.json`, a finding
+It exits 1 and names each gap: a saved round with no `labels.json`, a finding
 with no label or an unknown value, or a missing `blocker_followed` field. It
 names a schema-2 label that reads a later review round which never ran.
 

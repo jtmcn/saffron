@@ -1154,8 +1154,8 @@ round. Both seats of a step 2c pull request review count as one review round
 together. A cell's REVIEW counts as the cell's single review round. A spec chain's
 spec review and a pull request review happen outside any task, so neither is an
 attempt. `saffron draft` charges each of its review rounds to its task as one
-SPEC_REVIEW attempt (§3.4). It is numbered from 1, and Jev scores each one
-(`driver.py jev`).
+SPEC_REVIEW attempt (§3.4). It is numbered from 1, and the spec loop saves each one
+(`driver.py save-round`).
 _Avoid_: bare "round", "iteration", and "pass".
 
 **Spec loop run**: One spec loop, numbered from 1, from its order's snapshot to

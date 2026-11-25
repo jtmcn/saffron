@@ -45,3 +45,14 @@ loop reads `jev.ttl`, so the one useful score helps nobody yet.
 - 2026-10-02: filed from the evidence record of the same date.
 - 2026-10-02: Q6 dropped, schema-2 labels defined and the pre-registration
   proposed. Point 4 waits on the stopping rule.
+- 2026-11-22: scored. `driver.py noise --count` read 59, past the 40 that
+  triggers the run. Nobody checked on the day it crossed 40, so the run came
+  late and counted more review rounds than the rule meant.
+- 2026-11-22: `driver.py noise` printed `noise 59, caught 25, acted on 647,
+  flagged 14: fail`. Catch is 25 of 59, or 42%, under the bar of half. Cost is
+  14 of 647, or 2.2%, inside the bar of one in twenty. Catch decides it.
+  Q2 stays an observation and nothing in the loop acts on it.
+- 2026-11-24: no other saved answer helps
+  (`docs/evidence/2026-11-24-jev-other-uses-graded.md`). The loop stops
+  calling Jev. `driver.py save-round` keeps saving each review round for its
+  labels.

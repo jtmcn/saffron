@@ -31,7 +31,6 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
-    from harness.jev_observe import ReviewRound
     from saffron.gates.contract import GateResult
     from saffron.intake import Spec
 
@@ -44,8 +43,8 @@ LEGACY_PLAN = STATE_DIR / "plan.json"
 SNAPSHOT_COMMAND = "uv run .claude/skills/run-saffron-spec-loop/driver.py snapshot"
 ONTOLOGY = REPO / "ontology" / "factory.ttl"
 ONTOLOGY_NS = "urn:software-factory:ns#"
-# Where `jev` writes. A cell's own batch directory sits under `v0/`, as `saffron/cli.py` puts it.
-JEV_ROOT = Path.home() / ".saffron" / "batches"
+# Where `save-round` writes. A cell's own batch directory sits under `v0/`, as `saffron/cli.py` puts it.
+BATCHES = Path.home() / ".saffron" / "batches"
 # The paths `check` walks `depends_on` for. A live ancestor touching one of
 # these shapes REVIEW or REBUT, and a stacked child's REVIEW never runs it.
 _REVIEW_TRIGGER_PATHS = (
@@ -1323,7 +1322,7 @@ def _findings_are_latest(directory: Path) -> bool:
     """Whether `findings.json` in a batch directory is the latest run's REVIEW.
 
     Each run recreates `gates/` before REVIEW, so a file no older than it is
-    the latest run's. `record` and `jev --kind cell` share this rule.
+    the latest run's. `record` and `save-round --kind cell` share this rule.
     """
     gates_dir = directory / "gates"
     try:
@@ -1337,7 +1336,7 @@ def _review_lenses_line(spec_id: str) -> str:
     """The lenses the spec's latest REVIEW ran, read from `findings.json` in
     its batch directory. A re-run overwrites that file."""
     none_recorded = "lenses: none recorded for this spec's latest run"
-    directory = JEV_ROOT / "v0" / spec_id
+    directory = BATCHES / "v0" / spec_id
     findings_path = directory / "findings.json"
     if not _findings_are_latest(directory):
         return none_recorded
@@ -1512,13 +1511,6 @@ _HALT_GUIDANCE = {
 }
 
 
-def _jev_client():
-    """The live client. Built only here, so no other command needs the SDK."""
-    from typesafe_sdk import TypeSafeClient
-
-    return TypeSafeClient(timeout=120.0)
-
-
 def _spec_path(spec_id: str, given: str | None) -> Path | None:
     if given:
         return Path(given)
@@ -1527,76 +1519,37 @@ def _spec_path(spec_id: str, given: str | None) -> Path | None:
 
 
 def _resolve_commit(ref: str, cwd: Path) -> str | int:
-    """`ref` as a SHA. A review round stores and emits only SHAs, never a ref: a
-    branch name re-resolves to a different commit on every re-score, and
-    `origin/main` diffed against itself is empty (item F1)."""
+    """`ref` as a SHA. A review round stores only SHAs, never a ref, because a
+    branch name later resolves to a different commit (item F1)."""
     try:
         return _git("rev-parse", "--verify", f"{ref}^{{commit}}", cwd=cwd)
     except GitError as exc:
         return _fail(f"{ref} does not resolve to a commit: {exc}")
 
 
-def cmd_jev(args) -> int:
-    """Score one review round with Jev and write `jev.ttl`. Nothing reads it yet."""
-    if not os.environ.get("TYPESAFE_API_KEY"):
-        print("error: TYPESAFE_API_KEY is not set for this command", file=sys.stderr)
-        return 2
-    if args.kind == "cell" and args.round is not None:
-        return _fail("--kind cell has one review round; it takes no --round")
-    if args.round is not None and (args.report or args.commit or args.base):
-        return _fail(
-            "--round re-scores a saved review round; it takes no --report, --commit or --base"
-        )
+def cmd_save_round(args) -> int:
+    """Save one review round's reports and findings, so the loop can label them."""
     # `harness` is not in the saffron wheel, so it is imported from the checkout.
     if str(REPO) not in sys.path:
         sys.path.insert(0, str(REPO))
-    from typesafe_sdk import TypeSafeError
-
-    from harness import jev_observe
     from saffron.intake import SpecError, load_spec
 
-    # A re-score reads the spec the reviewer read, saved beside the review round.
-    if args.kind != "cell" and args.round is not None:
-        path = _jev_base(args) / f"round-{args.round}" / "spec.md"
-        if not path.is_file():
-            return _fail(f"no saved review round {args.round} at {path.parent}")
-    else:
-        path = _spec_path(args.spec_id, args.spec)
+    path = _spec_path(args.spec_id, args.spec)
     if path is None:
         return _fail(f"no single spec file for {args.spec_id}, so pass --spec")
     try:
         spec, _sha = load_spec(path)
     except SpecError as exc:
         return _fail(str(exc))
-    criteria = [c.claim for c in spec.acceptance] or spec.acceptance_criteria
-    prepared = (
-        _jev_cell(spec.id, path.read_text(), criteria)
+    saved = (
+        _save_cell(spec.id, path.read_text())
         if args.kind == "cell"
-        else _jev_review(args, spec.id, path.read_text(), criteria)
+        else _save_review(args, spec.id, path.read_text())
     )
-    if isinstance(prepared, int):
-        return prepared
-    directory, round_ = prepared
-    # So a failed call below does not leave an earlier score looking current (item F7).
-    (directory / "jev.ttl").unlink(missing_ok=True)
-    # A first review round with no findings asks Jev nothing, and an empty request is refused.
-    if not jev_observe.build_asks(round_):
-        print(f"{spec.id}  {args.kind} review round {round_.number}  nothing to ask")
-        return 0
-    try:
-        model, answers = jev_observe.observe(round_, _jev_client())
-    # KeyError is an answer missing from the response, which is Jev failing too.
-    except (TypeSafeError, KeyError) as exc:
-        print(
-            f"error: Jev did not answer review round {round_.number}: {exc}",
-            file=sys.stderr,
-        )
-        return 2
-    (directory / "jev.ttl").write_text(jev_observe.to_turtle(round_, model, answers))
-    print(
-        f"{spec.id}  {args.kind} review round {round_.number}  "
-        f"{len(answers)} answers  {directory}"
-    )
+    if isinstance(saved, int):
+        return saved
+    directory, count = saved
+    print(f"{spec.id}  {args.kind} {directory.name}  {count} findings  {directory}")
     return 0
 
 
@@ -1618,7 +1571,7 @@ LABEL_LATER = {"spec-review": "next_spec_round", "pr-review": "pr_seats"}
 
 
 def _label_gaps(directory: Path, kind: str) -> list[str]:
-    """Why one scored review round's `labels.json` does not grade its Jev answers."""
+    """Why one saved review round's `labels.json` is incomplete."""
     path = directory / "labels.json"
     if not path.is_file():
         return ["no labels.json"]
@@ -1656,188 +1609,107 @@ def _label_gaps(directory: Path, kind: str) -> list[str]:
 
 
 def cmd_labels(args) -> int:
-    """Every Jev-scored review round of these specs carries a complete
-    `labels.json`, the outcome its scores are graded against later."""
+    """Every saved review round of these specs carries a complete `labels.json`."""
     specs = args.spec_ids or [row.spec_id for row in _load()]
     bad = 0
-    scored = 0
+    saved = 0
     for spec_id in specs:
         for kind in ("spec-review", "pr-review", "cell"):
-            base = JEV_ROOT / "spec-loop" / spec_id / kind
+            base = BATCHES / "spec-loop" / spec_id / kind
             for directory in sorted(base.glob("round-*")):
-                if not (directory / "jev.ttl").is_file():
+                if not (directory / "findings.json").is_file():
                     continue
-                scored += 1
+                saved += 1
                 for gap in _label_gaps(directory, kind):
                     bad += 1
                     print(f"{spec_id}  {kind} {directory.name}  {gap}")
     if bad:
-        return _fail(f"{bad} label gap(s) across {scored} scored review round(s)")
-    print(f"labels: {scored} scored review round(s), each labelled")
+        return _fail(f"{bad} label gap(s) across {saved} saved review round(s)")
+    print(f"labels: {saved} saved review round(s), each labelled")
     return 0
 
 
-def cmd_noise(args) -> int:
-    """Grade Q2's noise score over every schema-2 labelled review round on disk."""
-    if str(REPO) not in sys.path:
-        sys.path.insert(0, str(REPO))
-    from harness import jev_grade
+def _save_review(args, spec_id: str, spec_text: str) -> tuple[Path, int] | int:
+    """A spec or PR review round, numbered one past the last saved review round."""
+    from harness import review_round
 
-    notes = []
-    for directory in sorted((JEV_ROOT / "spec-loop").glob("*/*/round-*")):
-        if directory.parent.name not in LABEL_LATER:
-            continue
-        labels, findings = directory / "labels.json", directory / "findings.json"
-        saved = directory / "round.json"
-        if not (labels.is_file() and findings.is_file() and saved.is_file()):
-            continue
-        if not jev_grade.counts(saved.read_text()):
-            continue
-        ttl = directory / "jev.ttl"
-        notes += jev_grade.round_notes(
-            findings.read_text(),
-            labels.read_text(),
-            ttl.read_text() if ttl.is_file() else None,
-        )
-    grade = jev_grade.grade(notes)
-    if args.count:
-        print(f"noise notes {grade.noise}")
-        return 0
-    print(
-        f"noise {grade.noise}, caught {grade.caught}, acted on {grade.acted}, "
-        f"flagged {grade.flagged_acted}: {grade.verdict}"
-    )
-    return 0
-
-
-def _jev_base(args) -> Path:
-    return JEV_ROOT / "spec-loop" / args.spec_id / args.kind
-
-
-def _jev_since(prev: dict, commit: str, merge_base: str, root: Path) -> str:
-    """Where a later review round's diff starts: the last reviewed commit, or the
-    merge base again when a restack or a merged base rewrote the history between."""
-    if prev.get("base") != merge_base:
-        return merge_base
-    try:
-        _git("merge-base", "--is-ancestor", prev["commit"], commit, cwd=root)
-    except GitError:
-        return merge_base
-    return prev["commit"]
-
-
-def _jev_review(
-    args, spec_id: str, spec_text: str, criteria: list[str]
-) -> tuple[Path, ReviewRound] | int:
-    """A spec or PR review round: numbered, diffed from the last review round, saved before the call."""
-    from harness import jev_observe
-
-    base = _jev_base(args)
+    if not args.report or not args.commit:
+        return _fail("a review round needs --report and --commit")
+    commit = _resolve_commit(args.commit, args.root)
+    if isinstance(commit, int):
+        return commit
+    base = BATCHES / "spec-loop" / spec_id / args.kind
     done = sorted(
         int(p.name.removeprefix("round-"))
         for p in base.glob("round-*")
         if p.name.removeprefix("round-").isdigit()
     )
-    if args.round is not None:
-        number = args.round
-        directory = base / f"round-{number}"
-        if not (directory / "round.json").is_file():
-            return _fail(f"no saved review round {number} at {base}")
-        saved = json.loads((directory / "round.json").read_text())
-        commit, since = saved["commit"], saved["since"]
-        saved_at = saved.get("saved_at")
-        base_ref, merge_base = saved["base_ref"], saved["base"]
-        reports = [p.read_text() for p in sorted(directory.glob("report-*.md"))]
-    else:
-        if not args.report or not args.commit:
-            return _fail("a new review round needs --report and --commit")
-        commit = _resolve_commit(args.commit, args.root)
-        if isinstance(commit, int):
-            return commit
-        number = (done[-1] if done else 0) + 1
-        directory = base / f"round-{number}"
-        prev = (
-            json.loads((base / f"round-{number - 1}" / "round.json").read_text())
-            if number > 1
-            else {}
-        )
-        base_ref = args.base or prev.get("base_ref") or "origin/main"
-        try:
-            merge_base = _git("merge-base", base_ref, commit, cwd=args.root)
-        except GitError as exc:
-            return _fail(f"{base_ref} has no merge base with {commit}: {exc}")
-        since = _jev_since(prev, commit, merge_base, args.root) if prev else merge_base
-        reports = [Path(p).read_text() for p in args.report]
-        saved_at = dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
+    number = (done[-1] if done else 0) + 1
+    prev_path = base / f"round-{number - 1}" / "round.json"
+    prev = json.loads(prev_path.read_text()) if prev_path.is_file() else {}
+    base_ref = args.base or prev.get("base_ref") or "origin/main"
     try:
-        findings = [f for text in reports for f in jev_observe.parse_block(text)]
-    except jev_observe.BlockError as exc:
-        return _fail(str(exc))
-    prior: list = []
-    for n in (n for n in done if n < number):
-        try:
-            prior += jev_observe.load_findings(
-                (base / f"round-{n}" / "findings.json").read_text()
-            )
-        except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
-            return _fail(f"review round {n}'s findings.json is corrupt: {exc}")
-    # `since` is the merge base for review round 1, so the diff is the whole PR.
-    try:
-        diff = _git("diff", f"{since}..{commit}", cwd=args.root)
+        merge_base = _git("merge-base", base_ref, commit, cwd=args.root)
     except GitError as exc:
+        return _fail(f"{base_ref} has no merge base with {commit}: {exc}")
+    reports = [Path(p).read_text() for p in args.report]
+    try:
+        findings = [f for text in reports for f in review_round.parse_block(text)]
+    except review_round.BlockError as exc:
         return _fail(str(exc))
-    pairs = jev_observe.number_findings(args.kind, spec_id, number, findings)
+    pairs = review_round.number_findings(args.kind, spec_id, number, findings)
+    directory = base / f"round-{number}"
     directory.mkdir(parents=True, exist_ok=True)
     for i, text in enumerate(reports, 1):
         (directory / f"report-{i}.md").write_text(text)
     (directory / "spec.md").write_text(spec_text)
-    saved = {"commit": commit, "since": since, "base_ref": base_ref, "base": merge_base}
-    if saved_at is not None:
-        saved["saved_at"] = saved_at
+    saved_at = dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
+    saved = {
+        "commit": commit,
+        "base_ref": base_ref,
+        "base": merge_base,
+        "saved_at": saved_at,
+    }
     (directory / "round.json").write_text(json.dumps(saved) + "\n")
-    (directory / "findings.json").write_text(jev_observe.dump_findings(pairs))
-    return directory, jev_observe.ReviewRound(
-        args.kind, spec_id, number, commit, spec_text, criteria, pairs, prior, diff
-    )
+    (directory / "findings.json").write_text(review_round.dump_findings(pairs))
+    return directory, len(pairs)
 
 
-def _jev_cell(
-    spec_id: str, spec_text: str, criteria: list[str]
-) -> tuple[Path, ReviewRound] | int:
+def _save_cell(spec_id: str, spec_text: str) -> tuple[Path, int] | int:
     """The cell's REVIEW, read from its batch directory after the task ends."""
-    from harness import jev_observe
+    from harness import review_round
 
-    directory = JEV_ROOT / "v0" / spec_id
+    directory = BATCHES / "v0" / spec_id
     try:
         lenses = json.loads((directory / "findings.json").read_text())
         commit = json.loads((directory / "patch.json").read_text())["head_sha"]
-        diff = (directory / "patch.diff").read_text()
     except (OSError, json.JSONDecodeError, KeyError) as exc:
-        return _fail(f"no finished cell to score at {directory}: {exc}")
+        return _fail(f"no finished cell to save at {directory}: {exc}")
     if not _findings_are_latest(directory):
-        return _fail(f"{directory}'s REVIEW predates its latest run, so no score")
-    # Saved beside the other kinds, so `labels` finds the round its labels grade (b-91ead2).
-    base = JEV_ROOT / "spec-loop" / spec_id / "cell"
+        return _fail(
+            f"{directory}'s REVIEW predates its latest run, so nothing is saved"
+        )
+    # Saved beside the other kinds, so `labels` finds the round (b-91ead2).
+    base = BATCHES / "spec-loop" / spec_id / "cell"
     rounds = sorted(
         (int(p.name.removeprefix("round-")), p)
         for p in base.glob("round-*")
         if p.name.removeprefix("round-").isdigit()
     )
-    # A rescore of the same head keeps its review round. A re-run cell takes the next one.
+    # Saving the same head again keeps its review round. A re-run cell takes the next one.
     number = next(
         (n for n, p in rounds if _saved_commit(p) == commit),
         (rounds[-1][0] if rounds else 0) + 1,
     )
-    findings = jev_observe.lens_findings(lenses)
-    pairs = jev_observe.number_findings("cell", spec_id, number, findings)
+    pairs = review_round.number_findings(
+        "cell", spec_id, number, review_round.lens_findings(lenses)
+    )
     saved = base / f"round-{number}"
     saved.mkdir(parents=True, exist_ok=True)
     (saved / "spec.md").write_text(spec_text)
     (saved / "round.json").write_text(json.dumps({"commit": commit}) + "\n")
-    (saved / "findings.json").write_text(jev_observe.dump_findings(pairs))
-    return saved, jev_observe.ReviewRound(
-        "cell", spec_id, number, commit, spec_text, criteria, pairs, [], diff
-    )
+    (saved / "findings.json").write_text(review_round.dump_findings(pairs))
+    return saved, len(pairs)
 
 
 def _saved_commit(directory: Path) -> str | None:
@@ -1977,7 +1849,7 @@ def _live_phase(spec_id: str) -> str | None:
     """The phase a running cell of this spec is in, from its `events.jsonl`."""
     from saffron import events
 
-    task_dir = JEV_ROOT / "v0" / spec_id
+    task_dir = BATCHES / "v0" / spec_id
     log = task_dir / "events.jsonl"
     if not log.is_file() or time.time() - log.stat().st_mtime > _LIVE_S:
         return None
@@ -4121,7 +3993,7 @@ def main() -> int:
     p.set_defaults(func=cmd_priority)
 
     p = sub.add_parser(
-        "jev", help="score one review round with Jev, informational only"
+        "save-round", help="save one review round's reports and findings for labelling"
     )
     p.add_argument("spec_id")
     p.add_argument(
@@ -4141,23 +4013,14 @@ def main() -> int:
         "--base",
         help="the PR's base branch (default: the last review round's, else origin/main)",
     )
-    p.add_argument("--round", type=int, help="score a saved review round again")
     p.add_argument("--root", type=Path, default=REPO, help="the checkout git reads")
-    p.set_defaults(func=cmd_jev)
+    p.set_defaults(func=cmd_save_round)
 
     p = sub.add_parser(
-        "labels", help="check every Jev-scored review round has its labels.json"
+        "labels", help="check every saved review round has its labels.json"
     )
     p.add_argument("spec_ids", nargs="*", help="default: every spec in the order")
     p.set_defaults(func=cmd_labels)
-
-    p = sub.add_parser("noise", help="grade Jev's noise score on schema-2 review notes")
-    p.add_argument(
-        "--count",
-        action="store_true",
-        help="print only the noise count, so the stopping rule reveals no result",
-    )
-    p.set_defaults(func=cmd_noise)
 
     # Split by hand: 3.12.3's argparse (CI's) left everything after `--`
     # unrecognized once a `nargs="*"` positional had matched empty.
