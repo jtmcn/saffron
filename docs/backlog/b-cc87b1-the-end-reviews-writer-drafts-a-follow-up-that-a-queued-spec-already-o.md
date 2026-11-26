@@ -4,7 +4,7 @@ title: The end review's writer drafts a follow-up that a queued spec already own
 status: open
 tier: 2
 filed: 2026-10-23
-specs: []
+specs: [SA-0440]
 prs: [939]
 commits: []
 cites: [§4.2.1]
