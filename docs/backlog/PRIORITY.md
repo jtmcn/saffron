@@ -83,6 +83,10 @@ back, and re-verification went red.
 
 ### Tier 2 — the morning after
 
+**Placed 2026-11-23**, from `SA-0429`'s spec chain: **b-f7db70**. A kept
+`ORPHANED` task is resumed past its adopted pull request, and a green cell
+force-pushes over the by-hand head.
+
 **Placed 2026-11-07**, in grooming, from three open items no tier named:
 ~~**b-a714d2**~~, **b-d9ed45**, then ~~**b-2bc0d5**~~. A second batch stamps a live
 task `ORPHANED`, because nothing holds one batch at a time. A second run of one
@@ -95,10 +99,6 @@ between ADR 10's sequence and two cells on one host.
 cannot run. The follow-up writer's first draft never parses. The record's
 git calls can prompt and drop git's reason. A cell makes CONNECTs no git
 call explains.
-
-**Placed 2026-11-20**, from `SA-0417`'s spec review: **b-0f5493**. Each event's
-terminal line prints before its log redacts it, so the token reaches the
-`launchd` log file.
 
 **Placed 2026-10-17**, from the spec loop's run 43: **b-3a79a0**. The loop's
 driver orders a stack by `depends_on`, not by the stack base a batch built.
@@ -117,7 +117,7 @@ First **170**, then **b-2e0b97**, then **108** and ~~**b-ca3bc6**~~. Then
 
 **From the operator visibility plan and the spec loop's runs 5 to 10**, in
 this order: **43**, **66**, ~~**67**~~, **98**, ~~**157**~~, ~~**172**~~, **b-eac388**,
-**b-bc54d1**, ~~**b-63ac52**~~, **b-952c34**, ~~**b-60d804**~~,
+~~**b-bc54d1**~~, ~~**b-63ac52**~~, **b-952c34**, ~~**b-60d804**~~,
 **b-281f0a** and **b-7d3810**. Then **160**, which is what
 item 141's close left. The Gate-only cell's suite is in a file because the
 ledger has no owner column that fits it.
@@ -274,10 +274,18 @@ ends a task unjudged on one API error, with no retry.
 - ~~**b-5e443c**~~, ~~**b-65e7e2**~~, ~~**b-6f7f8d**~~, ~~**b-865399**~~, ~~**b-a70ec1**~~, ~~**b-ce93aa**~~, ~~**b-0c1d69**~~, ~~**b-250dc7**~~, ~~**b-25766a**~~, ~~**b-602d00**~~, ~~**b-e8027b**~~, ~~**b-343c21**~~, ~~**b-cafacd**~~, ~~**b-db95e1**~~, ~~**b-1adb50**~~, ~~**b-466005**~~, ~~**b-6377cf**~~, ~~**b-cde96b**~~, ~~**b-dce9a4**~~, ~~**b-04a5d9**~~.
 - ~~**b-b0cd68**~~, ~~**b-bff670**~~, ~~**b-c375d6**~~, ~~**b-e0cd57**~~, ~~**b-2e7c4d**~~, ~~**b-38d45f**~~, ~~**b-47659f**~~, ~~**b-66d1c3**~~, ~~**b-78ccc7**~~, ~~**b-00534f**~~, ~~**b-209696**~~, ~~**b-23a149**~~, ~~**b-60ff2e**~~, ~~**b-970f53**~~, ~~**b-c94a2f**~~, ~~**b-0a08bf**~~, ~~**b-2247dd**~~, ~~**b-4e1b6d**~~, ~~**b-708c8a**~~, ~~**b-8e30bd**~~.
 - ~~**b-a1d649**~~, ~~**b-e0e1cf**~~, ~~**b-5df2a7**~~, ~~**b-cf50dc**~~, ~~**b-52e670**~~, ~~**b-e9153f**~~, ~~**b-9efbe2**~~, ~~**b-f5ceaf**~~, ~~**b-cd1566**~~, ~~**b-bba47a**~~, ~~**b-d31930**~~, ~~**b-2da959**~~, ~~**b-f73cd0**~~, ~~**b-998bb7**~~, ~~**b-781ea4**~~, ~~**b-a68b24**~~, ~~**b-009d51**~~, ~~**b-1b05be**~~, ~~**b-b9365d**~~, ~~**b-8e12c1**~~.
-- ~~**b-549012**~~, ~~**b-719346**~~, ~~**b-e0044f**~~, ~~**b-e9dd4c**~~, ~~**b-3cf039**~~, ~~**b-7c118b**~~, ~~**b-c5da95**~~, ~~**b-31e3c8**~~, ~~**b-3df181**~~, ~~**b-879e72**~~, ~~**b-c7858c**~~, ~~**b-cbb6e7**~~, ~~**b-d1c277**~~, ~~**b-c12d39**~~, ~~**b-16c819**~~, ~~**b-96508a**~~, ~~**b-1b5747**~~, ~~**b-d9a027**~~, ~~**b-c7fd81**~~.
+- ~~**b-549012**~~, ~~**b-719346**~~, ~~**b-e0044f**~~, ~~**b-e9dd4c**~~, ~~**b-3cf039**~~, ~~**b-7c118b**~~, ~~**b-c5da95**~~, ~~**b-31e3c8**~~, ~~**b-3df181**~~, ~~**b-879e72**~~, ~~**b-c7858c**~~, ~~**b-cbb6e7**~~, ~~**b-d1c277**~~, ~~**b-c12d39**~~, ~~**b-16c819**~~, ~~**b-96508a**~~, ~~**b-1b5747**~~, ~~**b-d9a027**~~, ~~**b-c7fd81**~~, ~~**b-0f5493**~~.
+- ~~**b-18fa39**~~.
 - Closed as wontfix: **b-8d5e55**, **b-593d50**.
 
 ### Tier 3 — real, not urgent
+
+**Placed 2026-11-24**, with `SA-0431`: **b-84cf18**. The glossary has no
+entry for a REVIEW edit's `raised` outcome.
+
+**Placed 2026-11-23**, from the spec loop's run 84: **b-e0e720**, then
+**b-1349d9**. The `prose` gate reads no attribute docstring. "Emitter" names
+two things, and §4.7 says `append` sets `failed`.
 
 **Placed 2026-11-20**, with `SA-0418`: **b-d0a813**. The vocabulary has no
 word for an attempt a cell opened, and `SA-0418` dates a task by one.
@@ -307,7 +315,7 @@ wrong first line.
 **Placed 2026-10-16**, from the spec loop's run 42: **b-60317d**.
 `reconcile`'s `head_moved` comment says nothing judges a moved head.
 
-**Placed 2026-10-19**, from the spec loop's run 44: **b-b8f0d9**, **b-e9cd43**,
+**Placed 2026-10-19**, from the spec loop's run 44: ~~**b-b8f0d9**~~, **b-e9cd43**,
 **b-524b1a**, **b-62e00a**, **b-b33854**, **b-d149c6**, ~~**b-0094bd**~~, then
 ~~**b-8ef729**~~. Each is a gap a seat found and the stack left alone.
 
@@ -345,7 +353,7 @@ Each line keeps the order it was filed in.
   ~~**77**~~, **90**, **92**, **96**, ~~**100**~~, **101** and **108**.
 - Filed 2026-09-12 to 2026-09-19: ~~**116**~~, **121**, ~~**122**~~, **130**, **134**,
   ~~**150**~~, ~~**151**~~, **155**, **156**, **174** and **b-d6bff7**.
-- From spec loop runs 7 to 10: ~~**b-990bd9**~~, ~~**b-7431a2**~~, **b-9eceda**, **b-bc9951**,
+- From spec loop runs 7 to 10: ~~**b-990bd9**~~, ~~**b-7431a2**~~, ~~**b-9eceda**~~, **b-bc9951**,
   **b-0281e4**, **b-e9db0e**, **b-397edd**, **b-0e20e9**, ~~**b-98dc4d**~~,
   ~~**b-27b9db**~~, ~~**b-bbf663**~~ and ~~**b-6a9707**~~.
 - From the reviews of #393 and `SA-0120`, and spec loop runs 13 and 14: **b-d5d290**,
@@ -533,10 +541,10 @@ risk — not, as an earlier draft of this note said, that `.gitignore` in
 `integrity.gate_config` already routes the edit to a person. That is the
 *tracked* half only: a `.gitignore` naming itself reaches no diff at all.
 
-**What this ordering costs, recounted on 2026-11-22.** Tier 1 holds 7 open
-items, tier 2 holds 64 and tier 3 holds 144. So tier 3 holds 67% of the
+**What this ordering costs, recounted on 2026-11-24.** Tier 1 holds 7 open
+items, tier 2 holds 63 and tier 3 holds 145. So tier 3 holds 67% of the
 backlog. That is the deliberate consequence of ranking by the milestone rather
-than by what is nearest to hand. 22 of the 215 open items are outside a cell,
+than by what is nearest to hand. 24 of the 215 open items are outside a cell,
 since a cell cannot reach their files.
 
 **Placed 2026-11-04**, from the spec loop's run 53: **b-8c6696**, ~~**b-a19ffd**~~
@@ -547,7 +555,7 @@ and **b-9bb8b7**. A spec missed the fixtures that pin the plan's sha. §5.3's
 - ~~**14**~~, ~~**19**~~, ~~**22**~~, ~~**23**~~, ~~**56**~~, ~~**62**~~, ~~**64**~~, ~~**65**~~, ~~**68**~~, ~~**86**~~, ~~**87**~~, ~~**91**~~, ~~**99**~~, ~~**105**~~, ~~**106**~~, ~~**107**~~, ~~**110**~~, ~~**111**~~, ~~**123**~~, ~~**124**~~.
 - ~~**125**~~, ~~**127**~~, ~~**131**~~, ~~**132**~~, ~~**133**~~, ~~**139**~~, ~~**175**~~, ~~**176**~~, ~~**b-a1bdba**~~, ~~**b-4589be**~~, ~~**b-e0bbbf**~~, ~~**b-e403c1**~~, ~~**b-d1d634**~~, ~~**b-ea1d13**~~, ~~**b-5fa523**~~, ~~**b-76953a**~~, ~~**b-0adc85**~~, ~~**b-111c56**~~, ~~**b-26315b**~~, ~~**b-2dea1c**~~.
 - ~~**b-37924b**~~, ~~**b-542beb**~~, ~~**b-ac97c0**~~, ~~**b-50b566**~~, ~~**b-6a692d**~~, ~~**b-f4eb52**~~, ~~**b-589cf6**~~, ~~**b-df59f8**~~, ~~**b-e88930**~~, ~~**b-ca3bc6**~~, ~~**b-dc5212**~~, ~~**b-5aa016**~~, ~~**b-f71105**~~, ~~**b-1c4a14**~~, ~~**b-74a122**~~, ~~**b-206d2c**~~, ~~**b-a64578**~~, ~~**b-d0baf7**~~, ~~**b-25b7ba**~~, ~~**b-e4cb58**~~.
-- ~~**b-60f950**~~, ~~**b-ef334d**~~.
+- ~~**b-60f950**~~, ~~**b-708b05**~~, ~~**b-ef334d**~~.
 - Closed as wontfix: **9**, **10**, **b-1e5572**, **b-013138**, **b-830dc7**, **b-6ac0cd**, **b-7eb6d3**, **b-1fc93b**, **b-8971e6**, **b-8693ef**.
 
 ---

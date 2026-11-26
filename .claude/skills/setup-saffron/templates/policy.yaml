@@ -37,6 +37,8 @@ witness:
   # FILL: a `pattern` per constant spelling: `name`, the `value` a mutant edits, then the rest of it.
   # Each `replace` must leave every matched file importable.
   constants: []
+  # FILL: a Python `re` matched at the start of a failed test's reason when an assertion failed.
+  assertion: null
 
 # FILL: a Python `re` per definition line, holding `{name}`, for the citation check.
 citations:

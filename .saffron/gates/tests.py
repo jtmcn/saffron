@@ -130,10 +130,13 @@ if uncollected is not None and not subset:
         }
     )
 
+# Captured output fits each FAILED line to 80 columns, and pytest drops the
+# ` - reason` suffix that does not fit. 400 keeps it whole (b-18fa39, measured).
 proc = subprocess.run(
     ["pytest", "-q", "--no-header", "--color=no", "-p", "no:cacheprovider", *subset],
     capture_output=True,
     text=True,
+    env={**os.environ, "COLUMNS": "400"},
 )
 out = proc.stdout + proc.stderr
 
@@ -162,13 +165,14 @@ if proc.returncode in (3, 4):
         }
     )
 
-# Node ids from pytest's own FAILED and ERROR lines, never a regex over captured
-# output a test can print into (b-bba47a). A collection error names a file, not a node id.
+# Node ids from pytest's own FAILED and ERROR lines, never a regex over output (b-bba47a).
+# A collection error names a file. The reason sits outside the identity (b-18fa39).
 failures = [
-    {"file": node_file(name), "code": name, "message": line}
+    {"file": node_file(name), "code": name, "message": head, "detail": reason}
     for line in out.splitlines()
     if line.startswith(("FAILED ", "ERROR "))
-    for name in [line.split(" ", 1)[1].split(" - ")[0]]
+    for head, _, reason in [line.partition(" - ")]
+    for name in [head.split(" ", 1)[1]]
     if "::" in name or uncollected is not None
 ]
 

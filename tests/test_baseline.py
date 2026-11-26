@@ -1,4 +1,10 @@
-from saffron.gates.baseline import is_no_progress, subtract_baseline, suite_drift
+from saffron.gates.baseline import (
+    NewFailure,
+    is_no_progress,
+    render,
+    subtract_baseline,
+    suite_drift,
+)
 from saffron.gates.contract import Failure, GateResult, GateStatus
 
 
@@ -231,6 +237,93 @@ def test_fixing_some_of_several_identical_failures_is_progress():
     previous = subtract_baseline([gate("lint", same, same, same, same)], [])
     current = subtract_baseline([gate("lint", same)], [])
     assert not is_no_progress(current, previous)
+
+
+def test_failures_differing_only_in_detail_share_one_identity():
+    """`identity` never reads `detail`, so a baseline failure still cancels
+    its head match even when their reasons differ word for word."""
+    base_detail = Failure(
+        file="a.py",
+        code="X",
+        message="assert false",
+        detail="assertionerror expected ok got bad",
+    )
+    head_detail = Failure(
+        file="a.py",
+        code="X",
+        message="assert false",
+        detail="assertionerror expected clean got dirty",
+    )
+    survivor = Failure(
+        file="b.py",
+        code="Y",
+        message="other failure",
+        detail="assertionerror unrelated reason here",
+    )
+    base = [gate("tests", base_detail)]
+    head = [gate("tests", head_detail, survivor)]
+
+    new = subtract_baseline(head, base)
+    assert [n.failure.file for n in new] == ["b.py"]
+    assert new[0].failure.detail == "assertionerror unrelated reason here"
+
+    first_attempt = subtract_baseline(
+        [
+            gate(
+                "tests",
+                Failure(file="c.py", code="Z", message="m", detail="reason one here"),
+            )
+        ],
+        [],
+    )
+    second_attempt = subtract_baseline(
+        [
+            gate(
+                "tests",
+                Failure(file="c.py", code="Z", message="m", detail="reason two here"),
+            )
+        ],
+        [],
+    )
+    assert is_no_progress(second_attempt, first_attempt)
+
+
+def test_render_ends_a_failures_line_with_its_detail():
+    with_line = NewFailure(
+        "tests",
+        Failure(file="a.py", line=12, code="X", message="failed", detail="see trace"),
+    )
+    assert render(with_line) == "[tests] a.py:12 X: failed - see trace"
+    assert (
+        render(
+            NewFailure(
+                "tests", Failure(file="a.py", line=12, code="X", message="failed")
+            )
+        )
+        == "[tests] a.py:12 X: failed"
+    )
+
+    no_line = NewFailure(
+        "lint",
+        Failure(file="a.py", code="E501", message="too long", detail="see ruff"),
+    )
+    assert render(no_line) == "[lint] a.py:? E501: too long - see ruff"
+    assert (
+        render(
+            NewFailure("lint", Failure(file="a.py", code="E501", message="too long"))
+        )
+        == "[lint] a.py:? E501: too long"
+    )
+
+    no_file = NewFailure(
+        "secrets",
+        Failure(file="", code="token", message="leaked", detail="see diff"),
+    )
+    assert render(no_file) == "[secrets] token: leaked - see diff"
+    assert (
+        render(NewFailure("secrets", Failure(file="", code="token", message="leaked")))
+        == "[secrets] token: leaked"
+    )
 
 
 def _ran(name, *, status="pass", tool="ruff 1.0"):

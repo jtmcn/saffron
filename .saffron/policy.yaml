@@ -158,3 +158,6 @@ witness:
     replace: '\g<value>saffron constant mutant '
   - pattern: '(?m)^(?P<name>[A-Z][A-Z0-9_]*)(?:: [^=\n]+)? = (?P<value>-?(?:0[xX][0-9a-fA-F_]+|0[oO][0-7_]+|0[bB][01_]+|\d[\d_]*(?:\.[\d_]*)?(?:[eE][-+]?\d+)?j?))(?![\w.])'
     replace: (\g<value> + 1)
+  # pytest's reason for a failed bare assert, AssertionError, and `pytest.fail` or
+  # an unraised `pytest.raises` (measured, b-c2f264). Any other reason only raised.
+  assertion: '^(?:assert\b|AssertionError\b|Failed\b)'

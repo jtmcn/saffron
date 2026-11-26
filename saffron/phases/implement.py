@@ -239,7 +239,7 @@ def run_agent(
     options: dict,
     resume: str | None = None,
     spec_id: str,
-    emit: Callable[[Event], None] = lambda event: print(describe(event)),
+    emit: Callable[[Event], object] = lambda event: print(describe(event)),
     last_cost_usd: float = 0.0,
     timeout_s: float = 3600,
     exec_stream: Callable[..., runtime.Completed] = runtime.exec_stream,

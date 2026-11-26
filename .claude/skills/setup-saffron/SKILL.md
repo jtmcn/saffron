@@ -50,6 +50,7 @@ The question is §5.6's: *where in here does a plausible-looking wrong change hu
 - `integrity.suppressions`: each language's skip, expected-failure and ignore-comment tokens. A token the list omits is a hole `integrity` cannot see.
 - `integrity.gate_config`: every file that changes what a gate measures. That includes each tool's config, a `conftest.py` or its analogue, and `**/.gitignore`. Saffron's own `.saffron/policy.yaml` shows the reasoning behind each entry.
 - `witness.witness_name`, `witness.witness_body` and `witness.constants`: Python `re` patterns naming the language's own constant shape and where a test's own text ends. Left `null`/empty when the language's constants are not worth deriving a mutant from yet.
+- `witness.assertion`: a Python `re` matched at the start of the reason the `tests` gate reports for a failed test, when an assertion failed. Left `null` when that gate reports no reason.
 
 **E. `thread_env`.** Only when step 1 found a thread pool to cap. Skip the section otherwise.
 On a runtime that shares the host kernel, an empty `thread_env` draws a warning on every task, and that is expected.

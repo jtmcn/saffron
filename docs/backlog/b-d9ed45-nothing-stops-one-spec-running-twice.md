@@ -5,7 +5,7 @@ status: partial
 tier: 2
 filed: 2026-10-11
 specs: [SA-0422]
-prs: [1090]
+prs: [1090, 1299]
 commits: []
 cites: [§5.1]
 related: [b-ca3bc6, b-a714d2]
@@ -47,3 +47,6 @@ second start refuses.
   lock per spec id that every home shares, and refuses a task another
   process holds. `regate`, the qualifying step, the end review's layer cell
   and the probe networks still pre-clean spec-keyed names with no lock.
+- 2026-11-22: `SA-0422` (#1299) landed. `run_task` refuses a spec id
+  another process holds on any home. The callers its spec left out still
+  pre-clean with no lock, so the item stays partial.

@@ -1779,6 +1779,135 @@ def test_the_refusal_to_push_is_emitted_and_the_log_never_learns_the_leak(packag
     assert FAKE_KEY not in (task_dir / "events.jsonl").read_text()
 
 
+def test_packages_default_emitters_warn_naming_their_logs_own_path(
+    packageable, monkeypatch, capsys
+):
+    """Handed no `emit`, `package()` and `push_unpackaged_work()` each print
+    the refusal's warning, naming the `path` of the `EventLog` they built.
+    Each prints once per log, on the line right after the event its
+    refused write raised. A log that takes every write prints none."""
+    from saffron.events import read_log
+    from saffron.phases.package import push_unpackaged_work
+    from saffron.repos import mirror as mirror_module
+
+    class _OneBelow(package_phase.EventLog):
+        def __init__(self, task_dir, **kwargs):
+            super().__init__(Path(task_dir) / "sub", **kwargs)
+
+    monkeypatch.setattr(package_phase, "EventLog", _OneBelow)
+
+    task_dir = packageable.outcome.task_dir
+    log_path = task_dir / "sub" / "events.jsonl"
+    push_kwargs = {
+        k: v for k, v in packageable.unpackaged_kwargs.items() if k != "emit"
+    }
+    package_kwargs = {k: v for k, v in packageable.kwargs.items() if k != "emit"}
+
+    real_diff_stat = mirror_module.diff_stat
+
+    def _boom_diff_stat(*_a, **_k):
+        raise mirror_module.GitError("the stat broke")
+
+    packageable.outcome.state = "EXHAUSTED"
+    monkeypatch.setattr(mirror_module, "diff_stat", _boom_diff_stat)
+
+    # A first push, into a clean log: both of its lines print, alone.
+    first = push_unpackaged_work(packageable.outcome, **push_kwargs)
+    assert first.pushed is True
+    printed = capsys.readouterr().out.splitlines()
+    assert len(printed) == 2
+    assert "the stat broke" in printed[0]
+    assert printed[1].startswith("PACKAGE: pushed ")
+    assert [type(e).__name__ for e in read_log(log_path.parent)] == [
+        "PhaseStart",
+        "PhaseStart",
+    ]
+
+    # A directory where `events.jsonl` was: a second push's first line, then
+    # the warning, then its second line.
+    log_path.unlink()
+    log_path.mkdir()
+    second = push_unpackaged_work(packageable.outcome, **push_kwargs)
+    assert second.pushed is True
+    printed = capsys.readouterr().out.splitlines()
+    assert len(printed) == 3
+    assert "the stat broke" in printed[0]
+    assert printed[1] == f"warning: {log_path} refused a write; events may be missing"
+    assert printed[2].startswith("PACKAGE: pushed ")
+
+    # Cleared, and `diff_stat` restored, before `package()` runs.
+    log_path.rmdir()
+    monkeypatch.setattr(mirror_module, "diff_stat", real_diff_stat)
+    packageable.outcome.state = "READY_FOR_REVIEW"
+
+    real_append_queue_line = package_phase.index_report.append_queue_line
+
+    def _boom_append_queue_line(*_a, **_k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(
+        package_phase.index_report, "append_queue_line", _boom_append_queue_line
+    )
+
+    def _opens_pr(argv):
+        return sp.CompletedProcess(argv, 0, stdout="https://x/pull/9\n")
+
+    result = package(packageable.outcome, gh=_opens_pr, **package_kwargs)
+    assert result.state == "READY_FOR_REVIEW"
+    printed = capsys.readouterr().out.splitlines()
+    assert printed == [
+        "PACKAGE: https://x/pull/9",
+        "PACKAGE: the READY_FOR_REVIEW row could not be written: disk full",
+    ]
+
+    # A directory where `events.jsonl` was: its first line, the warning once,
+    # then its second line.
+    log_path.unlink()
+    log_path.mkdir()
+    result = package(packageable.outcome, gh=_opens_pr, **package_kwargs)
+    assert result.state == "READY_FOR_REVIEW"
+    printed = capsys.readouterr().out.splitlines()
+    assert printed == [
+        "PACKAGE: https://x/pull/9",
+        f"warning: {log_path} refused a write; events may be missing",
+        "PACKAGE: the READY_FOR_REVIEW row could not be written: disk full",
+    ]
+    log_path.rmdir()
+    log_path.touch()
+
+    # The row write restored, and the log corrupted again: each credential
+    # refusal below emits one event, printed then its warning.
+    monkeypatch.setattr(
+        package_phase.index_report, "append_queue_line", real_append_queue_line
+    )
+    log_path.unlink()
+    log_path.mkdir()
+
+    work = packageable.work
+    git(work, "checkout", "-q", "cell")
+    (work / "config.py").write_text(f'ANTHROPIC_API_KEY = "{FAKE_KEY}"\n')
+    git(work, "add", "-A")
+    git(work, "commit", "-qm", "the agent hardcoded a key")
+    (task_dir / "patch.diff").write_text(
+        git(work, "diff", *DIFF_FLAGS, f"{packageable.base}..HEAD") + "\n"
+    )
+    git(work, "checkout", "-q", "main")
+
+    refused = package(packageable.outcome, gh=_no_gh, **package_kwargs)
+    assert refused.state == "MERGE_FAILED"
+    printed = capsys.readouterr().out.splitlines()
+    assert len(printed) == 2
+    assert printed[0].startswith("PACKAGE: refusing to push — ")
+    assert printed[1] == f"warning: {log_path} refused a write; events may be missing"
+
+    pushed_refusal = push_unpackaged_work(packageable.outcome, **push_kwargs)
+    assert pushed_refusal.pushed is False
+    printed = capsys.readouterr().out.splitlines()
+    assert len(printed) == 2
+    assert "credential in the patch" in printed[0]
+    assert printed[1] == f"warning: {log_path} refused a write; events may be missing"
+
+
 def test_the_bodys_diff_is_pinned_against_the_operators_gitconfig(packageable):
     """`diff.noprefix` is a global anyone may set, and it rewrites every path
     the host parses out of the diff. Without `DIFF_FLAGS`, §7's gate-gaming
@@ -2099,6 +2228,151 @@ def test_a_credential_in_the_patch_is_refused_before_anything_is_pushed(packagea
         (packageable.out_dir / "queue.json").read_text(),
     ]
     assert not any(FAKE_KEY in text for text in artifacts)
+
+
+def test_a_failed_queue_row_in_finish_is_said_and_its_result_still_returns(
+    packageable, monkeypatch
+):
+    """`_finish` hands an `Exception` raised while it writes its queue line
+    to its new keyword-only `say`. It still returns its result. This is
+    reached here on a pull request `package()` opened and on a credential
+    refusal. `ledger.set_task_package`, the write before it, stays
+    unguarded, so a raise there, and a `KeyboardInterrupt`, both still leave
+    `package()` (`SA-0423`)."""
+    from saffron.cell.runtime import CellRuntimeError
+    from saffron.report import index as index_report
+
+    class _Unlisted(Exception):
+        pass
+
+    real_append = index_report.append_queue_line
+    real_header = index_report.accept_rate_header
+
+    def _reset_write() -> None:
+        monkeypatch.setattr(index_report, "append_queue_line", real_append)
+        monkeypatch.setattr(index_report, "accept_rate_header", real_header)
+
+    def _lines() -> list[str]:
+        return [line for e in packageable.events if (line := describe(e))]
+
+    # 1) `append_queue_line` raises `OSError`, and `gh` opens a pull request.
+    def _raiser_os_error(*_a, **_k):
+        raise OSError("disk fell over")
+
+    def fake_gh(argv):
+        return sp.CompletedProcess(argv, 0, stdout="https://github.com/o/r/pull/1\n")
+
+    monkeypatch.setattr(index_report, "append_queue_line", _raiser_os_error)
+    packageable.events.clear()
+    result1 = package(packageable.outcome, gh=fake_gh, **packageable.kwargs)
+
+    assert result1.state == "READY_FOR_REVIEW"
+    assert result1.pr_url == "https://github.com/o/r/pull/1"
+    row1 = _state(packageable.ledger, packageable.task_id)
+    assert row1["state"] == "READY_FOR_REVIEW"
+    assert row1["pr_url"] == "https://github.com/o/r/pull/1"
+    assert any(
+        "READY_FOR_REVIEW" in line and "disk fell over" in line for line in _lines()
+    )
+    _reset_write()
+
+    # A credential in the patch reaches `_finish` as `MERGE_FAILED`, before
+    # any push, so it is safe to reuse across every call below.
+    work = packageable.work
+    git(work, "checkout", "-q", "cell")
+    (work / "config.py").write_text(f'ANTHROPIC_API_KEY = "{FAKE_KEY}"\n')
+    git(work, "add", "-A")
+    git(work, "commit", "-qm", "the agent hardcoded a key")
+    patch = packageable.outcome.task_dir / "patch.diff"
+    patch.write_text(git(work, "diff", *DIFF_FLAGS, f"{packageable.base}..HEAD") + "\n")
+    git(work, "checkout", "-q", "main")
+
+    value_error = ValueError("the store is corrupt")
+    operational_error = sqlite3.OperationalError("database is locked")
+    runtime_error = CellRuntimeError("the queue store is locked")
+    unlisted_error = _Unlisted("an exception nobody declared")
+
+    def _raiser(exc):
+        def _raise(*_a, **_k):
+            raise exc
+
+        return _raise
+
+    for label, patcher, exc in [
+        (
+            "append_queue_line",
+            lambda e: monkeypatch.setattr(
+                index_report, "append_queue_line", _raiser(e)
+            ),
+            value_error,
+        ),
+        (
+            "accept_rate_header",
+            lambda e: monkeypatch.setattr(
+                index_report, "accept_rate_header", _raiser(e)
+            ),
+            operational_error,
+        ),
+        (
+            "append_queue_line",
+            lambda e: monkeypatch.setattr(
+                index_report, "append_queue_line", _raiser(e)
+            ),
+            runtime_error,
+        ),
+        (
+            "append_queue_line",
+            lambda e: monkeypatch.setattr(
+                index_report, "append_queue_line", _raiser(e)
+            ),
+            unlisted_error,
+        ),
+    ]:
+        packageable.ledger.set_task_state(packageable.task_id, "READY_FOR_REVIEW")
+        packageable.events.clear()
+        patcher(exc)
+        result = package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
+
+        assert result.state == "MERGE_FAILED", label
+        row = _state(packageable.ledger, packageable.task_id)
+        assert row["state"] == "MERGE_FAILED", label
+        assert any("MERGE_FAILED" in line and str(exc) in line for line in _lines()), (
+            label,
+            _lines(),
+        )
+        _reset_write()
+
+    # A `KeyboardInterrupt` subclass from `append_queue_line` still leaves
+    # `package()`, unmarked by this guard.
+    class _Stop(KeyboardInterrupt):
+        pass
+
+    interrupt = _Stop("operator pressed Ctrl-C")
+
+    def _raiser_interrupt(*_a, **_k):
+        raise interrupt
+
+    packageable.ledger.set_task_state(packageable.task_id, "READY_FOR_REVIEW")
+    monkeypatch.setattr(index_report, "append_queue_line", _raiser_interrupt)
+    with pytest.raises(_Stop) as excinfo_interrupt:
+        package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
+    assert excinfo_interrupt.value is interrupt
+    _reset_write()
+
+    # Last: `set_task_package` itself raises, ahead of the guarded write,
+    # and that same object leaves `package()`.
+    ledger_error = _Unlisted("the ledger write broke")
+
+    def _set_task_package_raises(*_a, **_k):
+        raise ledger_error
+
+    packageable.ledger.set_task_state(packageable.task_id, "READY_FOR_REVIEW")
+    monkeypatch.setattr(
+        packageable.ledger, "set_task_package", _set_task_package_raises
+    )
+    with pytest.raises(_Unlisted) as excinfo_ledger:
+        package(packageable.outcome, gh=_no_gh, **packageable.kwargs)
+    assert excinfo_ledger.value is ledger_error
 
 
 def test_an_empty_diff_is_named_rather_than_a_traceback(packageable):
@@ -3704,6 +3978,84 @@ def test_a_task_with_no_commits_pushes_nothing(packageable, tmp_path):
         == ""
     )
     assert _state(packageable.ledger, packageable.task_id)["pushed_sha"] is None
+
+
+def test_pushed_unpackaged_work_carries_its_branchs_diff_stat_against_its_tree_base(
+    packageable, monkeypatch
+):
+    """A pushed `PushResult` carries the diff stat of `tree_base` to the
+    pushed commit. It is read after the push and after `ledger.record_push`,
+    never from `patch.json`'s own `base_sha` (`SA-0423`). A stat that
+    cannot be read leaves the result pushed and the push recorded, with
+    both counts `None` and the error said."""
+    from saffron.phases.package import push_unpackaged_work
+    from saffron.repos import mirror as mirror_module
+
+    work = packageable.work
+    real_diff_stat = mirror_module.diff_stat
+
+    # Moves the default branch past `tree_base`, so a stat misread from
+    # `base_sha` would differ from one correctly read from `tree_base`.
+    git(work, "checkout", "-q", "main")
+    (work / "g.txt").write_text("1\n2\n3\n4\n5\n")
+    git(work, "add", "-A")
+    git(work, "commit", "-qm", "main moved past tree_base")
+    git(work, "push", "-q", "origin", "main")
+    moved = git(work, "rev-parse", "main")
+    git(packageable.mirror, "fetch", "-q")
+
+    (packageable.outcome.task_dir / "patch.json").write_text(
+        json.dumps({"base_sha": moved, "tree_base": packageable.base})
+    )
+    packageable.outcome.state = "EXHAUSTED"
+
+    # 1) A spy that raises `GitError`, after recording that the remote and
+    #    the ledger already hold the commit it was handed.
+    recorded: list[tuple] = []
+
+    def _raising_diff_stat(mirror, base, head):
+        recorded.append((mirror, base, head))
+        assert remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=work) == head
+        assert _state(packageable.ledger, packageable.task_id)["pushed_sha"] == head
+        raise mirror_module.GitError("the stat broke")
+
+    monkeypatch.setattr(mirror_module, "diff_stat", _raising_diff_stat)
+    first = push_unpackaged_work(packageable.outcome, **packageable.unpackaged_kwargs)
+
+    assert first.pushed is True
+    assert (first.added, first.removed) == (None, None)
+    assert [(base, head) for _, base, head in recorded] == [
+        (packageable.base, first.pushed_sha)
+    ]
+    remote_head = remote_sha(str(packageable.remote), "saffron/SA-0005", cwd=work)
+    assert remote_head == first.pushed_sha
+    assert (
+        _state(packageable.ledger, packageable.task_id)["pushed_sha"]
+        == first.pushed_sha
+    )
+    lines = [describe(event) for event in packageable.events]
+    assert any(line and "the stat broke" in line for line in lines)
+
+    # 2) `diff_stat` raises `OSError` instead.
+    packageable.events.clear()
+
+    def _os_error_diff_stat(*_a, **_k):
+        raise OSError("disk fell over")
+
+    monkeypatch.setattr(mirror_module, "diff_stat", _os_error_diff_stat)
+    second = push_unpackaged_work(packageable.outcome, **packageable.unpackaged_kwargs)
+
+    assert second.pushed is True
+    assert (second.added, second.removed) == (None, None)
+    lines = [describe(event) for event in packageable.events]
+    assert any(line and "disk fell over" in line for line in lines)
+
+    # 3) The real stat, restored, carries the fixture's own +2/-1.
+    monkeypatch.setattr(mirror_module, "diff_stat", real_diff_stat)
+    third = push_unpackaged_work(packageable.outcome, **packageable.unpackaged_kwargs)
+
+    assert third.pushed is True
+    assert (third.added, third.removed) == (2, 1)
 
 
 def _earlier_task(packageable, state, pushed_sha):

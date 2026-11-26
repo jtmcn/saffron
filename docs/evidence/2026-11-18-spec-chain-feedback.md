@@ -247,3 +247,172 @@ writer ran 41 wrong versions, and all died.
     `Exception` subclass on each path, since named kinds share bases.
 85. A guard's upper edge is driven too: the statement before the guarded
     one raises, and the witness expects it to escape.
+
+## SA-0424 (b-9eceda)
+
+One writer, two reviews, and a final writer round. The writer took about
+56 minutes for the draft and 18 for the first revision. Each review took
+about 13 minutes.
+
+Round 1 found one blocker. The spec let a cell split `append`'s one
+`except` clause, so the mutant's `find` could match twice or never. A
+warning printed one event late passed every emitter witness, because a
+second event always followed each fault. The writer measured that it
+survived. Round 1 also found that step 6 was built on the prototype's
+`SA-0421` rather than the open pull request. Round 2 found one blocker.
+The only two-fault log met its faults in one order, so a version that
+swapped which flag triggers each warning passed. It also found that the
+spec paraphrased the mutant. The writer ran 55 wrong versions, and 54
+died. The survivor behaves like correct code.
+
+## What SA-0424 adds
+
+86. A claim over two faults drives both orders, and a fault as the log's
+    last event.
+87. A spec whose mutant pins a construct tells the cell to keep that
+    construct, and never says that a mutant pins it.
+88. A child's prototype builds on its parent's open pull request when one
+    exists, not on the parent's prototype.
+
+## SA-0425 (b-f582ee, b-b8f0d9)
+
+One writer, two reviews, and a final writer round. The delegate first
+reproduced the defect on main with a stub that raised deaths into
+`_RebutCap`. The draft took about 52 minutes. Each review took 8 to 9
+minutes.
+
+Round 1 found one blocker. In the verdict stage, a death followed by a
+second lens met the refusal branch, which set the cut. Every witness row
+had one lens. Round 1 also found that an older test drove its cut with a
+turn ceiling. It stayed green under the new rule and stopped guarding
+`SA-0407`'s reset. Round 2 found no blocker. Two concerns named members
+reached only through a sequence of sessions in one stage. A third named
+the bare words "stage" and "pool" a cell would copy. The writer ran 22
+wrong versions, and 20 died. The two survivors behave like correct code.
+
+## What SA-0425 adds
+
+89. A rule keyed on spend drives each sequence of sessions that can share
+    one pool, not only one session per stage.
+90. A change that narrows when a predicate fires reads every existing test
+    that drove the old predicate, whether or not it still passes.
+
+## SA-0426 (b-18fa39)
+
+One writer, two reviews, and the delegate's own last edit. The delegate
+first rebuilt finish 103's draft from the mirror and measured pytest's
+80-column cut. The draft took about 28 minutes and the revision about 20.
+Each review took 7 to 8 minutes.
+
+Round 1 found one blocker. A test outside `touches` requires `GATES.md` to
+name every failure field, and `GATES.md` is forbidden. The prototype ran
+its witnesses and not the suite. Round 1 also found two readers the new
+field reached: `migrate`'s top-up and the PR body's table. Round 2 found
+no blocker. One concern named a witness whose detail held a pipe alone,
+where the claim says the detail is escaped as the message is.
+
+## What SA-0426 adds
+
+91. A spec that adds a contract field runs the whole suite on its
+    prototype, since a test may enumerate the fields.
+92. A witness for an escape drives every character class the escape
+    handles, not only the first one.
+
+## SA-0427 (b-708b05)
+
+One writer, two reviews, and a final writer round. The draft took about 37
+minutes, the revision about 23 and the final round about 20. Each review
+took 6 to 8 minutes.
+
+Round 1 found no blocker and four concerns, all on one ordering criterion.
+Its witness was red against its mutant and never measured against base,
+where nothing truncates on release. It drove one of two locks and one
+ending, and its seam was measured on a newer Python than the cell runs.
+Round 2 found no blocker. One concern named two claims that the release
+window contradicted. Another named a docstring already at its line limit.
+The last three named wrong versions no command had run. The final round
+killed all ten.
+
+## What SA-0427 adds
+
+93. A witness for an ordering runs against base as well as its mutant,
+    since base may already satisfy the order by doing nothing.
+94. A spec that adds a sentence to a docstring counts that docstring's
+    lines at base against the gate's limit.
+
+## SA-0429 (b-619b7d)
+
+One writer, two reviews, and a final writer round. The draft took about 29
+minutes. The delegate then sent it back before any review, because the
+writer had measured a red adopt that admitted the child and left it out of
+scope. That revision took about 27 minutes, and the next two about 2 and 4.
+Each review took 11 to 12 minutes.
+
+Round 1 found no blocker and three concerns. The size estimate sat 16 lines
+under the prototype, and the measured figure prices past 80% of the
+ceiling. No witness adopted one pull request red twice. A window between
+two ledger writes stays open until adopt is retried. Round 2 found no
+blocker. Its two concerns were members no witness drove: a repeat on the
+same head, and a row with no push. The final round killed all three
+wrong versions it added.
+
+## What SA-0429 adds
+
+95. A claim about a retried command drives the retry on the same input,
+    not only on a fresh one.
+96. A spec's size estimate is read from the prototype's numstat, never
+    fitted to the 80% line.
+
+## SA-0430 (b-f7db70)
+
+One writer, two reviews, and a final writer round. The draft took about 28
+minutes and found that the merged `SA-0429` contradicted it. Each passed
+alone, and together they failed `tests/test_cli.py`. The delegate chose to
+land `SA-0430` first, and the writer amended `SA-0429` in the same commit
+after measuring both prototypes together. The revisions took about 8, 8 and
+8 minutes. Each review took 10 to 11 minutes.
+
+Round 1 found one blocker. Criterion 2 refused a dead revision's retry,
+because a batch mints a fresh task and the dead row carries no push. Round 1
+also found an unpinned row order and a smoke test that still took `SA-0429`.
+Round 2 found no blocker. Its first concern was a hole the fix opened: an
+adopted `ORPHANED` row records the operator's head as its own push. The
+final round closed it, and all 28 declared wrong versions were killed, each
+by its own criterion's witness.
+
+## What SA-0430 adds
+
+97. A spec whose subject overlaps a queued spec's applies both prototypes
+    together and runs both specs' witnesses before its first review.
+98. A rule that grants ownership from a row's recorded push names which
+    writers record that push, adopt included.
+99. Each wrong version is run against its own criterion's witness alone,
+    so a kill is attributed to the witness that claims it.
+
+## SA-0431 (b-c2f264)
+
+One writer, two reviews, and a final writer round. The draft took about 51
+minutes. The writer landed the `witness.assertion` policy field by hand, and
+the operator approved it as drafted. The revisions took about 20 and 7
+minutes. The reviews took about 14 and 11 minutes.
+
+Round 1 found two blockers. Every witness declared a pattern that meant
+"starts with assert", so a core that hard-coded those words passed all six.
+No row held two raised witnesses, so a wrong join passed. Round 1 also found
+that an unanchored host-filed concern never reached REBUT. Round 2 found the
+first blocker's class again, in criteria 4 and 6, and a stale pair count.
+The final round ran every route under a `KeyError` pattern, and all 54
+declared wrong versions were killed, each by its own criterion's witness.
+
+The size estimate rose from 132 to 150 lines as stale sentences came into
+scope. `check` blocks it at `elevated`, and the delegate accepted that,
+since the `size` gate counts 499 of its 1300 tokens.
+
+## What SA-0431 adds
+
+100. A rule that reads a declared pattern drives at least one row under a
+     pattern that disagrees with the obvious default, on every route that
+     reads it.
+101. A claim that names each member of a list drives a row with two members.
+102. A change that lets a finding past a filter reads every docstring and
+     document that says only one kind passes.

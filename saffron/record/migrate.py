@@ -90,12 +90,22 @@ _GATE_RESULT_SET_ASIDE = frozenset(
 def _normalized(fact: Fact) -> Fact:
     """`fact` with every difference the top-up sets aside already gone:
     its `at`, and the four `gate_result` keys above on a `gate_result`.
+    A `gate_result`'s own failures also drop `detail`, which no ledger row
+    stores (`_failure_payload` never writes one).
     A `rebuttal` fact's own `answer` and `error` default to null where
     either is missing. So a fact recorded before item 42 agrees with one
     derived with both explicitly null."""
     payload = fact.payload
     if fact.kind == "gate_result":
         payload = {k: v for k, v in payload.items() if k not in _GATE_RESULT_SET_ASIDE}
+        if "failures" in payload:
+            payload = {
+                **payload,
+                "failures": [
+                    {k: v for k, v in failure.items() if k != "detail"}
+                    for failure in payload["failures"]
+                ],
+            }
     elif fact.kind == "rebuttal":
         payload = {"answer": None, "error": None, **payload}
     return replace(fact, at="", payload=payload)

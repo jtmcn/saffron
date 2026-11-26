@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import time
 from collections.abc import Callable, Sequence
@@ -23,7 +24,7 @@ import pytest
 from saffron import task as task_module
 from saffron.agents.findings import Finding
 from saffron.cell.session import CellOutcome
-from saffron.events import Ceilings, Event, Teardown, read_log
+from saffron.events import Agent, Ceilings, Event, PhaseStart, Teardown, read_log
 from saffron.gates.contract import GateResult
 from saffron.intake import History, Spec, parse_spec
 from saffron.ledger import Ledger, TaskState
@@ -398,7 +399,9 @@ def test_both_queue_writers_put_the_trailing_accept_rate_in_the_header(
         acceptance_criteria=["it works"],
     )
     result = package_phase.PackageResult(state="MERGE_FAILED", branch="saffron/Y-9")
-    package_phase._finish(finish_ledger, outcome, finish_out_dir, spec, "r2", result)
+    package_phase._finish(
+        finish_ledger, outcome, finish_out_dir, spec, "r2", result, say=print
+    )
 
     finish_page = (finish_out_dir / "index.html").read_text()
     assert "trailing accept rate <strong>75% of 4</strong>" in finish_page
@@ -634,9 +637,9 @@ def test_a_log_that_failed_on_its_first_write_still_warns(
         def append(self, event):
             if self._first:
                 self._first = False
-                self.failed = True
-                return
-            super().append(event)
+                self.write_refused = True
+                return event
+            return super().append(event)
 
     monkeypatch.setattr(task_module, "EventLog", _FailFirst)
     _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
@@ -684,9 +687,9 @@ def test_a_log_that_starts_failing_partway_through_still_warns(
         def append(self, event):
             self._count += 1
             if self._count <= 2:
-                super().append(event)
-            else:
-                self.failed = True
+                return super().append(event)
+            self.write_refused = True
+            return event
 
     monkeypatch.setattr(task_module, "EventLog", _FailAfterTwo)
     _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
@@ -713,6 +716,137 @@ def test_a_log_that_starts_failing_partway_through_still_warns(
     logged = read_log(out_dir / "SY-11")
     assert len(logged) == 2, "only the two appends that ran before the flip land"
     assert logged[1] == events[0]
+
+
+def test_run_tasks_log_warnings_name_its_path_and_say_which_fault(
+    tmp_path, monkeypatch, capsys
+):
+    """`run_task`'s own `emit` closure names its log by the `EventLog` it
+    built, never a path rederived from `out_dir` and the spec id. One
+    warning per fault prints once per log, on the line right after the
+    event that raised it. The serialize warning never lands in the log,
+    and neither does the refusal's."""
+
+    class _OneBelow(task_module.EventLog):
+        """Writes one directory below the task's own, so a warning that
+        named `out_dir / spec.id / "events.jsonl"` would point at a file
+        that never exists."""
+
+        def __init__(self, task_dir, **kwargs):
+            super().__init__(Path(task_dir) / "sub", **kwargs)
+
+    monkeypatch.setattr(task_module, "EventLog", _OneBelow)
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
+
+    out_dir = tmp_path / "out"
+
+    def _phase(ts: float, detail: str) -> PhaseStart:
+        return PhaseStart(
+            timestamp=ts,
+            spec_id="irrelevant",
+            phase="PACKAGE",
+            label="PACKAGE",
+            detail=detail,
+        )
+
+    def _raw_set(ts: float, line: str) -> Agent:
+        return Agent(
+            timestamp=ts, spec_id="irrelevant", raw=True, line=line, event={"s": {1, 2}}
+        )
+
+    def _raw_huge(ts: float, line: str) -> Agent:
+        return Agent(
+            timestamp=ts,
+            spec_id="irrelevant",
+            raw=True,
+            line=line,
+            event={"n": 10**5000},
+        )
+
+    # --- Task 1: both faults, the second on-disk corruption happening mid-task.
+    one, two = _raw_set(1.0, "one"), _raw_huge(2.0, "two")
+    first_phase, last_phase = _phase(3.0, "first"), _phase(4.0, "last")
+    log_dir = out_dir / "SY-21" / "sub"
+
+    def _on_cell_1(kwargs):
+        logged = read_log(log_dir)
+        assert [type(e).__name__ for e in logged] == ["Ceilings", "PhaseStart"]
+        (log_dir / "events.jsonl").unlink()
+        (log_dir / "events.jsonl").mkdir()
+        kwargs["emit"](last_phase)
+
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-21",
+        state="EXHAUSTED",
+        task_id=1,
+        out_dir=out_dir,
+        events=[one, two, first_phase],
+        on_cell=_on_cell_1,
+    )
+    out1 = capsys.readouterr().out
+    lines1 = out1.splitlines()
+    path1 = str(log_dir / "events.jsonl")
+    refused1 = f"warning: {path1} refused a write; events may be missing"
+    serialize1 = f"warning: {path1} could not serialize an event and left it out"
+
+    def _index(line: str) -> int:
+        return lines1.index(line)
+
+    # The whole set of warnings, so one naming another path fails too.
+    assert [w for w in lines1 if w.startswith("warning:")] == [serialize1, refused1]
+    assert _index("agent: (raw) one") < _index(serialize1)
+    assert _index(serialize1) < _index("agent: (raw) two")
+    assert _index("agent: (raw) two") < _index("PACKAGE: first")
+    assert _index("PACKAGE: first") < _index("PACKAGE: last")
+    assert _index("PACKAGE: last") < _index(refused1)
+
+    # --- Task 2: one fault only, no corruption.
+    phase_two, bad_two = _phase(1.0, "only"), _raw_set(2.0, "last-line")
+    log_dir2 = out_dir / "SY-22" / "sub"
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-22",
+        state="EXHAUSTED",
+        task_id=2,
+        out_dir=out_dir,
+        events=[phase_two, bad_two],
+    )
+    out2 = capsys.readouterr().out
+    lines2 = out2.splitlines()
+    path2 = str(log_dir2 / "events.jsonl")
+    serialize2 = f"warning: {path2} could not serialize an event and left it out"
+    assert [w for w in lines2 if w.startswith("warning:")] == [serialize2]
+    assert lines2.index("agent: (raw) last-line") < lines2.index(serialize2)
+
+    # --- Task 3: the log already refusing before the task's own Ceilings line.
+    log_dir3 = out_dir / "SY-23" / "sub"
+    log_dir3.mkdir(parents=True)
+    (log_dir3 / "events.jsonl").mkdir()
+    bad_three = _raw_set(1.0, "only-bad")
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-23",
+        state="EXHAUSTED",
+        task_id=3,
+        out_dir=out_dir,
+        events=[bad_three],
+    )
+    out3 = capsys.readouterr().out
+    lines3 = out3.splitlines()
+    path3 = str(log_dir3 / "events.jsonl")
+    refused3 = f"warning: {path3} refused a write; events may be missing"
+    serialize3 = f"warning: {path3} could not serialize an event and left it out"
+    ceilings_idx = next(
+        i for i, line in enumerate(lines3) if line.startswith("ceilings:")
+    )
+    assert lines3[ceilings_idx + 1] == refused3
+    bad_idx = lines3.index("agent: (raw) only-bad")
+    assert lines3[bad_idx + 1] == serialize3
+    assert [w for w in lines3 if w.startswith("warning:")] == [refused3, serialize3]
 
 
 def test_run_task_redacts_the_cells_own_token_from_its_log(
@@ -753,6 +887,141 @@ def test_run_task_redacts_the_cells_own_token_from_its_log(
     assert only.line is not None
     assert "before " in only.line and " after" in only.line
     assert token not in only.line
+
+
+def test_run_tasks_default_emit_prints_no_credential(tmp_path, monkeypatch, capsys):
+    """The `emit` `run_task` builds when handed none prints `describe` of
+    what the log already redacted, the same contract `_default_emit` keeps
+    (b-0f5493)."""
+    from saffron.credentials import OWN_TOKEN_DESCRIPTION
+    from saffron.events import Agent, describe
+
+    _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
+
+    token = "cct-" + "5a9f3e7c21d4b8"
+    github = "gh" + "p_" + "a" * 20
+    aws = "AKIA" + "A" * 16
+    api_key = "sk-ant-" + "api03-" + "a" * 20
+    pad = "x" * 150
+
+    def _unredacted(text: str) -> bool:
+        return any(s in text for s in (token, token[:10], "ghp_", github, aws, api_key))
+
+    def _events(spec_id: str) -> list[Agent]:
+        return [
+            Agent(
+                timestamp=1.0,
+                spec_id=spec_id,
+                raw=False,
+                event={"type": "text", "text": f"before {token} and {github} after"},
+            ),
+            Agent(
+                timestamp=2.0,
+                spec_id=spec_id,
+                raw=False,
+                event={
+                    "type": "tool_use",
+                    "name": "Bash",
+                    "input": {"command": f"{token} {github}"},
+                },
+            ),
+            Agent(
+                timestamp=3.0,
+                spec_id=spec_id,
+                raw=True,
+                line=f"before {token} and {aws} after",
+            ),
+            Agent(
+                timestamp=4.0,
+                spec_id=spec_id,
+                raw=False,
+                detail=f"before {token} and {api_key} after",
+            ),
+            Agent(timestamp=5.0, spec_id=spec_id, raw=True, line=pad + token),
+            Agent(timestamp=6.0, spec_id=spec_id, raw=True, line=pad + github),
+        ]
+
+    out_dir = tmp_path / "out"
+    events = _events("SY-20")
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-20",
+        state="NOT_IMPLEMENTED",
+        task_id=20,
+        out_dir=out_dir,
+        events=events,
+        token=token,
+    )
+    printed = [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("agent: ")
+    ]
+    assert len(printed) == len(events)
+    for line in printed:
+        assert not _unredacted(line)
+        assert "(redacted: " in line
+    for line in printed[:5]:
+        assert OWN_TOKEN_DESCRIPTION in line
+    stored = [e for e in read_log(out_dir / "SY-20") if isinstance(e, Agent)]
+    assert len(stored) == len(events)
+    for line, logged in zip(printed, stored, strict=True):
+        assert line == describe(logged)
+
+    # `events.jsonl` pre-created as a directory: every write is refused, and
+    # the same six lines still print redacted, beside one warning.
+    dir_out_dir = tmp_path / "out-dir"
+    dir_task_dir = dir_out_dir / "SY-21"
+    dir_task_dir.mkdir(parents=True)
+    (dir_task_dir / "events.jsonl").mkdir()
+    dir_events = _events("SY-21")
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-21",
+        state="NOT_IMPLEMENTED",
+        task_id=21,
+        out_dir=dir_out_dir,
+        events=dir_events,
+        token=token,
+    )
+    output = capsys.readouterr().out
+    printed_refused = [
+        line for line in output.splitlines() if line.startswith("agent: ")
+    ]
+    assert len(printed_refused) == len(dir_events)
+    for line in printed_refused:
+        assert not _unredacted(line)
+        assert "(redacted: " in line
+    for line in printed_refused[:5]:
+        assert OWN_TOKEN_DESCRIPTION in line
+    assert output.count("refused a write") == 1
+
+    # Handed no token, the log still redacts the three shapes, and the
+    # token prints as it came.
+    none_out_dir = tmp_path / "out-none"
+    none_events = _events("SY-22")
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-22",
+        state="NOT_IMPLEMENTED",
+        task_id=22,
+        out_dir=none_out_dir,
+        events=none_events,
+        token=None,
+    )
+    printed_none = [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("agent: ")
+    ]
+    assert len(printed_none) == len(none_events)
+    for line in printed_none[:5]:
+        assert token[:10] in line
+    for line in printed_none:
+        assert not any(s in line for s in ("ghp_", github, aws, api_key))
 
 
 def test_a_handoff_carries_both_halves_or_neither():
@@ -2199,6 +2468,80 @@ def test_both_run_task_rows_carry_the_outcomes_unread_and_unanswered_counts(
     assert (row2["unread"], row2["unanswered"]) == (2, 3)
 
 
+def test_both_rows_after_a_push_carry_the_pushed_branchs_diff_stat(
+    tmp_path, monkeypatch
+):
+    """Both queue lines `run_task` writes after `push_unpackaged_work` carry
+    the `added` and `removed` its `PushResult` holds, never PACKAGE's own
+    stat (`SA-0423`)."""
+    out_dir = tmp_path / "out"
+
+    # PACKAGE never ran: no anchored blocker, so `exhausted_package` is
+    # False and `run_task` takes the plain "never packaged" branch.
+    _push(
+        monkeypatch,
+        package_phase.PushResult(
+            pushed=True,
+            branch="saffron/SY-1",
+            pushed_sha="a" * 40,
+            note="pushed",
+            added=2,
+            removed=1,
+        ),
+    )
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-1",
+        state="EXHAUSTED",
+        task_id=1,
+        out_dir=out_dir,
+    )
+    row1 = next(r for r in _rows(out_dir) if r["spec_id"] == "SY-1")
+    assert (row1["added"], row1["removed"]) == (2, 1)
+
+    # PACKAGE's own refusal carries a different stat than the push, and
+    # the push's own stat is what `run_task` writes on this line.
+    blocker = Finding(
+        lens="correctness",
+        severity="blocker",
+        file="a.py",
+        line=3,
+        claim="broken",
+        anchored=True,
+    )
+    monkeypatch.setattr(
+        package_phase,
+        "package",
+        lambda _outcome, **kwargs: package_phase.PackageResult(
+            state="EXHAUSTED", note="conflicts with main", added=9, removed=9
+        ),
+    )
+    _push(
+        monkeypatch,
+        package_phase.PushResult(
+            pushed=True,
+            branch="saffron/SY-2",
+            pushed_sha="b" * 40,
+            note="pushed",
+            added=2,
+            removed=1,
+        ),
+    )
+    _drive(
+        tmp_path,
+        monkeypatch,
+        spec_id="SY-2",
+        state="EXHAUSTED",
+        task_id=2,
+        out_dir=out_dir,
+        reviews=[LensReview(lens="correctness", findings=[blocker])],
+        rebut_result=None,
+    )
+    row2 = next(r for r in _rows(out_dir) if r["spec_id"] == "SY-2")
+    assert (row2["added"], row2["removed"]) == (2, 1)
+
+
 def test_an_exhausted_package_that_opened_nothing_still_pushes_its_work(
     tmp_path, monkeypatch
 ):
@@ -2405,7 +2748,7 @@ def test_a_raise_that_escapes_run_task_from_package_is_marked_and_kept(
     `saffron.task.mark_raised_in_package`, and the same object re-raises
     with its type unchanged. `saffron.task.raised_in_package(exc)` reads
     the mark. An exhausted-mode raise, a `GATE_ERROR` cell's own
-    `append_queue_line` raise, and a fresh, never-raised exception, all
+    `push_unpackaged_work` raise, and a fresh, never-raised exception, all
     read as unmarked. So does a `run_one_cell` raise here, since this case
     mints no task for `ready_task` to admit (`b-066901`)."""
     # Imported here, not at module scope, or the reverted run collects as
@@ -2560,17 +2903,14 @@ def test_a_raise_that_escapes_run_task_from_package_is_marked_and_kept(
     assert excinfo4.value is run_one_cell_error
     assert not raised_in_package(excinfo4.value)
 
-    # 5) A `GATE_ERROR` cell reaches no PACKAGE call: its own
-    # `append_queue_line` raise escapes unmarked too.
-    from saffron.report import index as index_report
+    # 5) A `GATE_ERROR` cell's own `push_unpackaged_work` raise still
+    # escapes unmarked. The write after it is guarded now (`SA-0423`).
+    push_error = CellRuntimeError("the registry could not be reached")
 
-    _push(monkeypatch, package_phase.PushResult(pushed=False, note="unused"))
-    append_error = CellRuntimeError("the queue store is locked")
+    def _push_raises_gate_error(*a, **k):
+        raise push_error
 
-    def _append_raises(*a, **k):
-        raise append_error
-
-    monkeypatch.setattr(index_report, "append_queue_line", _append_raises)
+    monkeypatch.setattr(package_phase, "push_unpackaged_work", _push_raises_gate_error)
     with pytest.raises(CellRuntimeError) as excinfo5:
         _drive(
             tmp_path,
@@ -2580,7 +2920,7 @@ def test_a_raise_that_escapes_run_task_from_package_is_marked_and_kept(
             task_id=205,
             out_dir=out_dir,
         )
-    assert excinfo5.value is append_error
+    assert excinfo5.value is push_error
     assert not raised_in_package(excinfo5.value)
 
     # 6) A fresh exception of either type, never raised, is unmarked too.
@@ -2593,6 +2933,187 @@ def test_a_raise_that_escapes_run_task_from_package_is_marked_and_kept(
     assert not raised_in_package(fresh)
     mark_raised_in_package(fresh)
     assert raised_in_package(fresh)
+
+
+def test_a_failed_end_row_write_is_said_and_run_task_still_returns(
+    tmp_path, monkeypatch, capsys
+):
+    """An `Exception` raised while `run_task` writes either of its own
+    end-of-task queue lines is printed and never leaves `run_task`
+    (`SA-0423`). It returns its outcome exactly as it does when the write
+    lands, so `saffron cell`'s exit code still reads from the outcome's own
+    state. This covers a raise out of `append_queue_line` and one out of
+    `accept_rate_header`. Both reach the line for a task PACKAGE never ran
+    and the `EXHAUSTED` line. A `KeyboardInterrupt` still leaves `run_task`
+    from either line."""
+    from saffron.cell.runtime import CellRuntimeError
+    from saffron.cli import CELL_EXIT
+    from saffron.report import index as index_report
+
+    class _Unlisted(Exception):
+        pass
+
+    out_dir = tmp_path / "out"
+    real_append = index_report.append_queue_line
+    real_header = index_report.accept_rate_header
+    next_task_id = [2000]
+
+    def _raiser(exc):
+        def _raise(*_a, **_k):
+            raise exc
+
+        return _raise
+
+    def _reset_write() -> None:
+        monkeypatch.setattr(index_report, "append_queue_line", real_append)
+        monkeypatch.setattr(index_report, "accept_rate_header", real_header)
+
+    blocker = Finding(
+        lens="correctness",
+        severity="blocker",
+        file="a.py",
+        line=1,
+        claim="broken",
+        anchored=True,
+    )
+
+    def _run_case(
+        *, spec_id: str, state: str, where: str, exc: Exception, exhausted: bool
+    ) -> CellOutcome:
+        _reset_write()
+        if where == "append_queue_line":
+            monkeypatch.setattr(index_report, "append_queue_line", _raiser(exc))
+        else:
+            monkeypatch.setattr(index_report, "accept_rate_header", _raiser(exc))
+        if exhausted:
+            monkeypatch.setattr(
+                package_phase,
+                "package",
+                lambda _outcome, **kwargs: package_phase.PackageResult(
+                    state="EXHAUSTED", note="conflicts with main"
+                ),
+            )
+            _push(monkeypatch, package_phase.PushResult(pushed=True, note="pushed"))
+        else:
+            _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
+        capsys.readouterr()
+        next_task_id[0] += 1
+        if exhausted:
+            result = _drive(
+                tmp_path,
+                monkeypatch,
+                spec_id=spec_id,
+                state=state,
+                task_id=next_task_id[0],
+                out_dir=out_dir,
+                reviews=[LensReview(lens="correctness", findings=[blocker])],
+                rebut_result=None,
+            )
+        else:
+            result = _drive(
+                tmp_path,
+                monkeypatch,
+                spec_id=spec_id,
+                state=state,
+                task_id=next_task_id[0],
+                out_dir=out_dir,
+            )
+        out = capsys.readouterr().out
+        guard_line = f"{spec_id}: the {state} row could not be written: {exc}"
+        status_marker = f"{spec_id:<10} {state}"
+        assert guard_line in out, out
+        assert status_marker in out, out
+        assert out.index(guard_line) < out.rindex(status_marker), out
+        _reset_write()
+        return result
+
+    # Five on a `NOT_IMPLEMENTED` task, the line for a task PACKAGE never ran.
+    for exc, where in [
+        (OSError("disk fell over"), "append_queue_line"),
+        (ValueError("bad value"), "append_queue_line"),
+        (CellRuntimeError("the queue store is locked"), "append_queue_line"),
+        (_Unlisted("an exception nobody declared"), "append_queue_line"),
+        (sqlite3.OperationalError("database is locked"), "accept_rate_header"),
+    ]:
+        result = _run_case(
+            spec_id="NI-1",
+            state="NOT_IMPLEMENTED",
+            where=where,
+            exc=exc,
+            exhausted=False,
+        )
+        assert CELL_EXIT.get(result.state, 1) == 1
+
+    # Five on an `EXHAUSTED` task whose PACKAGE refused.
+    for exc, where in [
+        (OSError("disk fell over"), "append_queue_line"),
+        (ValueError("bad value"), "append_queue_line"),
+        (_Unlisted("an exception nobody declared"), "append_queue_line"),
+        (sqlite3.OperationalError("database is locked"), "accept_rate_header"),
+        (RuntimeError("the header broke"), "accept_rate_header"),
+    ]:
+        result = _run_case(
+            spec_id="EX-1", state="EXHAUSTED", where=where, exc=exc, exhausted=True
+        )
+        assert CELL_EXIT.get(result.state, 1) == 1
+
+    # One on a `GATE_ERROR` task.
+    result = _run_case(
+        spec_id="GE-1",
+        state="GATE_ERROR",
+        where="append_queue_line",
+        exc=OSError("disk fell over"),
+        exhausted=False,
+    )
+    assert CELL_EXIT.get(result.state, 1) == 2
+
+    # A `KeyboardInterrupt` subclass from `append_queue_line` still leaves
+    # `run_task`, once on each line.
+    class _Stop(KeyboardInterrupt):
+        pass
+
+    for spec_id, state, exhausted in [
+        ("KI-1", "NOT_IMPLEMENTED", False),
+        ("KI-2", "EXHAUSTED", True),
+    ]:
+        _reset_write()
+        interrupt = _Stop("operator pressed Ctrl-C")
+        monkeypatch.setattr(index_report, "append_queue_line", _raiser(interrupt))
+        if exhausted:
+            monkeypatch.setattr(
+                package_phase,
+                "package",
+                lambda _outcome, **kwargs: package_phase.PackageResult(
+                    state="EXHAUSTED", note="conflicts with main"
+                ),
+            )
+            _push(monkeypatch, package_phase.PushResult(pushed=True, note="pushed"))
+        else:
+            _push(monkeypatch, package_phase.PushResult(pushed=False, note=_NO_COMMITS))
+        next_task_id[0] += 1
+        with pytest.raises(_Stop) as excinfo:
+            if exhausted:
+                _drive(
+                    tmp_path,
+                    monkeypatch,
+                    spec_id=spec_id,
+                    state=state,
+                    task_id=next_task_id[0],
+                    out_dir=out_dir,
+                    reviews=[LensReview(lens="correctness", findings=[blocker])],
+                    rebut_result=None,
+                )
+            else:
+                _drive(
+                    tmp_path,
+                    monkeypatch,
+                    spec_id=spec_id,
+                    state=state,
+                    task_id=next_task_id[0],
+                    out_dir=out_dir,
+                )
+        assert excinfo.value is interrupt
+    _reset_write()
 
 
 def test_a_task_bound_for_package_reads_its_state_only_once_package_ends(
@@ -5471,7 +5992,7 @@ def test_every_row_a_tasks_end_writes_comes_from_queue_line(tmp_path, monkeypatc
         removed=23,
     )
     package_phase._finish(
-        ledger_4, outcome_4, out_dir_4, spec_4, "target-repo", result_4
+        ledger_4, outcome_4, out_dir_4, spec_4, "target-repo", result_4, say=print
     )
     ledger_4.close()
 
@@ -5503,7 +6024,7 @@ def test_every_row_a_tasks_end_writes_comes_from_queue_line(tmp_path, monkeypatc
         state="MERGE_FAILED", note="gone", branch="saffron/SY-1"
     )
     package_phase._finish(
-        ledger_5, outcome_5, out_dir_5, spec_5, "target-repo", result_5
+        ledger_5, outcome_5, out_dir_5, spec_5, "target-repo", result_5, say=print
     )
     ledger_5.close()
 

@@ -7,6 +7,7 @@ so a reverted lock fails an assertion here rather than a collection error.
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import json
 import os
 import signal
@@ -19,6 +20,12 @@ import pytest
 
 from saffron import cli, preflight
 from saffron.ledger import Ledger
+from tests.test_cell_name_lock import (
+    _raised,
+    _ReleaseProbe,
+    _relock_as_successor,
+    _SpyStop,
+)
 from tests.test_cli import (
     _fake_batch_resolution,
     _seed_repo,
@@ -401,3 +408,112 @@ def test_the_home_is_freed_when_its_holder_returns_or_raises(monkeypatch, tmp_pa
 
             after = cli.main(_argv("batch", home, tmp_path, f"{tag}-after"))
             assert after == 0, (holder_cmd, should_raise)
+
+
+def test_a_contender_in_a_holders_write_window_names_no_stale_holder(
+    monkeypatch, tmp_path, capsys
+):
+    home = tmp_path / "home"
+    started: list[str] = []
+    monkeypatch.setattr(
+        cli, "_batch", lambda args, ledger, out_dir: (started.append("batch"), 0)[1]
+    )
+    this_pid = os.getpid()
+    lock_path = home / "ledger.lock"
+
+    def _in_block_refusal(tag: str) -> None:
+        capsys.readouterr()
+        result = cli.main(_argv("batch", home, tmp_path, tag))
+        assert result == 2
+        out = capsys.readouterr().out
+        assert out == f"saffron: held by pid {this_pid} running saffron cell\n"
+
+    def _stale_window_refusal(tag: str) -> None:
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o644)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            capsys.readouterr()
+            result = cli.main(_argv("batch", home, tmp_path, tag))
+            assert result == 2
+            out = capsys.readouterr().out
+            assert out == "saffron: held by pid unknown running unknown\n"
+        finally:
+            os.close(fd)
+
+    def _holder(mode: str):
+        def _run(args, ledger, out_dir):
+            _in_block_refusal(f"{mode}-a")
+            _in_block_refusal(f"{mode}-b")
+            if mode == "return":
+                return 0
+            if mode == "raise":
+                raise RuntimeError("the holder raised")
+            raise _SpyStop("the holder was interrupted")
+
+        return _run
+
+    for mode in ("return", "raise", "interrupt"):
+        monkeypatch.setattr(cli, "_run_cell", _holder(mode))
+        result_box: list[int] = []
+
+        def _call(mode=mode, result_box=result_box) -> None:
+            result_box.append(cli.main(_argv("cell", home, tmp_path, f"{mode}-holder")))
+
+        raised = _raised(_call)
+        if mode == "interrupt":
+            assert isinstance(raised, _SpyStop), repr(raised)
+            assert result_box == []
+        else:
+            assert raised is None, repr(raised)
+            expected = 0 if mode == "return" else 2
+            assert result_box == [expected]
+
+        assert lock_path.is_file()
+        assert lock_path.read_text() == ""
+        _stale_window_refusal(f"{mode}-stale")
+
+    assert started == []
+
+
+def test_the_home_lock_empties_its_file_before_it_lets_go(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    monkeypatch.setattr(cli, "_batch", lambda args, ledger, out_dir: 0)
+    monkeypatch.setattr(cli, "_run_cell", lambda args, ledger, out_dir: 0)
+
+    result = cli.main(_argv("cell", home, tmp_path, "warmup"))
+    assert result == 0
+    lock_path = home / "ledger.lock"
+
+    def _holder(mode: str):
+        def _run(args, ledger, out_dir):
+            if mode == "return":
+                return 0
+            if mode == "raise":
+                raise RuntimeError("the holder raised")
+            raise _SpyStop("the holder was interrupted")
+
+        return _run
+
+    for mode in ("return", "raise", "interrupt"):
+        probe = _ReleaseProbe(lock_path, lambda: _relock_as_successor(lock_path))
+        result_box: list[int] = []
+
+        def _call(mode=mode, result_box=result_box) -> None:
+            result_box.append(cli.main(_argv("cell", home, tmp_path, f"{mode}-holder")))
+
+        with pytest.MonkeyPatch.context() as mp:
+            probe.patch(mp)
+            mp.setattr(cli, "_run_cell", _holder(mode))
+            raised = _raised(_call)
+
+        if mode == "interrupt":
+            assert isinstance(raised, _SpyStop), repr(raised)
+            assert result_box == []
+        else:
+            assert raised is None, repr(raised)
+            expected = 0 if mode == "return" else 2
+            assert result_box == [expected]
+
+        assert probe.released, "the probe never saw a release"
+        assert probe.content_at_release == ""
+        assert lock_path.read_text() == "4242 next\n"

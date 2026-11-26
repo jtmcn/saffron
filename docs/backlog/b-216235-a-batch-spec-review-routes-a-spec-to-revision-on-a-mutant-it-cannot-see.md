@@ -38,3 +38,4 @@ revise.
   ran with room for a revision.
 - 2026-11-22: batch 102 ran `SA-0419` at `--budget 100`. Its spec review
   routed `run` that time.
+- 2026-11-23: two more weak wrong versions in the spec loop's run 84. `SA-0426`'s criterion 3 version widened `_DIGITS` and never made `identity` read `detail`. Finish 105's draft `SA-0428` declared two `migrate` versions its own witness could not reach, and REBUT left both blockers for the operator.

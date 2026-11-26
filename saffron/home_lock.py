@@ -30,7 +30,8 @@ class HomeLocked(Exception):
 
     `pid` and `command` come from the lock file the holder wrote, read
     before this exception is raised. Either is `None` when the file is
-    read between the holder's truncate and its write.
+    read between a holder's flock and its write, or between its release
+    truncate and its close.
     """
 
     def __init__(self, pid: int | None, command: str | None) -> None:
@@ -57,12 +58,13 @@ def _read_holder(handle: TextIO) -> tuple[int | None, str | None]:
 def lock(home: Path, command: str) -> Iterator[None]:
     """Hold `home`'s lock for `command`, for as long as the block runs, by
     return or by raise. Never waits: a lock already held raises
-    `HomeLocked` at once, naming the holder the file names.
+    `HomeLocked` at once, naming the holder the file names. Release
+    empties the file before the lock lets go.
 
     Opened `O_RDWR | O_CREAT`, never `O_TRUNC`: a contender this refuses
-    reads the holder's line out of the file it was refused on. The
-    descriptor is non-inheritable by Python's own default (PEP 446), so a
-    child this command starts never keeps the lock once this process ends.
+    reads the holder's line out of the file. The descriptor is
+    non-inheritable (PEP 446), so a child this command starts never keeps
+    the lock once this process ends.
     """
     home.mkdir(parents=True, exist_ok=True)
     fd = os.open(home / _LOCK_NAME, os.O_RDWR | os.O_CREAT, 0o644)
@@ -77,4 +79,11 @@ def lock(home: Path, command: str) -> Iterator[None]:
         handle.truncate()
         handle.write(f"{os.getpid()} {command}\n")
         handle.flush()
-        yield
+        try:
+            yield
+        finally:
+            # Emptied while the flock is still held, so the next holder's
+            # window names `unknown`, never this one's stale line.
+            handle.seek(0)
+            handle.truncate()
+            handle.flush()

@@ -31,3 +31,4 @@ rebuttal, and asserts the rebuttal is judged.
 ## Record
 
 - 2026-11-22: filed from the spec loop's run 82.
+- 2026-11-23: recurred in the spec loop's run 84. Batch 105's REBUT for `SA-0424` exited with code -6 and no result event. The task ended `REBUTTAL_UNJUDGED`, and the operator took it by hand as #1310.

@@ -37,3 +37,4 @@ decision says why not. `review.py:144` is fixed.
   and the loop's Standards seat reads them by hand.
 - 2026-10-24: ADR 11 (#963) makes "round" a confusable phrase, so the first
   arm of Done moved from `AVOIDED` to a `_Confusable_:` line.
+- 2026-11-24: recurred in the spec loop's run 85. `SA-0425`'s comments wrote a bare "stage" and "pool", both on `CONTEXT.md` _Avoid_ lines. No gate read them, and the Standards seat found them by hand.

@@ -447,3 +447,136 @@ def test_the_credential_shapes_are_spelled_in_one_module():
         source = pattern.pattern
         found_in = [f for f in py_files if source in f.read_text()]
         assert found_in == [credentials_file]
+
+
+def test_the_default_emitters_line_carries_no_credential(tmp_path, capsys):
+    """`session._default_emit` prints `describe` of what `EventLog.append`
+    already redacted. A credential the log keeps off disk never reaches the
+    terminal either, at every shape and field `append` redacts (b-0f5493)."""
+    from dataclasses import replace
+
+    from saffron.cell.session import _default_emit
+    from saffron.credentials import CREDENTIAL_SHAPES, OWN_TOKEN_DESCRIPTION
+    from saffron.events import Agent, EventLog, describe, read_log
+
+    token = "cct-" + "5a9f3e7c21d4b8"
+    github = _github_token("p")
+    aws = _aws_key()
+    api_key = _api_key()
+
+    def _unredacted(text: str) -> bool:
+        if token in text or token[:10] in text or "ghp_" in text:
+            return True
+        return any(pattern.search(text) for _, pattern in CREDENTIAL_SHAPES)
+
+    pad = "x" * 150
+    events = [
+        Agent(
+            timestamp=1.0,
+            spec_id="CR-emit",
+            raw=False,
+            event={"type": "text", "text": f"before {token} and {github} after"},
+        ),
+        Agent(
+            timestamp=2.0,
+            spec_id="CR-emit",
+            raw=False,
+            event={
+                "type": "tool_use",
+                "name": "Bash",
+                "input": {"command": f"{token} {github}"},
+            },
+        ),
+        Agent(
+            timestamp=3.0,
+            spec_id="CR-emit",
+            raw=True,
+            line=f"before {token} and {aws} after",
+        ),
+        Agent(
+            timestamp=4.0,
+            spec_id="CR-emit",
+            raw=False,
+            detail=f"before {token} and {api_key} after",
+        ),
+        Agent(timestamp=5.0, spec_id="CR-emit", raw=True, line=pad + token),
+        Agent(timestamp=6.0, spec_id="CR-emit", raw=True, line=pad + github),
+    ]
+
+    task_dir = tmp_path / "CR-emit"
+    log = EventLog(task_dir, token=token)
+    for event in events:
+        _default_emit(event, log=log)
+    printed = [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("agent: ")
+    ]
+    assert len(printed) == len(events)
+    for line in printed:
+        assert not _unredacted(line)
+        assert "(redacted: " in line
+    for line in printed[:5]:
+        assert OWN_TOKEN_DESCRIPTION in line
+    stored = read_log(task_dir)
+    assert len(stored) == len(events)
+    for line, logged in zip(printed, stored, strict=True):
+        assert line == describe(logged)
+
+    # Handed `None`, the own-token redaction is guarded off, but the three
+    # static shapes still redact.
+    none_dir = tmp_path / "CR-emit-none"
+    none_log = EventLog(none_dir, token=None)
+    for event in events:
+        _default_emit(replace(event, spec_id="CR-emit-none"), log=none_log)
+    printed_none = [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("agent: ")
+    ]
+    assert len(printed_none) == len(events)
+    for line in printed_none[:5]:
+        assert token[:10] in line
+    for line in printed_none:
+        assert "ghp_" not in line
+        assert not any(pattern.search(line) for _, pattern in CREDENTIAL_SHAPES)
+
+    # A log whose `events.jsonl` is a directory refuses every write, and
+    # still prints each line redacted (append's own refusal branch).
+    dir_task = tmp_path / "CR-emit-dir"
+    dir_task.mkdir()
+    (dir_task / "events.jsonl").mkdir()
+    dir_log = EventLog(dir_task, token=token)
+    for event in events:
+        _default_emit(replace(event, spec_id="CR-emit-dir"), log=dir_log)
+    assert dir_log.failed
+    printed_while_refused = [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("agent: ")
+    ]
+    assert len(printed_while_refused) == len(events)
+    for line in printed_while_refused:
+        assert not _unredacted(line)
+        assert "(redacted: " in line
+    for line in printed_while_refused[:5]:
+        assert OWN_TOKEN_DESCRIPTION in line
+
+    # Over `BOUND_CHARS`, the printed line is the redacted text before the
+    # bound, never the `(bounded, ...)` placeholder the stored line becomes.
+    big_dir = tmp_path / "CR-emit-bound"
+    big_log = EventLog(big_dir, token=token)
+    big_text = f"before {token} and {github} after " + "z" * 8300
+    big_event = Agent(
+        timestamp=1.0,
+        spec_id="CR-emit-bound",
+        raw=False,
+        event={"type": "text", "text": big_text},
+    )
+    _default_emit(big_event, log=big_log)
+    printed_big = capsys.readouterr().out.strip()
+    assert not _unredacted(printed_big)
+    assert "(bounded" not in printed_big
+    (big_stored,) = _only_agent(read_log(big_dir), Agent)
+    assert big_stored.bounded is True
+    assert describe(big_stored) != printed_big

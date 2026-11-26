@@ -3311,3 +3311,67 @@ critic's own, so they have no line.
 - `SA-0419` (#1290): `finish_run`'s docstring dropped the sentence that a
   refused append raises with the status written, where the spec asked for
   a rewording. **Bucket 3**. **Landed:** a review commit on #1290.
+- `SA-0421` (#1296): no witness drove the `None` half of the second
+  claim, so an emit path that redacted only with a token passed.
+  **Bucket 1**. **Landed:** a review commit on #1296.
+- `SA-0421` (#1296): the first witness's `None` half printed one raw line,
+  so a path that redacted all but one event passed. **Bucket 1**.
+  **Landed:** a review commit on #1296.
+- `SA-0421` (#1296): no witness asserted the `(redacted: ` suffix on a
+  refused write, so a refused line that printed raw passed. **Bucket 1**.
+  **Landed:** a review commit on #1296.
+- `SA-0421` (#1296): `append`'s docstring said a refused write left the
+  line unchanged, where it stores none. **Bucket 3**. **Landed:** a review
+  commit on #1296.
+- `SA-0422` (#1299): the first witness took the real host lock root and
+  deleted live locks there. **Bucket 2**. **Landed:** a review commit on
+  #1299.
+- `SA-0422` (#1299): a spy's `KeyboardInterrupt` escaped `pytest.raises`
+  and interrupted the session. **Bucket 1**. **Landed:** a review commit
+  on #1299.
+- `SA-0422` (#1299): no witness asserted a symlink target's text after a
+  refusal, and none drove a lowercase contender. **Bucket 1**. **Landed:**
+  a review commit on #1299.
+- `SA-0422` (#1299): the copied holder helper printed `-1` where
+  `home_lock` prints `unknown`. **Bucket 3**. **Landed:** a review commit
+  on #1299.
+
+## 2026-11-23, spec loop run 84 (#1305, #1308, #1309, #1310)
+
+- `SA-0423` (#1305): `_raiser` was written twice in one test file.
+  **Bucket 3**. **Landed:** a review commit on #1305.
+- `SA-0423` (#1305): no witness asserted the base and head the push
+  recorded. **Bucket 3**. **Landed:** a review commit on #1305.
+- `SA-0426` (#1308): the new `detail` attribute docstring carried an
+  em-dash, and the `prose` gate reads no attribute docstring. **Bucket 1**.
+  **Landed:** a review commit on #1308, and b-e0e720 for the gate.
+- `SA-0426` (#1308): a test docstring cited §5.4 for escaping that §5.7
+  states, and another said "either" over three reasons. **Bucket 3**.
+  **Landed:** a review commit on #1308.
+- `SA-0426` (#1308): criterion 4's "short" FAILED line was 81 columns, so
+  no line of that kind kept its reason at 80. **Bucket 3**. **Landed:** a
+  review commit on #1308.
+- `SA-0427` (#1309): the release probe matched `operation == LOCK_UN`, so
+  an unlock spelled `LOCK_UN | LOCK_NB` survived criteria 4 and 5.
+  **Bucket 3**. **Landed:** a review commit on #1309.
+- `SA-0427` (#1309): an unlinked lock file was caught by an error alone,
+  never an assertion. **Bucket 1**. **Landed:** a review commit on #1309.
+  b-c2f264 holds the gate.
+- `SA-0427` (#1309): `_relock_as_successor` was written twice across two
+  test files. **Bucket 3**. **Landed:** a review commit on #1309.
+- `SA-0424` (#1310): the `run_task` witness never asserted the whole set
+  of warnings, so one naming another path survived. **Bucket 3**.
+  **Landed:** a review commit on #1310.
+- `SA-0424` (#1310): the `began_write` comment read as the reverse of the
+  code. **Bucket 3**. **Landed:** a review commit on #1310.
+- `SA-0424` (#1310): two docstrings told the history of removed lines.
+  **Bucket 2**. **Landed:** a review commit on #1310.
+
+## 2026-11-24, spec loop run 85 (#1315)
+
+- `SA-0425` (#1315): the criterion 1 witness read each death row's REBUT
+  line only for "ran out", so a line losing its own error survived.
+  **Bucket 3**. **Landed:** a review commit on #1315.
+- `SA-0425` (#1315): two comments wrote a bare "stage" and "pool", which
+  `CONTEXT.md` lists to avoid. **Bucket 1**. **Landed:** a review commit on
+  #1315, and a record line on item 174 for the gate.

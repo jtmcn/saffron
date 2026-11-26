@@ -413,3 +413,43 @@ def test_a_probes_block_is_checked_when_the_policy_loads(tmp_path):
         repo = write_repo(case_dir, policy_text=text, gates=())
         with pytest.raises(PolicyError, match=re.escape(expected)):
             load_policy(repo)
+
+
+def test_a_witness_assertion_is_checked_and_this_repos_reads_each_measured_reason(
+    tmp_path,
+):
+    """b-c2f264: `load_policy` refuses a `witness: assertion:` that is no
+    regular expression. This repo's own pattern matches each reason pytest
+    printed for a failed assertion, and none it printed for a raise."""
+    from pathlib import Path
+
+    from saffron.repos.policy import parse_policy
+
+    assert parse_policy(b"gates: {}\n").witness.assertion is None
+    text = yaml.dump({"gates": {}, "witness": {"assertion": "(assert"}})
+    repo = write_repo(tmp_path, policy_text=text, gates=())
+    with pytest.raises(PolicyError, match=re.escape("witness assertion '(assert'")):
+        load_policy(repo)
+
+    root = Path(__file__).resolve().parents[1]
+    own = parse_policy((root / ".saffron" / "policy.yaml").read_bytes())
+    pattern = own.witness.assertion
+    assert pattern is not None
+    # Measured with this repo's pytest at COLUMNS=400, one reason per shape.
+    assertions = [
+        "assert 1 == 2",
+        "AssertionError: boom",
+        "AssertionError",
+        "AssertionError: assert 'a\\nb' == 'c'",
+        "Failed: nope",
+        "Failed: DID NOT RAISE ValueError",
+    ]
+    raises = [
+        "KeyError: 'x'",
+        "AttributeError: 'NoneType' object has no attribute 'x'",
+        "RuntimeError: fx",
+        "KeyError: 'AssertionError'",
+        "asserted: no",
+    ]
+    assert [r for r in assertions if not re.match(pattern, r)] == []
+    assert [r for r in raises if re.match(pattern, r)] == []
