@@ -4,7 +4,7 @@ title: A spec's wrong builds in prose never reach REVIEW's host run
 status: partial
 tier: 2
 filed: 2026-09-29
-specs: [SA-0151, SA-0152, SA-0167]
+specs: [SA-0151, SA-0152, SA-0167, SA-0437]
 prs: [597, 627, 635, 637]
 commits: []
 cites: []
