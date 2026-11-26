@@ -416,3 +416,26 @@ since the `size` gate counts 499 of its 1300 tokens.
 101. A claim that names each member of a list drives a row with two members.
 102. A change that lets a finding past a filter reads every docstring and
      document that says only one kind passes.
+
+## SA-0432 (b-65eb8f)
+
+One writer, two reviews, and a final writer round. The draft took about 35
+minutes, the revisions about 9 and 5, and the reviews about 9 and 6. Neither
+review found a blocker.
+
+Round 1 found that criteria 3 and 4 drove `push` alone, not `append` with a
+remote. It also found that the witness timing and git's behaviour were
+measured on the host only. The cell image showed two failures the host never
+shows. A git config write failed from the mounted worktree, and a spy's
+annotation raised on the image's Python 3.12. The image also carries git
+2.47.3, where the older notes named 2.39.5. Round 2 found that the
+witnesses never showed git reaped, and that an unreadable config read had
+no driver. The final round killed all 20 declared wrong versions, each by
+its own criterion's witness.
+
+## What SA-0432 adds
+
+103. A spec whose witnesses spawn processes or read the toolchain runs them
+     once in the cell image before its first review.
+104. A claim that a process is gone asserts that process's own state, not
+     only its children's output.
