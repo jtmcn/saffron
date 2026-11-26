@@ -72,8 +72,8 @@ acceptance:
       prints each line, on every call. Each line reads `re-verify: baseline
       suite at <new_base_sha cut to 12>`, then `re-verify: head suite at
       <packaged_sha cut to 12>`, as at your base. The witness drives one call
-      with an `emit` and two calls without one, with distinct shas, and
-      compares every line whole.
+      with an `emit` and two calls without one, with two distinct shas whose
+      characters vary along their length, and compares every line whole.
     witness: tests/test_package.py::test_reverify_says_each_suites_line_through_emit_or_print
     positive_case: >-
       The two calls without an `emit` see both lines on stdout through the
@@ -83,6 +83,8 @@ acceptance:
       - "The `print` stays beside the new `emit` call, so a caller's `emit` gets the line and stdout gets it too."
       - "The event's label is `PACKAGE` and its detail starts `re-verify: `, so it renders as `PACKAGE: re-verify: ...`."
       - "The detail carries the whole sha rather than its first twelve characters."
+      - "The detail cuts the sha's last twelve characters."
+      - "The head line names `new_base_sha`."
       - "Both suites' lines name `packaged_sha`, so the baseline line names the head."
       - "The event's phase is `GATE`."
       - "Handed no `emit`, `reverify` emits nowhere, so `regate` and the finishing suite print nothing."
@@ -94,6 +96,12 @@ acceptance:
           - member: the baseline suite at `new_base_sha`
             driven_by: "Both suites' lines name `packaged_sha`, so the baseline line names the head."
           - member: the head suite at `packaged_sha`
+            driven_by: "The head line names `new_base_sha`."
+      - set: the part of the sha a line carries
+        members:
+          - member: the first twelve characters
+            driven_by: "The detail cuts the sha's last twelve characters."
+          - member: no more than twelve
             driven_by: "The detail carries the whole sha rather than its first twelve characters."
       - set: the forms of a `reverify` call
         members:
@@ -125,11 +133,12 @@ acceptance:
       - "`package()` passes no `emit` to `reverify`, so both lines print and the caller's `emit` never sees them."
       - "`package()` hands `reverify` a print-only `emit` of its own."
       - "`package()` hands `reverify` its `emit` for the baseline suite alone."
+      - "`package()` hands `reverify` its `emit` for the head suite alone."
     covers:
       - set: the suites `package()` re-verifies
         members:
           - member: the baseline suite at the fixture's base
-            driven_by: "`package()` passes no `emit` to `reverify`, so both lines print and the caller's `emit` never sees them."
+            driven_by: "`package()` hands `reverify` its `emit` for the head suite alone."
           - member: the head suite at the pushed head
             driven_by: "`package()` hands `reverify` its `emit` for the baseline suite alone."
   - claim: >-
@@ -144,11 +153,12 @@ acceptance:
       - "`package()` hands `reverify` a print-only `emit`, so the log never holds the lines."
       - "`reverify` prints beside the `emit` it is handed, so each line prints twice."
       - "`package()` hands `reverify` its `emit` for the baseline suite alone, so the head line never reaches the log."
+      - "`package()` hands `reverify` its `emit` for the head suite alone, so the baseline line never reaches the log."
     covers:
       - set: the suites `package()` re-verifies
         members:
           - member: the baseline suite at the fixture's base
-            driven_by: "`package()` passes no `emit` to `reverify`, so the lines print and the log never holds them."
+            driven_by: "`package()` hands `reverify` its `emit` for the head suite alone, so the baseline line never reaches the log."
           - member: the head suite at the pushed head
             driven_by: "`package()` hands `reverify` its `emit` for the baseline suite alone, so the head line never reaches the log."
       - set: where the default sends each line
@@ -272,7 +282,10 @@ these changes.
    say `SA-0436` moved it, and assert `FINDINGS` is empty. Rename the
    scan test to `test_package_writes_to_a_stream_only_inside_an_emit`, as
    `renames:` declares. Allow only `emit`, and drop the `FINDINGS[1]`
-   paragraph from its docstring. Reword the `FINDINGS[1]` sentence in
+   paragraph from its docstring. Reword the comment inside
+   `test_only_the_line_no_kind_carries_writes_to_a_stream_outside_emit`
+   above its scan (`tests/test_package.py:1678-1679`). It names one
+   default sink, and both defaults now share the shielded name. Reword the `FINDINGS[1]` sentence in
    `tests/test_package_cell.py`'s docstring.
 
 ## Out of scope
