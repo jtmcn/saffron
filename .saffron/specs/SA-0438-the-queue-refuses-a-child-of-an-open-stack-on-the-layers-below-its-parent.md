@@ -88,8 +88,11 @@ acceptance:
       beside each one alone. The child is also admitted beside the top
       layer's own pull request, and beside all three. Both the plain scan
       and the `stack=True` scan read every case. Then the parent's spec is
-      edited, so its layer sits at an older `spec_sha`, and a `stack=True`
-      scan still admits the child beside each lower layer.
+      edited, so its layer sits at an older `spec_sha`. A `stack=True` scan
+      lists the parent's own open pull request beside each lower layer. It
+      refuses the parent as `open_pr_on_spec` and still admits the child.
+      Without that pull request the edited parent would be kept and rerun
+      from the default branch.
     witness: tests/test_scheduler.py::test_an_open_stacks_lower_layers_do_not_refuse_a_child_of_its_top
     wrong_versions:
       - "The walk stops at the predecessor of the parent's own layer, so the layer two below it still refuses."
@@ -139,12 +142,20 @@ acceptance:
       the later batch's `stack_layers` rows exist. It is admitted after,
       beside each one alone and beside both, in both scans. A third layer
       of the earlier batch sits above the stack base, and the child is
-      still refused on its pull request, in both scans.
+      still refused on its pull request, in both scans. Two more stack
+      bases are no layer. One is a plain cell's task in no batch, with a
+      branch, a push and a pull request. The other is a missed task of a
+      stack batch whose one layer sits below no row of its own. Each is
+      the first layer's predecessor. The child is refused on its pull
+      request before the layers exist and admitted after, in both scans.
+      Beside the missed one it is still refused on that batch's layer.
     witness: tests/test_scheduler.py::test_a_stack_base_in_an_earlier_batch_does_not_refuse_a_child_of_the_stack
     wrong_versions:
       - "The walk ends at the batch's first layer, so the stack base it was cut from still refuses."
       - "The walk exempts the stack base's own branch and stops there, so the layer below it in the earlier batch still refuses."
       - "On crossing into the stack base's batch, every layer of that batch is exempt, the ones above the stack base included."
+      - "The walk checks `stack_batch_of` on the stack base and breaks before adding the stack base's own branch."
+      - "A stack base in a stack batch with no `stack_layers` row of its own exempts that whole batch."
     covers:
       - set: the earlier batch's layers
         members:
@@ -154,6 +165,12 @@ acceptance:
             driven_by: "The walk exempts the stack base's own branch and stops there, so the layer below it in the earlier batch still refuses."
           - member: the layer above the stack base, refused
             driven_by: "On crossing into the stack base's batch, every layer of that batch is exempt, the ones above the stack base included."
+      - set: the stack bases that are no layer
+        members:
+          - member: a plain cell's task in no batch
+            driven_by: "The walk checks `stack_batch_of` on the stack base and breaks before adding the stack base's own branch."
+          - member: a missed task of a stack batch, beside that batch's layer
+            driven_by: "A stack base in a stack batch with no `stack_layers` row of its own exempts that whole batch."
     positive_case: >-
       The same witness reads the child admitted beside both lower layers
       of the earlier batch, so the refusal on the layer above the stack
@@ -168,8 +185,9 @@ acceptance:
       four: the layer above the parent's, the older task's lower layer, the
       unrelated batch's layer, and a pull request no task owns. A spec with
       no `depends_on` is refused on the bottom layer's pull request. So is
-      a child whose parent's task ran in the same batch and missed, with a
-      `spec_reviews` row and no `stack_layers` row. Both scans read every
+      a child whose parent's task ran in the same batch and missed. That
+      task is `READY_FOR_REVIEW` with a branch, a push and a pull request
+      url, a `spec_reviews` row and no `stack_layers` row. Both scans read every
       case.
     witness: tests/test_scheduler.py::test_an_open_stack_still_refuses_a_pull_request_off_its_childs_chain
     wrong_versions:
@@ -316,6 +334,10 @@ such set.
 
 ## Out of scope
 
+- **An edited parent whose pull request closed unreconciled**. Its spec
+  text moved, so the scan keeps it as a fresh candidate and a batch runs
+  it again from the default branch. The walk still exempts its old
+  layer's chain for its children until `reconcile` records the close.
 - **A layer above the parent's own layer**. b-0bd8c9's `SA-0327` met #990,
   `SA-0326`'s layer. The home ledger records batch 60's one layer as
   `SA-0326` at position 1, with `SA-0325`'s task as its predecessor.
@@ -382,9 +404,11 @@ layer is `TE-1` and never `TE-L1`.
 
 **Give the parent a stack base's shape, or `stack=True` refuses for the
 wrong reason**. Its newest waiting row needs a branch, a 40-hex
-`pushed_sha` and a `pr_url`, at the spec's current `spec_sha`
-(`saffron/scheduler.py:1186-1206`). `set_task_package`
-(`tests/test_scheduler.py:58-64`) writes all three.
+`pushed_sha` and a `pr_url` (`saffron/scheduler.py:1186-1206`).
+`set_task_package` (`tests/test_scheduler.py:58-64`) writes all three.
+Seed that row at the spec's current `spec_sha`. Otherwise no task there
+is done with the parent, and it becomes a fresh candidate itself
+(`saffron/scheduler.py:1446-1450`).
 
 **Read the refusal before the layers exist**. Each witness first reads the
 candidate refused on the pull request it then sees exempted. The two reads
