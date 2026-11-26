@@ -346,6 +346,29 @@ def test_labels_skips_a_folder_no_round_was_saved_in(monkeypatch, loop, capsys):
     assert "2 saved review round(s)" in capsys.readouterr().out
 
 
+def test_labels_asks_a_round_with_no_findings_what_came_after(
+    monkeypatch, loop, capsys
+):
+    # A clean round's blocker_followed is the stop-signal outcome.
+    base = _two_rounds(monkeypatch, loop)
+    _label_all(base / "round-1")
+    clean = loop.batches / "spec-loop" / "SA-0901" / "cell" / "round-1"
+    clean.mkdir(parents=True)
+    (clean / "findings.json").write_text("[]")
+    (clean / "round.json").write_text("{}")
+    assert _run(monkeypatch, "labels", "SA-0901") == 1
+    out = capsys.readouterr().out
+    assert "pr-review round-2  no labels.json" in out
+    assert "cell round-1  no labels.json" in out
+
+
+def test_a_review_round_without_its_report_saves_nothing(monkeypatch, loop, capsys):
+    _, second, _ = loop.commits
+    assert _review(monkeypatch, loop, "--commit", second) == 1
+    assert "needs --report and --commit" in capsys.readouterr().err
+    assert not (loop.batches / "spec-loop").exists()
+
+
 def _follow(round_dir: Path, schema: int | None, **followed) -> None:
     path = round_dir / "labels.json"
     doc = json.loads(path.read_text())

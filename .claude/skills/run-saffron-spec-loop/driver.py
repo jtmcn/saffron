@@ -1617,6 +1617,7 @@ def cmd_labels(args) -> int:
         for kind in ("spec-review", "pr-review", "cell"):
             base = BATCHES / "spec-loop" / spec_id / kind
             for directory in sorted(base.glob("round-*")):
+                # A round with no findings still owes `blocker_followed`.
                 if not (directory / "findings.json").is_file():
                     continue
                 saved += 1

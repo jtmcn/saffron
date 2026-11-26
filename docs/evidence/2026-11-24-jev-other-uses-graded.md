@@ -87,7 +87,7 @@ Rows with no noise, or with one noise finding, are left out.
 
 - **A cell's REVIEW.** About one cell blocker in five was `not-a-defect`.
   Those cost REBUT turns, and some are withdrawn. Q2 sits near chance on them.
-- **Reviewer notes.** The ranking held out of sample. The fixed 0.5 cutoff
+- **Reviewer notes.** Q2 still ranks notes well, as the October grading found. The fixed 0.5 cutoff
   failed on catch. A new cutoff needs a new pre-registration on new review
   rounds, not this data. The spec review row rests on 8 noise notes.
 

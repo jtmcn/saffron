@@ -229,7 +229,7 @@ puts it back.
      --report <standards seat> --commit <PR head> --base <the PR's base branch>
    ```
 
-   Pass `--base` every review round.
+   Pass `--base` every review round. It pins the merge base `round.json` records.
 3. **Verify every finding yourself** before acting: read the line and re-run
    its probe with the driver:
    `driver.py probe <file> --find … --replace … --root <worktree> -- uv run pytest …`.
@@ -361,6 +361,9 @@ For each finding id, record these four facts:
   `operator-decided`, `filed-backlog` or `no-action`.
 - `recurred_in`: any of `cell-review`, `pr-spec-seat` and `pr-standards-seat`.
 - `item`: the backlog id it went to, if any.
+
+A round with no findings still gets a `labels.json`, with `"findings": {}`. Its
+`blocker_followed` says whether a later stage found what this round missed.
 
 For the review round, record `blocker_followed` and set `"schema": 2`. Each key says
 whether a later stage found a blocker, or holds `null` for a stage that never
