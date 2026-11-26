@@ -69,9 +69,9 @@ acceptance:
       of <bound> turns`, the bound being `end_review.LENS_MAX_TURNS` read
       when the layer is built. No other line reads those attempts. The line
       reads no attempt of the six other phases the page reads. The witness
-      patches the constant to 57. On TE-9 it drives
-      three commit review attempts of 5, 25 and 3 turns, where every other
-      phase peaks higher but SPEC_WRITING at 0. On TE-4, whose spec the page
+      patches the constant to 57. On TE-9 it drives three commit review
+      attempts of 5, 28 and 3 turns. There REPAIRING peaks at 27,
+      SPEC_WRITING at 0, and every other phase higher than 28. On TE-4, whose spec the page
       was not handed, it drives three of 3, 7 and 2, where SPEC_WRITING
       peaks at 9 and REPAIRING at 10, and no REVIEW attempt exists. TE-4's
       second task in the batch holds no layer and a closed commit review
@@ -79,7 +79,7 @@ acceptance:
       seven lines whole and in order.
     witness: tests/test_stack_view.py::test_a_commit_review_reads_its_peak_beside_the_lens_bound
     wrong_versions:
-      - The bound read from the spec's `max_turns`, which reads `25 of 140 turns` on TE-9.
+      - The bound read from the spec's `max_turns`, which reads `28 of 140 turns` on TE-9.
       - The bound typed as the literal 50, which the patched constant exposes.
       - "`LENS_MAX_TURNS` imported by name, so the patched module attribute never reaches the page."
       - The bound taken from `spec_review.SPEC_REVIEW_MAX_TURNS`.
@@ -89,17 +89,22 @@ acceptance:
       - The line labelled REVIEW rather than COMMIT_REVIEW.
       - The line placed first, before SPEC_REVIEW.
       - The line placed before REBUT.
-      - The commit review attempts summed, which reads 33 on TE-9.
+      - The commit review attempts summed, which reads 36 on TE-9.
       - The last commit review attempt taken for the peak, which reads 3 on TE-9.
       - The first commit review attempt taken for the peak, which reads 5 on TE-9.
       - The line also reading `SPEC_REVIEW` attempts, which reads 31 on TE-9.
       - The line also reading `SPEC_WRITING` attempts, which reads 9 on TE-4.
       - The line also reading `IMPLEMENTING` attempts, which reads 50 on TE-9.
-      - The line also reading `REPAIRING` attempts, which reads 27 on TE-9.
+      - The line also reading `REPAIRING` attempts, which reads 10 on TE-4.
       - The line also reading `REVIEWING` attempts, which reads 38 on TE-9.
       - The line also reading `REBUTTING` attempts, which reads 45 on TE-9.
       - REVIEW reading `COMMIT_REVIEW` attempts beside its own, which reads `REVIEW 7 of P turns` on TE-4.
       - The line reading the commit review attempts of every task with the layer's spec id, not the layer's own task alone, which reads 40 on TE-4.
+      - The GATE ⇄ REPAIR line also reading `COMMIT_REVIEW` attempts, which reads `GATE ⇄ REPAIR 28 of 140 turns` on TE-9.
+      - The SPEC_REVIEW line also reading `COMMIT_REVIEW` attempts, which reads `SPEC_REVIEW 7` on TE-4.
+      - The SPEC_WRITING line also reading `COMMIT_REVIEW` attempts, which reads `SPEC_WRITING 28` on TE-9.
+      - The IMPLEMENT line also reading `COMMIT_REVIEW` attempts, which reads `IMPLEMENT 7 of P turns` on TE-4.
+      - The REBUT line also reading `COMMIT_REVIEW` attempts, which reads `REBUT 7 of P turns` on TE-4.
     covers:
       - set: the layers whose closed commit review attempts the line reads
         members:
@@ -130,7 +135,7 @@ acceptance:
           - member: IMPLEMENTING
             driven_by: The line also reading `IMPLEMENTING` attempts, which reads 50 on TE-9.
           - member: REPAIRING
-            driven_by: The line also reading `REPAIRING` attempts, which reads 27 on TE-9.
+            driven_by: The line also reading `REPAIRING` attempts, which reads 10 on TE-4.
           - member: REVIEWING
             driven_by: The line also reading `REVIEWING` attempts, which reads 38 on TE-9.
           - member: REBUTTING
@@ -139,14 +144,22 @@ acceptance:
         members:
           - member: the REVIEW line
             driven_by: REVIEW reading `COMMIT_REVIEW` attempts beside its own, which reads `REVIEW 7 of P turns` on TE-4.
-          - member: the SPEC_REVIEW, SPEC_WRITING, IMPLEMENT, GATE ⇄ REPAIR and REBUT lines
-            driven_by: tests/test_stack_view.py::test_a_commit_review_reads_its_peak_beside_the_lens_bound
+          - member: the GATE ⇄ REPAIR line
+            driven_by: The GATE ⇄ REPAIR line also reading `COMMIT_REVIEW` attempts, which reads `GATE ⇄ REPAIR 28 of 140 turns` on TE-9.
+          - member: the SPEC_REVIEW line
+            driven_by: The SPEC_REVIEW line also reading `COMMIT_REVIEW` attempts, which reads `SPEC_REVIEW 7` on TE-4.
+          - member: the SPEC_WRITING line
+            driven_by: The SPEC_WRITING line also reading `COMMIT_REVIEW` attempts, which reads `SPEC_WRITING 28` on TE-9.
+          - member: the IMPLEMENT line
+            driven_by: The IMPLEMENT line also reading `COMMIT_REVIEW` attempts, which reads `IMPLEMENT 7 of P turns` on TE-4.
+          - member: the REBUT line
+            driven_by: The REBUT line also reading `COMMIT_REVIEW` attempts, which reads `REBUT 7 of P turns` on TE-4.
     positive_case: >-
       "No other line reads those attempts" is read on TE-4, where the same
       render prints `COMMIT_REVIEW 7 of 57 turns` and `REVIEW P of P turns`.
       So the instrument that reads REVIEW empty sees the commit review
       attempts it would wrongly count. "The line reads no attempt of" the
-      six phases is read on TE-9 and TE-4, where the same line reads 25 and
+      six phases is read on TE-9 and TE-4, where the same line reads 28 and
       7 from their own attempts.
   - claim: >-
       A layer task with no closed `COMMIT_REVIEW` attempt reads
@@ -155,7 +168,7 @@ acceptance:
       `num_turns` is NULL, counts as no attempt. The witness drives a layer
       with no commit review attempt at all (TE-7) and a layer whose only one
       is open (TE-6). In the same render it reads TE-9's line with its peak
-      of 25.
+      of 28.
     witness: tests/test_stack_view.py::test_a_layer_with_no_closed_commit_review_reads_it_absent
     wrong_versions:
       - An open commit review attempt counted as 0, which reads `COMMIT_REVIEW 0 of 57 turns` on TE-6.
@@ -169,7 +182,7 @@ acceptance:
           - member: a layer whose only commit review attempt is open (TE-6)
             driven_by: An open commit review attempt counted as 0, which reads `COMMIT_REVIEW 0 of 57 turns` on TE-6.
     positive_case: >-
-      The witness first reads TE-9's last turn line as `COMMIT_REVIEW 25 of
+      The witness first reads TE-9's last turn line as `COMMIT_REVIEW 28 of
       57 turns` from the same render. So the helper that reads TE-7's and
       TE-6's line as absent is one that sees a commit review peak where one
       exists.
@@ -242,7 +255,7 @@ cell can land is the stack page's COMMIT_REVIEW row.
    since each attempt is one agent call under that bound. Update the
    docstring's count of six.
 2. **Extend the fixture.** In `_build_batches`, give TE-9's task three closed
-   `COMMIT_REVIEW` attempts of 5, 25 and 3 turns, in that order. Give
+   `COMMIT_REVIEW` attempts of 5, 28 and 3 turns, in that order. Give
    TE-4's layer task three of 3, 7 and 2. Give TE-4's second task, the one
    with no layer, one closed attempt of 40 turns. Open one on TE-6's layer
    task and leave it open. Give each a cost of 0.0, so every spend the other
@@ -276,7 +289,12 @@ body as it is, or a mutant no longer applies. The row itself is new code, so
 no mutant pins its spelling. `saffron mutant` writes a spec's mutants file to
 the ref and refuses a `find` that does not occur exactly once at `HEAD`
 (`saffron/mutants.py:347-354`). The row is absent at base, so a mutant of
-its bound is refused there.
+its bound is refused there. The `witness` gate executes the named witness alone
+under its mutant (`saffron/gates/core/witness.py:233`). It counts a failing
+witness as a kill (`saffron/gates/core/witness.py:298-299`). Criterion 1's
+mutant edits shared code, so it also moves the lines that predate the row,
+and its kill does not single out the row. The row itself is judged by `criteria`, `revert` and REVIEW's wrong
+versions.
 
 **The witnesses.** Each renders `stack_view(ledger, batch_b, specs)` for
 the shared fixture and reads lines through `_turn_lines` and
