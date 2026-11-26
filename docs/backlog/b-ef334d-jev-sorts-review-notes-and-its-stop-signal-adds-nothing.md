@@ -1,11 +1,12 @@
 ---
 id: b-ef334d
 title: Jev's noise score sorts a reviewer's notes, and its stop signal adds nothing over a blocker count
-status: partial
+status: done
 tier: 3
 filed: 2026-10-02
+closed: 2026-11-25
 specs: []
-prs: []
+prs: [1323]
 commits: []
 cites: []
 related: [130, b-91ead2]
