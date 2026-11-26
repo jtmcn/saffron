@@ -490,3 +490,71 @@ def test_adopt_records_a_layer_only_when_its_regate_moves_the_task_to_ready_for_
     assert len(layers) == 1
     assert layers[0]["task_id"] == red_task
     direct.close()
+
+
+def test_an_adopted_rebuttal_unjudged_or_orphaned_task_becomes_its_batchs_top_layer(
+    tmp_path, monkeypatch, capsys
+):
+    """A green re-gate under adopt places a `REBUTTAL_UNJUDGED` task,
+    then an `ORPHANED` one, each run after every layer, as the batch's
+    next top layer (b-619b7d). Each sits one position past the layer
+    before it, with that layer as its own predecessor."""
+    repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = _routed_ledger(home / "ledger.db")
+    repo_id = _seed_repo(tmp_path, ledger, "https://github.com/owner/repo.git")
+
+    batch_id = ledger.create_batch(100.0)
+    base_layer = _seed_stack_task(
+        ledger, repo_id, batch_id, spec_id="SY-BASE", state="READY_FOR_REVIEW"
+    )
+    ledger.record_stack_layer(
+        base_layer, position=1, predecessor_task_id=None, generation=0
+    )
+    rebuttal_task = _seed_stack_task(
+        ledger, repo_id, batch_id, spec_id="SY-UJ", state="REBUTTAL_UNJUDGED"
+    )
+    orphan_task = _seed_stack_task(
+        ledger, repo_id, batch_id, spec_id="SY-ORPH", state="ORPHANED"
+    )
+    ledger.close()
+
+    assert (
+        _adopt_green(
+            monkeypatch,
+            repo,
+            home,
+            spec_id="SY-UJ",
+            task_id=rebuttal_task,
+            number="71",
+            head_sha="c" * 40,
+        )
+        == 0
+    )
+    assert f"layer 2 of batch {batch_id}" in capsys.readouterr().out
+
+    assert (
+        _adopt_green(
+            monkeypatch,
+            repo,
+            home,
+            spec_id="SY-ORPH",
+            task_id=orphan_task,
+            number="72",
+            head_sha="d" * 40,
+        )
+        == 0
+    )
+    assert f"layer 3 of batch {batch_id}" in capsys.readouterr().out
+
+    direct = Ledger(home / "ledger.db")
+    layers = direct.stack_layers(batch_id)
+    assert len(layers) == 3
+    assert layers[1]["task_id"] == rebuttal_task
+    assert layers[1]["position"] == 2
+    assert layers[1]["predecessor_key"] == direct.record_key(base_layer)
+    assert layers[2]["task_id"] == orphan_task
+    assert layers[2]["position"] == 3
+    assert layers[2]["predecessor_key"] == direct.record_key(rebuttal_task)
+    direct.close()

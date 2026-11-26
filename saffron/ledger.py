@@ -1023,11 +1023,18 @@ class Ledger:
         if fact.kind == "task_push":
             # `pushed_in_state` reads the row's own `state` as it stood before this write, not `_touch_task`'s one-column shape.
             # SQLite evaluates every `SET` expression against the pre-update row, so this is the state the push landed in (SA-0330).
-            self._db.execute(
-                "UPDATE tasks SET pushed_sha = ?, pushed_in_state = state, "
-                "updated_at = ? WHERE task_id = ?",
-                (payload["pushed_sha"], at, task_id),
-            )
+            if payload.get("untrusted"):  # lands in no state instead (b-619b7d)
+                self._db.execute(
+                    "UPDATE tasks SET pushed_sha = ?, pushed_in_state = NULL, "
+                    "updated_at = ? WHERE task_id = ?",
+                    (payload["pushed_sha"], at, task_id),
+                )
+            else:
+                self._db.execute(
+                    "UPDATE tasks SET pushed_sha = ?, pushed_in_state = state, "
+                    "updated_at = ? WHERE task_id = ?",
+                    (payload["pushed_sha"], at, task_id),
+                )
             return None
         if fact.kind == "task_merged_head":
             self._touch_task(task_id, "merged_head_sha", payload["head"], at)
@@ -1792,13 +1799,18 @@ class Ledger:
             )
         )
 
-    def record_push(self, task_id: int, pushed_sha: str) -> None:
+    def record_push(
+        self, task_id: int, pushed_sha: str, *, trusted: bool = True
+    ) -> None:
         """The push already happened, so it is recorded before the pull request
         is opened: a `gh` that fails otherwise leaves a pushed branch the
-        ledger cannot name (§5.7)."""
-        self._commit_and_append(
-            self._build_fact(task_id, "task_push", {"pushed_sha": pushed_sha})
-        )
+        ledger cannot name (§5.7). `trusted=False` lands the push in no
+        state: the fact carries `untrusted` only then, so a fact at base,
+        and every trusted call, fold unchanged (b-619b7d)."""
+        payload: dict[str, Any] = {"pushed_sha": pushed_sha}
+        if not trusted:
+            payload["untrusted"] = True
+        self._commit_and_append(self._build_fact(task_id, "task_push", payload))
 
     def record_merged_head(self, task_id: int, head: str) -> None:
         """The commit a merged pull request's head actually was — called by
