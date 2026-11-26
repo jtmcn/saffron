@@ -261,6 +261,10 @@ GitHub issues remain in use only for research/evidence records under
   both cases in it; keep its name" (#306). The cell took the first half, which
   failed `criteria` on attempt 1 and spent attempt 2 on the repair turn
   (backlog item 159).
+  A `preserves` witness is exempt and can name one case. Its test exists at
+  base, so the parameter list is already written, and `criteria` collects
+  the case by exact string. `tests/test_queued_specs.py` refuses a bracketed witness
+  without `preserves` (`SA-0435`).
 
 - **For each criterion, name the plausible wrong implementation its witness
   would pass, before you declare the witness.** If you can name one, the
