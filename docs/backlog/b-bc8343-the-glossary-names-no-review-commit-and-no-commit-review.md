@@ -5,7 +5,7 @@ status: partial
 tier: 2
 outside_cell: true
 filed: 2026-10-27
-specs: [SA-0326]
+specs: [SA-0326, SA-0434]
 prs: [1062]
 commits: []
 cites: [§4.1, §5.7, §6.1]
