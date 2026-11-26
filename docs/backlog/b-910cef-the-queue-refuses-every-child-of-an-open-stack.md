@@ -4,7 +4,7 @@ title: "The queue's open pull request refusal blocks every child of an open stac
 status: open
 tier: 2
 filed: 2026-10-09
-specs: []
+specs: [SA-0438]
 prs: [780]
 commits: []
 cites: [§4.2.1]
