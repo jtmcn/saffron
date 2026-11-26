@@ -3,7 +3,7 @@ id: SA-0436
 title: "PACKAGE's `re-verify:` line is printed past `emit`, so no caller can redirect it and `events.jsonl` never carries it"
 type: bug
 priority: 3
-estimated_lines: 70
+estimated_lines: 79
 estimate_measured: true
 touches:
   - saffron/events.py
@@ -143,7 +143,14 @@ acceptance:
       - "`package()` passes no `emit` to `reverify`, so the lines print and the log never holds them."
       - "`package()` hands `reverify` a print-only `emit`, so the log never holds the lines."
       - "`reverify` prints beside the `emit` it is handed, so each line prints twice."
+      - "`package()` hands `reverify` its `emit` for the baseline suite alone, so the head line never reaches the log."
     covers:
+      - set: the suites `package()` re-verifies
+        members:
+          - member: the baseline suite at the fixture's base
+            driven_by: "`package()` passes no `emit` to `reverify`, so the lines print and the log never holds them."
+          - member: the head suite at the pushed head
+            driven_by: "`package()` hands `reverify` its `emit` for the baseline suite alone, so the head line never reaches the log."
       - set: where the default sends each line
         members:
           - member: "`events.jsonl`"
@@ -152,7 +159,7 @@ acceptance:
             driven_by: "`reverify` prints beside the `emit` it is handed, so each line prints twice."
   - claim: >-
       The stream-write scan over `saffron/phases/package.py` exempts a
-      function named `emit` and a lambda, and no longer exempts `reverify`.
+      function named `emit`, and no longer exempts `reverify`.
       It still finds no write.
     witness: tests/test_package.py::test_package_writes_to_a_stream_only_inside_an_emit
     positive_case: >-
@@ -251,7 +258,9 @@ these changes.
    prints it. Add one `FAMILIES` row for the line, citing
    `phases/package.py:reverify` and `PhaseStart`. Empty `FINDINGS`, and
    keep the name. Reword the module docstring and `describe`'s docstring
-   where they say one shape resists typing.
+   where they say one shape resists typing. `PhaseStart`'s docstring names
+   the labels that differ from their phase (`saffron/events.py:200-203`).
+   Add `re-verify:` to that list.
 2. **`reverify`.** Give it an optional keyword `emit`, defaulting to
    `None`. Handed none, it builds a nested function named `emit` that
    prints `describe(event)`. Replace the `print` with one `emit` of a
@@ -287,6 +296,16 @@ so no mutant is on the ref, and `witness` reports `skip` for each claim.
 a free detail, and `describe` already renders `label: detail`. One
 `Literal` member is the smallest widening. A new kind would cost a
 dataclass, the union, `_KINDS` and a `describe` branch.
+The `FINDINGS` note judged a lower-case label to carry no more than a free
+string (`saffron/events.py:1157-1161`). Two things reverse it. `PLAN`,
+`SALVAGE` and `SCOPE` already name no phase (`saffron/events.py:80-87`),
+so only the casing sets `re-verify` apart. And the label carries the line
+through `emit` into `events.jsonl` with its phase, which the free print
+never did.
+
+**The lambda exemption.** `_stream_writes` also shields any lambda, and
+`package.py` holds no lambda at your base. The fourth claim leaves that
+rule as your base tests it.
 
 **Drive the real `reverify`.** `_stub_package_cells` stubs both gate
 cells (`tests/test_package.py:228-264`). For the `package()` witnesses,
