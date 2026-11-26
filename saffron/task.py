@@ -1571,9 +1571,9 @@ def package_ready_task(
         return Refused(reason=" ".join(str(exc).split()))
     image = repo_image.build_cell_image(repo)
 
-    # A prefix no other network uses, so a killed invocation's leftover cannot
-    # collide with re-verification's own `saffron-pkg-` names.
-    network = f"saffron-hostprobe-{spec_id}"
+    # A prefix of its own, so a killed invocation's leftover cannot collide with
+    # `saffron-pkg-` names. Lowercase: the runtime refuses capitals (measured).
+    network = f"saffron-hostprobe-{spec_id.lower()}"
     runtime.remove_network(network)
     try:
         subnet = runtime.allocate_network(network)

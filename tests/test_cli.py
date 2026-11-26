@@ -5964,7 +5964,7 @@ def test_package_probes_the_host_then_runs_package_on_the_rebuilt_task(
         "package",
     ]
 
-    network_name = "saffron-hostprobe-SY-PKG"
+    network_name = "saffron-hostprobe-sy-pkg"
     expected_mirror_path = cli._mirror_path(resolved_repo, home)
     assert calls[0][1:] == ("SY-PKG", resolved_repo, repo_id, expected_mirror_path)
     assert calls[1][1:] == (resolved_repo, expected_mirror_path)
@@ -6245,7 +6245,7 @@ def test_package_probes_the_host_before_package_and_exits_two_on_a_refusal(
         # Exact, not a subset: a skipped probe still removes and recreates
         # the network, so only the sequence catches package() running instead.
         assert names == expected_names
-        network_name = f"saffron-hostprobe-{spec_id}"
+        network_name = f"saffron-hostprobe-{spec_id.lower()}"
         assert calls[0][1] == network_name
         assert calls[1][1:] == (network_name, (), {"subnet": claimed_subnet})
         assert calls[-1][1] == network_name
@@ -6301,7 +6301,7 @@ def test_package_probe_claims_its_network_from_the_pool_and_probes_its_gateway(
     held_network = "saffron-other-spec-net"
     runtime.create_network(held_network, subnet=held_subnet)
 
-    network_name = "saffron-hostprobe-SY-PROBE-POOL"
+    network_name = "saffron-hostprobe-sy-probe-pool"
     leftover_subnet = str(pool_subnets[1])
     runtime.create_network(network_name, subnet=leftover_subnet)
 
