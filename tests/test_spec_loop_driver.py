@@ -724,7 +724,7 @@ def loop(tmp_path, monkeypatch):
     monkeypatch.setattr(driver, "REPO", tmp_path)
     monkeypatch.setattr(driver, "STATE_DIR", tmp_path / ".saffron-loop")
     monkeypatch.setattr(driver, "ORDER", tmp_path / ".saffron-loop" / "order.json")
-    monkeypatch.setattr(driver, "JEV_ROOT", tmp_path / "batches")
+    monkeypatch.setattr(driver, "BATCHES", tmp_path / "batches")
     monkeypatch.setattr(
         driver, "_gh_pr_field", lambda n, _name: {10: "OPEN", 11: "MERGED"}[n]
     )
@@ -4631,7 +4631,7 @@ def test_status_line_prints_the_queue_on_one_line_without_github(
     held.held = "#99"
     (order := tmp_path / "order.json").write_text("[]")
     monkeypatch.setattr(driver, "ORDER", order)
-    monkeypatch.setattr(driver, "JEV_ROOT", tmp_path)
+    monkeypatch.setattr(driver, "BATCHES", tmp_path)
     monkeypatch.setattr(driver, "_load", lambda: [ready, running, quiet, held])
     monkeypatch.setattr(driver, "_pr_state", lambda _n: pytest.fail("read GitHub"))
     EventLog(tmp_path / "v0" / "B").append(

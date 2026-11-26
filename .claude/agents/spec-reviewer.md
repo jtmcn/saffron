@@ -175,7 +175,7 @@ trivial.
 3. **Assessment**, one sentence: runnable, runnable after the listed fixes, or
    not runnable.
 4. **Findings block**, last: a fenced `json` block restating the findings for
-   Jev (`driver.py jev`). Write `{"findings": [...]}`, one object per finding,
+   the spec loop's saved review round (`driver.py save-round`). Write `{"findings": [...]}`, one object per finding,
    with `severity` (`blocker`, `concern` or `note`), `criterion` (its number,
    or `null`), `file`, `line` and `claim`. A blocker's object adds `fixes`,
    its word from item 1. A review with no findings writes an empty list.

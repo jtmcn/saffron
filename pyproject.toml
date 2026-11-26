@@ -36,8 +36,6 @@ dev = [
     "ty==0.0.77",
     "ast-grep-cli==0.45.3",
     "vulture==2.16",
-    # The spec loop's `jev` command calls it. Pinned because Jev launched 2026-09-15 and its API moves.
-    "typesafe-sdk==0.7.1",
 ]
 
 [build-system]

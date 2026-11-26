@@ -22,16 +22,10 @@ _.log_message  # http.server calls it for every request: saffron/view/server.py 
 _.do_POST  # http.server dispatches each request method by name: saffron/view/server.py (SA-0218)
 
 # Called from outside the scanned roots.
-_.parse_block  # .claude/skills/run-saffron-spec-loop/driver.py: `jev`, outside the scanned roots
-_.lens_findings  # .claude/skills/run-saffron-spec-loop/driver.py: `jev`, outside the scanned roots
-_.dump_findings  # .claude/skills/run-saffron-spec-loop/driver.py: `jev`, outside the scanned roots
-_.load_findings  # .claude/skills/run-saffron-spec-loop/driver.py: `jev`, outside the scanned roots
-_.observe  # .claude/skills/run-saffron-spec-loop/driver.py: `jev`, outside the scanned roots
-_.to_turtle  # .claude/skills/run-saffron-spec-loop/driver.py: `jev`, outside the scanned roots
-_.number_findings  # .claude/skills/run-saffron-spec-loop/driver.py: `jev`, outside the scanned roots
-_.round_notes  # .claude/skills/run-saffron-spec-loop/driver.py: `noise`, outside the scanned roots
-_.grade  # .claude/skills/run-saffron-spec-loop/driver.py: `noise`, outside the scanned roots
-_.counts  # .claude/skills/run-saffron-spec-loop/driver.py: `noise`, outside the scanned roots
+_.parse_block  # .claude/skills/run-saffron-spec-loop/driver.py: `save-round`, outside the scanned roots
+_.lens_findings  # .claude/skills/run-saffron-spec-loop/driver.py: `save-round`, outside the scanned roots
+_.dump_findings  # .claude/skills/run-saffron-spec-loop/driver.py: `save-round`, outside the scanned roots
+_.number_findings  # .claude/skills/run-saffron-spec-loop/driver.py: `save-round`, outside the scanned roots
 _.spec_files  # records/rules.py: driver.py `bookkeeping`, outside the scanned roots
 _.first_cited_item  # records/rules.py: driver.py `bookkeeping`, outside the scanned roots
 _.context_section  # records/rules.py: driver.py `bookkeeping`, outside the scanned roots

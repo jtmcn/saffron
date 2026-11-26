@@ -239,3 +239,9 @@ The source note's exit criteria stand, with two additions from its review.
    (`docs/evidence/2026-10-02-jev-scores-graded.md`, item b-ef334d).
 2. **A review round with nothing to ask makes no call.** Without Q6, a first
    review round with no findings has no question left.
+3. **The loop no longer calls Jev.** Q2's noise test failed on 2026-11-22,
+   and no other saved answer beat what the loop already had
+   (`docs/evidence/2026-11-24-jev-other-uses-graded.md`). `driver.py jev`
+   became `driver.py save-round`. It saves each review round's reports and
+   findings for labelling and makes no call. `typesafe-sdk` left the `dev`
+   group.
