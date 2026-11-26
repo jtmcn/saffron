@@ -3,7 +3,7 @@ id: SA-0435
 title: "A witness naming one case of a parametrised test reaches a cell, and no check on the queue refuses it"
 type: test
 priority: 3
-estimated_lines: 47
+estimated_lines: 52
 estimate_measured: true
 touches:
   - tests/test_queued_specs.py
@@ -33,45 +33,51 @@ max_turns: 130
 risk: standard
 acceptance:
   - claim: >-
-      A queued spec with a witness that carries a `[` fails
+      A queued spec with a witness that carries a `[` and has no
+      `preserves: true` fails
       `test_no_witness_names_one_case_of_a_parametrised_test`, a new test in
-      `tests/test_queued_specs.py` with one case per spec file, and the
-      failure prints that witness. It fails for a witness with or without
-      `preserves: true`, for the case spellings `[SA-0001-a.md]` and
-      `[a-b]`, and for a bracketed witness in a later criterion behind a
-      bare first one. It fails again when the same case is checked a
-      second time. The same id without its bracket passes, with or without
-      `preserves`. A spec in `done/` whose witness carries a bracket passes,
-      since a retired spec reaches no cell. The witness also reads a
-      collected node id of the new test for every queued spec and every
+      `tests/test_queued_specs.py` with one case per spec file. The failure
+      prints that witness. It fails for the case spellings
+      `[SA-0001-a.md]`, `[a-b]` and `[0]`. It fails for a bracketed witness
+      in the first criterion ahead of a bare one, and in a later criterion
+      behind a bare first one. It fails again when the same case is checked
+      a second time. The same id without its bracket passes. A bracketed
+      witness with `preserves: true` passes, since the test it names
+      already exists. A spec in `done/` whose witness carries a bracket
+      passes, since a retired spec reaches no cell. The witness also reads
+      a collected node id of the new test for every queued spec and every
       `done/` file but `README.md`.
     witness: tests/test_queued_specs.py::test_a_witness_naming_one_case_is_refused_and_a_bare_one_is_not
     wrong_versions:
-      - "Only a witness without `preserves` is read, so a bracketed `preserves` witness passes."
+      - "Every witness holding a `[` is read, `preserves` included, so a bracketed `preserves` witness fails."
       - "Only a `preserves` witness is read, so a bracketed witness without it passes."
       - "The check matches a bracket holding word characters alone, so `[SA-0001-a.md]` passes."
+      - "The check matches a bracket holding a character outside word characters, so `[0]` passes."
       - "Only the first criterion is read, so a bracketed witness behind a bare one passes."
+      - "Only a later criterion is read, so a bracketed witness in the first criterion passes."
       - "A `done/` file is parsed and checked like a queued spec, so a retired bracketed witness fails."
       - "The check refuses any witness holding `::`, so a bare id fails too."
       - "The new test is parametrised over the queued specs alone, so a `done/` file gets no case."
-      - "The check asserts that no witness holds a `[` without naming one, so its failure prints no witness."
+      - "The check raises a message naming only the spec file, so its failure prints no witness."
     covers:
       - set: the kinds of witness a criterion declares
         members:
-          - member: "a witness without `preserves`"
+          - member: "a witness without `preserves`, refused"
             driven_by: "Only a `preserves` witness is read, so a bracketed witness without it passes."
-          - member: "a witness with `preserves: true`"
-            driven_by: "Only a witness without `preserves` is read, so a bracketed `preserves` witness passes."
+          - member: "a witness with `preserves: true`, not refused"
+            driven_by: "Every witness holding a `[` is read, `preserves` included, so a bracketed `preserves` witness fails."
       - set: the case spellings inside the bracket
         members:
           - member: "`[SA-0001-a.md]`"
             driven_by: "The check matches a bracket holding word characters alone, so `[SA-0001-a.md]` passes."
           - member: "`[a-b]`"
             driven_by: tests/test_queued_specs.py::test_a_witness_naming_one_case_is_refused_and_a_bare_one_is_not
+          - member: "`[0]`"
+            driven_by: "The check matches a bracket holding a character outside word characters, so `[0]` passes."
       - set: the criteria of one spec
         members:
-          - member: the first criterion
-            driven_by: tests/test_queued_specs.py::test_a_witness_naming_one_case_is_refused_and_a_bare_one_is_not
+          - member: the first criterion, ahead of a bare one
+            driven_by: "Only a later criterion is read, so a bracketed witness in the first criterion passes."
           - member: a later criterion behind a bare first one
             driven_by: "Only the first criterion is read, so a bracketed witness behind a bare one passes."
       - set: where the spec file sits
@@ -89,7 +95,7 @@ acceptance:
       - set: what the failure prints
         members:
           - member: the bracketed witness, case included
-            driven_by: "The check asserts that no witness holds a `[` without naming one, so its failure prints no witness."
+            driven_by: "The check raises a message naming only the spec file, so its failure prints no witness."
       - set: the checks of one case
         members:
           - member: the first check
@@ -97,9 +103,10 @@ acceptance:
           - member: a second check of the same case
             driven_by: tests/test_queued_specs.py::test_a_witness_naming_one_case_is_refused_and_a_bare_one_is_not
     positive_case: >-
-      The witness reads the bare id pass and the retired file pass in the
-      same fixture that reads the bracketed form of that id fail. So the
-      check it reads passing is one that refuses a bracket when it sees one.
+      The witness reads the bare id, the bracketed `preserves` witness and
+      the retired file pass in the same fixture that reads the bracketed
+      form without `preserves` fail. So the check it reads passing is one
+      that refuses a bracket when it sees one.
   - claim: >-
       Retiring a spec still keeps a collected case id for every `done/` file
       under each test that `test_retiring_a_spec_keeps_every_case_id` names,
@@ -125,14 +132,22 @@ the gate reads what a witness's text looks like.
 says a declared witness is a bare node id. A parametrised test collects as
 `test_name[case]`, so a bare id names none of its cases. And a spec that
 names one case pins itself to a parameter list the cell has not written
-yet. `SA-0095`'s cell parametrised a witness its spec named bare, and lost
-an attempt to `witness-not-collected` (backlog item 159).
+yet. `SA-0095` is background for the convention. Its cell parametrised a
+witness its spec named bare, and lost an attempt to
+`witness-not-collected` (backlog item 159). This check refuses the opposite
+spelling, a witness that names the case.
+
+**Why a `preserves` witness is left alone.** That reason holds only for a
+test the cell will write. A `preserves` witness names a test that exists at
+base, so its parameter list is already written. And `criteria` collects a
+named case by exact string. Refusing it too would leave no way to declare a
+parametrised test as a `preserves` target.
 
 **What `tests/test_queued_specs.py` checks per spec today.** Four tests
 take one case per spec file from `CASES` (`tests/test_queued_specs.py:94`,
 `tests/test_queued_specs.py:214`, `tests/test_queued_specs.py:288` and
 `tests/test_queued_specs.py:309`). `CASES` is every queued spec plus every
-`done/` file but `README.md` (`tests/test_queued_specs.py:43-56`). Each of
+`done/` file but `README.md` (`tests/test_queued_specs.py:43-57`). Each of
 the four returns at once for a `done/` file
 (`tests/test_queued_specs.py:96-97`, `tests/test_queued_specs.py:216-217`,
 `tests/test_queued_specs.py:292-293` and
@@ -145,10 +160,9 @@ node id under each for every `done/` file
 suite once per module (`tests/test_queued_specs.py:170-181`).
 
 **Measured at base.** No witness in the four queued specs carries a `[`, so
-the new check refuses none of them and `retired_first` stays empty. None of
-the 377 `done/` files that parse carries one either. A `grep` over `.saffron/specs/` finds no
-`witness:` or `preserves:` line holding one. That covers `SA-0063`, the one
-`done/` file that no longer parses.
+the new check refuses none of them and `retired_first` stays empty. A `grep`
+over `.saffron/specs/` finds no `witness:` or `preserves:` line holding one,
+so none of the 378 `done/` files carries one either.
 
 ## Problem
 
@@ -156,7 +170,7 @@ Add `test_no_witness_names_one_case_of_a_parametrised_test` to
 `tests/test_queued_specs.py`. Parametrise it over `CASES` with the ids the
 other per-spec tests use. A `done/` file returns at once, as in the other
 four. For a queued spec it collects every criterion's witness that holds a
-`[`, `preserves` or not, and asserts that list is empty.
+`[` and has no `preserves: true`, and asserts that list is empty.
 
 Add its name to the tuple in `test_retiring_a_spec_keeps_every_case_id`.
 
