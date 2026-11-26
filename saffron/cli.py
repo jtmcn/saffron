@@ -3168,7 +3168,7 @@ def _review(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
 
 
 # States a pull request opened or fixed by hand can leave a task in.
-# REBUTTAL_UNJUDGED and ORPHANED also re-gate toward READY_FOR_REVIEW (b-619b7d).
+# `REBUTTAL_UNJUDGED` and `ORPHANED` also re-gate toward `READY_FOR_REVIEW` (b-619b7d).
 _ADOPTABLE_STATES = frozenset(
     {
         "EXHAUSTED",

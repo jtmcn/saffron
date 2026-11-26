@@ -1021,8 +1021,8 @@ class Ledger:
             )
             return None
         if fact.kind == "task_push":
-            # `pushed_in_state` reads the row's own `state` as it stood before this write, not `_touch_task`'s one-column shape.
-            # SQLite evaluates every `SET` expression against the pre-update row, so this is the state the push landed in (SA-0330).
+            # A trusted push sets `pushed_in_state` to the row's `state` before this write (SA-0330).
+            # SQLite evaluates every `SET` against the pre-update row, so that is the state the push landed in.
             if payload.get("untrusted"):  # lands in no state instead (b-619b7d)
                 self._db.execute(
                     "UPDATE tasks SET pushed_sha = ?, pushed_in_state = NULL, "

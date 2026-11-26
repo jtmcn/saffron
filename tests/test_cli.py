@@ -5471,13 +5471,6 @@ def test_adopt_keeps_the_state_of_a_task_whose_regate_is_red_declined_or_on_anot
     assert row["pushed_sha"] == retry_head
 
 
-def _bare_parent_task(ledger, repo_id, spec_id, spec_sha, branch):
-    """A parent task built by hand, so its push history can be driven
-    one call at a time rather than through `_seed_task`'s single state."""
-    run_id = ledger.create_run(repo_id, base_sha="a" * 40)
-    return ledger.create_task(run_id, spec_id=spec_id, spec_sha=spec_sha, branch=branch)
-
-
 def _write_parent_and_child(specs_dir, parent_id, child_id):
     """Named by spec id, so a `Refusal.path.stem` names the spec it is
     about (`discover_specs` globs `*.md` by no particular filename)."""
@@ -5572,16 +5565,19 @@ def test_adopt_admits_a_rebuttal_unjudged_or_orphaned_tasks_child_only_after_a_g
             pr_url=f"https://github.com/owner/repo/pull/{800 + i}",
         )
         branch = f"saffron/{parent_id}"
-        parent_task = _bare_parent_task(ledger, repo_id, parent_id, parent_sha, branch)
-
+        # The stale shape pushes in `REVIEWING` first, then moves on.
+        parent_task = _seed_task(
+            ledger,
+            repo_id,
+            spec_id=parent_id,
+            state="REVIEWING" if push_shape == "stale" else state,
+            spec_sha=parent_sha,
+            branch=branch,
+        )
         if push_shape == "trusted":
-            ledger.set_task_state(parent_task, state)
             ledger.record_push(parent_task, "1" * 40)
         elif push_shape == "stale":
-            ledger.set_task_state(parent_task, "REVIEWING")
             ledger.record_push(parent_task, "2" * 40)
-            ledger.set_task_state(parent_task, state)
-        else:
             ledger.set_task_state(parent_task, state)
         ledger.close()
 
@@ -5654,10 +5650,15 @@ def test_adopt_admits_a_rebuttal_unjudged_or_orphaned_tasks_child_only_after_a_g
         check.close()
 
         if suffix == "pushed":
-            # A repeated adopt of the same carried url and head declines,
-            # writing no new row, and still leaves the child refused (b-619b7d).
+            # A second red adopt of the same carried url and head writes no
+            # new row and still leaves the child refused (b-619b7d).
             assert (
-                _adopt_once(monkeypatch, head_sha=kept_head, outcome=1, **adopt_kwargs)
+                _adopt_once(
+                    monkeypatch,
+                    head_sha=kept_head,
+                    outcome=(kept_head, 3),
+                    **adopt_kwargs,
+                )
                 == 0
             )
             check = Ledger(ledger_path)
