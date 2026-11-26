@@ -73,8 +73,10 @@ acceptance:
       three commit review attempts of 5, 25 and 3 turns, where every other
       phase peaks higher but SPEC_WRITING at 0. On TE-4, whose spec the page
       was not handed, it drives three of 3, 7 and 2, where SPEC_WRITING
-      peaks at 9 and REPAIRING at 10, and no REVIEW attempt exists. It
-      asserts both layers' seven lines whole and in order.
+      peaks at 9 and REPAIRING at 10, and no REVIEW attempt exists. TE-4's
+      second task in the batch holds no layer and a closed commit review
+      attempt of 40 turns, which no line reads. It asserts both layers'
+      seven lines whole and in order.
     witness: tests/test_stack_view.py::test_a_commit_review_reads_its_peak_beside_the_lens_bound
     wrong_versions:
       - The bound read from the spec's `max_turns`, which reads `25 of 140 turns` on TE-9.
@@ -97,6 +99,7 @@ acceptance:
       - The line also reading `REVIEWING` attempts, which reads 38 on TE-9.
       - The line also reading `REBUTTING` attempts, which reads 45 on TE-9.
       - REVIEW reading `COMMIT_REVIEW` attempts beside its own, which reads `REVIEW 7 of P turns` on TE-4.
+      - The line reading the commit review attempts of every task with the layer's spec id, not the layer's own task alone, which reads 40 on TE-4.
     covers:
       - set: the layers whose closed commit review attempts the line reads
         members:
@@ -104,6 +107,12 @@ acceptance:
             driven_by: tests/test_stack_view.py::test_a_commit_review_reads_its_peak_beside_the_lens_bound
           - member: a layer whose spec the page was not handed (TE-4)
             driven_by: The bound read as `PLACEHOLDER` on a layer with no spec, which reads `7 of P turns` on TE-4.
+      - set: the tasks whose commit review attempts could reach a layer's line
+        members:
+          - member: the layer's own task (TE-4's first task)
+            driven_by: tests/test_stack_view.py::test_a_commit_review_reads_its_peak_beside_the_lens_bound
+          - member: another task of the same spec id with no layer (TE-4's second task)
+            driven_by: The line reading the commit review attempts of every task with the layer's spec id, not the layer's own task alone, which reads 40 on TE-4.
       - set: the commit review attempts of one layer task
         members:
           - member: the first of three
@@ -234,8 +243,9 @@ cell can land is the stack page's COMMIT_REVIEW row.
    docstring's count of six.
 2. **Extend the fixture.** In `_build_batches`, give TE-9's task three closed
    `COMMIT_REVIEW` attempts of 5, 25 and 3 turns, in that order. Give
-   TE-4's layer task three of 3, 7 and 2. Open one on TE-6's layer task and
-   leave it open. Give each a cost of 0.0, so every spend the other
+   TE-4's layer task three of 3, 7 and 2. Give TE-4's second task, the one
+   with no layer, one closed attempt of 40 turns. Open one on TE-6's layer
+   task and leave it open. Give each a cost of 0.0, so every spend the other
    witnesses pin holds.
 3. **Keep the two existing turn-line tests true.** Each list they pin gains
    its seventh line. Patch `end_review.LENS_MAX_TURNS` in each, as they patch
@@ -260,16 +270,22 @@ cell can land is the stack page's COMMIT_REVIEW row.
 
 ## Notes for the agent
 
-**No criterion declares a mutant.** The row is new code, and its spelling is
-yours. So `witness` will report `skip`.
+**Each criterion has a mutant on `refs/saffron/mutants`.** Both edit
+`_peak_turns`, the code at base that both witnesses read through. Leave its
+body as it is, or a mutant no longer applies. The row itself is new code, so
+no mutant pins its spelling. `saffron mutant` writes a spec's mutants file to
+the ref and refuses a `find` that does not occur exactly once at `HEAD`
+(`saffron/mutants.py:347-354`). The row is absent at base, so a mutant of
+its bound is refused there.
 
 **The witnesses.** Each renders `stack_view(ledger, batch_b, specs)` for
 the shared fixture and reads lines through `_turn_lines` and
-`_layer_section_text`. Import `end_review` inside each test, and patch
-`LENS_MAX_TURNS` with `raising=False`. Then both witnesses fail at base
-on the missing line, not at collection.
+`_layer_section_text`. Patch `end_review.LENS_MAX_TURNS`, which exists at
+base (`saffron/end_review.py:52`), so both witnesses fail at base on the
+missing line.
 
 **Measured on the prototype.** At base both witnesses fail. With the row
 both pass, and so do the six other tests in the file. Each wrong version
 above was applied to `saffron/report/stack.py` alone and failed its own
-criterion's witness.
+criterion's witness. So did each criterion's mutant. Since both edit shared
+code, each also fails an existing test in the file.
