@@ -2722,6 +2722,16 @@ def _coverage_lines(target: Spec) -> tuple[list[str], list[str]]:
     return [line for line in lines if line not in concerns], concerns
 
 
+def _prose_wrong_version_lines(target: Spec) -> list[str]:
+    """b-ef8543: each criterion with no `wrong_versions` in a spec whose
+    body lists wrong versions in prose. A concern, never a blocker."""
+    from saffron import intake
+
+    # Absent until SA-0437 lands.
+    judge = getattr(intake, "prose_wrong_version_lines", None)
+    return judge(target) if judge is not None else []
+
+
 def _review_change_lines(target: Spec, specs: dict[str, Spec]) -> list[str]:
     """One `review:` line per live ancestor, reached through `depends_on` at
     any depth, whose `touches` names a REVIEW-shaping path. A stacked
@@ -2808,6 +2818,8 @@ def cmd_check(args) -> int:
     coverage_blockers, coverage_concerns = _coverage_lines(target)
     for concern in coverage_concerns:
         print(f"concern: {concern}")
+    for line in _prose_wrong_version_lines(target):
+        print(f"concern: {line}")
     late = [
         b for b in (_cite_blocker(target, specs), _disclosure_blocker(target)) if b
     ] + coverage_blockers

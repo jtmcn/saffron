@@ -1,6 +1,6 @@
 ---
 id: SA-0437
-title: "No function names a spec that lists its wrong versions in prose, so REVIEW quietly runs none of them"
+title: "A queued spec that lists its wrong versions in prose prints no line about it, so REVIEW quietly runs none of them"
 type: feature
 priority: 3
 estimated_lines: 31
@@ -61,8 +61,6 @@ budget_usd: 40
 max_attempts: 3
 max_turns: 160
 risk: standard
-pending_symbols:
-  - saffron/intake.py::prose_wrong_version_lines
 acceptance:
   - claim: >-
       `intake.prose_wrong_version_lines(spec)` returns one line for each
@@ -109,9 +107,7 @@ acceptance:
             driven_by: A search of the notes section only.
       - set: leads in one body
         members:
-          - member: the first of two leads
-            driven_by: The last lead in the body quoted.
-          - member: the second of two leads
+          - member: the first of two leads, quoted over the second
             driven_by: The last lead in the body quoted.
       - set: criteria of one spec
         members:
@@ -179,7 +175,7 @@ acceptance:
 
 ## Context
 
-Backlog item **b-ef8543**, filed 2026-09-29 from pass 22 of the spec loop.
+Backlog item **b-ef8543**, filed 2026-09-29 from spec loop run 22.
 It cites no `DESIGN.md` section. The change sits in intake (§3.2). Every
 line number below was read at `42107252`.
 
@@ -229,9 +225,8 @@ Add to `saffron/intake.py`:
   say. It searches the whole body and refuses nothing.
 
 `parse_spec` and `discover_specs` stay as they are. Nothing in
-`saffron/` calls the new function, and `pending_symbols` defers it for
-the `dead` gate. Measured on the prototype, `dead` fails with
-`unused function 'prose_wrong_version_lines'` without that entry.
+`saffron/` calls the new function. `driver.py check` reads it, as the
+next section says.
 
 ## Out of scope
 
@@ -246,13 +241,24 @@ the `dead` gate. Measured on the prototype, `dead` fails with
   criterion declares, as here.
 - **A spec with no `acceptance:`.** Its checklist has no field to
   declare, so it yields no line.
-- **The delegate's hand edit once this spec merges.**
-  `.claude/skills/run-saffron-spec-loop/driver.py`'s `check` gains it.
-  It prints each line the function returns as `concern: <line>`, beside
-  `_coverage_lines`. Its exit code stays as it is.
-  `tests/test_spec_loop_driver.py` gains one witness for that wiring.
-  The driver imports intake, so this edit lands after the cell. The
-  `pending_symbols` entry goes stale then, and that edit removes it.
+- **Hand edits in this spec's own pull request, already made.** This
+  copies `SA-0415`'s pattern.
+  - `.claude/skills/run-saffron-spec-loop/driver.py` gains
+    `_prose_wrong_version_lines` beside `_coverage_lines`. It reads
+    `getattr(intake, "prose_wrong_version_lines", None)` and returns no
+    line while the name is absent. `cmd_check` prints each line as
+    `concern: <line>`, after the coverage concerns. Its exit code stays
+    as it is.
+  - `tests/test_spec_loop_driver.py` gains
+    `test_check_notes_each_prose_wrong_version_line_and_still_exits_0`.
+    It stubs the function, so it passes before and after this spec
+    lands. It fails with the `cmd_check` loop removed.
+  - `.saffron/deadcode-allow.py` gains `_.prose_wrong_version_lines`
+    under "Called from outside the scanned roots". The `dead` gate scans
+    no `.claude/` file, so the function reads as dead without it.
+    Measured on the prototype, `dead` passes with that line.
+- **Closing the item.** Once this spec's cell merges, backlog item
+  b-ef8543 closes.
 
 ## Notes for the agent
 
