@@ -36,7 +36,9 @@ def _stated_count() -> int:
 # Sites per kind in `scheduler.py`. A new site under an old kind changes a count here,
 # so a ninth refusal cannot hide inside one of the eight.
 SITES = {
-    "open_pr_on_spec": 1,
+    # Another task's open pull request. An `ORPHANED` resume refused by a url
+    # on an `ORPHANED` row, or by an unowned head (`SA-0430`).
+    "open_pr_on_spec": 2,
     "open_pr_overlap": 1,
     # A live spec that does not parse, and a retired one in `done/` (§4.2.1).
     "malformed_spec": 2,

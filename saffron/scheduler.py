@@ -54,6 +54,16 @@ credits only that: not a `MERGED` task, not a waiting task, not a place in a
 stack order, not the stack base. `SA-0279` named its own three parents this
 way in prose, and nothing read it. This check turns that sentence into a
 fact the scan and `saffron cell` can both refuse on before any cell starts.
+
+`SA-0430` narrows the first refusal's own same-spec exemption for one
+re-queue state. `open_pr_refusal` exempts any resume from the pull request
+on its own branch. "Is a resume" stood in for "owns that PR", and
+recovering the real owner needs the ledger. `_orphaned_pr_refusal` is that
+recovery. An `ORPHANED` resume is refused beside a `pr_url` any `ORPHANED`
+row at its `spec_sha` carries. It is also refused beside an open pull
+request on its branch that no *non*-`ORPHANED` row there owns, by its
+`pushed_sha` or its own `pr_url`. An `ORPHANED` row's own push or url owns
+nothing. Every other re-queue state keeps the wide exemption.
 """
 
 from __future__ import annotations
@@ -350,7 +360,7 @@ def _open_prs(repo_slug: str, gh: GhRunner) -> list[dict]:
             "--state",
             "open",
             "--json",
-            "number,headRefName,url,files",
+            "number,headRefName,headRefOid,url,files",
             "--limit",
             "100",
         ]
@@ -965,6 +975,78 @@ def open_pr_refusal(
     return None
 
 
+def _orphaned_pr_refusal(
+    candidate: Candidate,
+    rows: Sequence[sqlite3.Row],
+    open_prs: list[dict],
+    pr_url_by_task: Mapping[int, str],
+    pushed_sha_by_task: Mapping[int, str],
+) -> tuple[RefusalKind, str] | None:
+    """Why an `ORPHANED` resume sits beside a pull request a green cell would
+    push over, or `None` (`SA-0430`, backlog item b-f7db70).
+
+    Read before `open_pr_refusal`'s own same-spec exemption, narrowing it
+    for one re-queue state. `rows` is every row at this candidate's own
+    `(spec_id, spec_sha)`, not only the resumed one.
+
+    Any `ORPHANED` row here with a `pr_url` refuses on the newest one, or
+    else beside an open pull request no *non*-`ORPHANED` row here owns.
+    """
+    if candidate.task_id is None:
+        return None
+    resumed = next(
+        (row for row in rows if int(row["task_id"]) == candidate.task_id), None
+    )
+    if resumed is None or resumed["state"] != "ORPHANED":
+        return None
+
+    reason: str | None = None
+
+    orphaned_with_url = [
+        (int(row["task_id"]), pr_url_by_task.get(int(row["task_id"]), ""))
+        for row in rows
+        if row["state"] == "ORPHANED" and pr_url_by_task.get(int(row["task_id"]), "")
+    ]
+    if orphaned_with_url:
+        _newest_task_id, newest_url = max(orphaned_with_url, key=lambda pair: pair[0])
+        reason = f"an open pull request already targets this spec: {newest_url}"
+    else:
+        own_branch = _branch(candidate.spec.id)
+        owned_heads = {
+            pushed_sha_by_task.get(int(row["task_id"]), "")
+            for row in rows
+            if row["state"] != "ORPHANED"
+            and pushed_sha_by_task.get(int(row["task_id"]), "")
+        }
+        # This filter is provably redundant here: no `ORPHANED` row in `rows`
+        # reaches this branch with a url. Kept for safety against a refactor.
+        owned_urls = {
+            pr_url_by_task.get(int(row["task_id"]), "")
+            for row in rows
+            if row["state"] != "ORPHANED"
+            and pr_url_by_task.get(int(row["task_id"]), "")
+        }
+        for pr in open_prs:
+            if pr.get("headRefName") != own_branch:
+                continue
+            head = pr.get("headRefOid") or ""
+            if not head or head in owned_heads:
+                continue
+            url = pr.get("url") or ""
+            if url and url in owned_urls:
+                continue
+            where = url or own_branch
+            reason = (
+                "a pull request no task owns is open on this spec's own "
+                f"branch: {where}"
+            )
+            break
+
+    if reason is None:
+        return None
+    return ("open_pr_on_spec", reason)
+
+
 def _refuse(
     candidate: Candidate,
     *,
@@ -977,6 +1059,9 @@ def _refuse(
     markers: Sequence[tuple[str, str]],
     ancestor_branches: frozenset[str],
     edges: Mapping[str, Sequence[str]],
+    rows: Sequence[sqlite3.Row],
+    pr_url_by_task: Mapping[int, str],
+    pushed_sha_by_task: Mapping[int, str],
     check_dependencies: bool = True,
 ) -> tuple[RefusalKind, str] | None:
     """The kind and reason of the first §4.2.1 refusal this candidate earns, or
@@ -988,12 +1073,21 @@ def _refuse(
     every other check as it runs today. Stack mode (`SA-0142`) passes it.
     A stack order decides `depends_on` over every candidate at once,
     not one entry at a time here."""
+    # `rows`, `pr_url_by_task` and `pushed_sha_by_task` feed
+    # `_orphaned_pr_refusal`, read before `open_pr_refusal` (`SA-0430`).
     if (
         reason := protected_touch_refusal(
             candidate.spec.touches, protected, candidate.spec.forbidden
         )
     ) is not None:
         return "protected_touch", reason
+
+    if (
+        orphaned := _orphaned_pr_refusal(
+            candidate, rows, open_prs, pr_url_by_task, pushed_sha_by_task
+        )
+    ) is not None:
+        return orphaned
 
     if (refused := open_pr_refusal(candidate, open_prs, ancestor_branches)) is not None:
         return refused
@@ -1337,6 +1431,15 @@ def build_queue(
     """
     specs, failures = discover_specs(directory)
     existing = ledger.tasks_by_spec(repo_id) if repo_id is not None else {}
+    # Feeds `_orphaned_pr_refusal` from the ledger alone (`SA-0430`), so an
+    # `ORPHANED` resume's own `pr_url` refuses with no `repo_slug` at all.
+    pr_url_by_task: dict[int, str] = {}
+    pushed_sha_by_task: dict[int, str] = {}
+    if repo_id is not None:
+        for row in ledger.tasks_by_repo(repo_id):
+            task_id = int(row["task_id"])
+            pr_url_by_task[task_id] = row["pr_url"] or ""
+            pushed_sha_by_task[task_id] = row["pushed_sha"] or ""
 
     candidates: list[Candidate] = []
     for discovered in specs:
@@ -1443,6 +1546,9 @@ def build_queue(
             markers=markers,
             ancestor_branches=_ancestor_branches(candidate.spec.id, edges),
             edges=edges,
+            rows=existing.get((candidate.spec.id, candidate.spec_sha), ()),
+            pr_url_by_task=pr_url_by_task,
+            pushed_sha_by_task=pushed_sha_by_task,
             check_dependencies=not stack,
         )
         if refused is None and candidate.spec.id in removed_name_held:
