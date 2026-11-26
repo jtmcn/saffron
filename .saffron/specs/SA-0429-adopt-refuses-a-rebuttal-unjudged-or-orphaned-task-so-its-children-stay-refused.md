@@ -263,7 +263,7 @@ ledger each carry `saffron/<spec id>` as `branch`.
 scan already admits its child (`saffron/scheduler.py:746-747`). A
 `stack=True` scan also needs a trusted push and a url on that row
 (`saffron/scheduler.py:1094-1110`). `_stale_push_state` distrusts a push not
-recorded in the row's own state (`saffron/scheduler.py:151-158`), and so
+recorded in the row's own state (`saffron/scheduler.py:161-168`), and so
 does the batch's resolver, `task._resolve_stacked_on`
 (`saffron/task.py:593-600`). `ORPHANED` is in `REQUEUE_STATES`
 (`saffron/scheduler.py:164-173`), so the queue offers its spec again
