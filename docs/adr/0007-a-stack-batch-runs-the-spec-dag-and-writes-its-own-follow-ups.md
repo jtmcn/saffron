@@ -128,8 +128,8 @@ every reviewed diff. Its severities route differently. A qualified `blocker` or
 goes to the backlog pool, not the pull request. A lens that errors has no task
 to stop, so its layer shows as unreviewed. Every in-cell critic keeps ADR 4
 whole, a follow-up's included.
-Amended 2026-11-26, b-cc87b1 (`SA-0440`): some qualified findings feed no
-follow-up. Such a finding's claim names an unretired spec outside the stack
+Amended 2026-11-26, b-cc87b1 (`SA-0440`): one more kind of qualified finding
+feeds no follow-up. Such a finding's claim names an unretired spec outside the stack
 whose `touches` hold its file. It goes to the backlog pool with a reason
 naming that spec.
 

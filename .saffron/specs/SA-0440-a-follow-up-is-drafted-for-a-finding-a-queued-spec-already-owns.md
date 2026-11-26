@@ -127,8 +127,8 @@ acceptance:
             driven_by: tests/test_follow_up.py::test_a_finding_an_unretired_spec_names_and_touches_gets_no_writer_session
     positive_case: >-
       The same `write` spy that sees no session for the owned group sees
-      one session for the mixed group before it, and one for the higher
-      layer's group after it. The first prompt carries each of the seven
+      one session for the mixed group before it, and one after it for the
+      group whose claim names the higher layer. The first prompt carries each of the seven
       unowned claims, so the spy that finds no owned claim in it reads a
       prompt the writer was given.
   - claim: >-
@@ -252,8 +252,7 @@ directly in `specs_dir`, with its default refusals, less every layer of
 the stack. Read the spec files once for the stack, not once a group.
 
 Pool each owned finding alone, as its own one-finding `FollowUpGroup`, with
-a reason naming the owning spec's id and the file. Call the owner an
-unretired spec outside the stack in that reason, never a queued one. Do this first for each
+a reason naming the owning spec's id and the file. Do this first for each
 group, before the halt and sub-cap checks, so an owned finding always
 carries its owner's reason. The group's other findings go on as today. A
 group with none left goes no further.
