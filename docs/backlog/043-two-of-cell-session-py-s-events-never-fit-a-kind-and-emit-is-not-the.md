@@ -3,7 +3,7 @@ id: 43
 title: Two of `cell/session.py`'s events never fit a kind, and `emit` is not the whole output seam
 status: partial
 tier: 2
-specs: [SA-0029, SA-0030, SA-0031, SA-0041, SA-0042, SA-0101]
+specs: [SA-0029, SA-0030, SA-0031, SA-0041, SA-0042, SA-0101, SA-0436]
 prs: [351]
 commits: []
 cites: []
@@ -116,3 +116,5 @@ two are now `emit(<Event>)`, against existing kinds and with no message change.
   `events.jsonl` as `TaskOutcome`. One `FINDINGS` entry is left:
   `re-verify: {label} suite at {sha}` in `phases/package.py`, which stays a
   free string. The item stays partial on it.
+- 2026-11-26: specced as `SA-0436`. It hands the line to `emit` as a
+  `PhaseStart` labelled `re-verify`, and empties `FINDINGS`.

@@ -84,6 +84,7 @@ WATCH_PREFIXES = (
     "SALVAGE",
     "SCOPE",
     "REPAIR",
+    "re-verify",
     # The CLI's own error line when a cell raises. Without it the teardown
     # line after it read as the cause (item 158).
     "saffron:",
