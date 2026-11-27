@@ -4,7 +4,7 @@ title: Nothing stops one spec running in two cells at once, and the second remov
 status: partial
 tier: 2
 filed: 2026-10-11
-specs: [SA-0422]
+specs: [SA-0422, SA-0442]
 prs: [1090, 1299]
 commits: []
 cites: [§5.1]
@@ -50,3 +50,9 @@ second start refuses.
 - 2026-11-22: `SA-0422` (#1299) landed. `run_task` refuses a spec id
   another process holds on any home. The callers its spec left out still
   pre-clean with no lock, so the item stays partial.
+- 2026-11-27: `SA-0442` queued for the callers left. `regate`,
+  qualification, the end review's layer cell and `saffron package`'s probe
+  network each take the spec id's lock before their first runtime call. A
+  runtime check for a live container was weighed and set aside: a SIGKILLed
+  holder's container still lists as `running` (measured, apple/container
+  1.7.1).
