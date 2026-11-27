@@ -3,7 +3,7 @@ id: SA-0441
 title: "The lens fixtures' witnesses read commits that only local branches carry, so a repo without those branches fails four of them at base and at head"
 type: test
 priority: 3
-estimated_lines: 791
+estimated_lines: 798
 estimate_measured: true
 touches:
   - docs/evidence/fixtures/heads.bundle.b64
@@ -67,6 +67,7 @@ acceptance:
       - "The bundle is base64 in 64-character lines."
       - "The file ends with an empty line after the base64."
       - "The file ends with a line of three spaces after the base64."
+      - "One full-width line near the end holds `-` in place of one base64 character."
     covers:
       - set: the commits a fixture declares
         members:
@@ -94,6 +95,10 @@ acceptance:
             driven_by: "The file ends with an empty line after the base64."
           - member: a blank last line
             driven_by: "The file ends with a line of three spaces after the base64."
+      - set: the characters a line holds
+        members:
+          - member: a non-alphabet character on a full-width line
+            driven_by: "One full-width line near the end holds `-` in place of one base64 character."
   - claim: >-
       `repo_from_head_and_bundle(source, bundle, into)` in
       `tests/test_corpus.py` builds a bare repo holding the history
@@ -260,7 +265,10 @@ history and that file hold.
    a new fixture whose commits HEAD lacks needs the bundle rebuilt. It also
    replaces the claim that a shallow checkout plus CI's fetch is enough
    (`docs/evidence/fixtures/README.md:27-28`). The tests now need HEAD's
-   history back to the bundle's prerequisite.
+   history back to the bundle's prerequisite. It rewrites the title line
+   (`docs/evidence/fixtures/README.md:1`) and the paragraph at
+   `docs/evidence/fixtures/README.md:24-27`. Both say `refs/fixtures/*`
+   alone keeps the commits alive. They now name the bundle beside the refs.
 
 ## Out of scope
 
@@ -270,6 +278,11 @@ history and that file hold.
   (`.saffron/policy.yaml:66`).
 - CI's fetch of `refs/fixtures/*` (`.github/workflows/ci.yml:16`). It is
   harmless once the tests read the bundle. Removing it is a later edit.
+  Its comment goes stale with this change and stays as it is here, since
+  `.github/**` is forbidden. It says "`refs/fixtures/*` is what keeps them
+  alive; deleting one makes that fixture unverifiable"
+  (`.github/workflows/ci.yml:14-15`). The later edit that removes the fetch
+  rewords it.
 - `refs/fixtures/*` on GitHub and the four local `fixtures/*` branches.
   They stay. The scoring driver still needs a fixture head inside its own
   cell (backlog item b-9529e9).
@@ -291,19 +304,21 @@ point its `objects/info/alternates` at `/work/.git/objects`, run
 `git update-ref refs/fixtures/<sha> <sha>` for each sha that is no
 ancestor of HEAD, then `git bundle create <file> --all ^HEAD` with `HEAD`
 spelled as `/work`'s HEAD sha. Read the shas from each `fixture.toml`,
-never from a branch name. The prototype's bundle was 44,097 bytes, 780
-lines once encoded, with one prerequisite, `2e563cf0`, which `main`
+never from a branch name. The prototype's bundle was 44,433 bytes. Once
+encoded it was 60,024 bytes in 780 lines, with one prerequisite, `2e563cf0`, which `main`
 reaches. The task needs every one of the eight in `/work`. A sha that
 `cat-file` misses is not in `/work`, and no edit here can bring it in.
 
 **Size.** The `size` gate counts each whitespace-separated token, and
 `tests/**` is not counted. The prototype priced at 871 tokens: 780 for
 the bundle and the rest for the README. A `test` spec's ceiling is 4200.
-Any other line width moves the bundle's count, so keep 76. The prototype
-changed 791 lines outside `tests/` and 197 in `tests/test_corpus.py`. At
+Any other line width moves the bundle's count, so keep 76. Write LF line
+endings, as `base64.encodebytes` does. A CRLF file would still pass the
+first witness, since `splitlines` drops the `\r`. The prototype
+changed 798 lines outside `tests/` and 197 in `tests/test_corpus.py`. At
 the plan checkpoint, declare `estimated_test_lines` for the `tests/`
 share. The checkpoint prices the other lines at 4 tokens each, which is
-about 3170 here and under 4200.
+about 3200 here and under 4200.
 
 **Fetching HEAD.** `git -C <into> fetch --no-tags <source> +HEAD:refs/heads/head`
 copies only what HEAD reaches. Alternates or `+refs/*:refs/*` would let
