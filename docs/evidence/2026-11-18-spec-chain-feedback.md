@@ -439,3 +439,21 @@ its own criterion's witness.
      once in the cell image before its first review.
 104. A claim that a process is gone asserts that process's own state, not
      only its children's output.
+
+## SA-0434 (b-bc8343)
+
+One writer, two reviews, and a final writer round, run beside three other
+chains in worktrees of their own. Neither review found a blocker. Round 1
+found that no mutant was declared. The writer found that mutants reach
+`refs/saffron/mutants` only through `saffron mutant`, after the spec
+merges, and wrote a file for the delegate to push. Round 2 found a phase
+row whose fixture peak sat above the commit review's, so a row that also
+read it passed. The final round moved one fixture value and killed all 29
+declared wrong versions, each by its own witness.
+
+## What SA-0434 adds
+
+105. A claim that no other row reads a new phase's attempts checks each
+     row's fixture peak against the new phase's peak, row by row.
+106. A spec whose mutant edits shared code says the kill does not single
+     out the new behaviour.
