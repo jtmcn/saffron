@@ -136,7 +136,9 @@ acceptance:
       `_build` helper, and wraps its probe double. Held as `TE-2`, then as
       `te-2`, `qualify` makes no probe call. Each of `f1`, `f2`, `f3`, `f4`,
       `f7`, `f8` and `f10` lands in the pool `unverified`, its reason naming
-      the holder. Beside a holder of `TE-1`, one probe call is made for
+      the holder. The findings with no probe keep their outcomes: `f5` stays
+      `unanchored`, `s1` stays `note`, and `f6` and `s2` stay `qualified`.
+      Beside a holder of `TE-1`, one probe call is made for
       `TE-2`, and a take of `TE-2` inside it is refused naming
       `qualification`. A take succeeds after `qualify` returns.
     witness: tests/test_spec_id_lock_callers.py::test_qualification_probes_nothing_for_a_held_spec_id_and_says_why
@@ -150,6 +152,7 @@ acceptance:
       - "Qualification takes a lock keyed `qualify-<spec id>`, which a task's lock never meets."
       - "A held lock records each probed finding `unverified` with an empty reason."
       - "Qualification writes an empty text into the lock file."
+      - "A held lock marks every finding of the range `unverified`."
     covers:
       - set: the spec ids a holder's lock reaches
         members:
@@ -173,6 +176,8 @@ acceptance:
             driven_by: "A held lock raises out of `qualify` rather than marking the probes `unverified`."
           - member: a reason naming the holder
             driven_by: "A held lock records each probed finding `unverified` with an empty reason."
+          - member: the findings with no probe, left as they were
+            driven_by: "A held lock marks every finding of the range `unverified`."
       - set: the probed findings of the held layer
         members:
           - member: "`f1`, `f2`, `f3`, `f4`, `f7`, `f8` and `f10`, each asserted"
@@ -193,7 +198,8 @@ acceptance:
       saffron-endreview-SY-1`, and a take of `SY-1` there is refused naming
       that text. A take succeeds after the spy's raise. With `cell_up`,
       `cell_down` and `remove_container` faked, a take inside the block is
-      refused, and one after it exits succeeds.
+      refused, and so is one inside `cell_down`. One after the block exits
+      succeeds.
     witness: tests/test_spec_id_lock_callers.py::test_a_layer_cell_beside_a_held_spec_id_raises_before_any_runtime_call
     positive_case: >-
       Beside a holder of `SY-2`, the same spy records `rm -f` of the layer
@@ -204,6 +210,7 @@ acceptance:
       - "The lock is taken and let go before the first runtime call."
       - "The layer cell takes a lock keyed `endreview-<spec id>`, which a task's lock never meets."
       - "The layer cell writes an empty text into the lock file."
+      - "The lock is released, through an `ExitStack` closed at the top of the `finally`, before `cell_down`."
     covers:
       - set: the spec ids a holder's lock reaches
         members:
@@ -221,6 +228,8 @@ acceptance:
             driven_by: "The lock is taken after `runtime.remove_container`, so the container is removed first."
           - member: held, not only checked
             driven_by: "The lock is taken and let go before the first runtime call."
+          - member: while `cell_down` runs
+            driven_by: "The lock is released, through an `ExitStack` closed at the top of the `finally`, before `cell_down`."
           - member: after a raise, and after the block exits
             driven_by: tests/test_spec_id_lock_callers.py::test_a_layer_cell_beside_a_held_spec_id_raises_before_any_runtime_call
       - set: what the holder's line names
@@ -238,8 +247,10 @@ acceptance:
       spy records nothing, and `package` is not reached. Beside a holder of `SY-2`, the
       spy's first call is `network rm saffron-hostprobe-sy-1`, and a take of
       `SY-1` there is refused naming the batch tree. A take succeeds after
-      the spy's raise. With the probe faked, a take inside the replaced
-      `package` succeeds.
+      the spy's raise. With the probe faked, a take is refused inside the
+      pre-clean `remove_network`, `allocate_network`, the host probe and the
+      final `remove_network`. A take inside the replaced `package` then
+      succeeds.
     witness: tests/test_spec_id_lock_callers.py::test_package_refuses_a_spec_id_another_process_holds_before_its_probe_network
     positive_case: >-
       Beside a holder of `SY-2`, the same spy records `network rm` of the
@@ -251,6 +262,7 @@ acceptance:
       - "A held lock raises out of `package_ready_task` rather than returning `Refused`."
       - "`package_ready_task` writes an empty text into the lock file."
       - "`package_ready_task` takes a lock keyed `hostprobe-<spec id>`, which a task's lock never meets."
+      - "The lock wraps the pre-clean `remove_network` alone."
     covers:
       - set: the spec ids a holder's lock reaches
         members:
@@ -268,6 +280,8 @@ acceptance:
             driven_by: "The lock is taken and let go before the probe network."
           - member: after a raise
             driven_by: tests/test_spec_id_lock_callers.py::test_package_refuses_a_spec_id_another_process_holds_before_its_probe_network
+          - member: through the allocate, the host probe and the final remove
+            driven_by: "The lock wraps the pre-clean `remove_network` alone."
           - member: while `package` is called
             driven_by: "The lock is held until `package_ready_task` returns, so `package` is called under it."
       - set: how a held lock ends the call
@@ -397,11 +411,17 @@ Name each in its function's docstring, and keep each within ten lines.
   `LockHeld` from the spec review's layer cell. The batch records the
   `error` round, `GATE_ERROR` and a miss, then raises (`saffron/batch.py:773-787`). `_drive` catches it,
   prints `raised LockHeld`, and adds one to `consecutive_aborts`
-  (`saffron/batch.py:326-341`). Two in a row stop the batch
+  (`saffron/batch.py:326-342`). Two in a row stop the batch
   `INFRASTRUCTURE` before its next task (`saffron/batch.py:79`, `:306-307`).
   A `Refused` from `run_task` leaves that count alone (`:358-361`). Traced
   from the code, not measured. `saffron/batch.py` is forbidden here, so a
   follow-up would make a held lock there a refusal rather than an abort.
+  The revision's layer cell lands the same way. `revise` raising sets
+  `GATE_ERROR` and a miss, records no `error` round, and raises into the
+  same abort count (`saffron/batch.py:900-907`).
+- **Two holders with one text.** `package_ready_task` writes the batch
+  tree, as `run_task` does (`saffron/task.py:980`). A refusal beside
+  either names the same text, so only the pid tells them apart.
 - **Two users on one host.** Each user has a root of their own.
 - **The batch tree.** Each home has its own, so two homes never share one
   `events.jsonl`.
