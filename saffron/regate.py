@@ -242,8 +242,8 @@ def run_regate(
         print(f"regate: {gate} {failure.code} {failure.file}")
     count = len(comparison.new_failures)
 
-    # A review commit on `head` can revive an already-killed wrong version.
-    # A survivor of that second ask counts as one more new failure (`b-d9a027`, `SA-0404`).
+    # A review commit on `head` can revive an already-killed or -raised wrong
+    # version. A survivor of that ask counts as one more new failure (`SA-0404`).
     diff = review_commit_diff(mirror, row["pushed_sha"], baseline_sha, head)
     own_pairs, own_unreadable = parent_versions.own_version_pairs(
         spec=spec, out_dir=out_dir, diff=diff
@@ -298,6 +298,7 @@ def run_regate(
             created=set(),
             note=lambda _step, _ok, detail: print(f"regate: {detail}"),
             inert_patterns=policy.probes.inert,
+            assertion=policy.witness.assertion,
         )
         for _criterion, entry in pairs:
             outcome = entry["outcome"]

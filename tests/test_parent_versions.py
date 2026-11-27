@@ -55,6 +55,16 @@ def _killed(version: str, file: str, find: str, replace: str = "r") -> dict:
     }
 
 
+def _outcome(version: str, file: str, find: str, outcome: str) -> dict:
+    return {
+        "version": version,
+        "edit": {"file": file, "find": find, "replace": "r"},
+        "reason": "",
+        "outcome": outcome,
+        "summary": "s",
+    }
+
+
 def test_a_childs_diff_pairs_each_killed_version_of_each_parent_whose_witness_it_edits(
     tmp_path,
 ):
@@ -703,3 +713,50 @@ def test_the_tasks_own_record_that_cannot_be_read_is_reported_and_pairs_nothing(
         "edit": {"file": "x.py", "find": "foo99", "replace": "r"},
         "reason": "",
     }
+
+
+def test_a_raised_version_is_asked_again_beside_each_killed_one(tmp_path):
+    """A `raised` version is paired for another ask exactly as a `killed`
+    one is, by `parent_version_pairs` and by `own_version_pairs`. A
+    `survived`, `error` or `unproven` version is not. `describe_parent_versions`
+    counts a `raised` entry only as chosen, the same as `killed` (`b-c2f264`)."""
+    from saffron.parent_versions import (
+        describe_parent_versions,
+        own_version_pairs,
+        parent_version_pairs,
+    )
+
+    criteria = [{"claim": "c1", "witness": "tests/test_a.py", "wrong_versions": ["v"]}]
+    specs_dir = tmp_path / "specs"
+    specs_dir.mkdir()
+    _write(specs_dir / "SP-1.md", _spec_text("SP-1", criteria))
+    out_dir = tmp_path / "out"
+    (out_dir / "SP-1").mkdir(parents=True)
+    record = [
+        {
+            "witness": "tests/test_a.py",
+            "claim": "c1",
+            "versions": [
+                _killed("k1", "a.py", "f1"),
+                _outcome("r1", "a.py", "f2", "raised"),
+                _outcome("surv", "a.py", "f3", "survived"),
+                _outcome("err", "a.py", "f4", "error"),
+                _outcome("unpr", "a.py", "f5", "unproven"),
+            ],
+        },
+    ]
+    (out_dir / "SP-1" / "wrong-versions.json").write_text(json.dumps(record))
+
+    pairs, unreadable = parent_version_pairs(
+        depends_on=["SP-1"], specs_dir=specs_dir, out_dir=out_dir, diff=DIFF
+    )
+    assert unreadable == []
+    assert [entry["version"] for _c, entry in pairs] == ["k1", "r1"]
+
+    spec = parse_spec(_spec_text("SP-1", criteria))
+    own_pairs, own_unreadable = own_version_pairs(spec=spec, out_dir=out_dir, diff=DIFF)
+    assert own_unreadable is False
+    assert [entry["version"] for _c, entry in own_pairs] == ["k1", "r1"]
+
+    line = describe_parent_versions([{"outcome": "raised"}, {"outcome": "killed"}], [])
+    assert line == "parent wrong versions: 2 chosen, 0 survived, 0 refused, 0 unproven"

@@ -661,9 +661,9 @@ def _not_covered(
             f"criteri{'on is' if len(claims) == 1 else 'a are'} not mechanically "
             "checked: no `criteria` gate result stands behind the checklist."
         )
-    # Unanchored findings skip REBUT and the concern count (§6). A
-    # host-filed survivor `anchored_blockers` selected is not one of them.
-    selected = {id(f) for f in blockers}
+    # Unanchored findings skip REBUT and the concern count (§6). A selected
+    # host-filed finding, blocker or concern, is not one of them.
+    selected = {id(f) for f in blockers} | {id(f) for f in rebut_concerns(reviews)}
     if unanchored := [
         (r.lens, f)
         for r in reviews

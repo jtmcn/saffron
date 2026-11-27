@@ -2207,18 +2207,19 @@ def _wv_parent_spec_text(*, with_wrong_versions: bool) -> str:
 
 def _write_wv_policy(work: Path, *, moved: bool = False) -> None:
     """One declared test path, one inert pattern (so `pv3` below is refused
-    before any cell) and one gate env entry, as the witness names. `moved`
-    changes every member, so a member read from the checkout is caught."""
+    before any cell), and one gate env entry, as the witness names. One
+    `witness.assertion` too (`b-c2f264`). `moved` changes every member, so a
+    member read from the checkout is caught."""
     gates_dir = work / ".saffron" / "gates"
     gates_dir.mkdir(parents=True, exist_ok=True)
     tests_gate = gates_dir / "tests"
     if not tests_gate.exists():
         tests_gate.write_text('#!/bin/sh\necho "{}"\n')
         tests_gate.chmod(0o755)
-    gate, paths, inert, env = (
-        ("checks", "spec/**", "# never: {name}", "2")
+    gate, paths, inert, env, assertion = (
+        ("checks", "spec/**", "# never: {name}", "2", "^assert")
         if moved
-        else ("tests", "tests/**", "\\s*# noop: {name}", "1")
+        else ("tests", "tests/**", "\\s*# noop: {name}", "1", "^KeyError")
     )
     (work / ".saffron" / "policy.yaml").write_text(
         "gates:\n"
@@ -2229,6 +2230,8 @@ def _write_wv_policy(work: Path, *, moved: bool = False) -> None:
         f"  inert: ['{inert}']\n"
         "thread_env:\n"
         f"  SOME_ENV: '{env}'\n"
+        "witness:\n"
+        f"  assertion: '{assertion}'\n"
     )
 
 
@@ -2574,6 +2577,63 @@ def test_regate_asks_the_tasks_own_and_each_parents_killed_versions_in_one_probe
         "Yp1",
         "Yp2",
     ]
+
+
+def _wv_raised_results() -> list[GateResult]:
+    """`_wv_full_results`, with the own first version's kill replaced by a
+    raise under the task's base policy (`^KeyError`), which an `assert`
+    detail misses (`b-c2f264`)."""
+    results = _wv_full_results()
+    results[0] = GateResult(
+        gate="tests",
+        status="fail",
+        tool="pytest 1",
+        failures=[Failure(file=_WV_W1_WITNESS, code="FAILED", detail="assert 1 == 2")],
+    )
+    return results
+
+
+def test_regate_prints_a_version_that_only_raised_and_counts_it_nowhere(
+    monkeypatch, tmp_path, capsys
+):
+    """`regate` passes the base policy's `witness.assertion` to
+    `_apply_criterion_probes`. A revived version that only raised prints its
+    own line and adds no new failure (`b-c2f264`). An `assert` detail misses
+    the base's `^KeyError` and reads `raised`. A `KeyError` detail reads
+    `killed`, as before, and prints no raised line at all."""
+    fixture = _build_wrong_version_fixture(tmp_path)
+    home = tmp_path / "home"
+    checkout = fixture.checkout.resolve()
+    mirror_path = cli._mirror_path(checkout, home)
+
+    ledger = _seeding_ledger(home / "ledger.db", fixture.origin_url)
+    task_id = _seed_wv_task(ledger, fixture, mirror_path)
+    ledger.close()
+    _seed_wv_records(home)
+
+    _prepare_wrong_version_run(monkeypatch, checkout, _wv_raised_results())
+    cli.main(["--home", str(home), "regate", str(task_id), "--repo", "."])
+    out = capsys.readouterr().out
+
+    lines = [line for line in out.splitlines() if line.startswith("regate: SA-")]
+    before_parens = [line.split(" (", 1)[0] for line in lines]
+    assert before_parens[:2] == [
+        "regate: SA-0005 wrong version raised: v1",
+        "regate: SA-0005 wrong version survived: v2",
+    ]
+    assert "3 new failure" in out.splitlines()[-1]
+
+    killed_results = _wv_full_results()
+    killed_results[0] = GateResult(
+        gate="tests",
+        tool="pytest 1",
+        status="fail",
+        failures=[Failure(file=_WV_W1_WITNESS, code="FAILED", detail="KeyError: 'x'")],
+    )
+    _prepare_wrong_version_run(monkeypatch, checkout, killed_results)
+    cli.main(["--home", str(home), "regate", str(task_id), "--repo", "."])
+    out = capsys.readouterr().out
+    assert "wrong version raised" not in out
 
 
 def test_regate_counts_each_surviving_wrong_version_as_a_new_failure_and_names_its_spec(

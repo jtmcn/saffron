@@ -12,7 +12,12 @@ from pathlib import Path
 from saffron.cell.runtime import Completed
 from saffron.gates.suite import GateSuite
 from saffron.intake import Criterion, Mutant
-from saffron.repos.policy import GateDeclaration, IntegrityPatterns, Policy
+from saffron.repos.policy import (
+    GateDeclaration,
+    IntegrityPatterns,
+    Policy,
+    WitnessPatterns,
+)
 
 FAIL = {"file": "a.py", "code": "E501", "message": "too long"}
 FAIL_B = {"file": "b.py", "code": "E501", "message": "too long"}
@@ -77,12 +82,15 @@ class _WitnessTree(_Tree):
     """A tree whose mutant applies, so `witness_gate` runs for real.
 
     `killed` decides whether the witness notices the mutant once it is live.
+    `detail` is the killing result's one failure's `detail`, read by
+    `witness_gate`'s own `assertion` check (`b-c2f264`).
     """
 
-    def __init__(self, *args, killed, witness, **kwargs):
+    def __init__(self, *args, killed, witness, detail=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.killed = killed
         self.witness = witness
+        self.detail = detail
         self.live = False
 
     @contextlib.contextmanager
@@ -105,6 +113,10 @@ class _WitnessTree(_Tree):
             "tool": "tests 1.0",
             "collected": subset or [self.witness],
         }
+        if status == "fail" and self.detail is not None:
+            payload["failures"] = [
+                {"file": self.witness, "code": "FAILED", "detail": self.detail}
+            ]
         return Completed(0, json.dumps(payload), "")
 
 
@@ -337,6 +349,73 @@ def test_a_witness_left_unstrengthened_blocks_when_elevated_and_a_killed_mutant_
     # Declared `elevated`, killed: nothing new to report.
     comparison = _comparison(elevated_spec, elevated_policy, killed=True)
     assert comparison.new_failures == ()
+
+
+def test_the_suite_hands_witness_its_policys_assertion_and_a_raise_blocks_nothing():
+    """`GateSuite._run` passes `policy.witness.assertion` into
+    `runner.run_suite`, so a task's `witness` gate judges raises under the
+    repo's own declared pattern, and under no other (`b-c2f264`). A raise
+    there adds no new failure to the comparison.
+
+    Driven through `GateSuite.against`, five times, over one `preserves`
+    criterion with a mutant, against a tree whose killing `tests` result
+    carries one failure's `detail`.
+    """
+    criterion = Criterion(
+        claim="a keeps returning true",
+        witness=_WITNESS,
+        preserves=True,
+        mutant=Mutant(file="src/a.py", find="return True", replace="return False"),
+    )
+    spec = _Spec(risk="elevated", acceptance=[criterion])
+
+    def _comparison(assertion, *, detail):
+        policy = Policy(
+            gates={"lint": GateDeclaration(), "tests": GateDeclaration()},
+            witness=WitnessPatterns(assertion=assertion),
+        )
+        suite = _suite(("lint", "tests"), policy=policy, spec=spec)
+        baseline_tree = _WitnessTree(
+            _lint(FAIL), changed=["src/a.py"], killed=False, witness=_WITNESS
+        )
+        baseline = suite.baseline(baseline_tree)
+        head_tree = _WitnessTree(
+            _lint(FAIL),
+            changed=["src/a.py"],
+            killed=True,
+            witness=_WITNESS,
+            detail=detail,
+        )
+        comparison = suite.against(head_tree, baseline)
+        witness = next(r for r in comparison.run.results if r.gate == "witness")
+        return comparison, witness
+
+    # Under `^assert\b`, a `KeyError` detail reads `pass`, no new failure,
+    # and the raised clause.
+    comparison, witness = _comparison(r"^assert\b", detail="KeyError: 'x'")
+    assert witness.status == "pass"
+    assert comparison.new_failures == ()
+    assert "failed only by raising" in witness.summary
+
+    # An `assert` detail reads `pass` and the base summary.
+    _, witness = _comparison(r"^assert\b", detail="assert 1 == 2")
+    assert witness.status == "pass"
+    assert "failed only by raising" not in witness.summary
+
+    # No pattern declared: the `KeyError` detail reads the base summary too.
+    _, witness = _comparison(None, detail="KeyError: 'x'")
+    assert witness.status == "pass"
+    assert "failed only by raising" not in witness.summary
+
+    # Under `^KeyError\b`, the `KeyError` detail reads the base summary.
+    _, witness = _comparison(r"^KeyError\b", detail="KeyError: 'x'")
+    assert witness.status == "pass"
+    assert "failed only by raising" not in witness.summary
+
+    # ...and the `assert` detail reads the raised clause.
+    _, witness = _comparison(r"^KeyError\b", detail="assert 1 == 2")
+    assert witness.status == "pass"
+    assert "failed only by raising" in witness.summary
 
 
 def test_a_new_failure_in_an_advisory_gate_is_carried_apart_and_blocks_nothing():

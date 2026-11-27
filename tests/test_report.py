@@ -1428,6 +1428,51 @@ def test_a_host_filed_survivor_outside_the_diff_is_reported_as_a_blocker():
     assert "adequacy" not in unanchored_line
 
 
+def test_an_unanchored_host_filed_concern_is_not_listed_as_unseen():
+    """The "Not covered" section skips what `rebut_concerns` selects too.
+    An unanchored host-filed concern is not called unseen, though REBUT and
+    the concern count now see it (`b-c2f264`). An unanchored lens concern
+    still is."""
+    host_filed = _finding(
+        lens="adequacy",
+        severity="concern",
+        file="src/x.py",
+        line=2,
+        claim=f"{HOST_FILED}t.py::a failed only by raising 'KeyError'.",
+        anchored=False,
+    )
+    lens_concern = _finding(
+        lens="correctness",
+        severity="concern",
+        file="b.py",
+        line=5,
+        claim="a lens's own unanchored concern",
+        anchored=False,
+    )
+    reviews = [
+        LensReview(lens="adequacy", findings=[host_filed]),
+        LensReview(lens="correctness", findings=[lens_concern]),
+    ]
+    rendered = render_pr_body(
+        SPEC,
+        RESULTS,
+        [],
+        base_sha="a" * 40,
+        head_sha="b" * 40,
+        added=1,
+        removed=0,
+        transcript_path="/t",
+        reviews=reviews,
+    )
+    section = rendered.split("## Not covered", 1)[1]
+    unanchored_line = next(
+        line for line in section.splitlines() if "could not be anchored" in line
+    )
+    assert "1 finding" in unanchored_line
+    assert "`correctness`" in unanchored_line
+    assert "adequacy" not in unanchored_line
+
+
 def test_the_disagreements_table_shows_the_first_answer_to_a_duplicated_finding():
     """The table was a `{r.finding: r}` comprehension — last wins — while the
     ledger and the queue's counts both keep the first. On a duplicate the

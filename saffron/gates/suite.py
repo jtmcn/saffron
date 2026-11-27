@@ -209,6 +209,7 @@ class GateSuite:
             acceptance=spec.acceptance,
             derived=derived,
             mutate=tree.mutated,
+            assertion=policy.witness.assertion,
         )
         # After the declared gates (real `collected`/`failures` at head), before
         # `committed`, which must see the tree `revert` restored (§5.4). No

@@ -389,7 +389,7 @@ class CellSpec:
     # `SuiteSpec` protocol (`SA-0387`, `SA-0389`). Empty where the spec declares none.
     renames: dict[str, str] = field(default_factory=dict)
     # `intake.Spec.depends_on`, read by `parent_versions.parent_version_pairs`
-    # to ask REVIEW each parent's own killed wrong versions again (`SA-0402`).
+    # to ask REVIEW each parent's own killed or raised version again (`SA-0402`).
     depends_on: list[str] = field(default_factory=list)
     # Kept in step with `intake.Spec`, which is where a run's ceilings are
     # declared and defaulted; `cli` passes all three, so these are reached only
@@ -2103,22 +2103,23 @@ def _apply_criterion_probes(
     created: set[str],
     note: Callable[[str, bool, str], None],
     inert_patterns: Sequence[str],
+    assertion: str | None,
 ) -> None:
     """Applies every criterion probe's and wrong version's own edit, and asks its
     criterion's witness (items b-2750d5, b-7e69d0, b-78a590, b-7c88f8). `pairs` holds
-    one pair per probe of each criterion-probe entry, each wrong version paired with
-    its criterion, then each parent's killed wrong version (`SA-0402`). Writes each
-    pair's outcome and summary in place. A refused pair's reason sits under `refusal`,
-    from `probe_refusal`, the touches/subject refusal, or `inert_edit` (`SA-0400`). A
-    stopped or unenterable cell is entered once more for whatever pairs are left. One
-    still left after that reads `error`, with its runtime error under `unasked`.
-    Appends a survivor's `Finding` to `reviews`'s `adequacy` lens, and asks it a
-    second time of the whole `tests` gate too (backlog b-b9365d)."""
+    one pair per criterion-probe entry, each wrong version paired with its criterion.
+    A parent's killed or raised wrong version follows too (`SA-0402`). Writes each
+    pair's outcome and summary in place. A refused pair's reason sits under
+    `refusal`, from `probe_refusal`, the touches/subject refusal, or `inert_edit`
+    (`SA-0400`). A stopped or unenterable cell is entered once more for whatever
+    pairs are left. One still left after that reads `error`, under `unasked`. A
+    survivor or a raised pair appends its own `Finding` to the `adequacy` lens.
+    Only a survivor is asked again, of the whole `tests` gate too (`b-b9365d`)."""
     from saffron import probe as probe_check
     from saffron.cell import worktree
     from saffron.gates import runner
     from saffron.gates.core.scope import matches
-    from saffron.gates.core.witness import witness_gate
+    from saffron.gates.core.witness import raised_detail, witness_gate
     from saffron.repos import mirror as mirror_ops
 
     def _unproven(pending: list[tuple[Criterion, dict]], reason: str) -> None:
@@ -2197,9 +2198,10 @@ def _apply_criterion_probes(
         cell. A witness-ask or line-read stop names the pair that was
         running, so it is asked again. A second-ask stop names the next
         pair, since its own survivor's finding is already filed."""
-        # `witness_gate` reports a raise here and a gate `error` alike as
+        # `witness_gate` reports a runtime stop here and a gate `error` alike as
         # `error`. Only this note tells them apart.
         stopped: str | None = None
+        last_result: GateResult | None = None
 
         @contextlib.contextmanager
         def _mutate(edit: Mutant):
@@ -2212,21 +2214,23 @@ def _apply_criterion_probes(
                 raise
 
         def _run_tests(subset: list[str]) -> GateResult:
-            nonlocal stopped
+            nonlocal stopped, last_result
             try:
-                return runner.run_gate(
+                last_result = runner.run_gate(
                     "tests",
                     gates["tests"],
                     repo,
                     subset=subset,
                     executor=runner.CellExecutor(container),
                 )
+                return last_result
             except runtime.CellRuntimeError as exc:
                 stopped = str(exc)
                 raise
 
         for index, (criterion, entry) in enumerate(pairs_to_ask):
             edit = Mutant.model_validate(entry["edit"])
+            last_result = None
             result = witness_gate(
                 acceptance=[criterion.model_copy(update={"mutant": edit})],
                 mutate=_mutate,
@@ -2235,33 +2239,58 @@ def _apply_criterion_probes(
                 edit_noun="wrong version"
                 if entry.get("version")
                 else "criterion probe",
+                assertion=assertion,
             )
             entry["outcome"] = review.criterion_probe_outcome(result.status)
             entry["summary"] = result.summary
             if stopped is not None:
                 return index, stopped
-            if entry["outcome"] != "survived":
+            raised_text = None
+            if entry["outcome"] == "killed" and last_result is not None:
+                raised_text = raised_detail(last_result, assertion)
+                if raised_text is not None:
+                    entry["outcome"] = "raised"
+            verdict = entry["outcome"]
+            if verdict not in ("survived", "raised"):
                 continue
+            label = "the survivor's" if verdict == "survived" else "the raised edit's"
             try:
                 content = worktree.read_at_head(container, edit.file)
                 if content is None or edit.find not in content:
                     entry["outcome"] = "error"
-                    entry["summary"] = "the survivor's line could not be read"
+                    entry["summary"] = f"{label} line could not be read"
                     continue
-                finding = review.survivor_finding(
-                    criterion,
-                    edit,
-                    content,
-                    version=entry.get("version"),
-                    parent=entry.get("parent"),
-                )
+                if verdict == "survived":
+                    finding = review.survivor_finding(
+                        criterion,
+                        edit,
+                        content,
+                        version=entry.get("version"),
+                        parent=entry.get("parent"),
+                    )
+                else:
+                    assert raised_text is not None  # set with verdict
+                    finding = review.raised_finding(
+                        criterion,
+                        edit,
+                        content,
+                        raised_text,
+                        version=entry.get("version"),
+                        parent=entry.get("parent"),
+                    )
                 (anchored,) = anchor(
                     [finding], diff, read_head=partial(worktree.read_at_head, container)
                 )
             except runtime.CellRuntimeError as exc:
                 entry["outcome"] = "error"
-                entry["summary"] = f"the survivor's line could not be read: {exc}"
+                entry["summary"] = f"{label} line could not be read: {exc}"
                 return index, str(exc)
+
+            if verdict == "raised":
+                # No second ask: `check_probe` reads a kill from the whole
+                # `tests` gate, which a raise is not (`b-c2f264`).
+                adequacy.findings.append(anchored)
+                continue
 
             # The second ask (backlog b-b9365d) only runs for a survivor,
             # and only `anchored.claim` can change from it.
@@ -3621,6 +3650,7 @@ def _drive_cell(
                         created=created,
                         note=_critic_teardown,
                         inert_patterns=policy.probes.inert,
+                        assertion=policy.witness.assertion,
                     )
 
                     # A spec declaring no criterion bought no session above
@@ -3724,8 +3754,8 @@ def _drive_cell(
             if on_state is not None:
                 on_state("REBUTTING")
             blockers = review.anchored_blockers(reviews)
-            # §5.6: every anchored concern, the selection rule the concern
-            # answers table shares (`pr_body.py`).
+            # §5.6: every anchored concern, plus a host-filed raised one unanchored,
+            # the selection rule the concern answers table shares (`pr_body.py`).
             concerns = review.rebut_concerns(reviews)
             # Read directly, not through `_over_budget`: that call emits the
             # stopping line, and REBUT no longer stops outright past budget.

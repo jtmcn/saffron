@@ -181,6 +181,7 @@ def run_witness(
     timeout_s: float = 900,
     executor: GateExecutor | None = None,
     derived: Sequence[Criterion] = (),
+    assertion: str | None = None,
 ) -> GateResult | None:
     """`witness` (§5.4.1), wired to the repo's declared `tests` gate.
 
@@ -302,6 +303,7 @@ def run_witness(
         collected=collected,
         derived=derived,
         tests_tool=tests_result.tool if tests_result is not None else None,
+        assertion=assertion,
     )
 
 
@@ -314,6 +316,7 @@ def run_suite(
     acceptance: Sequence[Criterion] = (),
     mutate: Mutated | None = None,
     derived: Sequence[Criterion] = (),
+    assertion: str | None = None,
 ) -> list[GateResult]:
     """Run every declared gate in declaration order.
 
@@ -345,6 +348,7 @@ def run_suite(
             timeout_s=timeout_s,
             executor=executor,
             derived=derived,
+            assertion=assertion,
         )
         if witness_result is not None:
             # After `tests`, never beside it — its own result is what

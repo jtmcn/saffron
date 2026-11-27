@@ -120,6 +120,21 @@ def _named(criterion: Criterion, reason: str) -> str:
     return f"{criterion.witness} ({reason})"
 
 
+def raised_detail(result: GateResult, assertion: str | None) -> str | None:
+    """The first failure's `detail` when `result` died only by raising, not
+    by an assertion (`DESIGN.md` §5.4.1, `b-c2f264`). Needs a declared
+    `assertion`, a `fail` status and at least one failure. Every failure's
+    `detail` must then be non-empty and unmatched by `re.match(assertion,
+    detail)`. One matched or empty detail among several reads as died, as
+    at base. `None` otherwise."""
+    if assertion is None or result.status != "fail" or not result.failures:
+        return None
+    for failure in result.failures:
+        if not failure.detail or re.match(assertion, failure.detail):
+            return None
+    return result.failures[0].detail
+
+
 # What a summary calls the edit. A criterion probe is no mutant (b-37924b).
 EditNoun = Literal["mutant", "criterion probe", "wrong version"]
 
@@ -133,6 +148,8 @@ def witness_gate(
     edit_noun: EditNoun = "mutant",
     derived: Sequence[Criterion] = (),
     tests_tool: str | None = None,
+    # `None` reads every `fail` as died, as before this argument existed.
+    assertion: str | None = None,
 ) -> GateResult:
     """Each criterion's mutant, applied through `mutate`, tested alone, and
     undone.
@@ -173,6 +190,7 @@ def witness_gate(
         )
 
     died: list[str] = []
+    raised: list[str] = []
     survived: list[Failure] = []
     miscounted: list[Failure] = []
     unproven: list[str] = []
@@ -296,7 +314,11 @@ def witness_gate(
                 ),
             )
         if tests_result.status == "fail":
-            died.append(criterion.witness)
+            detail = raised_detail(tests_result, assertion)
+            if detail is not None:
+                raised.append(_named(criterion, detail))
+            else:
+                died.append(criterion.witness)
             tool = tool or tests_result.tool
             continue
         if tests_result.status == "pass":
@@ -324,6 +346,14 @@ def witness_gate(
             _named(criterion, f"the `tests` gate reported {tests_result.status}")
         )
 
+    # Ahead of `note`, whatever the status: a raise is never a `Failure`,
+    # so this clause is the only record of one (`b-c2f264`).
+    raised_clause = (
+        f"; {len(raised)} witness(es) failed only by raising, not by an "
+        f"assertion: {', '.join(raised)}"
+        if raised
+        else ""
+    )
     note = (
         f" — {len(unproven)} {edit_noun}(s) not proven: {', '.join(unproven)}"
         if unproven
@@ -348,22 +378,25 @@ def witness_gate(
             status="fail",
             tool=tool,
             failures=[*survived, *miscounted],
-            summary=" and ".join(pieces) + note,
+            summary=" and ".join(pieces) + raised_clause + note,
         )
-    if died:
+    if died or raised:
         return GateResult(
             gate="witness",
             status="pass",
             tool=tool,
             summary=(
                 f"{len(died)} of {len(worklist)} witness(es) died under their "
-                f"own {edit_noun}{note}"
+                f"own {edit_noun}{raised_clause}{note}"
             ),
         )
     return GateResult(
         gate="witness",
         status="skip",
-        summary=f"no declared {edit_noun} produced a trustworthy verdict{note}",
+        summary=(
+            f"no declared {edit_noun} produced a trustworthy verdict"
+            f"{raised_clause}{note}"
+        ),
     )
 
 

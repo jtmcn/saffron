@@ -2,10 +2,10 @@
 
 A parent's REVIEW already ran each declared wrong version once, against its
 own criterion's witness. When a child edits that witness, the wrong versions
-it once caught are worth asking again. This module chooses the pairs and
-states the one line their asking earns. `SA-0402` runs them. A task's own
-review commit puts its own killed versions back in play the same way
-(`b-d9a027`), through `own_version_pairs`.
+it once caught, killed or raised, are worth asking again. This module chooses
+the pairs and states the one line their asking earns. `SA-0402` runs them. A
+task's own review commit puts its own killed or raised versions back in play
+the same way (`b-d9a027`), through `own_version_pairs`.
 """
 
 from __future__ import annotations
@@ -102,7 +102,7 @@ def _parent_pairs(
             for version in versions:
                 if not isinstance(version, dict):
                     raise _Unreadable
-                if version.get("outcome") != "killed":
+                if version.get("outcome") not in ("killed", "raised"):
                     continue
                 try:
                     edit = Mutant.model_validate(version.get("edit"))
@@ -160,8 +160,8 @@ def parent_version_pairs(
 def own_version_pairs(
     *, spec: Spec, out_dir: Path, diff: str
 ) -> tuple[list[tuple[Criterion, dict]], bool]:
-    """Which of `spec`'s own already-recorded killed wrong versions a review
-    commit in `diff` puts back in play (`b-d9a027`).
+    """Which of `spec`'s own already-recorded killed or raised wrong versions
+    a review commit in `diff` puts back in play (`b-d9a027`).
 
     `spec` is the task's own spec, and the record is read from
     `out_dir / spec.id / wrong-versions.json`, the same file REVIEW wrote.
@@ -184,8 +184,9 @@ def describe_parent_versions(
     """REVIEW's own line for the asked parent pairs (`SA-0402`). Every entry
     counts as chosen. It then counts at most one more thing: `survived`, a
     `refusal` key read as refused, or an `unproven` outcome with neither. A
-    `killed` or `error` outcome counts only as chosen. The tail names, in
-    `unread`'s own order, each parent whose record could not answer."""
+    `killed`, `raised` or `error` outcome counts only as chosen. The tail
+    names, in `unread`'s own order, each parent whose record could not
+    answer."""
     chosen = len(entries)
     survived = sum(1 for e in entries if e.get("outcome") == "survived")
     refused = sum(1 for e in entries if e.get("refusal") is not None)
