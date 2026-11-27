@@ -3,7 +3,7 @@ id: SA-0445
 title: "A spec review whose extraction turn hits its cap ends with no re-ask, and its review text is kept only in a bounded event log"
 type: bug
 priority: 2
-estimated_lines: 92
+estimated_lines: 93
 estimate_measured: true
 touches:
   - saffron/spec_review.py
@@ -102,13 +102,14 @@ acceptance:
       the extraction prompt, and is given the floor the first extraction
       turn was given. A clean re-ask returns its findings, with cost and
       turns summed over all three turns and the raised turn's model named.
-      A re-ask that raises or is refused returns an error, and a rejected
-      window returns its reset. No failure earns a third extraction turn. A
+      A re-ask that raises or is refused returns an error. A rejected
+      window on the re-ask, raised or returned, returns its reset. No
+      failure earns a third extraction turn. A
       rate-limited raise, or a rejected window, on the first extraction
       turn still returns the reset with no re-ask. The witness drives three
       raises: one carrying an attempt, shaped as a budget cut, one carrying
-      none, and a turn killed with no result event. Each meets all four
-      re-ask outcomes. A review turn of $4.00 then shows the re-ask's floor
+      none, and a turn killed with no result event. Each meets all five
+      re-ask outcomes, each scripted with exactly three outcomes. A review turn of $4.00 then shows the re-ask's floor
       capped at 1.5.
     witness: tests/test_spec_review.py::test_a_spec_review_re_asks_once_when_its_extraction_turn_raises
     wrong_versions:
@@ -118,6 +119,7 @@ acceptance:
       - "A rate-limited raise on the first extraction turn is re-asked rather than returned as a reset."
       - "The session's cost leaves out the turns before the re-ask when the re-ask comes back clean."
       - "A re-ask that raises earns one more extraction turn."
+      - "A re-ask after a raise whose value is refused earns the refused-value re-ask."
       - "The re-ask after a raise is given the raised turn's own cost as its floor."
       - "The re-ask after a raise is given the review turn's whole cost as its floor, uncapped."
     covers:
@@ -136,8 +138,10 @@ acceptance:
           - member: a raise
             driven_by: "A re-ask that raises earns one more extraction turn."
           - member: a refused value
+            driven_by: "A re-ask after a raise whose value is refused earns the refused-value re-ask."
+          - member: a rejected window, returned
             driven_by: tests/test_spec_review.py::test_a_spec_review_re_asks_once_when_its_extraction_turn_raises
-          - member: a rejected window
+          - member: a rejected window, raised
             driven_by: tests/test_spec_review.py::test_a_spec_review_re_asks_once_when_its_extraction_turn_raises
       - set: the rate limits a first extraction turn can meet
         members:
@@ -148,20 +152,22 @@ acceptance:
     positive_case: >-
       The same recording double that counts two calls for each rate-limited
       first extraction turn counts three for each raise with no rate limit.
-      Its script holds three outcomes. So a fourth call
-      fails the witness, and a missing re-ask leaves the count at two.
+      Each script holds exactly three outcomes. So a fourth call fails the
+      witness, and a missing re-ask leaves the count at two.
   - claim: >-
       When `run_spec_review` is given a directory to keep text in, every
       error return after its review turn returned keeps that turn's text.
       The text passes through `credentials.redact` with no token, and lands
       as `review-<sha256 hex of the written text>.md` in that directory,
       which is made when missing. The error is the old one followed by `;
-      review text kept at <path>`. Where the write raises `OSError`, the
+      review text kept at `, the directory's own name, a slash and the
+      file's name. That path is relative to the batch tree, and never
+      absolute, since the error reaches origin in the record. Where the write raises `OSError`, the
       error is the old one followed by `; review text not kept: ` and the
-      exception, and nothing raises. A clean extraction and a rate-limited
-      one keep nothing. The witness drives five error returns: no session
+      exception, and nothing raises. A clean extraction keeps nothing, and
+      so does a rejected window on either extraction turn. The witness drives five error returns: no session
       id to resume, raised then raised, raised then refused, refused then
-      raised, and refused then refused. It drives four returns that keep
+      raised, and refused then refused. It drives six returns that keep
       nothing. It drives two failed sessions for one spec, and a directory
       path that is a file.
     witness: tests/test_spec_review.py::test_a_spec_review_whose_extraction_fails_keeps_its_review_text
@@ -174,8 +180,10 @@ acceptance:
       - "An `OSError` from the write reaches the caller."
       - "A re-ask after a refused value that comes back clean still writes the text."
       - "A rate-limited extraction turn writes the text."
+      - "A rate-limited re-ask keeps the text."
       - "A re-ask after a raise that comes back clean still writes the text."
       - "The file is written, but the error does not name it."
+      - "The error names the file by its absolute path."
     covers:
       - set: the error returns after a review turn returned
         members:
@@ -197,16 +205,24 @@ acceptance:
             driven_by: "A re-ask after a refused value that comes back clean still writes the text."
           - member: a clean re-ask after a raise
             driven_by: "A re-ask after a raise that comes back clean still writes the text."
-          - member: a rate-limited extraction turn
+          - member: a rejected window returned by the first extraction turn
             driven_by: "A rate-limited extraction turn writes the text."
+          - member: a rejected window returned by the re-ask after a refused value
+            driven_by: "A rate-limited re-ask keeps the text."
+          - member: a rejected window returned by the re-ask after a raise
+            driven_by: tests/test_spec_review.py::test_a_spec_review_whose_extraction_fails_keeps_its_review_text
       - set: the failed sessions for one spec
         members:
           - member: the first
             driven_by: tests/test_spec_review.py::test_a_spec_review_whose_extraction_fails_keeps_its_review_text
           - member: a second, with other text, in the same directory
             driven_by: "Every session writes the same file name, so a second failure for the spec overwrites the first."
+      - set: the error returns whose text names the kept file
+        members:
+          - member: every one of the five error returns above
+            driven_by: "The error names the file by its absolute path."
     positive_case: >-
-      Each of the four returns that keep nothing runs over the same review
+      Each of the six returns that keep nothing runs over the same review
       text, through the same helper, into a directory of the same shape as
       the five error returns. Those five each read exactly one file there.
       So a directory the witness reads as absent is one the write would
@@ -218,7 +234,7 @@ acceptance:
       followed by `.spec-review`. `_stack_review` passes
       that directory to `run_spec_review`, and the draft's `review` adapter
       reaches it through `_stack_review`. The error `read_spec_review` reads
-      from that session names the kept file. The witness drives the real
+      from that session names the kept file relative to `out_dir`. The witness drives the real
       `run_spec_review` through `cli._stack_review` and through
       `cli._draft_adapters`' `review`, over a scripted `implement.run_agent`
       whose two extraction turns each lack a structured output.
@@ -295,8 +311,10 @@ that `review` returns. A spec review that errors sets its task
 
 ## Problem
 
-1. **Raise the cap.** Set `SPEC_REVIEW_EXTRACT_BUDGET_USD` to 1.5, and
-   replace its comment with the measured figures above. Leave
+1. **Raise the cap.** Set `SPEC_REVIEW_EXTRACT_BUDGET_USD` to 1.5. Its new
+   comment says three things. $1.0876 is where a $1.00 cap cut `SA-0326`'s
+   extraction turn, so it is a floor. $0.974 is the largest clean use. 1.5
+   matches `SPEC_WRITER_EXTRACT_BUDGET_USD`. Leave
    `SPEC_REVIEW_SESSION_USD`'s formula as it is. A spec review still makes at
    most two extraction turns, so the sum stays its ceiling.
 2. **Re-ask after a raise.** In `run_spec_review`, give a first extraction
@@ -379,8 +397,9 @@ that `review` returns. A spec review that errors sets its task
 
 ## Notes for the agent
 
-**Mutants.** Criterion 1 edits an existing value, so its mutant, if the
-ref holds one, puts the old value back. Criteria 2 to 4 are new code whose
+**Mutants.** Criterion 1 edits an existing value. After this spec merges,
+the delegate pushes its mutant to `refs/saffron/mutants`, keyed by
+criterion 1's witness. It puts the old value back. Criteria 2 to 4 are new code whose
 spelling is yours, so `witness` reports `skip` for them.
 
 **Import inside each witness.** Each new witness imports `saffron.spec_review`
