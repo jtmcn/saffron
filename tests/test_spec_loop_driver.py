@@ -4559,6 +4559,30 @@ def test_check_blocks_on_an_undriven_member_and_notes_a_negative_claim(
     assert not [b for b in out if b.startswith("blocker: ")], out
 
 
+def test_check_notes_each_prose_wrong_version_line_and_still_exits_0(
+    monkeypatch, capsys
+):
+    """b-ef8543: `check` prints each line `prose_wrong_version_lines` returns
+    as a concern and still exits 0. It prints none while the name is absent."""
+    from saffron import intake
+    from tests.test_spec_size_estimate import _run
+
+    target = _spec("SA-0009")
+    line = "SA-0009 criterion 1: its notes say 'These fail it' and it declares no wrong_versions"
+    monkeypatch.setattr(intake, "coverage_problems", lambda spec: [], raising=False)
+    monkeypatch.setattr(
+        intake, "prose_wrong_version_lines", lambda spec: [line], raising=False
+    )
+    rc, out = _run(monkeypatch, capsys, target, [])
+    assert rc == 0, out
+    assert f"concern: {line}" in out, out
+
+    monkeypatch.delattr(intake, "prose_wrong_version_lines", raising=False)
+    rc, out = _run(monkeypatch, capsys, target, [])
+    assert rc == 0, out
+    assert not [o for o in out if "its notes say" in o], out
+
+
 def test_subject_concerns_read_a_mutant_from_the_ref_not_the_spec(tmp_path):
     """SA-0338: a queued spec carries no inline mutant, so the concern reads
     the ref. A spec with none there is left as it is."""
