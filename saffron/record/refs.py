@@ -6,7 +6,9 @@ Standard library only, git by `subprocess`, as `saffron/cell/worktree.py` does.
 
 from __future__ import annotations
 
+import contextlib
 import os
+import signal
 import subprocess
 from pathlib import Path
 
@@ -34,6 +36,23 @@ def _no_prompt() -> dict[str, str]:
 TASKS = "refs/saffron/tasks"
 VALUES = "refs/saffron/values"
 _FACTS = "facts"
+
+# Measured: a dry-run push takes 1.3-1.4s. Read from the module at call
+# time, never cached, so a witness can patch it (b-65eb8f).
+PUSH_TIMEOUT_S = 120
+
+# Reasoned, as `_REAP_S` is in `saffron/cell/runtime.py`: a killed group
+# closes its pipes at once, so this bounds only a child that left the group.
+_PUSH_REAP_S = 5.0
+
+_KEEPALIVE = ("-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4")
+
+
+def _kill_group(proc: subprocess.Popen) -> None:
+    # Measured on macOS: a group left holding only a zombie answers EPERM,
+    # not ESRCH, the same shape `saffron/cell/runtime.py`'s `_kill_group` guards.
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(proc.pid, signal.SIGKILL)
 
 
 class RefsRecord:
@@ -154,21 +173,80 @@ class RefsRecord:
         mirror's branches and its `refs/saffron/values/*` are left as they were."""
         self._git("fetch", "--prune", remote, f"+{TASKS}/*:{TASKS}/*")
 
-    def _push(self, remote: str, ref: str) -> None:
-        # No `--force`: a non-fast-forward refusal is how a stale writer
-        # learns it is stale, the primitive a cross-host budget depends on.
+    def _keepalive_args(self) -> tuple[str, ...]:
+        """`ServerAliveInterval`/`CountMax`, where this host names no
+        `GIT_SSH_COMMAND` and this mirror resolves no `core.sshCommand`.
+        An exit from that read other than 0 (set) or 1 (unset) is a repo
+        git itself cannot parse, and raises before any push starts."""
+        if "GIT_SSH_COMMAND" in os.environ:
+            return ()
         try:
-            self._git("push", remote, f"{ref}:{ref}")
+            self._git("config", "--get", "core.sshCommand")
         except RecordError as exc:
-            # git writes "! [rejected]" for the refusal and nothing else does,
-            # so a full disk or a dead remote stays the error it already is.
-            if "[rejected]" not in exc.stderr:
+            if exc.returncode != 1:
                 raise
-            raise StaleWriter(
-                f"{remote} refused {ref}: {exc.stderr.strip()}",
-                returncode=exc.returncode,
-                stderr=exc.stderr,
-            ) from exc
+            return _KEEPALIVE
+        return ()
+
+    def _push_env(self) -> dict[str, str]:
+        env = _no_prompt()
+        keepalive = self._keepalive_args()
+        if keepalive:
+            env["GIT_SSH_COMMAND"] += " " + " ".join(keepalive)
+        return env
+
+    def _push(self, remote: str, ref: str) -> None:
+        # No `--force`: a stale writer must see the refusal, not an overwrite.
+        # Run by hand, in its own process group, so a stall can be killed alone.
+        argv = ["git", "-C", str(self._repo), *_IDENT, "push", remote, f"{ref}:{ref}"]
+        try:
+            proc = subprocess.Popen(
+                argv,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=self._push_env(),
+                process_group=0,
+            )
+        except OSError as exc:
+            raise RecordError(f"git push could not be executed: {exc}") from exc
+        try:
+            _, stderr = proc.communicate(timeout=PUSH_TIMEOUT_S)
+        except subprocess.TimeoutExpired as expired:
+            _kill_group(proc)
+            try:
+                _, stderr = proc.communicate(timeout=_PUSH_REAP_S)
+            except subprocess.TimeoutExpired as late:
+                # A child outside the group can still hold a pipe open.
+                # Keep what was read, and wait on git: the kill reaped it.
+                stderr = late.stderr
+                proc.wait()
+            raise RecordError(
+                f"git push did not finish within {PUSH_TIMEOUT_S}s",
+                returncode=124,
+                stderr=(stderr or b"").decode(errors="replace"),
+            ) from expired
+        except BaseException:
+            # Ctrl-C and SIGTERM reach here as `KeyboardInterrupt`.
+            # Let it go on unchanged, once git itself is gone.
+            _kill_group(proc)
+            proc.wait()
+            raise
+        if proc.returncode == 0:
+            return
+        text = (stderr or b"").decode(errors="replace")
+        if "[rejected]" not in text:
+            # git writes "! [rejected]" for the refusal and nothing else.
+            # A full disk or a dead remote stays the error it already is.
+            raise RecordError(
+                f"git push failed ({proc.returncode}): {text.strip()}",
+                returncode=proc.returncode,
+                stderr=text,
+            )
+        raise StaleWriter(
+            f"{remote} refused {ref}: {text.strip()}",
+            returncode=proc.returncode,
+            stderr=text,
+        )
 
     def _resolve(self, ref: str) -> str | None:
         # Exit 1 is a genuinely absent ref; anything else is a broken repo, and

@@ -1,4 +1,7 @@
+import os
+import signal
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -407,6 +410,50 @@ def test_a_fact_cannot_be_filed_under_another_task(repo):
     assert record.task_keys() == []
 
 
+def _stand_in_ssh(
+    dir_: Path, log: Path, *, beat_s: float = 0.1, giveup_s: float = 20.0
+) -> Path:
+    """An `ssh` that appends one beat to `log` every `beat_s`. It gives up
+    on its own after `giveup_s`, so a wrong version fails this witness
+    instead of hanging it. Named literally `ssh`: git probes any other
+    basename with `-G` first, starting it twice."""
+    ssh = dir_ / "ssh"
+    beats = max(1, int(giveup_s / beat_s))
+    ssh.write_text(
+        "#!/bin/sh\n"
+        f"i=0\n"
+        f"while [ $i -lt {beats} ]; do\n"
+        f"  date +%s%N >> {log}\n"
+        f"  sleep {beat_s}\n"
+        f"  i=$((i + 1))\n"
+        "done\n"
+        "exit 1\n"
+    )
+    ssh.chmod(0o755)
+    return ssh
+
+
+def _logging_ssh(dir_: Path, log: Path) -> Path:
+    """An `ssh` that logs its own argv and refuses at once, as a passphrase
+    prompt would without one."""
+    ssh = dir_ / "ssh"
+    ssh.write_text(f'#!/bin/sh\necho "$*" >> {log}\nexit 255\n')
+    ssh.chmod(0o755)
+    return ssh
+
+
+def _last_call(log: Path) -> list[str]:
+    return log.read_text().splitlines()[-1].split() if log.exists() else []
+
+
+def _has_keepalive(args: list[str]) -> bool:
+    return "ServerAliveInterval=15" in args and "ServerAliveCountMax=4" in args
+
+
+def _beats(log: Path) -> int:
+    return len(log.read_text().splitlines()) if log.exists() else 0
+
+
 def test_every_network_git_call_asks_for_no_credential(tmp_path, repo, monkeypatch):
     """Each fetch and push reaches an ssh origin through a stand-in ssh. It logs
     what it was handed and fails as an origin that wants a passphrase."""
@@ -442,3 +489,273 @@ def test_every_network_git_call_asks_for_no_credential(tmp_path, repo, monkeypat
     # The refusal names git's reason rather than reading as a lacking origin.
     assert "would prompt for a passphrase" in str(refused.value)
     assert isinstance(refused.value.__cause__, RecordError)
+
+
+def test_a_push_that_never_returns_is_refused_within_the_limit(
+    tmp_path, repo, monkeypatch
+):
+    from saffron.record import refs
+
+    monkeypatch.setattr(refs, "PUSH_TIMEOUT_S", 2, raising=False)
+    log = tmp_path / "ssh.log"
+    _stand_in_ssh(tmp_path, log)
+    monkeypatch.setenv("GIT_SSH_COMMAND", str(tmp_path / "ssh"))
+    monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "file:ssh")
+    monkeypatch.delenv("GIT_TERMINAL_PROMPT", raising=False)
+    remote = "ssh://stall.invalid/mirror.git"
+
+    record = refs.RefsRecord(repo)
+    fact = a_fact()
+    record.append(fact.task_key, fact)
+    ref = f"{TASKS}/{fact.task_key}"
+    before = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", ref],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+    for _ in range(2):
+        start = time.monotonic()
+        with pytest.raises(RecordError) as raised:
+            record.push(fact.task_key, remote)
+        elapsed = time.monotonic() - start
+        assert 2 <= elapsed < 7
+        assert not isinstance(raised.value, StaleWriter)
+        assert "2s" in str(raised.value)
+        after = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", ref],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        assert after == before
+
+    later = a_fact(task_key="e" * 32)
+    start = time.monotonic()
+    with pytest.raises(RecordError) as raised_append:
+        refs.RefsRecord(repo, remote=remote).append(later.task_key, later)
+    elapsed = time.monotonic() - start
+    assert 2 <= elapsed < 7
+    assert not isinstance(raised_append.value, StaleWriter)
+    assert "2s" in str(raised_append.value)
+    # The local commit lands before the refused push, and stays.
+    assert refs.RefsRecord(repo).read(later.task_key) == [later]
+
+
+def test_a_timed_out_push_leaves_no_process_behind(tmp_path, repo, monkeypatch):
+    from saffron.record import refs
+
+    # Pinned, not read back: a batch pays for a stalled push up to this
+    # limit, so a change to the real default must be a deliberate one.
+    assert refs.PUSH_TIMEOUT_S == 120
+    monkeypatch.setattr(refs, "PUSH_TIMEOUT_S", 2, raising=False)
+    log = tmp_path / "ssh.log"
+    _stand_in_ssh(tmp_path, log)
+    monkeypatch.setenv("GIT_SSH_COMMAND", str(tmp_path / "ssh"))
+    monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "file:ssh")
+    monkeypatch.delenv("GIT_TERMINAL_PROMPT", raising=False)
+    remote = "ssh://stall.invalid/mirror.git"
+
+    kept: list[subprocess.Popen] = []
+    real_popen = subprocess.Popen
+
+    def _spy_popen(argv: Any, *args: Any, **kwargs: Any) -> Any:
+        proc = real_popen(argv, *args, **kwargs)
+        if isinstance(argv, list) and "push" in argv:
+            kept.append(proc)
+        return proc
+
+    monkeypatch.setattr(subprocess, "Popen", _spy_popen)
+
+    record = refs.RefsRecord(repo)
+    fact = a_fact()
+    record.append(fact.task_key, fact)
+
+    def _check(do_call: Any) -> None:
+        before = _beats(log)
+        start = time.monotonic()
+        with pytest.raises(RecordError):
+            do_call()
+        elapsed = time.monotonic() - start
+        assert 2 <= elapsed < 7
+        beats_at_refusal = _beats(log) - before
+        assert beats_at_refusal >= 5
+        # Read, never polled or waited on: production code's own wait set it.
+        assert kept[-1].returncode is not None
+        time.sleep(1)
+        assert _beats(log) - before == beats_at_refusal
+
+    _check(lambda: record.push(fact.task_key, remote))
+
+    later = a_fact(task_key="e" * 32)
+    _check(lambda: refs.RefsRecord(repo, remote=remote).append(later.task_key, later))
+
+
+def test_an_interrupted_push_leaves_no_process_behind(tmp_path, repo, monkeypatch):
+    from saffron.record import refs
+
+    log = tmp_path / "ssh.log"
+    _stand_in_ssh(tmp_path, log)
+    monkeypatch.setenv("GIT_SSH_COMMAND", str(tmp_path / "ssh"))
+    monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "file:ssh")
+    monkeypatch.delenv("GIT_TERMINAL_PROMPT", raising=False)
+    remote = "ssh://stall.invalid/mirror.git"
+
+    kept: list[subprocess.Popen] = []
+    real_popen = subprocess.Popen
+
+    def _spy_popen(argv: Any, *args: Any, **kwargs: Any) -> Any:
+        proc = real_popen(argv, *args, **kwargs)
+        if isinstance(argv, list) and "push" in argv:
+            kept.append(proc)
+        return proc
+
+    monkeypatch.setattr(subprocess, "Popen", _spy_popen)
+
+    def _raise_interrupt(signum: int, frame: Any) -> None:
+        raise KeyboardInterrupt
+
+    record = refs.RefsRecord(repo)
+    fact = a_fact()
+    record.append(fact.task_key, fact)
+
+    def _check(do_call: Any) -> None:
+        before = _beats(log)
+        old = signal.signal(signal.SIGALRM, _raise_interrupt)
+        signal.setitimer(signal.ITIMER_REAL, 2.5)
+        try:
+            with pytest.raises(KeyboardInterrupt):
+                do_call()
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, old)
+        beats_at_interrupt = _beats(log) - before
+        assert beats_at_interrupt >= 5
+        assert kept[-1].returncode is not None
+        time.sleep(1)
+        assert _beats(log) - before == beats_at_interrupt
+
+    _check(lambda: record.push(fact.task_key, remote))
+
+    later = a_fact(task_key="f" * 32)
+    _check(lambda: refs.RefsRecord(repo, remote=remote).append(later.task_key, later))
+
+
+def test_a_push_asks_ssh_for_keepalive_only_where_the_host_names_no_ssh_command(
+    tmp_path, repo, monkeypatch
+):
+    from saffron.record import refs
+
+    monkeypatch.delenv("GIT_SSH_COMMAND", raising=False)
+    monkeypatch.delenv("GIT_SSH", raising=False)
+    monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "file:ssh")
+    monkeypatch.delenv("GIT_TERMINAL_PROMPT", raising=False)
+
+    home = tmp_path / "home"
+    xdg = tmp_path / "xdg"
+    home.mkdir()
+    xdg.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+    bare_dir = tmp_path / "bare-bin"
+    bare_dir.mkdir()
+    bare_log = tmp_path / "bare.log"
+    _logging_ssh(bare_dir, bare_log)
+    monkeypatch.setenv("PATH", f"{bare_dir}{os.pathsep}{os.environ['PATH']}")
+
+    named_dir = tmp_path / "named-bin"
+    named_dir.mkdir()
+    named_log = tmp_path / "named.log"
+    named_ssh = _logging_ssh(named_dir, named_log)
+
+    remote = "ssh://stall.invalid/mirror.git"
+    record = refs.RefsRecord(repo)
+    fact = a_fact()
+    record.append(fact.task_key, fact)
+
+    def _set_core_ssh_command(value: str | None) -> None:
+        if value is None:
+            subprocess.run(
+                ["git", "-C", str(repo), "config", "--unset", "core.sshCommand"],
+                check=True,
+            )
+        else:
+            subprocess.run(
+                ["git", "-C", str(repo), "config", "core.sshCommand", value],
+                check=True,
+            )
+
+    # Neither set: keepalive goes on the bare `ssh` resolved from `PATH`.
+    with pytest.raises(RecordError):
+        record.push(fact.task_key, remote)
+    assert _has_keepalive(_last_call(bare_log))
+
+    # `GIT_SSH_COMMAND` alone: no keepalive, and the named stand-in runs.
+    monkeypatch.setenv("GIT_SSH_COMMAND", str(named_ssh))
+    with pytest.raises(RecordError):
+        record.push(fact.task_key, remote)
+    assert not _has_keepalive(_last_call(named_log))
+    monkeypatch.delenv("GIT_SSH_COMMAND", raising=False)
+
+    # `core.sshCommand` alone, from each source git itself reads.
+    _set_core_ssh_command("true")
+    with pytest.raises(RecordError):
+        record.push(fact.task_key, remote)
+    assert not _has_keepalive(_last_call(bare_log))
+    _set_core_ssh_command(None)
+
+    (home / ".gitconfig").write_text("[core]\n\tsshCommand = true\n")
+    with pytest.raises(RecordError):
+        record.push(fact.task_key, remote)
+    assert not _has_keepalive(_last_call(bare_log))
+    (home / ".gitconfig").unlink()
+
+    xdg_git_dir = xdg / "git"
+    xdg_git_dir.mkdir()
+    (xdg_git_dir / "config").write_text("[core]\n\tsshCommand = true\n")
+    with pytest.raises(RecordError):
+        record.push(fact.task_key, remote)
+    assert not _has_keepalive(_last_call(bare_log))
+    (xdg_git_dir / "config").unlink()
+
+    system_file = tmp_path / "gitconfig-system"
+    system_file.write_text("[core]\n\tsshCommand = true\n")
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(system_file))
+    monkeypatch.delenv("GIT_CONFIG_NOSYSTEM", raising=False)
+    with pytest.raises(RecordError):
+        record.push(fact.task_key, remote)
+    assert not _has_keepalive(_last_call(bare_log))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.delenv("GIT_CONFIG_SYSTEM", raising=False)
+
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.sshCommand")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "true")
+    with pytest.raises(RecordError):
+        record.push(fact.task_key, remote)
+    assert not _has_keepalive(_last_call(bare_log))
+    monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
+    monkeypatch.delenv("GIT_CONFIG_KEY_0", raising=False)
+    monkeypatch.delenv("GIT_CONFIG_VALUE_0", raising=False)
+
+    # Both set: still no keepalive, and still the named stand-in.
+    _set_core_ssh_command("true")
+    monkeypatch.setenv("GIT_SSH_COMMAND", str(named_ssh))
+    with pytest.raises(RecordError):
+        record.push(fact.task_key, remote)
+    assert not _has_keepalive(_last_call(named_log))
+    monkeypatch.delenv("GIT_SSH_COMMAND", raising=False)
+    _set_core_ssh_command(None)
+
+    # Any other exit from that read is `RecordError`, before any push starts.
+    before_bare = _beats(bare_log)
+    before_named = _beats(named_log)
+    (repo / "config").write_text("not a valid git config [[[\n")
+    with pytest.raises(RecordError) as broken:
+        record.push(fact.task_key, remote)
+    assert broken.value.returncode == 128
+    assert _beats(bare_log) == before_bare
+    assert _beats(named_log) == before_named
