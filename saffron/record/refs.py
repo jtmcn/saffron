@@ -176,8 +176,8 @@ class RefsRecord:
     def _keepalive_args(self) -> tuple[str, ...]:
         """`ServerAliveInterval`/`CountMax`, where this host names no
         `GIT_SSH_COMMAND` and this mirror resolves no `core.sshCommand`.
-        An exit from that read other than 0 (set) or 1 (unset) is a repo
-        git itself cannot parse, and raises before any push starts."""
+        An exit from that read other than 0 (set) or 1 (unset) is a mirror
+        git cannot read, and raises before any push starts."""
         if "GIT_SSH_COMMAND" in os.environ:
             return ()
         try:
@@ -217,7 +217,7 @@ class RefsRecord:
                 _, stderr = proc.communicate(timeout=_PUSH_REAP_S)
             except subprocess.TimeoutExpired as late:
                 # A child outside the group can still hold a pipe open.
-                # Keep what was read, and wait on git: the kill reaped it.
+                # Keep what was read. The kill ended git, so this wait returns at once.
                 stderr = late.stderr
                 proc.wait()
             raise RecordError(

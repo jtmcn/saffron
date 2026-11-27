@@ -141,9 +141,7 @@ def _spy_on_pushes(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     would hide a `--force` added back in. This checks the argv itself,
     never the push's own outcome. Patched at `subprocess.Popen` alone:
     `subprocess.run` is implemented over it, so patching both would
-    double-count every call that still reaches git through `run`. A push now
-    starts git through `Popen` directly, bounded and in its own process
-    group (b-65eb8f), and this still reads it."""
+    double-count every call that still reaches git through `run`."""
     calls: list[list[str]] = []
     real_popen = subprocess.Popen
 

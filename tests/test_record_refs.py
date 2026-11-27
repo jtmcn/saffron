@@ -454,6 +454,32 @@ def _beats(log: Path) -> int:
     return len(log.read_text().splitlines()) if log.exists() else 0
 
 
+def _keep_pushes(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    """Every git push process `Popen` starts while active. Kept, never polled,
+    so a test reads the `returncode` production code's own wait set."""
+    kept: list[Any] = []
+    real_popen = subprocess.Popen
+
+    def _spy_popen(argv: Any, *args: Any, **kwargs: Any) -> Any:
+        proc = real_popen(argv, *args, **kwargs)
+        if isinstance(argv, list) and "push" in argv:
+            kept.append(proc)
+        return proc
+
+    monkeypatch.setattr(subprocess, "Popen", _spy_popen)
+    return kept
+
+
+def _pushed_through(log: Path, do_call: Any) -> list[str]:
+    """The argv one refused push handed the stand-in that logs to `log`.
+    Asserts that stand-in ran exactly once for it."""
+    before = _beats(log)
+    with pytest.raises(RecordError):
+        do_call()
+    assert _beats(log) == before + 1
+    return _last_call(log)
+
+
 def test_every_network_git_call_asks_for_no_credential(tmp_path, repo, monkeypatch):
     """Each fetch and push reaches an ssh origin through a stand-in ssh. It logs
     what it was handed and fails as an origin that wants a passphrase."""
@@ -516,11 +542,14 @@ def test_a_push_that_never_returns_is_refused_within_the_limit(
     ).stdout.strip()
 
     for _ in range(2):
+        beats = _beats(log)
         start = time.monotonic()
         with pytest.raises(RecordError) as raised:
             record.push(fact.task_key, remote)
         elapsed = time.monotonic() - start
         assert 2 <= elapsed < 7
+        # The refusal came from a push that reached the stalled `ssh`.
+        assert _beats(log) > beats
         assert not isinstance(raised.value, StaleWriter)
         assert "2s" in str(raised.value)
         after = subprocess.run(
@@ -532,11 +561,13 @@ def test_a_push_that_never_returns_is_refused_within_the_limit(
         assert after == before
 
     later = a_fact(task_key="e" * 32)
+    beats = _beats(log)
     start = time.monotonic()
     with pytest.raises(RecordError) as raised_append:
         refs.RefsRecord(repo, remote=remote).append(later.task_key, later)
     elapsed = time.monotonic() - start
     assert 2 <= elapsed < 7
+    assert _beats(log) > beats
     assert not isinstance(raised_append.value, StaleWriter)
     assert "2s" in str(raised_append.value)
     # The local commit lands before the refused push, and stays.
@@ -548,7 +579,7 @@ def test_a_timed_out_push_leaves_no_process_behind(tmp_path, repo, monkeypatch):
 
     # Pinned, not read back: a batch pays for a stalled push up to this
     # limit, so a change to the real default must be a deliberate one.
-    assert refs.PUSH_TIMEOUT_S == 120
+    assert getattr(refs, "PUSH_TIMEOUT_S", 0) == 120
     monkeypatch.setattr(refs, "PUSH_TIMEOUT_S", 2, raising=False)
     log = tmp_path / "ssh.log"
     _stand_in_ssh(tmp_path, log)
@@ -557,16 +588,7 @@ def test_a_timed_out_push_leaves_no_process_behind(tmp_path, repo, monkeypatch):
     monkeypatch.delenv("GIT_TERMINAL_PROMPT", raising=False)
     remote = "ssh://stall.invalid/mirror.git"
 
-    kept: list[subprocess.Popen] = []
-    real_popen = subprocess.Popen
-
-    def _spy_popen(argv: Any, *args: Any, **kwargs: Any) -> Any:
-        proc = real_popen(argv, *args, **kwargs)
-        if isinstance(argv, list) and "push" in argv:
-            kept.append(proc)
-        return proc
-
-    monkeypatch.setattr(subprocess, "Popen", _spy_popen)
+    kept = _keep_pushes(monkeypatch)
 
     record = refs.RefsRecord(repo)
     fact = a_fact()
@@ -602,16 +624,7 @@ def test_an_interrupted_push_leaves_no_process_behind(tmp_path, repo, monkeypatc
     monkeypatch.delenv("GIT_TERMINAL_PROMPT", raising=False)
     remote = "ssh://stall.invalid/mirror.git"
 
-    kept: list[subprocess.Popen] = []
-    real_popen = subprocess.Popen
-
-    def _spy_popen(argv: Any, *args: Any, **kwargs: Any) -> Any:
-        proc = real_popen(argv, *args, **kwargs)
-        if isinstance(argv, list) and "push" in argv:
-            kept.append(proc)
-        return proc
-
-    monkeypatch.setattr(subprocess, "Popen", _spy_popen)
+    kept = _keep_pushes(monkeypatch)
 
     def _raise_interrupt(signum: int, frame: Any) -> None:
         raise KeyboardInterrupt
@@ -676,15 +689,7 @@ def test_a_push_asks_ssh_for_keepalive_only_where_the_host_names_no_ssh_command(
     named_log = tmp_path / "named.log"
     named_ssh = _logging_ssh(named_dir, named_log)
 
-    pushes: list[Any] = []
-    real_popen = subprocess.Popen
-
-    def _spy_popen(argv: Any, *args: Any, **kwargs: Any) -> Any:
-        if isinstance(argv, list) and "push" in argv:
-            pushes.append(argv)
-        return real_popen(argv, *args, **kwargs)
-
-    monkeypatch.setattr(subprocess, "Popen", _spy_popen)
+    pushes = _keep_pushes(monkeypatch)
 
     remote = "ssh://stall.invalid/mirror.git"
     record = refs.RefsRecord(repo)
@@ -692,11 +697,10 @@ def test_a_push_asks_ssh_for_keepalive_only_where_the_host_names_no_ssh_command(
     record.append(fact.task_key, fact)
 
     def _bare_push_has_keepalive(do_call: Any) -> bool:
-        before = _beats(bare_log)
-        with pytest.raises(RecordError):
-            do_call()
-        assert _beats(bare_log) == before + 1
-        return _has_keepalive(_last_call(bare_log))
+        return _has_keepalive(_pushed_through(bare_log, do_call))
+
+    def _push() -> None:
+        record.push(fact.task_key, remote)
 
     def _set_core_ssh_command(value: str | None) -> None:
         if value is None:
@@ -721,48 +725,36 @@ def test_a_push_asks_ssh_for_keepalive_only_where_the_host_names_no_ssh_command(
 
     # `GIT_SSH_COMMAND` alone: no keepalive, and the named stand-in runs.
     monkeypatch.setenv("GIT_SSH_COMMAND", str(named_ssh))
-    with pytest.raises(RecordError):
-        record.push(fact.task_key, remote)
-    assert not _has_keepalive(_last_call(named_log))
+    assert not _has_keepalive(_pushed_through(named_log, _push))
     monkeypatch.delenv("GIT_SSH_COMMAND", raising=False)
 
     # `core.sshCommand` alone, from each source git itself reads.
     _set_core_ssh_command("true")
-    with pytest.raises(RecordError):
-        record.push(fact.task_key, remote)
-    assert not _has_keepalive(_last_call(bare_log))
+    assert not _has_keepalive(_pushed_through(bare_log, _push))
     _set_core_ssh_command(None)
 
     (home / ".gitconfig").write_text("[core]\n\tsshCommand = true\n")
-    with pytest.raises(RecordError):
-        record.push(fact.task_key, remote)
-    assert not _has_keepalive(_last_call(bare_log))
+    assert not _has_keepalive(_pushed_through(bare_log, _push))
     (home / ".gitconfig").unlink()
 
     xdg_git_dir = xdg / "git"
     xdg_git_dir.mkdir()
     (xdg_git_dir / "config").write_text("[core]\n\tsshCommand = true\n")
-    with pytest.raises(RecordError):
-        record.push(fact.task_key, remote)
-    assert not _has_keepalive(_last_call(bare_log))
+    assert not _has_keepalive(_pushed_through(bare_log, _push))
     (xdg_git_dir / "config").unlink()
 
     system_file = tmp_path / "gitconfig-system"
     system_file.write_text("[core]\n\tsshCommand = true\n")
     monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(system_file))
     monkeypatch.delenv("GIT_CONFIG_NOSYSTEM", raising=False)
-    with pytest.raises(RecordError):
-        record.push(fact.task_key, remote)
-    assert not _has_keepalive(_last_call(bare_log))
+    assert not _has_keepalive(_pushed_through(bare_log, _push))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.delenv("GIT_CONFIG_SYSTEM", raising=False)
 
     monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
     monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.sshCommand")
     monkeypatch.setenv("GIT_CONFIG_VALUE_0", "true")
-    with pytest.raises(RecordError):
-        record.push(fact.task_key, remote)
-    assert not _has_keepalive(_last_call(bare_log))
+    assert not _has_keepalive(_pushed_through(bare_log, _push))
     monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
     monkeypatch.delenv("GIT_CONFIG_KEY_0", raising=False)
     monkeypatch.delenv("GIT_CONFIG_VALUE_0", raising=False)
@@ -770,9 +762,7 @@ def test_a_push_asks_ssh_for_keepalive_only_where_the_host_names_no_ssh_command(
     # Both set: still no keepalive, and still the named stand-in.
     _set_core_ssh_command("true")
     monkeypatch.setenv("GIT_SSH_COMMAND", str(named_ssh))
-    with pytest.raises(RecordError):
-        record.push(fact.task_key, remote)
-    assert not _has_keepalive(_last_call(named_log))
+    assert not _has_keepalive(_pushed_through(named_log, _push))
     monkeypatch.delenv("GIT_SSH_COMMAND", raising=False)
     _set_core_ssh_command(None)
 

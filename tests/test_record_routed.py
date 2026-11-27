@@ -19,9 +19,7 @@ def _bare(path: Path) -> Path:
 def _spy_on_git(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     """Every git argv issued while active. Patched at `subprocess.Popen`
     alone: `subprocess.run` is implemented over it, so patching both would
-    double-count every call that still reaches git through `run`. A push now
-    starts git through `Popen` directly, bounded and in its own process
-    group (b-65eb8f), and this still reads it."""
+    double-count every call that still reaches git through `run`."""
     calls: list[list[str]] = []
     real_popen = subprocess.Popen
 
