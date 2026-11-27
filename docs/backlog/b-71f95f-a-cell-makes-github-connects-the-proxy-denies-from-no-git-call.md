@@ -1,6 +1,6 @@
 ---
 id: b-71f95f
-title: "A cell makes CONNECTs to github.com that the proxy denies, and no git call makes them"
+title: "git in a cell makes CONNECTs to github.com that the proxy denies, when code under test pushes or fetches with no guard"
 status: open
 tier: 2
 filed: 2026-11-06
@@ -39,3 +39,6 @@ cell's own runs make none to the forge.
   a recording proxy. git made all of them: 7 for `SA-0334` and 2 for
   `SA-0335`, each from `git-remote-https`. Neither tree held the conftest's
   `GIT_ALLOW_PROTOCOL=file` yet. `SA-0443` sets it in the cell image.
+- 2026-11-27: `SA-0334`'s teardown holds 7 denials, under the cap of 10,
+  not 14. The first "done" clause stays undone. The proxy sees the cell's
+  address and port, and the cell chooses the `User-Agent`.

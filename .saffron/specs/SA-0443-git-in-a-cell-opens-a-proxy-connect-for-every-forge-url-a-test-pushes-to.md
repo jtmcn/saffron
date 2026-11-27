@@ -141,8 +141,10 @@ on the host with a recording listener as `HTTPS_PROXY`. `SA-0334`'s sat on
 its batch's base `7a8e5cc0`, and `SA-0335`'s on `SA-0334`'s pushed head
 `a632a846`. Each had its own patch's `saffron/` files applied.
 `SA-0334`'s command sent 7 CONNECTs to `github.com:443` and `SA-0335`'s
-sent 2. Those counts match each teardown log. `lsof` named the caller each time as `git-remote-https`, with the
-`User-Agent` `git/2.54.0`.
+sent 2. Those counts match each teardown log. `SA-0334`'s log holds 7
+`proxy_denied` rows, under the cap of 10, so 7 is every denial. The item's
+14 is a miscount. `lsof` named the caller each time as `git-remote-https`,
+with the `User-Agent` `git/2.54.0`.
 
 **What stops it today.** `tests/conftest.py:116-126` sets
 `GIT_ALLOW_PROTOCOL=file` for every test not marked `cell`. That is one
@@ -180,6 +182,15 @@ connection, and leave every local path working.
    fails here fails every cell's image build, so read the notes on the
    measured text first.
 3. **Witness it** in `tests/test_image.py`, as the notes describe.
+4. **Add a `cell`-marked test** in `tests/test_image.py`, beside
+   `test_base_image_has_git_and_the_agent_runtime` (`:21-29`). It starts
+   `image.BASE_TAG` with `runtime.run_ephemeral` and asks git, through
+   `sh -c` from `/tmp`, for an `https://` URL on a `.invalid` host. It
+   asserts a nonzero exit and git's refusal of the https transport in
+   stderr. It is no criterion's witness. `pyproject.toml:51` deselects
+   `cell` tests, so your gates never collect it and you cannot start it.
+   The operator starts it after building the base image from your pull
+   request's head, before merge.
 
 ## Out of scope
 
@@ -192,11 +203,15 @@ connection, and leave every local path working.
   another caller.
 - A test or tool that hands git an environment of its own without this
   value. git then sends the CONNECT, and the proxy still denies it.
-- `tests/conftest.py`'s fixture stays. It covers a host session of the
-  suite, where no image applies.
-- **A repo's image build.** A `.saffron/Dockerfile` step that fetches a
-  git-sourced dependency over https now fails at build. `uv.lock` holds
-  none at your base. Such a repo sets its own value on that step.
+- `tests/conftest.py`'s fixture stays. It covers the suite on the host,
+  where no image applies.
+- **A repo's image build.** A repo's `.saffron/Dockerfile` `RUN` steps
+  inherit the value, so a git-sourced dependency fetched over https fails
+  its build step. `uv pip install` and `pip install` each exited 1 on
+  such a URL, measured. Saffron's own `uv.lock` holds no git source.
+- **Other transports.** `ftp://`, `ftps://` and `ext::` are left out of
+  the witness's forge set. The declared value refuses them too, and no
+  test drives them.
 
 ## Notes for the agent
 
@@ -258,6 +273,11 @@ edit (§5.1), so no gate builds your step. Keep it to what git prints.
   the environment a process in a cell inherits.
 - The prototype witness passed in the host's suite, and inside
   `saffron/cell:saffron` as root and through the wrapper.
+
+**The `cell`-marked test, measured.** On a prototype base image built with
+the declaration, it passed. On the base image built from `254f0a14`, it
+failed. Leave out `/opt/saffron/unprivileged`. `run_ephemeral` keeps no
+capability, and `setpriv` then exits 127 with `setresuid failed`.
 
 **No `retired_first`.** Nothing here adds or widens a refusal a spec can
 meet. The conftest already sets the same value for every unmarked test, so
