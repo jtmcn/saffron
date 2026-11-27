@@ -7462,6 +7462,9 @@ def _stub_probe_gates(monkeypatch, cell, *, gate_results, mutate=None, subsets=N
 
 
 _PROBE_POLICY = 'gates: {tests: {}}\nintegrity:\n  test_paths: ["spec/**"]\n'
+# `_PROBE_POLICY` plus a declared `witness.assertion`, for the raised-wrong-
+# version drive (`b-c2f264`).
+_PROBE_POLICY_WITH_ASSERTION = _PROBE_POLICY + "witness:\n  assertion: '^KeyError\\b'\n"
 
 
 def _adequacy_finding(claim, probe_file, find, replace, *, severity="concern"):
@@ -13425,6 +13428,7 @@ def test_a_cell_run_produces_a_witness_result(monkeypatch, tmp_path):
         acceptance: Sequence[Criterion] = (),
         mutate: Mutated | None = None,
         derived: Sequence[Criterion] = (),
+        assertion=None,
     ):
         captured.append((acceptance, mutate))
         assert mutate is not None  # `_suite` always supplies one
@@ -13491,6 +13495,7 @@ def test_a_cell_run_supplies_the_real_mutator(monkeypatch, tmp_path):
         acceptance: Sequence = (),
         mutate: Mutated | None = None,
         derived: Sequence = (),
+        assertion=None,
     ):
         captured.append((acceptance, mutate))
         assert mutate is not None  # `_suite` always supplies one
@@ -13604,6 +13609,7 @@ def test_a_skipped_witness_blocks_nothing_at_either_tier(monkeypatch, tmp_path):
             acceptance: Sequence[Criterion] = (),
             mutate: Mutated | None = None,
             derived: Sequence[Criterion] = (),
+            assertion=None,
         ):
             captured.append((acceptance, mutate))
             assert mutate is not None, "the wiring must hand run_suite a mutator"
@@ -14967,6 +14973,97 @@ def test_a_wrong_version_its_witness_survives_is_rebutted_as_a_blocker(
     ]
 
 
+def test_a_drive_hands_review_its_policys_assertion_for_each_wrong_version(
+    monkeypatch, tmp_path
+):
+    """`_drive_cell` passes `policy.witness.assertion` to
+    `_apply_criterion_probes`. Under a policy declaring `^KeyError\\b`, an
+    `assert` detail reads `raised` and a `KeyError` detail reads `killed`,
+    for the first and second of two wrong versions. Nothing blocks, so the
+    task ends `READY_FOR_REVIEW` with no rebuttal turn, and `findings.json`
+    holds one `adequacy` concern."""
+    from saffron.intake import Criterion
+
+    criterion = Criterion(
+        claim="the guard rejects a negative amount",
+        witness="t.py::a",
+        wrong_versions=["removing the guard entirely", "the guard is removed"],
+    )
+
+    raises_edit = {"file": "src/x.py", "find": "assert x == 1", "replace": "r1"}
+    killed_edit = {"file": "src/y.py", "find": "check(9)", "replace": "check(0)"}
+
+    cell = _stub_the_runtime(
+        monkeypatch,
+        patch=_ANCHORING_DIFF,
+        gate_cell_suite=[_tests_result("pass", collected=["t.py::a"])],
+    )
+    contents = {
+        "src/x.py": "def y():\n    return 1\nassert x == 1\n",
+        "src/y.py": "def other():\n    check(9)\n",
+    }
+
+    def _read_at_head(container, path):
+        return None if container == _CRITIC_CONTAINER else contents.get(path)
+
+    monkeypatch.setattr("saffron.cell.worktree.read_at_head", _read_at_head)
+
+    subsets: list[list[str]] = []
+    _stub_probe_gates(
+        monkeypatch,
+        cell,
+        gate_results=[
+            _tests_result(
+                "fail",
+                collected=["t.py::a"],
+                failures=[
+                    Failure(file="t.py::a", code="FAILED", detail="assert 1 == 2")
+                ],
+            ),
+            _tests_result(
+                "fail",
+                collected=["t.py::a"],
+                failures=[
+                    Failure(file="t.py::a", code="FAILED", detail="KeyError: 'x'")
+                ],
+            ),
+        ],
+        subsets=subsets,
+    )
+
+    outcome, _ledger = _drive(
+        monkeypatch,
+        tmp_path,
+        cell=cell,
+        turns=_probe_turns(_turn(_probe_answer(None, "the diff needs no probe")))
+        + [
+            _turn(
+                _wrong_version_answer(
+                    (raises_edit, "the substitute still raises"),
+                    (killed_edit, "the substitute is caught"),
+                )
+            ),
+        ],
+        spec=_spec(acceptance=[criterion]),
+        policy=_PROBE_POLICY_WITH_ASSERTION,
+        gates=("tests",),
+    )
+    assert outcome.state == "READY_FOR_REVIEW"
+    assert subsets == [["t.py::a"], ["t.py::a"]]
+
+    entry = json.loads((tmp_path / "out" / "SY-1" / "wrong-versions.json").read_text())
+    assert [v["outcome"] for v in entry[0]["versions"]] == ["raised", "killed"]
+
+    findings = json.loads((tmp_path / "out" / "SY-1" / "findings.json").read_text())
+    (adequacy,) = [r for r in findings if r["lens"] == "adequacy"]
+    (finding,) = adequacy["findings"]
+    assert finding["severity"] == "concern"
+    assert finding["claim"].startswith(review.HOST_FILED)
+    assert "removing the guard entirely" in finding["claim"]
+    assert finding["file"] == "src/x.py"
+    assert finding["line"] == 3
+
+
 # --- a child asking a parent's own killed wrong versions again (SA-0402) ---
 
 
@@ -16256,6 +16353,7 @@ def _run_apply_criterion_probes(
     read_at_head=None,
     gates=("tests",),
     spec=None,
+    assertion=None,
 ):
     """Calls `session._apply_criterion_probes` once, over `pairs`, with
     `session.critic_cell`, `runner.run_gate`, `worktree.source_mutated` and
@@ -16339,6 +16437,7 @@ def _run_apply_criterion_probes(
         created=created,
         note=lambda *a: None,
         inert_patterns=[],
+        assertion=assertion,
     )
     return log, kwargs_log, reviews[0], created
 
@@ -16751,6 +16850,203 @@ def test_a_second_stop_files_every_pair_left_as_an_error_naming_the_runtime_erro
     j_a = _outcome_of(pairs_j, "a")
     assert j_a["outcome"] == "unproven"
     assert "unasked" not in j_a
+
+
+_RAISED_ASSERTION = r"^(?:assert\b|AssertionError\b|Failed\b)"
+
+
+def test_a_witness_that_only_raises_under_an_edit_reads_raised_and_files_a_concern(
+    monkeypatch,
+):
+    """A pair whose witness only raises reads `raised`, like a survivor's
+    line, and files an `adequacy` concern with no second ask. Its line-read
+    failures and its own stopping cell behave exactly as a survivor's do
+    (`b-c2f264`). Nine pairs over two cells, eleven `tests` results: raises,
+    a kill, a survivor, and one raised line sharing no token with the diff.
+    One raise is a criterion probe, one a wrong version, one a parent's own."""
+    import inspect
+
+    import saffron.probe as probe_mod
+    from saffron.agents.findings import Finding
+    from saffron.intake import Criterion, Mutant
+
+    sig = inspect.signature(session._apply_criterion_probes)
+    assert sig.parameters["assertion"].default is inspect.Parameter.empty
+
+    criteria = {
+        n: Criterion(claim=f"claim {n}", witness=f"t.py::{n}") for n in "abcdefghi"
+    }
+
+    def _pair(letter, edit, **extra):
+        return (criteria[letter], {"edit": edit, **extra})
+
+    def _outcome_of(letter):
+        for criterion, entry in pairs:
+            if criterion.witness.endswith(letter):
+                return entry
+        raise AssertionError(letter)
+
+    pairs = [
+        _pair("a", _probe_cell_edit("a")),
+        _pair("b", _probe_cell_edit("b"), version="vb"),
+        _pair("c", _probe_cell_edit("c"), version="vc", parent="PARENT-1"),
+        _pair("d", _probe_cell_edit("d"), version="vd"),
+        _pair("e", _probe_cell_edit("e")),
+        _pair("f", {"file": "src/f.py", "find": "nope", "replace": "f"}),
+        _pair("g", {"file": "src/x.py", "find": "NOT_PRESENT", "replace": "g"}),
+        _pair("h", {"file": "src/h.py", "find": "assert x == 1", "replace": "h"}),
+        _pair("i", {"file": "src/x.py", "find": "return 1", "replace": "i"}),
+    ]
+
+    def _failing(letter, detail):
+        return GateResult(
+            gate="tests",
+            status="fail",
+            tool="pytest 8.0",
+            failures=[Failure(file=f"t.py::{letter}", code="FAILED", detail=detail)],
+        )
+
+    run_gate = [
+        _failing("a", "KeyError: 'a'"),  # a: raises
+        _failing("b", "ZeroDivisionError: 'b'"),  # b: raises
+        _failing("c", "AttributeError: 'c'"),  # c: raises
+        _failing("d", "Failed: nope"),  # d: dies (matches the pattern, not literal "assert")
+        GateResult(gate="tests", status="pass", tool="pytest 8.0"),  # e: survives
+        GateResult(gate="tests", status="pass", tool="pytest 8.0"),  # e's second ask
+        _failing("f", "KeyError: 'f'"),  # f: raises, read answers `None`
+        _failing("g", "KeyError: 'g'"),  # g: raises, read lacks `find`
+        _failing("h", "KeyError: 'h'"),  # h: raises, the read stops gate-1
+        _failing("h", "KeyError: 'h'"),  # h, asked again in gate-2
+        _failing("i", "KeyError: 'i'"),  # i: raises, shares no token with the diff
+    ]
+
+    @contextlib.contextmanager
+    def _mutate_ok(_container, _edit):
+        yield None
+
+    def _read_at_head(container, path):
+        if container == "gate-1" and path == "src/h.py":
+            raise runtime.CellRuntimeError("the line read raised")
+        if path == "src/h.py":
+            return "assert x == 1\n"
+        return _PROBE_CELL_CONTENTS.get(path)
+
+    real_check_probe = probe_mod.check_probe
+    calls: list[Mutant] = []
+
+    def _spy_check_probe(probe, **kwargs):
+        calls.append(probe)
+        return real_check_probe(probe, **kwargs)
+
+    monkeypatch.setattr(probe_mod, "check_probe", _spy_check_probe)
+
+    other_lens = review.LensReview(
+        lens="correctness",
+        findings=[
+            Finding(
+                lens="correctness",
+                severity="concern",
+                file="src/z.py",
+                line=1,
+                claim="an unrelated, unanchored concern",
+                anchored=False,
+            )
+        ],
+    )
+
+    log, _kwargs_log, adequacy, _created = _run_apply_criterion_probes(
+        monkeypatch,
+        pairs,
+        enters=["gate-1", "gate-2"],
+        run_gate=run_gate,
+        mutate=_mutate_ok,
+        read_at_head=_read_at_head,
+        assertion=_RAISED_ASSERTION,
+    )
+    assert log == ["enter:gate-1", "exit:gate-1", "enter:gate-2", "exit:gate-2"]
+
+    outcomes = {letter: _outcome_of(letter) for letter in "abcdefghi"}
+    raised_details = {
+        "a": "KeyError: 'a'",
+        "b": "ZeroDivisionError: 'b'",
+        "c": "AttributeError: 'c'",
+        "h": "KeyError: 'h'",
+        "i": "KeyError: 'i'",
+    }
+    for letter, detail in raised_details.items():
+        assert outcomes[letter]["outcome"] == "raised"
+        assert "unasked" not in outcomes[letter]
+        # Its summary is the gate's own, never a shape this test invents.
+        summary = outcomes[letter]["summary"]
+        assert "failed only by raising, not by an assertion" in summary
+        assert detail in summary
+        assert not summary.startswith("raised:")
+    assert outcomes["d"]["outcome"] == "killed"
+    assert "failed only by raising" not in outcomes["d"]["summary"]
+    assert outcomes["e"]["outcome"] == "survived"
+    for letter in "fg":
+        assert outcomes[letter]["outcome"] == "error"
+        assert "could not be read" in outcomes[letter]["summary"]
+
+    # Only the survivor's edit is ever asked of the whole `tests` gate.
+    assert len(calls) == 1
+
+    reviews = [adequacy, other_lens]
+    blockers = review.anchored_blockers(reviews)
+    assert len(blockers) == 1  # `e` alone
+
+    assert len(adequacy.findings) == 6
+    raised_findings = {f.claim: f for f in adequacy.findings if f.severity == "concern"}
+    assert len(raised_findings) == 5
+    for claim, finding in raised_findings.items():
+        assert finding.lens == "adequacy"
+        assert finding.probe is None
+        assert claim.startswith(review.HOST_FILED)
+    # A parent's version names its own parent, not the spec, in its concern.
+    assert any("PARENT-1" in claim for claim in raised_findings)
+    unanchored = [f for f in adequacy.findings if not f.anchored]
+    assert [f.file for f in unanchored] == ["src/x.py"]  # `i` alone
+
+    concerns = review.rebut_concerns(reviews)
+    assert len(concerns) == 5
+    assert review.anchored_concerns(reviews) == 5
+
+    # With no pattern, the same raise reads `killed`.
+    no_pattern_criterion = Criterion(claim="claim np", witness="t.py::np")
+    no_pattern_pairs = [(no_pattern_criterion, {"edit": _probe_cell_edit("np")})]
+    _run_apply_criterion_probes(
+        monkeypatch,
+        no_pattern_pairs,
+        enters=["gate-1"],
+        run_gate=[_failing("np", "KeyError: 'np'")],
+        mutate=_mutate_ok,
+        read_at_head=_read_at_head,
+        assertion=None,
+    )
+    assert no_pattern_pairs[0][1]["outcome"] == "killed"
+
+    # Under a pattern naming `KeyError`, a `KeyError` reason reads `killed`
+    # and an `assert` reason reads `raised`.
+    kp_killed = Criterion(claim="claim kp1", witness="t.py::kp1")
+    kp_raised = Criterion(claim="claim kp2", witness="t.py::kp2")
+    kp_pairs = [
+        (kp_killed, {"edit": _probe_cell_edit("kp1")}),
+        (kp_raised, {"edit": _probe_cell_edit("kp2")}),
+    ]
+    _run_apply_criterion_probes(
+        monkeypatch,
+        kp_pairs,
+        enters=["gate-1"],
+        run_gate=[
+            _failing("kp1", "KeyError: 'kp1'"),
+            _failing("kp2", "assert 1 == 2"),
+        ],
+        mutate=_mutate_ok,
+        read_at_head=_read_at_head,
+        assertion=r"^KeyError\b",
+    )
+    assert kp_pairs[0][1]["outcome"] == "killed"
+    assert kp_pairs[1][1]["outcome"] == "raised"
 
 
 def _scope_edit(file, replace="z"):

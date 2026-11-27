@@ -16,17 +16,27 @@ import re
 import pytest
 
 from saffron.gates.contract import Failure, GateResult, GateStatus, identity
-from saffron.gates.core.witness import witness_gate
+from saffron.gates.core.witness import FindCount, witness_gate
 from saffron.intake import Criterion, Mutant
 from tests.mutation import host_mutator
 
 
 def _tests(
-    *, status: GateStatus, collected: tuple[str, ...] = (), tool: str = "pytest 8.3.2"
+    *,
+    status: GateStatus,
+    collected: tuple[str, ...] = (),
+    tool: str = "pytest 8.3.2",
+    failures: tuple[Failure, ...] = (),
 ) -> GateResult:
     """A canned `tests`-gate result for exactly the one-node subset this gate
     invokes it with."""
-    return GateResult(gate="tests", status=status, tool=tool, collected=list(collected))
+    return GateResult(
+        gate="tests",
+        status=status,
+        tool=tool,
+        collected=list(collected),
+        failures=list(failures),
+    )
 
 
 def _criterion(
@@ -1204,3 +1214,357 @@ def test_a_find_count_failure_is_new_unless_the_base_reported_its_own(tmp_path):
     assert subtract_baseline([head_twice], [base_twice]) == []
     base_thrice = result_for(3)
     assert subtract_baseline([head_twice], [base_thrice]) == []
+
+
+def test_a_witness_that_fails_only_by_raising_reads_as_raised_and_moves_no_status():
+    """`assertion` turns a `fail` with every failure's `detail` non-empty and
+    unmatched by `re.match` into `raised`, never `killed` or `survived`. It
+    moves no status on its own: a gate whose only verdicts are raises still
+    reports `pass`, and a raise adds no `Failure` to the result. The summary
+    names every raised witness in one clause ahead of the "not proven" note,
+    whatever the status (`b-c2f264`, `DESIGN.md` §5.4.1)."""
+    # No leading `^`: `re.match` still anchors at the start on its own, so
+    # this is the only way a `re.search` mutation reads differently.
+    assertion = r"(?:assert\b|AssertionError\b|Failed\b)"
+
+    @contextlib.contextmanager
+    def stub_mutate(mutant):
+        yield None
+
+    def _c(name: str, find: str) -> Criterion:
+        return _criterion(
+            claim=f"claim {name}",
+            witness=f"tests/test_w.py::{name}",
+            find=find,
+        )
+
+    # A lone `KeyError` detail reads `pass` with no failure and the clause.
+    raised_one = _c("raised_one", "find_1")
+
+    def run_tests_raised(subset):
+        return _tests(
+            status="fail",
+            collected=tuple(subset),
+            failures=(
+                Failure(file=raised_one.witness, code="FAILED", detail="KeyError: 'x'"),
+            ),
+        )
+
+    result = witness_gate(
+        acceptance=[raised_one],
+        mutate=stub_mutate,
+        run_tests=run_tests_raised,
+        assertion=assertion,
+    )
+    assert result.status == "pass"
+    assert result.failures == []
+    assert (
+        "; 1 witness(es) failed only by raising, not by an assertion: "
+        f"{raised_one.witness} (KeyError: 'x')"
+    ) in result.summary
+
+    # Five kills and an undeclared pattern read the base summary.
+    kills = [_c(f"kill_{i}", f"find_k{i}") for i in range(5)]
+    by_witness = {
+        c.witness: _tests(
+            status="fail",
+            collected=(c.witness,),
+            failures=(Failure(file=c.witness, code="FAILED", detail="assert 1 == 2"),),
+        )
+        for c in kills
+    }
+    result = witness_gate(
+        acceptance=kills,
+        mutate=stub_mutate,
+        run_tests=lambda subset: by_witness[subset[0]],
+        assertion=None,
+    )
+    assert result.status == "pass"
+    assert result.summary == "5 of 5 witness(es) died under their own mutant"
+
+    # An undeclared pattern reads the same `KeyError` detail as died too.
+    result = witness_gate(
+        acceptance=[raised_one], mutate=stub_mutate, run_tests=run_tests_raised
+    )
+    assert result.summary == "1 of 1 witness(es) died under their own mutant"
+
+    # `re.match` misses a matched word placed later, so two such details
+    # read as raised, naming the first.
+    two_detail = _c("two_detail", "find_two")
+
+    def run_tests_two_detail(subset):
+        return _tests(
+            status="fail",
+            collected=tuple(subset),
+            failures=(
+                Failure(file=two_detail.witness, code="FAILED", detail="boom assert 1"),
+                Failure(file=two_detail.witness, code="ERROR", detail="teardown boom"),
+            ),
+        )
+
+    result = witness_gate(
+        acceptance=[two_detail],
+        mutate=stub_mutate,
+        run_tests=run_tests_two_detail,
+        assertion=assertion,
+    )
+    assert f"{two_detail.witness} (boom assert 1)" in result.summary
+
+    # The pattern alone decides, so "AssertionError" named later in a detail
+    # is as unmatched as any other word placed there.
+    later_error = _c("later_error", "find_later_error")
+
+    def run_tests_later_error(subset):
+        return _tests(
+            status="fail",
+            collected=tuple(subset),
+            failures=(
+                Failure(
+                    file=later_error.witness,
+                    code="FAILED",
+                    detail="boom AssertionError: oops",
+                ),
+            ),
+        )
+
+    result = witness_gate(
+        acceptance=[later_error],
+        mutate=stub_mutate,
+        run_tests=run_tests_later_error,
+        assertion=assertion,
+    )
+    assert f"{later_error.witness} (boom AssertionError: oops)" in result.summary
+
+    # A matched or an empty detail, beside an unmatched one, reads as died.
+    # So does a `fail` with no failure at all.
+    matched_c = _c("matched", "find_matched")
+    empty_beside_c = _c("empty_beside", "find_empty_beside")
+    one_matched_c = _c("one_matched", "find_one_matched")
+    no_failure_c = _c("no_failure", "find_no_failure")
+    by_witness = {
+        matched_c.witness: _tests(
+            status="fail",
+            collected=(matched_c.witness,),
+            failures=(
+                Failure(file=matched_c.witness, code="FAILED", detail="assert True"),
+            ),
+        ),
+        empty_beside_c.witness: _tests(
+            status="fail",
+            collected=(empty_beside_c.witness,),
+            failures=(
+                Failure(file=empty_beside_c.witness, code="FAILED", detail=""),
+                Failure(file=empty_beside_c.witness, code="ERROR", detail="boom"),
+            ),
+        ),
+        one_matched_c.witness: _tests(
+            status="fail",
+            collected=(one_matched_c.witness,),
+            failures=(
+                Failure(
+                    file=one_matched_c.witness, code="FAILED", detail="assert 2 == 3"
+                ),
+                Failure(file=one_matched_c.witness, code="ERROR", detail="boom"),
+            ),
+        ),
+        no_failure_c.witness: _tests(status="fail", collected=(no_failure_c.witness,)),
+    }
+    result = witness_gate(
+        acceptance=[matched_c, empty_beside_c, one_matched_c, no_failure_c],
+        mutate=stub_mutate,
+        run_tests=lambda subset: by_witness[subset[0]],
+        assertion=assertion,
+    )
+    assert result.status == "pass"
+    assert "4 of 4 witness(es) died under their own mutant" in result.summary
+    assert "failed only by raising" not in result.summary
+
+    # A kill beside two raises reads `pass`, counts one of three died and
+    # names both raises in one clause.
+    kill = _c("kill_combo", "find_kill_combo")
+    raise_a = _c("raise_a", "find_raise_a")
+    raise_b = _c("raise_b", "find_raise_b")
+    by_witness = {
+        kill.witness: _tests(
+            status="fail",
+            collected=(kill.witness,),
+            failures=(
+                Failure(file=kill.witness, code="FAILED", detail="assert False"),
+            ),
+        ),
+        raise_a.witness: _tests(
+            status="fail",
+            collected=(raise_a.witness,),
+            failures=(
+                Failure(file=raise_a.witness, code="FAILED", detail="KeyError: 'a'"),
+            ),
+        ),
+        raise_b.witness: _tests(
+            status="fail",
+            collected=(raise_b.witness,),
+            failures=(
+                Failure(
+                    file=raise_b.witness, code="FAILED", detail="ZeroDivisionError: b"
+                ),
+            ),
+        ),
+    }
+    result = witness_gate(
+        acceptance=[kill, raise_a, raise_b],
+        mutate=stub_mutate,
+        run_tests=lambda subset: by_witness[subset[0]],
+        assertion=assertion,
+    )
+    assert result.status == "pass"
+    assert "1 of 3 witness(es) died under their own mutant" in result.summary
+    assert (
+        "; 2 witness(es) failed only by raising, not by an assertion: "
+        f"{raise_a.witness} (KeyError: 'a'), {raise_b.witness} (ZeroDivisionError: b)"
+    ) in result.summary
+
+    # A survivor beside a raise reads `fail` with only the survivor's
+    # failure and both clauses.
+    survivor = _c("survivor", "find_survivor")
+    raise_c = _c("raise_c", "find_raise_c")
+    by_witness = {
+        survivor.witness: _tests(status="pass", collected=(survivor.witness,)),
+        raise_c.witness: _tests(
+            status="fail",
+            collected=(raise_c.witness,),
+            failures=(
+                Failure(file=raise_c.witness, code="FAILED", detail="KeyError: 'c'"),
+            ),
+        ),
+    }
+    result = witness_gate(
+        acceptance=[survivor, raise_c],
+        mutate=stub_mutate,
+        run_tests=lambda subset: by_witness[subset[0]],
+        assertion=assertion,
+    )
+    assert result.status == "fail"
+    assert [f.code for f in result.failures] == ["survived-mutant"]
+    assert "1 of 2 witness(es) survived their own mutant" in result.summary
+    assert (
+        "; 1 witness(es) failed only by raising, not by an assertion: "
+        f"{raise_c.witness} (KeyError: 'c')"
+    ) in result.summary
+
+    # A miscount beside a raise reads `fail` with only the miscount's
+    # failure and both clauses.
+    miscount = _c("miscount", "find_miscount")
+    raise_d = _c("raise_d", "find_raise_d")
+    assert miscount.mutant is not None  # `_c` always supplies one
+    miscount_find = miscount.mutant.find
+
+    @contextlib.contextmanager
+    def mutate_with_miscount(mutant):
+        if mutant.find == miscount_find:
+            yield FindCount("not found", 0)
+        else:
+            yield None
+
+    by_witness = {
+        raise_d.witness: _tests(
+            status="fail",
+            collected=(raise_d.witness,),
+            failures=(
+                Failure(file=raise_d.witness, code="FAILED", detail="KeyError: 'd'"),
+            ),
+        ),
+    }
+    result = witness_gate(
+        acceptance=[miscount, raise_d],
+        mutate=mutate_with_miscount,
+        run_tests=lambda subset: by_witness[subset[0]],
+        assertion=assertion,
+    )
+    assert result.status == "fail"
+    assert [f.code for f in result.failures] == ["mutant-find-absent"]
+    assert "1 of 2 declared mutant(s) did not match once" in result.summary
+    assert (
+        "; 1 witness(es) failed only by raising, not by an assertion: "
+        f"{raise_d.witness} (KeyError: 'd')"
+    ) in result.summary
+
+    # An unproven criterion beside a raise puts the clause ahead of the note.
+    unproven_c = _c("unproven_c", "find_unproven")
+    raise_e = _c("raise_e", "find_raise_e")
+    by_witness = {
+        raise_e.witness: _tests(
+            status="fail",
+            collected=(raise_e.witness,),
+            failures=(
+                Failure(file=raise_e.witness, code="FAILED", detail="KeyError: 'e'"),
+            ),
+        ),
+    }
+    result = witness_gate(
+        acceptance=[unproven_c, raise_e],
+        mutate=stub_mutate,
+        run_tests=lambda subset: by_witness[subset[0]],
+        collected=[raise_e.witness],
+        assertion=assertion,
+    )
+    assert result.status == "pass"
+    assert result.summary.index("failed only by raising") < result.summary.index(
+        "not proven"
+    )
+
+    # A derived criterion that raises is named, the same as a declared one.
+    derived_raise = _c("derived_raise", "find_derived_raise")
+    result = witness_gate(
+        acceptance=[],
+        mutate=stub_mutate,
+        run_tests=lambda subset: _tests(
+            status="fail",
+            collected=tuple(subset),
+            failures=(
+                Failure(
+                    file=derived_raise.witness, code="FAILED", detail="KeyError: 'f'"
+                ),
+            ),
+        ),
+        derived=[derived_raise],
+        assertion=assertion,
+    )
+    assert result.status == "pass"
+    assert derived_raise.witness in result.summary
+    assert "KeyError: 'f'" in result.summary
+
+    # Under `^KeyError\b` a `KeyError` detail reads died and `assert 1 == 2`
+    # reads raised.
+    died_keyerror = _c("died_keyerror", "find_died_keyerror")
+    raised_assert = _c("raised_assert", "find_raised_assert")
+    by_witness = {
+        died_keyerror.witness: _tests(
+            status="fail",
+            collected=(died_keyerror.witness,),
+            failures=(
+                Failure(
+                    file=died_keyerror.witness, code="FAILED", detail="KeyError: 'g'"
+                ),
+            ),
+        ),
+        raised_assert.witness: _tests(
+            status="fail",
+            collected=(raised_assert.witness,),
+            failures=(
+                Failure(
+                    file=raised_assert.witness, code="FAILED", detail="assert 1 == 2"
+                ),
+            ),
+        ),
+    }
+    result = witness_gate(
+        acceptance=[died_keyerror, raised_assert],
+        mutate=stub_mutate,
+        run_tests=lambda subset: by_witness[subset[0]],
+        assertion=r"^KeyError\b",
+    )
+    assert result.status == "pass"
+    assert "1 of 2 witness(es) died under their own mutant" in result.summary
+    assert (
+        "; 1 witness(es) failed only by raising, not by an assertion: "
+        f"{raised_assert.witness} (assert 1 == 2)"
+    ) in result.summary

@@ -935,6 +935,42 @@ def survivor_finding(
     )
 
 
+def raised_finding(
+    criterion: Criterion,
+    edit: Mutant,
+    content: str,
+    detail: str,
+    *,
+    version: str | None = None,
+    parent: str | None = None,
+) -> Finding:
+    """The concern filed when a criterion's own witness fails an edit only
+    by raising, never by an assertion (`b-c2f264`, `DESIGN.md` §5.4.1).
+    `content` and the line it names follow `survivor_finding` exactly.
+    `version`/`parent` name the edit the same way `survivor_finding` does.
+    Unanchored, like every other finding in a `LensReview`: the caller runs
+    this through `findings.anchor` too."""
+    line = content.count("\n", 0, content.index(edit.find)) + 1
+    edit_text = (
+        "the criterion's own edit"
+        if version is None
+        else f"{parent or 'the spec'}'s wrong version {version!r}"
+    )
+    claim = (
+        f"{HOST_FILED}{criterion.witness} failed with {edit_text} applied to "
+        f"{edit.file} only by raising {detail!r}, and no assertion failed. "
+        f"The claim was {criterion.claim!r}."
+    )
+    return Finding(
+        lens="adequacy",
+        severity="concern",
+        file=edit.file,
+        line=line,
+        claim=claim,
+        probe=None,
+    )
+
+
 # The kill tail's own opening phrase, checked by `rebut._blocker_line`
 # together with a leading `HOST_FILED`: a lens's claim never starts with one.
 SUITE_KILL_SENTENCE = "Under the edit the whole `tests` gate failed "
@@ -1023,10 +1059,15 @@ def rebut_concerns(reviews: Sequence[LensReview]) -> list[Finding]:
     blocker, and `_concern_answers` renders against those same numbers: the
     one selection rule every caller of the concern list shares.
 
-    No host-filed carve-out: a host-filed survivor is always severity
-    `blocker` (`review.apply_probe_verdict`), so it never reaches here."""
+    A `HOST_FILED` concern is exempt from the anchor check, the way a
+    `HOST_FILED` blocker is exempt in `anchored_blockers`. A raised edit
+    files one through `review.raised_finding`, severity `concern`
+    (`b-c2f264`)."""
     return [
-        f for r in reviews for f in r.findings if f.severity == "concern" and f.anchored
+        f
+        for r in reviews
+        for f in r.findings
+        if f.severity == "concern" and (f.anchored or f.claim.startswith(HOST_FILED))
     ]
 
 

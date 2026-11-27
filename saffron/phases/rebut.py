@@ -744,7 +744,8 @@ BlockerAnswer = Literal["answered", "unanswered", "unread"]
 def blocker_answers(turn: RebuttalTurn, blockers: int) -> dict[int, BlockerAnswer]:
     """Each of `blockers` numbers, 1 through `blockers`, mapped to item 42's
     own answer (§5.6). `blockers` is the caller's own count: a blocker count
-    alone, or that count plus every anchored concern. Every number reads
+    alone, or that count plus every anchored concern and host-filed raised
+    one. Every number reads
     `unread` when `turn.error` is not `None`, the empty string included.
     Otherwise a number reads `answered` when `first_answers` holds it, and
     `unanswered` when it does not.
@@ -824,8 +825,8 @@ def sustained_blockers(rebut_result: RebutResult | None) -> int:
 
     Zero with no `RebutResult`, with a rebuttal turn that errored, and for a
     blocker verdicted but never rebutted, which never enters `_confirmed_with`'s
-    answered set. Only a host-filed survivor reaches REBUT unanchored (§5.5).
-    """
+    answered set. A host-filed survivor or raised concern reaches REBUT
+    unanchored (§5.5)."""
     if rebut_result is None or rebut_result.rebuttal.error is not None:
         return 0
     return _confirmed_with(rebut_result, "argued")
