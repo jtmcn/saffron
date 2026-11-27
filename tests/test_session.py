@@ -16988,7 +16988,7 @@ def test_a_witness_that_only_raises_under_an_edit_reads_raised_and_files_a_conce
     assert outcomes["e"]["outcome"] == "survived"
     for letter in "fg":
         assert outcomes[letter]["outcome"] == "error"
-        assert "could not be read" in outcomes[letter]["summary"]
+        assert outcomes[letter]["summary"] == "the raised edit's line could not be read"
 
     # Only the survivor's edit is ever asked of the whole `tests` gate.
     assert len(calls) == 1

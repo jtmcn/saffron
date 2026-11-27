@@ -44,7 +44,7 @@ EXTRACT_PROMPT = context.turn_prompt("rebut-extract")
 
 
 class Rebuttal(BaseModel):
-    """The implementer's answer to one blocker, or one anchored concern,
+    """The implementer's answer to one blocker, or one anchored or host-filed concern,
     under §4.1's `findings.rebuttal`. A concern's entry is shaped the same
     way, and no verdict ever judges it (§5.6)."""
 
@@ -722,8 +722,8 @@ def rebut_state(
 
 
 def first_answers(rebuttal: RebuttalTurn) -> dict[int, Rebuttal]:
-    """The rebuttal keyed by finding number, a blocker's or an anchored
-    concern's alike, first answer winning.
+    """The rebuttal keyed by finding number, a blocker's or a concern's
+    alike, anchored or host-filed, first answer winning.
 
     Nothing in `_Rebuttals` constrains the model to one entry per `finding`,
     and three places read this field: the ledger, the queue's counts, and the
@@ -744,9 +744,8 @@ BlockerAnswer = Literal["answered", "unanswered", "unread"]
 def blocker_answers(turn: RebuttalTurn, blockers: int) -> dict[int, BlockerAnswer]:
     """Each of `blockers` numbers, 1 through `blockers`, mapped to item 42's
     own answer (§5.6). `blockers` is the caller's own count: a blocker count
-    alone, or that count plus every anchored concern and host-filed raised
-    one. Every number reads
-    `unread` when `turn.error` is not `None`, the empty string included.
+    alone, or that count plus every anchored or host-filed concern. Every
+    number reads `unread` when `turn.error` is not `None`, the empty string included.
     Otherwise a number reads `answered` when `first_answers` holds it, and
     `unanswered` when it does not.
     """
@@ -863,7 +862,7 @@ def run_rebut(
     *,
     blockers: Sequence[Finding],
     # Required, not defaulted: a bare default would let a caller silently
-    # drop every anchored concern it was handed (§5.6).
+    # drop every anchored or host-filed concern it was handed (§5.6).
     concerns: Sequence[Finding],
     # Required, not defaulted: a default would hide that `preserves` never
     # reached the guard below (backlog b-cd5fd2).

@@ -1054,7 +1054,7 @@ def rebuts_despite_errors(
 
 
 def rebut_concerns(reviews: Sequence[LensReview]) -> list[Finding]:
-    """Anchored concerns, in order. ORDER IS LOAD-BEARING, the same way as
+    """Anchored and host-filed concerns, in order. ORDER IS LOAD-BEARING, the same way as
     for `anchored_blockers`. `rebut.py` numbers this on from the last
     blocker, and `_concern_answers` renders against those same numbers: the
     one selection rule every caller of the concern list shares.
@@ -1129,7 +1129,7 @@ def describe_probes(entries: Sequence[Mapping[str, object]]) -> str:
 
 
 def anchored_concerns(reviews: Sequence[LensReview]) -> int:
-    """How many anchored concerns the review left. One rule, two callers:
+    """How many anchored or host-filed concerns the review left. One rule, two callers:
     `review_state` and the queue line the operator sorts on (§6) — a second
     hand-written copy silently reorders the morning page. It counts
     `rebut_concerns`, so REBUT and this count share one rule."""

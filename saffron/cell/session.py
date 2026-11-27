@@ -2198,7 +2198,7 @@ def _apply_criterion_probes(
         cell. A witness-ask or line-read stop names the pair that was
         running, so it is asked again. A second-ask stop names the next
         pair, since its own survivor's finding is already filed."""
-        # `witness_gate` reports a raise here and a gate `error` alike as
+        # `witness_gate` reports a runtime stop here and a gate `error` alike as
         # `error`. Only this note tells them apart.
         stopped: str | None = None
         last_result: GateResult | None = None
@@ -2269,9 +2269,7 @@ def _apply_criterion_probes(
                         parent=entry.get("parent"),
                     )
                 else:
-                    assert (
-                        raised_text is not None
-                    )  # set above, where verdict was chosen
+                    assert raised_text is not None  # set with verdict
                     finding = review.raised_finding(
                         criterion,
                         edit,
