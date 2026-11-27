@@ -1,0 +1,16 @@
+tests/test_stack_view.py::test_a_commit_review_reads_its_peak_beside_the_lens_bound:
+  file: saffron/report/stack.py
+  find: return max(turns) if turns else None
+  replace: return sum(turns) if turns else None
+  case: a layer whose commit review attempts are summed rather than peaked
+tests/test_stack_view.py::test_a_layer_with_no_closed_commit_review_reads_it_absent:
+  file: saffron/report/stack.py
+  find: |-
+    a["num_turns"]
+            for a in attempts
+            if a["phase"] == phase and a["num_turns"] is not None
+  replace: |-
+    a["num_turns"] or 0
+            for a in attempts
+            if a["phase"] == phase
+  case: an open attempt whose NULL turn count reads as 0
