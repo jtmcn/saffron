@@ -296,13 +296,13 @@ last one as predecessor (`saffron/batch.py:632-643`). The layers declare no
 **The ledger already serves the chain**. Its layer table carries
 `task_key`, `batch_key`, `position`, `spec_id` and `predecessor_key`
 (`saffron/ledger.py:257-265`). `Ledger.stack_batch_of(task_id)` names a
-task's stack batch (`saffron/ledger.py:1980-1997`).
+task's stack batch (`saffron/ledger.py:1992-2009`).
 `Ledger.stack_layers(batch_id)` lists that batch's rows with `task_id`
-(`saffron/ledger.py:1960-1978`). `Ledger.record_key(task_id)`
+(`saffron/ledger.py:1972-1990`). `Ledger.record_key(task_id)`
 gives a task's key (`saffron/ledger.py:631-635`). `tasks_by_repo` carries
-`task_id` and `spec_id` but no key (`saffron/ledger.py:1295-1312`).
+`task_id` and `spec_id` but no key (`saffron/ledger.py:1302-1319`).
 `_adopted_stack_layer` reads a task's batch the same way
-(`saffron/cli.py:3204-3213`).
+(`saffron/cli.py:3212-3221`).
 
 **A stack batch's own follow-up check already exempts its layers**.
 `run_stack_batch` passes its recorded `layer_branches` to `open_pr_refusal`
@@ -395,7 +395,7 @@ it reads none of this.
 
 **Seed a layer the way a stack batch leaves it**. `stack_batch_of` returns
 a batch only for a task whose run is attached to it and that holds a
-`spec_reviews` row (`saffron/ledger.py:1980-1997`).
+`spec_reviews` row (`saffron/ledger.py:1992-2009`).
 `tests/test_adopt_stack_layer.py:21-43` builds such a task. Copy its shape
 into `tests/test_scheduler.py` rather than importing it. Then call
 `Ledger.record_stack_layer` with each layer's `position` and
