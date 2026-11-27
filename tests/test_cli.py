@@ -4917,9 +4917,16 @@ def test_adopt_refuses_with_exit_one_and_writes_nothing(tmp_path, monkeypatch, c
     ledger = Ledger(home / "ledger.db")
     repo_id = _seed_repo(tmp_path, ledger, "https://github.com/owner/repo.git")
 
-    takes = {"NOT_IMPLEMENTED", "READY_FOR_REVIEW", "EXHAUSTED", "MERGE_FAILED"}
+    takes = {
+        "NOT_IMPLEMENTED",
+        "READY_FOR_REVIEW",
+        "EXHAUSTED",
+        "MERGE_FAILED",
+        "ORPHANED",
+        "REBUTTAL_UNJUDGED",
+    }
     others = sorted(state for state in typing.get_args(TaskState) if state not in takes)
-    assert len(others) == 24
+    assert len(others) == 22
 
     carried = {}
     for i, state in enumerate(sorted(takes)):
@@ -5462,6 +5469,421 @@ def test_adopt_keeps_the_state_of_a_task_whose_regate_is_red_declined_or_on_anot
     check.close()
     assert row["state"] == "READY_FOR_REVIEW"
     assert row["pushed_sha"] == retry_head
+
+
+def _write_parent_and_child(specs_dir, parent_id, child_id):
+    """Named by spec id, so a `Refusal.path.stem` names the spec it is
+    about (`discover_specs` globs `*.md` by no particular filename)."""
+    (specs_dir / f"{parent_id}.md").write_text(
+        f"---\nid: {parent_id}\ntitle: Parent\ntype: chore\n---\n\nBody.\n"
+    )
+    (specs_dir / f"{child_id}.md").write_text(
+        f"---\nid: {child_id}\ntitle: Child\ntype: chore\n"
+        f"depends_on: [{parent_id}]\n---\n\nBody.\n"
+    )
+
+
+def _adopt_once(
+    monkeypatch,
+    *,
+    home,
+    repo,
+    parent_id,
+    pr_number,
+    branch,
+    adopted_url,
+    parent_task,
+    head_sha,
+    outcome,
+):
+    """One `saffron adopt` call, every loop-dependent value passed in
+    rather than closed over, so no nested function binds a loop variable."""
+    monkeypatch.setattr(
+        cli,
+        "run_gh",
+        _fake_gh_names_a_pull_request(
+            adopted_url, head_branch=branch, number=pr_number, head_sha=head_sha
+        ),
+    )
+    monkeypatch.setattr(cli.regate, "run_regate", _FakeRegate({parent_task: outcome}))
+    return cli.main(
+        ["--home", str(home), "adopt", parent_id, pr_number, "--repo", str(repo)]
+    )
+
+
+def test_adopt_admits_a_rebuttal_unjudged_or_orphaned_tasks_child_only_after_a_green_regate(
+    tmp_path, monkeypatch
+):
+    """Both newly-adoptable states re-gate like `EXHAUSTED` does. A kept
+    `REBUTTAL_UNJUDGED` row's head lands untrusted, so a `stack=True` scan
+    and the one-parent resolver refuse its child as stale. The plain scan
+    still takes it, as it does at base for any waiting parent.
+
+    A kept `ORPHANED` row carries no such distrust, but `SA-0430` refuses
+    it beside its adopted url in both scans, and the child too. A green
+    re-gate moves either row to `READY_FOR_REVIEW`, where both scans take
+    the child alone and the resolver reaches a real fetch."""
+    from saffron.scheduler import StackBase, build_queue
+
+    fetch_calls: list[str] = []
+
+    def _fake_fetch_parent_head(branch_arg, pushed_sha, **_kwargs):
+        fetch_calls.append(branch_arg)
+        return (f"fetched-{branch_arg}", branch_arg)
+
+    monkeypatch.setattr(task, "_fetch_parent_head", _fake_fetch_parent_head)
+
+    scenarios = (
+        ("pushed", "REBUTTAL_UNJUDGED", "trusted"),
+        ("stale", "REBUTTAL_UNJUDGED", "stale"),
+        ("nopush", "REBUTTAL_UNJUDGED", "none"),
+        ("orphan", "ORPHANED", "none"),
+    )
+
+    for i, (suffix, state, push_shape) in enumerate(scenarios):
+        specs_dir = tmp_path / f"specs-{suffix}"
+        specs_dir.mkdir()
+        parent_id, child_id = f"SA-910{i}", f"SA-911{i}"
+        _write_parent_and_child(specs_dir, parent_id, child_id)
+        _, parent_sha = intake.load_spec(specs_dir / f"{parent_id}.md")
+
+        repo = _checkout_with_origin(
+            tmp_path, "https://github.com/owner/repo.git", dirname=f"co-{suffix}"
+        )
+        home = tmp_path / f"home-{suffix}"
+        home.mkdir()
+        ledger_path = home / "ledger.db"
+        ledger = _routed_ledger(ledger_path)
+        repo_id = _seed_repo(tmp_path, ledger, "https://github.com/owner/repo.git")
+        # An unrelated sibling task carrying its own url, so `carried_url`
+        # reading the wrong row's `pr_url` would not go unnoticed.
+        _seed_task(
+            ledger,
+            repo_id,
+            spec_id=f"SY-SIB-{i}",
+            state="MERGED",
+            pr_url=f"https://github.com/owner/repo/pull/{800 + i}",
+        )
+        branch = f"saffron/{parent_id}"
+        # The stale shape pushes in `REVIEWING` first, then moves on.
+        parent_task = _seed_task(
+            ledger,
+            repo_id,
+            spec_id=parent_id,
+            state="REVIEWING" if push_shape == "stale" else state,
+            spec_sha=parent_sha,
+            branch=branch,
+        )
+        if push_shape == "trusted":
+            ledger.record_push(parent_task, "1" * 40)
+        elif push_shape == "stale":
+            ledger.record_push(parent_task, "2" * 40)
+            ledger.set_task_state(parent_task, state)
+        ledger.close()
+
+        kept_head = f"{i}a" * 20
+        pr_number = str(600 + i)
+        adopted_url = f"https://github.com/owner/repo/pull/{600 + i}"
+        adopt_kwargs = dict(
+            home=home,
+            repo=repo,
+            parent_id=parent_id,
+            pr_number=pr_number,
+            branch=branch,
+            adopted_url=adopted_url,
+            parent_task=parent_task,
+        )
+
+        assert (
+            _adopt_once(
+                monkeypatch, head_sha=kept_head, outcome=(kept_head, 3), **adopt_kwargs
+            )
+            == 0
+        )
+
+        check = Ledger(ledger_path)
+        row = _task_row(check, parent_task)
+        assert row["state"] == state
+        assert row["pr_url"] == adopted_url
+        assert row["pushed_sha"] == kept_head
+        if state == "REBUTTAL_UNJUDGED":
+            assert row["pushed_in_state"] is None
+        else:
+            assert row["pushed_in_state"] == state
+
+        plain, plain_refusals = build_queue(specs_dir, repo_id, check)
+        stack, stack_refusals = build_queue(specs_dir, repo_id, check, stack=True)
+
+        if state == "REBUTTAL_UNJUDGED":
+            assert [c.spec.id for c in plain] == [child_id]
+            assert plain_refusals == []
+            assert [c.spec.id for c in stack] == []
+            stack_reasons = {r.path.stem: (r.kind, r.reason) for r in stack_refusals}
+            assert set(stack_reasons) == {child_id}
+            kind, reason = stack_reasons[child_id]
+            assert kind == "depends_on"
+            assert parent_id in reason
+            with pytest.raises(task._StackingRefused):
+                task._resolve_stacked_on(
+                    check,
+                    repo_id,
+                    [parent_id],
+                    mirror=tmp_path,
+                    url="https://github.com/owner/repo",
+                    spec_id=child_id,
+                    gh=None,
+                )
+        else:
+            assert plain == []
+            assert stack == []
+            plain_reasons = {r.path.stem: (r.kind, r.reason) for r in plain_refusals}
+            stack_reasons = {r.path.stem: (r.kind, r.reason) for r in stack_refusals}
+            assert set(plain_reasons) == {parent_id, child_id}
+            assert set(stack_reasons) == {parent_id, child_id}
+            for reasons in (plain_reasons, stack_reasons):
+                kind, reason = reasons[parent_id]
+                assert kind == "open_pr_on_spec"
+                assert adopted_url in reason
+                kind, reason = reasons[child_id]
+                assert kind == "depends_on"
+                assert parent_id in reason
+        check.close()
+
+        if suffix == "pushed":
+            # A second red adopt of the same carried url and head writes no
+            # new row and still leaves the child refused (b-619b7d).
+            assert (
+                _adopt_once(
+                    monkeypatch,
+                    head_sha=kept_head,
+                    outcome=(kept_head, 3),
+                    **adopt_kwargs,
+                )
+                == 0
+            )
+            check = Ledger(ledger_path)
+            out_row = _task_row(check, parent_task)
+            assert out_row["pr_url"] == adopted_url
+            assert out_row["pushed_sha"] == kept_head
+            _, still_refused = build_queue(specs_dir, repo_id, check, stack=True)
+            assert {r.path.stem for r in still_refused} == {child_id}
+            check.close()
+
+        if suffix == "stale":
+            # Zero new failures on a head other than the one adopted is
+            # the third kept outcome, and keeps the state too.
+            other_head = f"{i}e" * 20
+            assert (
+                _adopt_once(
+                    monkeypatch,
+                    head_sha=other_head,
+                    outcome=("9" * 40, 0),
+                    **adopt_kwargs,
+                )
+                == 0
+            )
+            check = Ledger(ledger_path)
+            out_row = _task_row(check, parent_task)
+            assert out_row["state"] == state
+            assert out_row["pr_url"] == adopted_url
+            assert out_row["pushed_sha"] == other_head
+            check.close()
+
+        green_head = f"{i}f" * 20
+        assert (
+            _adopt_once(
+                monkeypatch,
+                head_sha=green_head,
+                outcome=(green_head, 0),
+                **adopt_kwargs,
+            )
+            == 0
+        )
+
+        check = Ledger(ledger_path)
+        row = _task_row(check, parent_task)
+        assert row["state"] == "READY_FOR_REVIEW"
+        assert row["pr_url"] == adopted_url
+        assert row["pushed_sha"] == green_head
+
+        plain, plain_refusals = build_queue(specs_dir, repo_id, check)
+        stack, stack_refusals = build_queue(specs_dir, repo_id, check, stack=True)
+        assert [c.spec.id for c in plain] == [child_id]
+        assert plain_refusals == []
+        assert [c.spec.id for c in stack] == [child_id]
+        assert stack_refusals == []
+        assert stack[0].stack_base == StackBase(
+            spec_id=parent_id, task_id=parent_task, branch=branch
+        )
+
+        resolved = task._resolve_stacked_on(
+            check,
+            repo_id,
+            [parent_id],
+            mirror=tmp_path,
+            url="https://github.com/owner/repo",
+            spec_id=child_id,
+            gh=None,
+        )
+        assert resolved == (f"fetched-{branch}", branch)
+        assert branch in fetch_calls
+        check.close()
+
+
+def test_adopt_keeps_a_rebuttal_unjudged_or_orphaned_task_whose_regate_is_red_declined_or_on_another_head(
+    tmp_path, monkeypatch, capsys
+):
+    """For each newly-adoptable state, and an `EXHAUSTED` control, adopt
+    keeps the state and exits 0 after a red, a declined and an other-head
+    re-gate. The url and the head are recorded all the same, and the
+    printed line names the state kept. A `REBUTTAL_UNJUDGED` task's head
+    is recorded in no state, so its `pushed_in_state` reads `None`. An
+    `ORPHANED` task's head and the control's land in their own state, as
+    at base. Adopted again with a fresh head that re-gates green, each
+    red task moves to `READY_FOR_REVIEW`."""
+    repo = _checkout_with_origin(tmp_path, "https://github.com/owner/repo.git")
+    home = tmp_path / "home"
+    home.mkdir()
+    ledger = _routed_ledger(home / "ledger.db")
+    repo_id = _seed_repo(tmp_path, ledger, "https://github.com/owner/repo.git")
+
+    def _seed(spec_id, state):
+        task_id = _seed_task(ledger, repo_id, spec_id=spec_id, state="DIAGNOSING")
+        if state == "EXHAUSTED":
+            ledger.set_task_package(
+                task_id,
+                state,
+                branch=f"saffron/{spec_id}",
+                pushed_sha="",
+                pr_url="",
+                added=1,
+                removed=1,
+            )
+        else:
+            ledger.set_task_state(task_id, state)
+        return task_id
+
+    red_task = _seed("SY-UJRED", "REBUTTAL_UNJUDGED")
+    declined_task = _seed("SY-UJDECL", "REBUTTAL_UNJUDGED")
+    other_head_task = _seed("SY-ORPHOTHER", "ORPHANED")
+    control_task = _seed("SY-EXCTRL", "EXHAUSTED")
+    ledger.close()
+
+    cases = (
+        (
+            "SY-UJRED",
+            red_task,
+            91,
+            "r" * 40,
+            {red_task: ("r" * 40, 2)},
+            "REBUTTAL_UNJUDGED",
+        ),
+        (
+            "SY-UJDECL",
+            declined_task,
+            92,
+            "d" * 40,
+            {declined_task: 1},
+            "REBUTTAL_UNJUDGED",
+        ),
+        (
+            "SY-ORPHOTHER",
+            other_head_task,
+            93,
+            "o" * 40,
+            {other_head_task: ("x" * 40, 0)},
+            "ORPHANED",
+        ),
+        (
+            "SY-EXCTRL",
+            control_task,
+            94,
+            "e" * 40,
+            {control_task: ("e" * 40, 2)},
+            "EXHAUSTED",
+        ),
+    )
+    for spec_id, task_id, pr_number, head_sha, outcomes, state in cases:
+        url = f"https://github.com/owner/repo/pull/{pr_number}"
+        monkeypatch.setattr(
+            cli,
+            "run_gh",
+            _fake_gh_names_a_pull_request(
+                url,
+                head_branch=f"saffron/{spec_id}",
+                number=str(pr_number),
+                head_sha=head_sha,
+            ),
+        )
+        monkeypatch.setattr(cli.regate, "run_regate", _FakeRegate(outcomes))
+        assert (
+            cli.main(
+                [
+                    "--home",
+                    str(home),
+                    "adopt",
+                    spec_id,
+                    str(pr_number),
+                    "--repo",
+                    str(repo),
+                ]
+            )
+            == 0
+        )
+        out = capsys.readouterr().out
+        assert state in out
+
+        check = Ledger(home / "ledger.db")
+        row = _task_row(check, task_id)
+        check.close()
+        assert row["state"] == state
+        assert row["pr_url"] == url
+        assert row["pushed_sha"] == head_sha
+        if state == "REBUTTAL_UNJUDGED":
+            assert row["pushed_in_state"] is None
+        else:
+            assert row["pushed_in_state"] == state
+
+    # A fresh head that re-gates green moves each red/declined task on.
+    pr_number_by_spec = {c[0]: c[2] for c in cases}
+    for spec_id, task_id in (
+        ("SY-UJRED", red_task),
+        ("SY-UJDECL", declined_task),
+    ):
+        retry_head = "9" * 40
+        pr_number = pr_number_by_spec[spec_id]
+        monkeypatch.setattr(
+            cli,
+            "run_gh",
+            _fake_gh_names_a_pull_request(
+                f"https://github.com/owner/repo/pull/{pr_number}",
+                head_branch=f"saffron/{spec_id}",
+                number=str(pr_number),
+                head_sha=retry_head,
+            ),
+        )
+        monkeypatch.setattr(
+            cli.regate, "run_regate", _FakeRegate({task_id: (retry_head, 0)})
+        )
+        assert (
+            cli.main(
+                [
+                    "--home",
+                    str(home),
+                    "adopt",
+                    spec_id,
+                    str(pr_number),
+                    "--repo",
+                    str(repo),
+                ]
+            )
+            == 0
+        )
+        check = Ledger(home / "ledger.db")
+        row = _task_row(check, task_id)
+        check.close()
+        assert row["state"] == "READY_FOR_REVIEW"
+        assert row["pushed_sha"] == retry_head
 
 
 def test_adopt_of_a_ready_task_records_the_url_and_runs_no_regate(

@@ -488,6 +488,47 @@ def test_a_push_records_the_state_its_row_held_and_a_fold_rebuilds_it(tmp_path, 
     old.close()
 
 
+def test_an_untrusted_push_lands_in_no_state_and_a_fold_rebuilds_it(tmp_path, record):
+    """`record_push(..., trusted=False)` keeps the push's own `pushed_sha`
+    but sets `pushed_in_state` to `None`, over a push trusted in the same
+    state before it. A default push after it lands in the row's state
+    again (b-619b7d)."""
+    source_path, fold_path = tmp_path / "source.db", tmp_path / "fold.db"
+    source = Ledger(source_path, record=record)
+    into = Ledger(fold_path)
+
+    task_id = _minimal(source, "SA-60")
+    source.set_task_state(task_id, "REBUTTAL_UNJUDGED")
+    source.record_push(task_id, "1" * 40)
+    key = _key(source, task_id)
+
+    def _check(want_sha: str, want_state: str | None) -> None:
+        row = _raw_rows(source_path, _TASK_SQL, key)[0]
+        assert (row["pushed_sha"], row["pushed_in_state"]) == (want_sha, want_state)
+        into.fold_task(key, record.read(key))
+        folded = _raw_rows(fold_path, _TASK_SQL, key)[0]
+        assert (folded["pushed_sha"], folded["pushed_in_state"]) == (
+            want_sha,
+            want_state,
+        )
+
+    _check("1" * 40, "REBUTTAL_UNJUDGED")
+
+    source.record_push(task_id, "2" * 40, trusted=False)
+    _check("2" * 40, None)
+
+    source.record_push(task_id, "3" * 40)
+    _check("3" * 40, "REBUTTAL_UNJUDGED")
+
+    facts = [f for f in record.read(key) if f.kind == "task_push"]
+    assert "untrusted" not in facts[0].payload
+    assert facts[1].payload["untrusted"] is True
+    assert "untrusted" not in facts[2].payload
+
+    source.close()
+    into.close()
+
+
 def _ledger_that_predates_pushed_in_state(path: Path) -> Ledger:
     """A ledger written before `tasks.pushed_in_state`, opened as today's."""
     before = SCHEMA.replace(

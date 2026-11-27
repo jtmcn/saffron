@@ -68,6 +68,7 @@ from saffron.repos import image as repo_image
 from saffron.repos import mirror as git_mirror
 from saffron.repos.policy import Policy, PolicyError, load_policy, parse_policy
 from saffron.scheduler import (
+    STALE_PUSH_STATES,
     Candidate,
     GhRunner,
     Refusal,
@@ -237,8 +238,8 @@ def main(argv: list[str] | None = None) -> int:
     adopt_parser = subcommands.add_parser(
         "adopt",
         help="name a by-hand pull request as one spec's newest task's own, "
-        "re-gating EXHAUSTED/NOT_IMPLEMENTED/MERGE_FAILED toward "
-        "READY_FOR_REVIEW (b-619b7d)",
+        "re-gating EXHAUSTED/NOT_IMPLEMENTED/MERGE_FAILED/ORPHANED/"
+        "REBUTTAL_UNJUDGED toward READY_FOR_REVIEW (b-619b7d)",
     )
     adopt_parser.add_argument(
         "spec_id", help="the spec id whose newest task adopts the pull request"
@@ -3166,10 +3167,17 @@ def _review(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
     )
 
 
-# States a pull request opened or fixed by hand can leave a task in, spelled
-# out since `REBUTTAL_UNJUDGED` joined `MERGE_ONLY_STATES` and adopt refuses it.
+# States a pull request opened or fixed by hand can leave a task in.
+# `REBUTTAL_UNJUDGED` and `ORPHANED` also re-gate toward `READY_FOR_REVIEW` (b-619b7d).
 _ADOPTABLE_STATES = frozenset(
-    {"EXHAUSTED", "MERGE_FAILED", "NOT_IMPLEMENTED", "READY_FOR_REVIEW"}
+    {
+        "EXHAUSTED",
+        "MERGE_FAILED",
+        "NOT_IMPLEMENTED",
+        "ORPHANED",
+        "READY_FOR_REVIEW",
+        "REBUTTAL_UNJUDGED",
+    }
 )
 
 _ADOPT_GH_FIELDS = "url,headRefOid,headRefName"
@@ -3297,10 +3305,14 @@ def _adopt(args: argparse.Namespace, ledger: Ledger, out_dir: Path) -> int:
         print(f"adopt: task {task_id} ({args.spec_id}) → {adopted_url}")
         return 0
 
-    # Record the head, then the url: both facts, so a fold
-    # rebuilds them, and the url is on record before the re-gate it feeds.
-    ledger.record_push(task_id, head_sha)
-    ledger.adopt_pull_request(task_id, adopted_url)
+    # The url's fact trusts whatever push the row holds.
+    # A `STALE_PUSH_STATES` state records the head after it instead, untrusted (b-619b7d).
+    if state in STALE_PUSH_STATES:
+        ledger.adopt_pull_request(task_id, adopted_url)
+        ledger.record_push(task_id, head_sha, trusted=False)
+    else:
+        ledger.record_push(task_id, head_sha)
+        ledger.adopt_pull_request(task_id, adopted_url)
 
     before = ledger.regate(task_id)
     outcome = regate.run_regate(
