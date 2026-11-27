@@ -623,6 +623,7 @@ def test_an_interrupted_push_leaves_no_process_behind(tmp_path, repo, monkeypatc
     def _check(do_call: Any) -> None:
         before = _beats(log)
         old = signal.signal(signal.SIGALRM, _raise_interrupt)
+        start = time.monotonic()
         signal.setitimer(signal.ITIMER_REAL, 2.5)
         try:
             with pytest.raises(KeyboardInterrupt):
@@ -630,6 +631,8 @@ def test_an_interrupted_push_leaves_no_process_behind(tmp_path, repo, monkeypatc
         finally:
             signal.setitimer(signal.ITIMER_REAL, 0)
             signal.signal(signal.SIGALRM, old)
+        # A wait on git with the group alive would hold the interrupt until ssh gives up.
+        assert time.monotonic() - start < 2.5 + 5
         beats_at_interrupt = _beats(log) - before
         assert beats_at_interrupt >= 5
         assert kept[-1].returncode is not None
@@ -647,6 +650,8 @@ def test_a_push_asks_ssh_for_keepalive_only_where_the_host_names_no_ssh_command(
 ):
     from saffron.record import refs
 
+    # A stall must outlast keepalive's own give-up, so ssh's error arrives first.
+    assert getattr(refs, "PUSH_TIMEOUT_S", 0) > 15 * 4
     monkeypatch.delenv("GIT_SSH_COMMAND", raising=False)
     monkeypatch.delenv("GIT_SSH", raising=False)
     monkeypatch.setenv("GIT_ALLOW_PROTOCOL", "file:ssh")
@@ -671,10 +676,27 @@ def test_a_push_asks_ssh_for_keepalive_only_where_the_host_names_no_ssh_command(
     named_log = tmp_path / "named.log"
     named_ssh = _logging_ssh(named_dir, named_log)
 
+    pushes: list[Any] = []
+    real_popen = subprocess.Popen
+
+    def _spy_popen(argv: Any, *args: Any, **kwargs: Any) -> Any:
+        if isinstance(argv, list) and "push" in argv:
+            pushes.append(argv)
+        return real_popen(argv, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", _spy_popen)
+
     remote = "ssh://stall.invalid/mirror.git"
     record = refs.RefsRecord(repo)
     fact = a_fact()
     record.append(fact.task_key, fact)
+
+    def _bare_push_has_keepalive(do_call: Any) -> bool:
+        before = _beats(bare_log)
+        with pytest.raises(RecordError):
+            do_call()
+        assert _beats(bare_log) == before + 1
+        return _has_keepalive(_last_call(bare_log))
 
     def _set_core_ssh_command(value: str | None) -> None:
         if value is None:
@@ -688,10 +710,14 @@ def test_a_push_asks_ssh_for_keepalive_only_where_the_host_names_no_ssh_command(
                 check=True,
             )
 
-    # Neither set: keepalive goes on the bare `ssh` resolved from `PATH`.
-    with pytest.raises(RecordError):
-        record.push(fact.task_key, remote)
-    assert _has_keepalive(_last_call(bare_log))
+    # Neither set: keepalive goes on the bare `ssh` resolved from `PATH`,
+    # for every push of the ref and for `append` with a `remote`.
+    assert _bare_push_has_keepalive(lambda: record.push(fact.task_key, remote))
+    assert _bare_push_has_keepalive(lambda: record.push(fact.task_key, remote))
+    appended = a_fact(task_key="d" * 32)
+    assert _bare_push_has_keepalive(
+        lambda: refs.RefsRecord(repo, remote=remote).append(appended.task_key, appended)
+    )
 
     # `GIT_SSH_COMMAND` alone: no keepalive, and the named stand-in runs.
     monkeypatch.setenv("GIT_SSH_COMMAND", str(named_ssh))
@@ -750,12 +776,19 @@ def test_a_push_asks_ssh_for_keepalive_only_where_the_host_names_no_ssh_command(
     monkeypatch.delenv("GIT_SSH_COMMAND", raising=False)
     _set_core_ssh_command(None)
 
+    # Every place unset again: the same stand-in logs keepalive once more.
+    pushes_before = len(pushes)
+    assert _bare_push_has_keepalive(lambda: record.push(fact.task_key, remote))
+    assert len(pushes) == pushes_before + 1
+
     # Any other exit from that read is `RecordError`, before any push starts.
+    pushes_before = len(pushes)
     before_bare = _beats(bare_log)
     before_named = _beats(named_log)
     (repo / "config").write_text("not a valid git config [[[\n")
     with pytest.raises(RecordError) as broken:
         record.push(fact.task_key, remote)
     assert broken.value.returncode == 128
+    assert len(pushes) == pushes_before
     assert _beats(bare_log) == before_bare
     assert _beats(named_log) == before_named

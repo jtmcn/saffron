@@ -37,8 +37,8 @@ TASKS = "refs/saffron/tasks"
 VALUES = "refs/saffron/values"
 _FACTS = "facts"
 
-# Measured: a dry-run push takes 1.3-1.4s. Read from the module at call
-# time, never cached, so a witness can patch it (b-65eb8f).
+# Measured: a dry-run push takes 1.3-1.4s. Chosen: 120s clears keepalive's 60s
+# give-up. Read at call time, so a witness can patch it (b-65eb8f).
 PUSH_TIMEOUT_S = 120
 
 # Reasoned, as `_REAP_S` is in `saffron/cell/runtime.py`: a killed group
