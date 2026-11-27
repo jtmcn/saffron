@@ -599,9 +599,9 @@ def _outcome_facts(task: sqlite3.Row, one: _Maker) -> list[Fact]:
     from `pr_url`, so a merged task's package fact never claims `MERGED`.
 
     A kept `REBUTTAL_UNJUDGED` row also gets an untrusting `task_push` fact,
-    the same order `_adopt` writes (`saffron/cli.py:3310-3312`). A kept
+    the same order `_adopt` writes for a `STALE_PUSH_STATES` state. A kept
     `ORPHANED` row needs none: its own state already sets `pushed_in_state`
-    right (`saffron/cli.py:3313-3315`)."""
+    right."""
     facts = []
     at = task["updated_at"]
     if task["merged_head_sha"] is not None:
