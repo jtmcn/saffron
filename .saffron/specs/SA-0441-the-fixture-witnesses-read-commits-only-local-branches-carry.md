@@ -3,7 +3,7 @@ id: SA-0441
 title: "The lens fixtures' witnesses read commits that only local branches carry, so a repo without those branches fails four of them at base and at head"
 type: test
 priority: 3
-estimated_lines: 211
+estimated_lines: 791
 estimate_measured: true
 touches:
   - docs/evidence/fixtures/heads.bundle.b64
@@ -51,7 +51,8 @@ max_turns: 185
 acceptance:
   - claim: >-
       `docs/evidence/fixtures/heads.bundle.b64` is a git bundle, base64 in
-      76-character lines, with a last line of 1 to 76 characters. For every `base_sha` and every `head_sha` a shipped
+      76-character lines, with a last line of 1 to 76 characters. Every
+      line holds base64 characters alone. For every `base_sha` and every `head_sha` a shipped
       fixture declares, either HEAD's history holds the commit or the bundle
       lists a ref pointing at it, named by that sha in the fixtures
       namespace the Problem gives.
@@ -64,6 +65,8 @@ acceptance:
       - "The ref named for `SA-0050`'s `base_sha` points at `SA-0054`'s `head_sha`."
       - "The bundle is base64 on one unbroken line."
       - "The bundle is base64 in 64-character lines."
+      - "The file ends with an empty line after the base64."
+      - "The file ends with a line of three spaces after the base64."
     covers:
       - set: the commits a fixture declares
         members:
@@ -87,6 +90,10 @@ acceptance:
             driven_by: "The bundle is base64 on one unbroken line."
           - member: a width under 76
             driven_by: "The bundle is base64 in 64-character lines."
+          - member: an empty last line
+            driven_by: "The file ends with an empty line after the base64."
+          - member: a blank last line
+            driven_by: "The file ends with a line of three spaces after the base64."
   - claim: >-
       `repo_from_head_and_bundle(source, bundle, into)` in
       `tests/test_corpus.py` builds a bare repo holding the history
@@ -98,7 +105,9 @@ acceptance:
       each passes with `REPO` and the working directory pointed at a path
       that is no repo. Handed the one built from HEAD alone, each fails.
       The hostile-config witness also asserts that its bare diff starts
-      `diff --git`.
+      `diff --git`. Handed the HEAD-only repo with `recovery.pinned_diff`
+      patched to return `SA-0045`'s frozen patch, it still fails, at that
+      bare diff.
     witness: tests/test_corpus.py::test_each_fixture_witness_reads_the_repo_it_is_handed
     positive_case: >-
       On a scratch repo, the same `cat-file -e` probe that finds no
@@ -115,6 +124,7 @@ acceptance:
       - "The range witness still hands `REPO` to `pinned_diff`."
       - "The hostile-config witness still hands `REPO` to `pinned_diff`."
       - "The hostile-config witness's bare diff still reads `REPO`."
+      - "The hostile-config witness drops the `diff --git` assertion and its bare diff still reads `REPO`."
       - "The spec-body witness still hands `REPO` to `spec_body_at`."
       - "The spec-body witness reads `CONTEXT.md` with a `git show` that names no repo."
       - "The spec-body witness reads `CLAUDE.md` with a `git show` that names no repo."
@@ -151,6 +161,8 @@ acceptance:
             driven_by: "The hostile-config witness still hands `REPO` to `pinned_diff`."
           - member: the bare `git diff`
             driven_by: "The hostile-config witness's bare diff still reads `REPO`."
+          - member: the bare diff's `diff --git` check
+            driven_by: "The hostile-config witness drops the `diff --git` assertion and its bare diff still reads `REPO`."
           - member: "`spec_body_at`"
             driven_by: "The spec-body witness still hands `REPO` to `spec_body_at`."
           - member: "`git show` of `CONTEXT.md`"
@@ -245,7 +257,10 @@ history and that file hold.
 4. **The README.** Add one paragraph to
    `docs/evidence/fixtures/README.md`. It says the bundle carries the same
    commits and the tests read only HEAD's history and the bundle. It says
-   a new fixture whose commits HEAD lacks needs the bundle rebuilt.
+   a new fixture whose commits HEAD lacks needs the bundle rebuilt. It also
+   replaces the claim that a shallow checkout plus CI's fetch is enough
+   (`docs/evidence/fixtures/README.md:27-28`). The tests now need HEAD's
+   history back to the bundle's prerequisite.
 
 ## Out of scope
 
@@ -282,16 +297,23 @@ reaches. The task needs every one of the eight in `/work`. A sha that
 `cat-file` misses is not in `/work`, and no edit here can bring it in.
 
 **Size.** The `size` gate counts each whitespace-separated token, and
-`tests/**` is not counted. The prototype priced at 842 tokens: 780 for
-the bundle and 62 for the README. A `test` spec's ceiling is 4200.
-Any other line width moves the bundle's count, so keep 76.
+`tests/**` is not counted. The prototype priced at 871 tokens: 780 for
+the bundle and the rest for the README. A `test` spec's ceiling is 4200.
+Any other line width moves the bundle's count, so keep 76. The prototype
+changed 791 lines outside `tests/` and 197 in `tests/test_corpus.py`. At
+the plan checkpoint, declare `estimated_test_lines` for the `tests/`
+share. The checkpoint prices the other lines at 4 tokens each, which is
+about 3170 here and under 4200.
 
 **Fetching HEAD.** `git -C <into> fetch --no-tags <source> +HEAD:refs/heads/head`
 copies only what HEAD reaches. Alternates or `+refs/*:refs/*` would let
 every local ref back in, and the second claim's witness rejects both.
 The prototype's module fixture took about one second to build on the host.
-Every git command here was measured with the host's git 2.54. The cell
-image's git 2.39.5 was not measured.
+The git commands here were measured with the host's git 2.54. The
+prototype's two witnesses also pass inside `saffron/cell:saffron`, with
+its git 2.47.3 from Debian trixie. That worktree was seeded with the four
+`fixtures/*` branches deleted. At your base, the same image fails the four
+fixture witnesses there.
 
 **`spec_body_at`'s fallback.** `_spec_content_off_branch` runs
 `git log --all` (`harness/recovery.py:194`). In the helper's repo, `--all`
@@ -319,6 +341,11 @@ hostile-config witness needs its own `tmp_path` and `monkeypatch`. Give
 each call a fresh directory and a `pytest.MonkeyPatch.context()`, so the
 fake `$HOME` does not leak into the next call. Keep that witness a plain
 `def`. A parametrised witness collects under a bracketed name, and
-`criteria` refuses that.
+`criteria` refuses that. Last, call the hostile-config witness on
+`head_only_repo` once more, with `recovery.pinned_diff` patched to return
+`SA-0045`'s frozen `diff.patch`. Its pinned check then passes, so only its
+bare diff check can fail. Without this call, a witness can drop that
+check and read `REPO`, and still pass. `REPO` points at no repo, and an
+empty diff differs from the patch.
 
 **No `retired_first`.** Nothing here adds or widens a refusal.
