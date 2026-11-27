@@ -4,7 +4,7 @@ title: A fixture witness needs heads that only local branches carry, so pruning 
 status: open
 tier: 2
 filed: 2026-09-22
-specs: [SA-0121]
+specs: [SA-0121, SA-0444]
 prs: [435]
 commits: []
 cites: []
