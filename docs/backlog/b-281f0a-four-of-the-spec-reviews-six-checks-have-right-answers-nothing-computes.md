@@ -4,7 +4,7 @@ title: Four of the spec review's six checks have right answers, and every spec p
 status: partial
 tier: 2
 filed: 2026-09-19
-specs: [SA-0112]
+specs: [SA-0112, SA-0435]
 prs: [378, 382]
 commits: []
 cites: []
@@ -142,3 +142,8 @@ matters.
 - 2026-09-20: what stays open is the tree-only half, the
   parametrised-witness check in `tests/test_queued_specs.py`. It needs its own
   tests-only spec, or a by-hand commit, for the reason two entries above.
+- 2026-11-26: `SA-0435` is queued for the tree-only half. It adds a check in
+  `tests/test_queued_specs.py` that fails a queued spec whose witness
+  without `preserves` names one case of a parametrised test. A `preserves`
+  witness is exempt, since its test already exists. The `specs:` bullet stays out of it, as
+  the 2026-09-19 entry found: `records/check.py` holds that link already.
