@@ -16,6 +16,22 @@ def _bare(path: Path) -> Path:
     return path
 
 
+def _spy_on_git(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """Every git argv issued while active. Patched at `subprocess.Popen`
+    alone: `subprocess.run` is implemented over it, so patching both would
+    double-count every call that still reaches git through `run`."""
+    calls: list[list[str]] = []
+    real_popen = subprocess.Popen
+
+    def _popen(argv, *args, **kwargs):
+        if isinstance(argv, list) and argv and argv[0] == "git":
+            calls.append(list(argv))
+        return real_popen(argv, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", _popen)
+    return calls
+
+
 def _refs(repo: Path, pattern: str = "refs/saffron/") -> list[str]:
     out = subprocess.run(
         ["git", "-C", str(repo), "for-each-ref", "--format=%(refname)", pattern],
@@ -220,15 +236,7 @@ def test_a_later_fact_neither_the_mirror_nor_the_origin_holds_writes_no_ref(
     assert key is not None
     plain.close()
 
-    calls: list[list[str]] = []
-    real_run = subprocess.run
-
-    def _spy(argv, *args, **kwargs):
-        if isinstance(argv, list) and argv and argv[0] == "git":
-            calls.append(list(argv))
-        return real_run(argv, *args, **kwargs)
-
-    monkeypatch.setattr(subprocess, "run", _spy)
+    calls = _spy_on_git(monkeypatch)
 
     routed = Ledger(
         tmp_path / "l.db", record=RoutedRecord(lambda k: routed.record_home(k))
@@ -425,15 +433,7 @@ def test_the_exit_push_carries_each_appended_key_once_to_its_own_origin(
             continue  # `create_task` above already wrote both of these.
         record.append(key_kinds, _direct_fact(key_kinds, kind, "b"))
 
-    calls: list[list[str]] = []
-    real_run = subprocess.run
-
-    def _spy(argv, *args, **kwargs):
-        if isinstance(argv, list) and argv and argv[0] == "git":
-            calls.append(list(argv))
-        return real_run(argv, *args, **kwargs)
-
-    monkeypatch.setattr(subprocess, "run", _spy)
+    calls = _spy_on_git(monkeypatch)
 
     def _pushes(key: str) -> int:
         return sum(

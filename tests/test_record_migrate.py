@@ -139,16 +139,18 @@ def _ref_lines(log: Path, ref: str) -> list[str]:
 def _spy_on_pushes(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     """Every `git push` argv issued while active. A push that always lands
     would hide a `--force` added back in. This checks the argv itself,
-    never the push's own outcome."""
+    never the push's own outcome. Patched at `subprocess.Popen` alone:
+    `subprocess.run` is implemented over it, so patching both would
+    double-count every call that still reaches git through `run`."""
     calls: list[list[str]] = []
-    real_run = subprocess.run
+    real_popen = subprocess.Popen
 
-    def _spy(cmd: Any, *args: Any, **kwargs: Any) -> subprocess.CompletedProcess[Any]:
+    def _popen(cmd: Any, *args: Any, **kwargs: Any) -> Any:
         if isinstance(cmd, list) and "push" in cmd:
             calls.append(list(cmd))
-        return real_run(cmd, *args, **kwargs)
+        return real_popen(cmd, *args, **kwargs)
 
-    monkeypatch.setattr(subprocess, "run", _spy)
+    monkeypatch.setattr(subprocess, "Popen", _popen)
     return calls
 
 
