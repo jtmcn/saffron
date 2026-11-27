@@ -4,7 +4,7 @@ title: A batch spec review whose findings outrun the extraction cap raises, and 
 status: open
 tier: 2
 filed: 2026-10-29
-specs: []
+specs: [SA-0445]
 prs: []
 commits: []
 cites: [§4.2.1]
