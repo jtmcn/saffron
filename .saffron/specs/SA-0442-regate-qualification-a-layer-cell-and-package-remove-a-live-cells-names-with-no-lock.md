@@ -67,16 +67,19 @@ acceptance:
       before its first runtime call. It prints one `regate:` line naming the
       holder's pid and the text the holder wrote, and returns 1. Otherwise it
       holds the spec id's lock, with the text `saffron regate <task id>`,
-      from before its probe network through `record_regate`, and lets it go
+      from before its image build through `record_regate`, and lets it go
       when it returns or raises. The witness holds the lock in this process,
-      through a second open of its file, with a spy at `runtime._call`.
-      Held as `SA-0005`, then as `sa-0005`, regate returns 1 and prints that
-      line, and neither the spy nor `reverify` is reached. Beside a holder of
+      through a second open of its file, with a spy at `runtime._call`. Its
+      replaced `build_cell_image` records whether a take of `SA-0005`
+      succeeds. Held as `SA-0005`, then as `sa-0005`, regate returns 1 and
+      prints that line, and neither the spy, the image build nor `reverify`
+      is reached. Beside a holder of
       `SA-0006`, the spy's first call is `network rm
       saffron-regate-probe-<task id>`, and a take of `SA-0005` there is
       refused naming that text. A take succeeds after the spy's raise. With
-      the probe faked, a green regate is refused a take inside `reverify`
-      and inside `record_regate`, returns 0, and a take then succeeds.
+      the probe faked, a green regate is refused a take inside the image
+      build, inside `reverify` and inside `record_regate`. It returns 0, and
+      a take then succeeds.
     witness: tests/test_spec_id_lock_callers.py::test_regate_declines_a_spec_id_another_process_holds_before_any_runtime_call
     positive_case: >-
       Beside a holder of `SA-0006`, the same spy records `network rm` of the
@@ -84,6 +87,7 @@ acceptance:
     wrong_versions:
       - "`run_regate` takes no lock, as at your base, so its probes pre-clean a live task's Gate-only cell."
       - "The lock is taken after `_probe`, so the probe network is removed first."
+      - "The lock is taken after `build_cell_image`, so the image build runs beside a holder."
       - "The lock is taken and let go before `_probe`, so nothing holds it while regate works."
       - "The lock is held around `_probe` alone and let go before `reverify`."
       - "The lock is let go before `record_regate`, so the criterion probes go unlocked."
@@ -103,6 +107,8 @@ acceptance:
             driven_by: "Regate takes a lock keyed `regate-<spec id>`, which a task's lock on the spec id never meets."
       - set: when the lock is read
         members:
+          - member: at the image build
+            driven_by: "The lock is taken after `build_cell_image`, so the image build runs beside a holder."
           - member: at the first runtime call
             driven_by: "The lock is taken after `_probe`, so the probe network is removed first."
           - member: held, not only checked
@@ -178,7 +184,7 @@ acceptance:
   - claim: >-
       `layer_cell` raises `cell_name_lock.LockHeld` before any runtime call
       while another process holds its layer's spec id. Otherwise it holds the
-      lock, with the text `an end review's layer cell`, from before its first
+      lock, with the text `a layer cell (end_review.layer_cell)`, from before its first
       runtime call until its block exits by raise or by return. The witness
       holds the lock in this process with a spy at `runtime._call`. Held as
       `SY-1`, a layer cell for `SY-1`, and one for `sy-1`, each raise
@@ -219,7 +225,7 @@ acceptance:
             driven_by: tests/test_spec_id_lock_callers.py::test_a_layer_cell_beside_a_held_spec_id_raises_before_any_runtime_call
       - set: what the holder's line names
         members:
-          - member: "`an end review's layer cell`"
+          - member: "`a layer cell (end_review.layer_cell)`"
             driven_by: "The layer cell writes an empty text into the lock file."
   - claim: >-
       `package_ready_task` returns `Refused` while another process holds the
@@ -244,6 +250,7 @@ acceptance:
       - "The lock is taken and let go before the probe network."
       - "A held lock raises out of `package_ready_task` rather than returning `Refused`."
       - "`package_ready_task` writes an empty text into the lock file."
+      - "`package_ready_task` takes a lock keyed `hostprobe-<spec id>`, which a task's lock never meets."
     covers:
       - set: the spec ids a holder's lock reaches
         members:
@@ -253,6 +260,8 @@ acceptance:
             driven_by: tests/test_spec_id_lock_callers.py::test_package_refuses_a_spec_id_another_process_holds_before_its_probe_network
           - member: another spec id
             driven_by: tests/test_spec_id_lock_callers.py::test_package_refuses_a_spec_id_another_process_holds_before_its_probe_network
+          - member: a key of its own
+            driven_by: "`package_ready_task` takes a lock keyed `hostprobe-<spec id>`, which a task's lock never meets."
       - set: when the lock is read
         members:
           - member: at the probe network's first runtime call
@@ -351,11 +360,15 @@ reaches it.
    the `RuntimeError` there is treated: each probed finding gets the
    raise's text as its reason.
 3. **`layer_cell`.** Take the lock for `fields.spec_id` with the text
-   `an end review's layer cell`, before `runtime.remove_container`. Hold it
+   `a layer cell (end_review.layer_cell)`, before `runtime.remove_container`.
+   Six callers open one: the end review, the follow-up writer, a stack
+   batch's spec review and revision, `saffron draft` and `saffron review`,
+   so the text names none of them. Hold it
    until the `finally` that calls `cell_down` has run. Let `LockHeld` raise.
    `_review_one_layer` turns it into a lens error
    (`saffron/end_review.py:450-480`). A stack batch's spec review records
-   an `error` round and a miss (`saffron/batch.py:770-787`).
+   an `error` round and a miss (`saffron/batch.py:770-787`). Out of scope
+   names what the stack batch does next.
 4. **`package_ready_task`.** Take the lock for `spec_id` with `str(out_dir)`
    as its text, around the probe network's block alone. On a held lock,
    return `Refused` with the raise's text as its reason.
@@ -374,6 +387,21 @@ Name each in its function's docstring, and keep each within ten lines.
   spec id's lock while it works. A task started beside it returns
   `Refused`, and a plain batch keeps that spec started for the night
   (`saffron/batch.py:312`, `:358`).
+- **What a by-hand command shows on a held lock.** `saffron regate` exits
+  1, as it does for a new failure. Only its `regate:` line tells the two
+  apart. `saffron review` turns the raise into a lens error on every lens,
+  prints `0 blocker(s)` and the review file's path, and exits 2
+  (`saffron/end_review.py:478-482`, `saffron/commit_review.py:307-327`). The
+  holder appears only in that file. A follow-up could print it.
+- **A stack batch counts a held layer cell as an abort.** Take a
+  `LockHeld` from the spec review's layer cell. The batch records the
+  `error` round, `GATE_ERROR` and a miss, then raises (`saffron/batch.py:773-787`). `_drive` catches it,
+  prints `raised LockHeld`, and adds one to `consecutive_aborts`
+  (`saffron/batch.py:326-341`). Two in a row stop the batch
+  `INFRASTRUCTURE` before its next task (`saffron/batch.py:79`, `:306-307`).
+  A `Refused` from `run_task` leaves that count alone (`:358-361`). Traced
+  from the code, not measured. `saffron/batch.py` is forbidden here, so a
+  follow-up would make a held lock there a refusal rather than an abort.
 - **Two users on one host.** Each user has a root of their own.
 - **The batch tree.** Each home has its own, so two homes never share one
   `events.jsonl`.
@@ -427,9 +455,9 @@ on the same. Match the holder's pid with a word boundary.
   `repo_image.build_cell_image`. Use a `Ledger` with a `MemoryRecord`, its
   `task_mutants_commit` replaced on the instance.
 
-**Size.** A prototype on `SA-0431`'s branch measured 293
+**Size.** A prototype on `SA-0431`'s branch measured 290
 changed tokens outside the test paths with `size_gate`, docstrings
-included. `estimated_lines` is that over four. `ty check`, ruff,
+included. `estimated_lines` is that over four, rounded up. `ty check`, ruff,
 `.saffron/gates/dead` and `.saffron/gates/structure` were clean. Each
 witness failed with the source reverted. Every wrong version listed above
 failed its witness there. `tests/test_regate.py`, `tests/test_qualify.py`,
