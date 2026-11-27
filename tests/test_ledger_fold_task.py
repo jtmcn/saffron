@@ -24,6 +24,7 @@ from saffron.ledger import SCHEMA, Ledger
 from saffron.record.contract import Fact
 from saffron.record.fold import UnreadableTask, fold
 from saffron.record.memory import MemoryRecord
+from saffron.record.migrate import migrate
 
 
 @pytest.fixture
@@ -1550,3 +1551,74 @@ def test_the_spec_texts_fold_back_from_the_record_alone(tmp_path, record):
 
     source.close()
     into.close()
+
+
+def _seeded_kept_adopt(path: Path, spec_id: str, state: str) -> str:
+    """A minimal task moved to `state`, then adopted and kept the way
+    `_adopt` leaves a kept `REBUTTAL_UNJUDGED`/`ORPHANED` row with a
+    `pr_url` (`b-619b7d`). `path` opens as a
+    plain `Ledger`, with no `record=`, the shape `migrate` reads. Returns
+    the task's own record key."""
+    ledger = Ledger(path)
+    task_id = _minimal(ledger, spec_id)
+    ledger.set_task_state(task_id, "REVIEWING")
+    ledger.record_push(task_id, "1" * 40)
+    ledger.set_task_state(task_id, state)
+    head_sha = "2" * 40
+    if state == "REBUTTAL_UNJUDGED":  # a `STALE_PUSH_STATES` member
+        ledger.adopt_pull_request(task_id, "https://x/99")
+        ledger.record_push(task_id, head_sha, trusted=False)
+    else:  # ORPHANED: not a `STALE_PUSH_STATES` member
+        ledger.record_push(task_id, head_sha)
+        ledger.adopt_pull_request(task_id, "https://x/99")
+    key = _key(ledger, task_id)
+    ledger.close()
+    return key
+
+
+def test_migrate_keeps_a_kept_rebuttal_unjudged_or_orphaned_rows_own_push_trust(
+    tmp_path,
+):
+    for spec_id, state in (("SA-R1", "REBUTTAL_UNJUDGED"), ("SA-O1", "ORPHANED")):
+        source_path = tmp_path / f"{spec_id}-source.db"
+        key = _seeded_kept_adopt(source_path, spec_id, state)
+        source_row = _raw_rows(source_path, _TASK_SQL, key)[0]
+
+        record = MemoryRecord()
+        result = migrate(source_path, record)
+        assert result.migrated == [key]
+        assert result.refused == []
+
+        fold_path = tmp_path / f"{spec_id}-fold.db"
+        into = Ledger(fold_path)
+        into.fold_task(key, record.read(key))
+        folded_row = _raw_rows(fold_path, _TASK_SQL, key)[0]
+
+        for column in ("state", "pr_url", "pushed_sha", "pushed_in_state", "branch"):
+            assert folded_row[column] == source_row[column], (spec_id, column)
+        into.close()
+
+
+def test_migrate_derives_a_package_state_for_every_state_adopt_cannot_keep(tmp_path):
+    """`NOT_IMPLEMENTED` stays outside the kept set, and an empty `pr_url`
+    still derives `MERGE_FAILED`, as before `b-619b7d`."""
+    cases = (
+        ("SA-N1", "NOT_IMPLEMENTED", "https://x/7", "READY_FOR_REVIEW"),
+        ("SA-M1", "MERGED", "", "MERGE_FAILED"),
+    )
+    for spec_id, state, pr_url, derived in cases:
+        source_path = tmp_path / f"{spec_id}-source.db"
+        ledger = Ledger(source_path)
+        task_id = _minimal(ledger, spec_id)
+        ledger.set_task_state(task_id, state)
+        ledger._db.execute(
+            "UPDATE tasks SET pr_url = ? WHERE task_id = ?", (pr_url, task_id)
+        )
+        ledger._db.commit()
+        key = _key(ledger, task_id)
+        ledger.close()
+
+        record = MemoryRecord()
+        assert migrate(source_path, record).migrated == [key]
+        packages = [f for f in record.read(key) if f.kind == "task_package"]
+        assert [f.payload["state"] for f in packages] == [derived], spec_id

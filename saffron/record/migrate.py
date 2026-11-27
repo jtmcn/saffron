@@ -586,19 +586,29 @@ def _finding_facts(
 
 _PACKAGED = frozenset({"READY_FOR_REVIEW", "MERGE_FAILED", "EXHAUSTED"})
 
+# The two states a kept `saffron adopt` can leave with a `pr_url`
+# (`SA-0429`, `b-619b7d`). Kept in `task_package`'s `state` below.
+_ADOPT_KEPT_STATES = frozenset({"REBUTTAL_UNJUDGED", "ORPHANED"})
+
 
 def _outcome_facts(task: sqlite3.Row, one: _Maker) -> list[Fact]:
     """`task_merged_head`, then `task_package`/`task_push`, then `task_state`
     last, every one at `updated_at`. `task_package`'s `state` is copied where
-    it is one PACKAGE writes. A state `reconcile` moved it to is derived back
-    from `pr_url`, so a merged task's package fact never claims `MERGED`."""
+    it is one PACKAGE writes, or one a kept `saffron adopt` leaves
+    (`_ADOPT_KEPT_STATES`). A state `reconcile` moved it to is derived back
+    from `pr_url`, so a merged task's package fact never claims `MERGED`.
+
+    A kept `REBUTTAL_UNJUDGED` row also gets an untrusting `task_push` fact,
+    the same order `_adopt` writes for a `STALE_PUSH_STATES` state. A kept
+    `ORPHANED` row needs none: its own state already sets `pushed_in_state`
+    right."""
     facts = []
     at = task["updated_at"]
     if task["merged_head_sha"] is not None:
         facts.append(one("task_merged_head", at, {"head": task["merged_head_sha"]}))
     if task["pr_url"] is not None:
         state = task["state"]
-        if state not in _PACKAGED:
+        if state not in _PACKAGED and state not in _ADOPT_KEPT_STATES:
             state = "MERGE_FAILED" if task["pr_url"] == "" else "READY_FOR_REVIEW"
         facts.append(
             one(
@@ -614,6 +624,14 @@ def _outcome_facts(task: sqlite3.Row, one: _Maker) -> list[Fact]:
                 },
             )
         )
+        if state == "REBUTTAL_UNJUDGED":
+            facts.append(
+                one(
+                    "task_push",
+                    at,
+                    {"pushed_sha": task["pushed_sha"], "untrusted": True},
+                )
+            )
     elif task["pushed_sha"] is not None:
         facts.append(one("task_push", at, {"pushed_sha": task["pushed_sha"]}))
     facts.append(one("task_state", at, {"state": task["state"]}))
