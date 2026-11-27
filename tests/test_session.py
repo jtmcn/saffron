@@ -16910,7 +16910,9 @@ def test_a_witness_that_only_raises_under_an_edit_reads_raised_and_files_a_conce
         _failing("a", "KeyError: 'a'"),  # a: raises
         _failing("b", "ZeroDivisionError: 'b'"),  # b: raises
         _failing("c", "AttributeError: 'c'"),  # c: raises
-        _failing("d", "Failed: nope"),  # d: dies (matches the pattern, not literal "assert")
+        _failing(
+            "d", "Failed: nope"
+        ),  # d: dies (matches the pattern, not literal "assert")
         GateResult(gate="tests", status="pass", tool="pytest 8.0"),  # e: survives
         GateResult(gate="tests", status="pass", tool="pytest 8.0"),  # e's second ask
         _failing("f", "KeyError: 'f'"),  # f: raises, read answers `None`
