@@ -161,13 +161,14 @@ acceptance:
       as `review-<sha256 hex of the written text>.md` in that directory,
       which is made when missing. The error is the old one followed by `;
       review text kept at `, the directory's own name, a slash and the
-      file's name. That path is relative to the batch tree, and never
+      file's name. That path is relative to `out_dir`, and never
       absolute, since the error reaches origin in the record. Where the write raises `OSError`, the
       error is the old one followed by `; review text not kept: ` and the
       exception, and nothing raises. A clean extraction keeps nothing, and
-      so does a rejected window on either extraction turn. The witness drives five error returns: no session
+      so does a rejected window on either extraction turn, returned or
+      raised. The witness drives five error returns: no session
       id to resume, raised then raised, raised then refused, refused then
-      raised, and refused then refused. It drives six returns that keep
+      raised, and refused then refused. It drives nine returns that keep
       nothing. It drives two failed sessions for one spec, and a directory
       path that is a file.
     witness: tests/test_spec_review.py::test_a_spec_review_whose_extraction_fails_keeps_its_review_text
@@ -181,6 +182,7 @@ acceptance:
       - "A re-ask after a refused value that comes back clean still writes the text."
       - "A rate-limited extraction turn writes the text."
       - "A rate-limited re-ask keeps the text."
+      - "The text is kept in `_extraction_turn`'s `except` branch, before the rate-limit check."
       - "A re-ask after a raise that comes back clean still writes the text."
       - "The file is written, but the error does not name it."
       - "The error names the file by its absolute path."
@@ -211,6 +213,12 @@ acceptance:
             driven_by: "A rate-limited re-ask keeps the text."
           - member: a rejected window returned by the re-ask after a raise
             driven_by: tests/test_spec_review.py::test_a_spec_review_whose_extraction_fails_keeps_its_review_text
+          - member: a rejected window raised by the first extraction turn
+            driven_by: "The text is kept in `_extraction_turn`'s `except` branch, before the rate-limit check."
+          - member: a rejected window raised by the re-ask after a refused value
+            driven_by: tests/test_spec_review.py::test_a_spec_review_whose_extraction_fails_keeps_its_review_text
+          - member: a rejected window raised by the re-ask after a raise
+            driven_by: tests/test_spec_review.py::test_a_spec_review_whose_extraction_fails_keeps_its_review_text
       - set: the failed sessions for one spec
         members:
           - member: the first
@@ -222,7 +230,7 @@ acceptance:
           - member: every one of the five error returns above
             driven_by: "The error names the file by its absolute path."
     positive_case: >-
-      Each of the six returns that keep nothing runs over the same review
+      Each of the nine returns that keep nothing runs over the same review
       text, through the same helper, into a directory of the same shape as
       the five error returns. Those five each read exactly one file there.
       So a directory the witness reads as absent is one the write would
