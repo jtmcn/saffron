@@ -24,10 +24,10 @@ def test_reverification_runs_the_suite_inside_a_cell(tmp_path, capsys):
     """The gates come from the host-side export, mounted read-only; running them
     on the host would be the control plane executing model-authored code (§2).
 
-    Asserts `reverify` completes and prints both suites — a direct `print`,
-    per `events.FINDINGS[1]`, not routed through any callback the caller
-    supplies. The empty-diff assertion below is not vacuous: `reverify`
-    raises `PackageError` if either suite has an errored gate
+    Asserts `reverify` completes and prints both suites through its own
+    default `emit`. This call hands it none, so nothing routes through any
+    callback the caller supplies. The empty-diff assertion below is not
+    vacuous: `reverify` raises `PackageError` if either suite has an errored gate
     (`aborted_gates`), so two silently-broken suites cannot net to
     `new_failures == []` here — only two suites that both actually ran can
     produce this result.

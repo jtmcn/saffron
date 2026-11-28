@@ -33,6 +33,7 @@ from saffron.events import (
     EventLog,
     GateResult,
     GateStatus,
+    LineLabel,
     Phase,
     PhaseStart,
     Preflight,
@@ -1531,9 +1532,9 @@ def test_the_table_did_not_quietly_lose_a_row():
     `SA-0085`, `SA-0125` and `SA-0126` each moved this count. `SA-0133`
     and `SA-0186` each move it again, by two. `SA-0203` moves it again,
     by one. `SA-0235` moves it again, by one. `SA-0278` and `SA-0341`
-    each move it again, by one. `SA-0368` moves it again, by one."""
-    assert len(FAMILIES) == 74
-    assert len({f.prefix for f in FAMILIES}) == 74
+    each move it again, by one. `SA-0368` and `SA-0436` each move it again, by one."""
+    assert len(FAMILIES) == 75
+    assert len({f.prefix for f in FAMILIES}) == 75
 
 
 def test_the_duplicated_agent_renderer_still_matches_its_original():
@@ -2091,11 +2092,25 @@ def test_an_agent_detail_is_stripped_and_clipped():
 
 
 def test_findings_name_what_the_table_could_not_type():
-    """The one call-site shape `FAMILIES` refused to force into a
-    `message: str` is named, not silently dropped."""
-    assert len(FINDINGS) == 1
+    """Any call-site shape `FAMILIES` refuses to force into a `message: str`
+    is named, not silently dropped. `SA-0436` folded the one entry this
+    held into `LineLabel`, so today it holds none."""
+    assert FINDINGS == ()
     for prefix, where, note in FINDINGS:
         assert prefix and where and note
+
+
+def test_the_re_verify_line_is_a_typed_row_and_no_finding_is_left():
+    """`SA-0436`: the one shape `FINDINGS` named now fits `LineLabel`."""
+    assert "re-verify" in typing.get_args(LineLabel)
+    rows = [
+        f
+        for f in FAMILIES
+        if f.kind is PhaseStart and f.where == "phases/package.py:reverify"
+    ]
+    assert len(rows) == 1
+    assert rows[0].prefix == "re-verify:"
+    assert FINDINGS == ()
 
 
 # --- The fixture's normaliser -----------------------------------------------

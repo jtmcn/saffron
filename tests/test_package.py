@@ -458,6 +458,63 @@ def _reverified(*new, results=(), risk="standard", advisory=()):
     )
 
 
+def test_reverify_says_each_suites_line_through_emit_or_print(
+    monkeypatch, tmp_path, capsys
+):
+    """SA-0436: handed an `emit`, `reverify` hands each suite's line to it as a
+    `PhaseStart` (phase `PACKAGE`, label `re-verify`, the spec's id) and prints
+    nothing. Handed none, it prints each line, on every call."""
+    from saffron.events import PhaseStart, describe
+    from saffron.repos.policy import GateDeclaration, Policy
+
+    _stub_package_cells(monkeypatch)
+    spec = Spec(id="SA-0005", title="t", type="feature", touches=["src/**"])
+    policy = Policy(gates={"tests": GateDeclaration()})
+
+    base_sha = "0123456789ab" + "c" * 28
+    head_sha = "fedcba987654" + "d" * 28
+    seen: list = []
+    capsys.readouterr()
+    reverify(
+        mirror=tmp_path / "m1.git",
+        packaged_sha=head_sha,
+        new_base_sha=base_sha,
+        policy=policy,
+        gates_dir=tmp_path / "gates",
+        image="img",
+        spec=spec,
+        emit=seen.append,
+    )
+    assert capsys.readouterr().out == ""
+    events = [e for e in seen if isinstance(e, PhaseStart) and e.label == "re-verify"]
+    assert [e.phase for e in events] == ["PACKAGE", "PACKAGE"]
+    assert [e.spec_id for e in events] == [spec.id, spec.id]
+    lines = [describe(e) for e in events]
+    assert lines == [
+        f"re-verify: baseline suite at {base_sha[:12]}",
+        f"re-verify: head suite at {head_sha[:12]}",
+    ]
+
+    other_base = "1a2b3c4d5e6f" + "g" * 28
+    other_head = "6f5e4d3c2b1a" + "h" * 28
+    for _ in range(2):
+        capsys.readouterr()
+        reverify(
+            mirror=tmp_path / "m2.git",
+            packaged_sha=other_head,
+            new_base_sha=other_base,
+            policy=policy,
+            gates_dir=tmp_path / "gates",
+            image="img",
+            spec=spec,
+        )
+        printed = capsys.readouterr().out.splitlines()
+        assert printed == [
+            f"re-verify: baseline suite at {other_base[:12]}",
+            f"re-verify: head suite at {other_head[:12]}",
+        ]
+
+
 def test_fetch_default_branch_refuses_an_unreachable_remote(tmp_path):
     origin = _repo_with_commit(tmp_path / "origin")
     mirror = ensure_mirror(origin, tmp_path / "mirror.git")
@@ -1144,6 +1201,84 @@ def test_package_re_verifies_with_the_cells_revert_exemption(monkeypatch, packag
     assert seen == [["t.py::test_rebut"]]
 
 
+def test_package_hands_its_emit_to_reverify(monkeypatch, packageable):
+    """`package()` hands its own `emit` to `reverify`. Driven with the real
+    `reverify` behind it and an `emit` of the test's own. Both suites' lines
+    reach that `emit`, naming the fixture's base and the pushed head."""
+    from saffron.events import PhaseStart, describe
+    from saffron.gates.suite import GateSuite
+
+    monkeypatch.setattr("saffron.phases.package.reverify", reverify)
+    monkeypatch.setattr(
+        GateSuite,
+        "against",
+        lambda self, tree, baseline, *, exempt=None: _reverified(),
+    )
+    _stub_package_cells(monkeypatch)
+
+    seen: list = []
+    kwargs = {k: v for k, v in packageable.kwargs.items() if k != "emit"}
+    result = package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
+        emit=seen.append,
+        **kwargs,
+    )
+    events = [e for e in seen if isinstance(e, PhaseStart) and e.label == "re-verify"]
+    assert [e.phase for e in events] == ["PACKAGE", "PACKAGE"]
+    assert [e.spec_id for e in events] == [kwargs["spec"].id, kwargs["spec"].id]
+    lines = [describe(e) for e in events]
+    assert lines == [
+        f"re-verify: baseline suite at {packageable.base[:12]}",
+        f"re-verify: head suite at {result.pushed_sha[:12]}",
+    ]
+
+
+def test_package_with_no_emit_logs_and_prints_each_re_verify_line_once(
+    monkeypatch, packageable, capsys
+):
+    """Handed no `emit`, `package()`'s own default carries both suites' lines
+    into the task's `events.jsonl`, and prints each exactly once. The real
+    `reverify` runs behind that default, not the fixture's stub, so nothing
+    proves a double print by stubbing it away."""
+    from saffron.events import PhaseStart, describe, read_log
+    from saffron.gates.suite import GateSuite
+
+    monkeypatch.setattr("saffron.phases.package.reverify", reverify)
+    monkeypatch.setattr(
+        GateSuite,
+        "against",
+        lambda self, tree, baseline, *, exempt=None: _reverified(),
+    )
+    _stub_package_cells(monkeypatch)
+
+    kwargs = {k: v for k, v in packageable.kwargs.items() if k != "emit"}
+    capsys.readouterr()
+    result = package(
+        packageable.outcome,
+        gh=lambda argv: sp.CompletedProcess(argv, 0, stdout="https://x/pull/1\n"),
+        **kwargs,
+    )
+    printed = [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("re-verify: ")
+    ]
+    assert printed == [
+        f"re-verify: baseline suite at {packageable.base[:12]}",
+        f"re-verify: head suite at {result.pushed_sha[:12]}",
+    ]
+
+    logged_events = [
+        event
+        for event in read_log(packageable.outcome.task_dir)
+        if isinstance(event, PhaseStart) and event.label == "re-verify"
+    ]
+    assert [e.phase for e in logged_events] == ["PACKAGE", "PACKAGE"]
+    assert [e.spec_id for e in logged_events] == [kwargs["spec"].id, kwargs["spec"].id]
+    assert [describe(e) for e in logged_events] == printed
+
+
 def _state(ledger, task_id):
     return next(r for r in ledger.queue_lines() if r["task_id"] == task_id)
 
@@ -1655,31 +1790,26 @@ def _stream_writes(scope, *, allow: frozenset[str], aliases=frozenset()) -> list
     return found
 
 
-def test_only_the_line_no_kind_carries_writes_to_a_stream_outside_emit():
+def test_package_writes_to_a_stream_only_inside_an_emit():
     """The five sites nobody witnesses behaviourally — ParentGone, conflict,
     new-failures, LeaseRejected, the cleanup failure — plus the second
     `unstacked:` site in the stacking resolver, which no test drives at all
     (it moved to `saffron/task.py` with `run_task`; this assertion followed the
     function, not the file). Reinstating the
     defect on all six, line for line, left 1165 tests green under round 1's
-    census because it recognised only the literal name `print`.
-
-    `reverify`'s line is the one exception and is allowed by *location*:
-    `events.FINDINGS[1]` records that no `PhaseStart` label fits a lower-case
-    hyphenated step without widening `LineLabel`, which lives in the forbidden
-    `saffron/events.py`."""
+    census because it recognised only the literal name `print`."""
     import ast
 
     from saffron import task as task_module
     from saffron.phases import package as package_module
 
     package_tree = ast.parse(Path(package_module.__file__).read_text())
-    # `emit` is `package`'s own default sink — the same shielding the lambda
-    # rule gives a one-line default, spelled longer because it also logs.
+    # `emit` names both `package`'s and `reverify`'s own default sink, the
+    # same shielding the lambda rule gives a one-line default that also logs.
     assert (
         _stream_writes(
             package_tree,
-            allow=frozenset({"reverify", "emit"}),
+            allow=frozenset({"emit"}),
             aliases=_write_aliases(package_tree),
         )
         == []

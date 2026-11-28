@@ -12,9 +12,10 @@ class with a `type` string, so a future renderer knows what it holds — an
 turns one back into the prose above. `FAMILIES` below is the proof that the
 kinds are sufficient: one row per call-site shape, citing the file and
 symbol it lives in (never a line number — DESIGN.md's own citation rule) and
-the kind `describe()` renders it from. One shape resisted typing outright and
-is named as `FINDINGS` instead of forced into a `message: str` — the escape
-hatch this vocabulary exists to close.
+the kind `describe()` renders it from. `FINDINGS` names any shape that
+resists typing rather than forcing it into a `message: str`, the escape
+hatch this vocabulary exists to close. It holds none today, since
+`SA-0436` folded its one entry into `LineLabel`.
 
 Nothing here emits an `Event` yet; `SA-0030`/`SA-0031` migrate the 64 call
 sites to construct one and call `describe()` in place of the f-string they
@@ -95,6 +96,7 @@ LineLabel = Literal[
     "REVIEW",
     "REBUT",
     "PACKAGE",
+    "re-verify",
 ]
 
 Ceiling = Literal["budget_usd", "max_attempts", "max_turns"]
@@ -199,14 +201,14 @@ class Baseline:
 class PhaseStart:
     """A phase-scoped progress fact — roughly thirty of the 64 lines are this
     shape. `phase` is the phase it happened in and `label` is the prefix the
-    line carries; they differ for `PLAN:`, `SALVAGE:` and `SCOPE:`, and
-    collapsing them is the thing CONTEXT.md's plan-checkpoint entry forbids.
+    line carries. They differ for `PLAN:`, `SALVAGE:`, `SCOPE:` and `re-verify:`.
+    Only `PLAN:` is the one CONTEXT.md's plan-checkpoint entry names, and
+    forbids calling it a phase. The others stay apart by this module's design.
 
     ponytail: `detail` is a free string, and it is the one place in this
     vocabulary where prose survives. Typing the roughly thirty line families
     behind it is `SA-0040`'s mapping table, which either types them or names
-    the ones that resist; until then this field is the ceiling, not the
-    design."""
+    the ones that resist; until then this field is the ceiling, not the design."""
 
     timestamp: float
     spec_id: str
@@ -865,7 +867,7 @@ def describe(event: Event) -> str:
     Dispatches on `type(event)`, never a `type` string field — the module's
     own rule (line 9 above) applies here too. `FAMILIES` below is the table
     proving every one of the 64 call sites this exists to replace reaches a
-    branch here; `FINDINGS` names the one that does not.
+    branch here. `FINDINGS` would name any that does not, and holds none today.
     """
     if isinstance(event, Preflight):
         if event.step == "cell_up":
@@ -1145,19 +1147,9 @@ FAMILIES: tuple[_Family, ...] = (
     _Family("PACKAGE: (LeaseRejected)", _PKG, PhaseStart),
     _Family("PACKAGE: (pr_url)", _PKG, PhaseStart),
     _Family("PACKAGE: could not remove", _PKG, PhaseStart),
+    _Family("re-verify:", "phases/package.py:reverify", PhaseStart),
 )
 
-# The one call-site shape `FAMILIES` above could not fit into a typed kind
-# without a `message: str` standing in for a shape of its own — named here
-# rather than forced, per this spec's own acceptance criteria.
-FINDINGS: tuple[tuple[str, str, str], ...] = (
-    (
-        "re-verify: {label} suite at {sha}",
-        "phases/package.py:reverify",
-        "Every other `PhaseStart` prefix is a phase name in bare caps; "
-        "`re-verify` is lower-case with a hyphen and names a step inside "
-        "PACKAGE re-running the gate suite, not a phase transition. Widening "
-        "`LineLabel`'s casing for one call site would carry no more than a "
-        "free string does.",
-    ),
-)
+# `FINDINGS` would name any call-site shape that resists a typed kind,
+# standing in for a `message: str` instead. None does today.
+FINDINGS: tuple[tuple[str, str, str], ...] = ()
