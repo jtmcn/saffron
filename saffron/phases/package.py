@@ -29,7 +29,7 @@ from saffron.credentials import (
     OWN_TOKEN_DESCRIPTION,
     matches_own_token,
 )
-from saffron.events import Event, EventLog, PhaseStart, append_and_warn
+from saffron.events import Event, EventLog, PhaseStart, append_and_warn, describe
 from saffron.gates.baseline import render
 from saffron.gates.contract import split_lines
 from saffron.gates.core.scope import scope_gate
@@ -533,6 +533,7 @@ def reverify(
     image: str,
     spec: Spec,
     exempt: Sequence[str] = (),
+    emit: Callable[[Event], object] | None = None,
 ) -> SuiteComparison:
     """The whole gate suite on the packaged commit, judged against a fresh
     baseline at `new_base_sha`, each in its own gate-only cell (§5.7). The
@@ -556,6 +557,11 @@ def reverify(
     infrastructure and raises; only new failures are the task's.
     """
     from saffron.cell import runtime, worktree
+
+    if emit is None:
+
+        def emit(event: Event) -> None:
+            print(describe(event))
 
     suite = GateSuite(
         gates=policy.gate_executables(Path(worktree.GATES_MOUNT)),
@@ -596,13 +602,15 @@ def reverify(
                 env=dict(policy.thread_env),
                 gates_dir=gates_dir,
             )
-            # `events.FINDINGS[1]`: a lower-case, hyphenated step inside
-            # PACKAGE's own re-run of the suite, not a phase transition — no
-            # `PhaseStart` label fits it without widening `LineLabel`, and
-            # `events.py` is forbidden here. Same exemption as
-            # `events.FINDINGS[0]`'s outcome line in `cell/session.py`: a
-            # direct, unconditional `print`, never routed through `emit`.
-            print(f"re-verify: {label} suite at {sha[:12]}")
+            emit(
+                PhaseStart(
+                    timestamp=time.time(),
+                    spec_id=spec.id,
+                    phase="PACKAGE",
+                    label="re-verify",
+                    detail=f"{label} suite at {sha[:12]}",
+                )
+            )
             # `cwd` is a host path `CellExecutor` ignores; the gate paths are
             # cell-side (`/gates/.saffron/gates/...`).
             yield CellTree(container, cwd=mirror)
@@ -885,6 +893,7 @@ def package(
             image=image,
             spec=spec,
             exempt=outcome.revert_exempt,
+            emit=emit,
         )
         verified_on, gates = "packaged", comparison.run.results
         # The body and the queue line report the tier the verifying suite ran
