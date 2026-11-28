@@ -31,7 +31,8 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
-from saffron import end_review, events
+from saffron import cell_name_lock, end_review, events
+from saffron import task as task_module
 from saffron.agents import artifacts
 from saffron.agents.findings import Finding, Severity, anchor, parse_diff
 from saffron.cell import session
@@ -188,11 +189,11 @@ def _qualify_range(
     `qualify` does, so a later range can extend an earlier one's. A read
     the mirror cannot answer raises before any finding is recorded.
 
-    `graded_head`, when set, marks a layer's in-cell concerns. A
-    `qualified` finding there becomes `unverified` when its line sits in
-    a hunk of the diff from `graded_head` to the critic's own tree. That
-    tree is rebuilt from `out_dir`'s SA-0375 record, or `head` stands in
-    when the record cannot be used."""
+    Held around the probe call, `spec_id`'s lock turns a held lock into the same reason
+    a raised probe gives (`b-d9ed45`). `graded_head`, when set, marks a layer's in-cell
+    concerns. A `qualified` finding there becomes `unverified` when its line sits in a
+    hunk of the diff from `graded_head` to the critic's own tree. That tree is rebuilt
+    from `out_dir`'s SA-0375 record, or `head` stands in when the record cannot be used."""
     diff = _git(mirror, "diff", *DIFF_FLAGS, f"{base}..{head}", strip=False)
     findings = anchor(inputs, diff, read_head=partial(file_at, mirror, head))
     filed: dict[int, Severity] = {id(f): f.severity for f in findings}
@@ -232,23 +233,26 @@ def _qualify_range(
         )
         base_results: Sequence[GateResult] = ledger.baseline_results(run_id)
         try:
-            entries = session.probe_findings(
-                probed,
-                spec=spec,
-                repo=repo,
-                mirror=mirror,
-                gates_dir=gates_dir,
-                thread_env=thread_env,
-                test_paths=test_paths,
-                base_results=base_results,
-                gates=gates,
-                patch=diff,
-                created=created,
-                note=note,
-            )
-        except RuntimeError as exc:
-            # A patch that did not apply, or git failing. A cell that never came
-            # up reaches no caller: `probe_findings` reads it as `unproven`.
+            with cell_name_lock.lock(
+                task_module.CELL_NAME_LOCK_ROOT, spec_id, "qualification"
+            ):
+                entries = session.probe_findings(
+                    probed,
+                    spec=spec,
+                    repo=repo,
+                    mirror=mirror,
+                    gates_dir=gates_dir,
+                    thread_env=thread_env,
+                    test_paths=test_paths,
+                    base_results=base_results,
+                    gates=gates,
+                    patch=diff,
+                    created=created,
+                    note=note,
+                )
+        except (RuntimeError, cell_name_lock.LockHeld) as exc:
+            # A patch that did not apply, git failing, or a held lock (`b-d9ed45`) each reach here. A
+            # cell that never comes up reaches no caller: `probe_findings` reads it as `unproven`.
             reasons = {}
             for f in probed:
                 assert f.probe is not None  # this loop built `probed` from it

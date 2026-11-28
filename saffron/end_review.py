@@ -30,7 +30,8 @@ from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from saffron import mutants
+from saffron import cell_name_lock, mutants
+from saffron import task as task_module
 from saffron.agents import context
 from saffron.cell.worktree import DIFF_FLAGS
 from saffron.events import Event, describe
@@ -769,13 +770,13 @@ def layer_cell(
     """A fresh critic cell, seeded at a layer's own head, for the end
     review to read (`review_stack`'s and `review_joins`'s `open_cell`).
 
-    No task's own network is up once the end review runs. So this brings
-    a whole cell up through `session.cell_up`, rather than joining one the
-    way `critic_cell` does. `cell_up` and `cell_down` are reached through
-    their own module, never imported by name, so a caller that replaces
-    them there reaches this call too. `cell_down` always runs from a
-    `finally`, whether `cell_up` raised, the body raised, or neither did.
-    """
+    No task's own network is up once the end review runs. So this brings a whole cell up
+    through `session.cell_up`, rather than joining one the way `critic_cell` does.
+    `cell_up` and `cell_down` are reached through their own module, never imported by
+    name, so a caller that replaces them there reaches this call too. `cell_down` always
+    runs from a `finally`, whether `cell_up` raised, the body raised, or neither did.
+    Held around the whole block is `fields.spec_id`'s lock, taken before
+    `remove_container` and let go after `cell_down` runs (`b-d9ed45`)."""
     from saffron.cell import proxy, runtime, session
 
     container = f"saffron-endreview-{fields.spec_id}"
@@ -785,55 +786,60 @@ def layer_cell(
     proxy_name = proxy.proxy_name(f"endreview-{fields.spec_id}")
     created: set[str] = set()
 
-    runtime.remove_container(container)
-    try:
-        # A spec session's Bash runs a prior layer's code, so only its
-        # cell gets the wrapper's capabilities and the self-check.
-        if spec_session:
-            session.cell_up(
-                repo=repo,
-                mirror=mirror,
-                tree_base=fields.head,
-                branch=fields.branch,
+    with cell_name_lock.lock(
+        task_module.CELL_NAME_LOCK_ROOT,
+        fields.spec_id,
+        "a layer cell (end_review.layer_cell)",
+    ):
+        runtime.remove_container(container)
+        try:
+            # A spec session's Bash runs a prior layer's code, so only its
+            # cell gets the wrapper's capabilities and the self-check.
+            if spec_session:
+                session.cell_up(
+                    repo=repo,
+                    mirror=mirror,
+                    tree_base=fields.head,
+                    branch=fields.branch,
+                    network=network,
+                    critic_network=None,
+                    proxy_name=proxy_name,
+                    volume=volume,
+                    state=state,
+                    container=container,
+                    gates_dir=gates_dir,
+                    thread_env=thread_env,
+                    created=created,
+                    note=lambda step, detail: print(detail),
+                    cap_add=implement.UNPRIVILEGED_BASH_CAPS,
+                )
+                session.assert_bash_is_unprivileged(container)
+            else:
+                session.cell_up(
+                    repo=repo,
+                    mirror=mirror,
+                    tree_base=fields.head,
+                    branch=fields.branch,
+                    network=network,
+                    critic_network=None,
+                    proxy_name=proxy_name,
+                    volume=volume,
+                    state=state,
+                    container=container,
+                    gates_dir=gates_dir,
+                    thread_env=thread_env,
+                    created=created,
+                    note=lambda step, detail: print(detail),
+                )
+            yield container
+        finally:
+            session.cell_down(
                 network=network,
                 critic_network=None,
                 proxy_name=proxy_name,
                 volume=volume,
                 state=state,
                 container=container,
-                gates_dir=gates_dir,
-                thread_env=thread_env,
                 created=created,
-                note=lambda step, detail: print(detail),
-                cap_add=implement.UNPRIVILEGED_BASH_CAPS,
+                note=lambda step, ok, detail: print(detail),
             )
-            session.assert_bash_is_unprivileged(container)
-        else:
-            session.cell_up(
-                repo=repo,
-                mirror=mirror,
-                tree_base=fields.head,
-                branch=fields.branch,
-                network=network,
-                critic_network=None,
-                proxy_name=proxy_name,
-                volume=volume,
-                state=state,
-                container=container,
-                gates_dir=gates_dir,
-                thread_env=thread_env,
-                created=created,
-                note=lambda step, detail: print(detail),
-            )
-        yield container
-    finally:
-        session.cell_down(
-            network=network,
-            critic_network=None,
-            proxy_name=proxy_name,
-            volume=volume,
-            state=state,
-            container=container,
-            created=created,
-            note=lambda step, ok, detail: print(detail),
-        )
