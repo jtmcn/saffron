@@ -1,0 +1,5 @@
+tests/test_spec_review.py::test_a_spec_review_extraction_turn_is_capped_at_a_dollar_fifty:
+  file: saffron/spec_review.py
+  find: SPEC_REVIEW_EXTRACT_BUDGET_USD = 1.5
+  replace: SPEC_REVIEW_EXTRACT_BUDGET_USD = 1.0
+  case: an extraction turn left at the old one-dollar cap
