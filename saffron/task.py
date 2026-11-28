@@ -1544,13 +1544,13 @@ def package_ready_task(
     """`saffron package`'s whole body: `ready_task`'s rebuild, then every
     step PACKAGE needs on its own, with no agent and no `run_one_cell`.
 
-    Returns `ready_task`'s `Refused` untouched, before the image or the
-    network exist. `ready_task`'s own `tree_base` fallback reads
-    `mirror_path` earlier, whether it then refuses or not. On a `ReadyTask`
-    it prepares the mirror, attaches the row's own pinned mutants
-    (`b-c5da95`), and builds the repo's image. It then runs N1's
-    host-binding probe and calls `package_phase.package` once.
-    """
+    Returns `ready_task`'s `Refused` untouched, before the image or the network exist.
+    `ready_task`'s own `tree_base` fallback reads `mirror_path` earlier, whether it then
+    refuses or not. On a `ReadyTask` it prepares the mirror, attaches the row's own
+    pinned mutants (`b-c5da95`), and builds the repo's image. Around the probe network's
+    block alone, it holds `spec_id`'s lock, and a held one returns `Refused` naming the
+    raise (`b-d9ed45`). It then runs N1's host-binding probe and calls
+    `package_phase.package` once."""
     ready = ready_task(
         spec_id,
         repo=repo,
@@ -1574,33 +1574,41 @@ def package_ready_task(
     # A prefix of its own, so a killed invocation's leftover cannot collide with
     # `saffron-pkg-` names. Lowercase: the runtime refuses capitals (measured).
     network = f"saffron-hostprobe-{spec_id.lower()}"
-    runtime.remove_network(network)
     try:
-        subnet = runtime.allocate_network(network)
-        gateway = runtime.gateway(subnet)
-        ports, tolerated, sockets = preflight.host_probe_ports()
-        addresses = preflight.probe_addresses(gateway=gateway)
-        detail = (
-            f"probing {len(ports)} host ports at "
-            + ", ".join(addresses)
-            + "; tolerating "
-            + (", ".join(tolerated) or "nothing")
-        )
-        print(
-            describe(
-                Preflight(
-                    timestamp=time.time(),
-                    spec_id=spec_id,
-                    step="ports",
-                    detail=detail,
+        with cell_name_lock.lock(CELL_NAME_LOCK_ROOT, spec_id, str(out_dir)):
+            runtime.remove_network(network)
+            try:
+                subnet = runtime.allocate_network(network)
+                gateway = runtime.gateway(subnet)
+                ports, tolerated, sockets = preflight.host_probe_ports()
+                addresses = preflight.probe_addresses(gateway=gateway)
+                detail = (
+                    f"probing {len(ports)} host ports at "
+                    + ", ".join(addresses)
+                    + "; tolerating "
+                    + (", ".join(tolerated) or "nothing")
                 )
-            )
-        )
-        preflight.assert_host_is_unreachable(
-            repo_image.BASE_TAG, network, gateway=gateway, ports=ports, sockets=sockets
-        )
-    finally:
-        runtime.remove_network(network)
+                print(
+                    describe(
+                        Preflight(
+                            timestamp=time.time(),
+                            spec_id=spec_id,
+                            step="ports",
+                            detail=detail,
+                        )
+                    )
+                )
+                preflight.assert_host_is_unreachable(
+                    repo_image.BASE_TAG,
+                    network,
+                    gateway=gateway,
+                    ports=ports,
+                    sockets=sockets,
+                )
+            finally:
+                runtime.remove_network(network)
+    except cell_name_lock.LockHeld as held:
+        return Refused(reason=str(held))
 
     return package_phase.package(
         ready.outcome,
