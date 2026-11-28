@@ -189,7 +189,14 @@ def _build_batches(tmp_path: Path):
     _attempt(ledger, te4_1, 5, 0.0, [], phase="SPEC_WRITING")
     _attempt(ledger, te4_1, 9, 0.0, [], phase="SPEC_WRITING")
     _attempt(ledger, te4_1, 2, 0.0, [], phase="SPEC_WRITING")
+    _attempt(ledger, te9, 5, 0.0, [], phase="COMMIT_REVIEW")
+    _attempt(ledger, te9, 28, 0.0, [], phase="COMMIT_REVIEW")
+    _attempt(ledger, te9, 3, 0.0, [], phase="COMMIT_REVIEW")
+    _attempt(ledger, te4_1, 3, 0.0, [], phase="COMMIT_REVIEW")
+    _attempt(ledger, te4_1, 7, 0.0, [], phase="COMMIT_REVIEW")
+    _attempt(ledger, te4_1, 2, 0.0, [], phase="COMMIT_REVIEW")
     ledger.open_attempt(te6_2, phase="REBUTTING")
+    ledger.open_attempt(te6_2, phase="COMMIT_REVIEW")
 
     ledger.set_task_state(te9, "REJECTED")
 
@@ -198,6 +205,7 @@ def _build_batches(tmp_path: Path):
         run8, spec_id="TE-4", spec_sha="s" * 64, branch="saffron/TE-4", budget_usd=5.0
     )
     _attempt(ledger, te4_2, 4, 0.20, [])
+    _attempt(ledger, te4_2, 40, 0.0, [], phase="COMMIT_REVIEW")
     ledger.set_task_state(te4_2, "RATE_LIMITED")
 
     # A later `saffron cell`, outside any batch: no layer, no order entry.
@@ -592,11 +600,12 @@ def _turn_lines(section: str) -> list[str]:
 
 
 def test_each_phase_reads_its_own_peak_beside_its_own_bound(tmp_path, monkeypatch):
-    from saffron import spec_review
+    from saffron import end_review, spec_review
     from saffron.report.stack import render_stack, stack_view
 
     monkeypatch.setattr(spec_review, "SPEC_REVIEW_MAX_TURNS", 77)
     monkeypatch.setattr(spec_review, "SPEC_WRITER_MAX_TURNS", 133)
+    monkeypatch.setattr(end_review, "LENS_MAX_TURNS", 99)
 
     ledger, specs, _batch_a, batch_b = _build_batches(tmp_path)
     view = stack_view(ledger, batch_b, specs)
@@ -610,6 +619,7 @@ def test_each_phase_reads_its_own_peak_beside_its_own_bound(tmp_path, monkeypatc
         "GATE ⇄ REPAIR P of 90 turns",
         "REVIEW P of 90 turns",
         "REBUT P of 90 turns",
+        "COMMIT_REVIEW P of 99 turns",
     ]
     assert _turn_lines(_layer_section_text(rendered, "TE-9")) == [
         "SPEC_REVIEW 31 X 77 each",
@@ -618,15 +628,17 @@ def test_each_phase_reads_its_own_peak_beside_its_own_bound(tmp_path, monkeypatc
         "GATE ⇄ REPAIR 27 of 140 turns",
         "REVIEW 38 of 140 turns",
         "REBUT 45 of 140 turns",
+        "COMMIT_REVIEW 28 of 99 turns",
     ]
 
 
 def test_a_phase_with_no_closed_attempt_reads_absent_never_zero(tmp_path, monkeypatch):
-    from saffron import spec_review
+    from saffron import end_review, spec_review
     from saffron.report.stack import render_stack, stack_view
 
     monkeypatch.setattr(spec_review, "SPEC_REVIEW_MAX_TURNS", 77)
     monkeypatch.setattr(spec_review, "SPEC_WRITER_MAX_TURNS", 133)
+    monkeypatch.setattr(end_review, "LENS_MAX_TURNS", 99)
 
     ledger, specs, _batch_a, batch_b = _build_batches(tmp_path)
     view = stack_view(ledger, batch_b, specs)
@@ -640,6 +652,7 @@ def test_a_phase_with_no_closed_attempt_reads_absent_never_zero(tmp_path, monkey
         "GATE ⇄ REPAIR P of 70 turns",
         "REVIEW P of 70 turns",
         "REBUT P of 70 turns",
+        "COMMIT_REVIEW P of 99 turns",
     ]
     assert _turn_lines(_layer_section_text(rendered, "TE-4")) == [
         "SPEC_REVIEW P X 77 each",
@@ -648,6 +661,7 @@ def test_a_phase_with_no_closed_attempt_reads_absent_never_zero(tmp_path, monkey
         "GATE ⇄ REPAIR 10 of P turns",
         "REVIEW P of P turns",
         "REBUT P of P turns",
+        "COMMIT_REVIEW 7 of 99 turns",
     ]
 
     te9_lines = _turn_lines(_layer_section_text(rendered, "TE-9"))
@@ -655,3 +669,66 @@ def test_a_phase_with_no_closed_attempt_reads_absent_never_zero(tmp_path, monkey
 
     te7_lines = _turn_lines(_layer_section_text(rendered, "TE-7"))
     assert not any("200" in line for line in te7_lines)
+
+
+def test_a_commit_review_reads_its_peak_beside_the_lens_bound(tmp_path, monkeypatch):
+    """A closed `COMMIT_REVIEW` attempt reaches a seventh line, after REBUT,
+    bounded by `end_review.LENS_MAX_TURNS` read at build time. Its peak
+    isolates that phase's own attempts, never the layer's other six phases,
+    and never the second TE-4 task's own commit review attempt."""
+    from saffron import end_review
+    from saffron.report.stack import render_stack, stack_view
+
+    monkeypatch.setattr(end_review, "LENS_MAX_TURNS", 57)
+
+    ledger, specs, _batch_a, batch_b = _build_batches(tmp_path)
+    view = stack_view(ledger, batch_b, specs)
+    assert view is not None
+    rendered = render_stack(view)
+
+    nine_lines = _turn_lines(_layer_section_text(rendered, "TE-9"))
+    assert nine_lines == [
+        "SPEC_REVIEW 31 X 150 each",
+        "SPEC_WRITING 0 X 200 each",
+        "IMPLEMENT 50 of 140 turns",
+        "GATE ⇄ REPAIR 27 of 140 turns",
+        "REVIEW 38 of 140 turns",
+        "REBUT 45 of 140 turns",
+        "COMMIT_REVIEW 28 of 57 turns",
+    ]
+
+    four_lines = _turn_lines(_layer_section_text(rendered, "TE-4"))
+    assert four_lines == [
+        "SPEC_REVIEW P X 150 each",
+        "SPEC_WRITING 9 X 200 each",
+        "IMPLEMENT P of P turns",
+        "GATE ⇄ REPAIR 10 of P turns",
+        "REVIEW P of P turns",
+        "REBUT P of P turns",
+        "COMMIT_REVIEW 7 of 57 turns",
+    ]
+    assert not any("COMMIT_REVIEW 40" in line for line in four_lines + nine_lines)
+
+
+def test_a_layer_with_no_closed_commit_review_reads_it_absent(tmp_path, monkeypatch):
+    """A layer with no closed `COMMIT_REVIEW` attempt still keeps the line
+    and the lens bound, reading `PLACEHOLDER` for the peak rather than 0. An
+    open attempt, whose `num_turns` is NULL, counts as no attempt."""
+    from saffron import end_review
+    from saffron.report.stack import render_stack, stack_view
+
+    monkeypatch.setattr(end_review, "LENS_MAX_TURNS", 57)
+
+    ledger, specs, _batch_a, batch_b = _build_batches(tmp_path)
+    view = stack_view(ledger, batch_b, specs)
+    assert view is not None
+    rendered = render_stack(view)
+
+    seven_lines = _turn_lines(_layer_section_text(rendered, "TE-7"))
+    assert seven_lines[-1] == "COMMIT_REVIEW P of 57 turns"
+
+    six_lines = _turn_lines(_layer_section_text(rendered, "TE-6"))
+    assert six_lines[-1] == "COMMIT_REVIEW P of 57 turns"
+
+    nine_lines = _turn_lines(_layer_section_text(rendered, "TE-9"))
+    assert nine_lines[-1] == "COMMIT_REVIEW 28 of 57 turns"
