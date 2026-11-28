@@ -4,7 +4,7 @@ title: "A batch's spec review reads the host's check of each mutant on refs/saff
 type: bug
 priority: 2
 depends_on: [SA-0445]
-estimated_lines: 126
+estimated_lines: 129
 estimate_measured: true
 touches:
   - saffron/mutants.py
@@ -158,13 +158,14 @@ acceptance:
   - claim: >-
       `mutants.review_lines` names each outcome below in fixed words, and
       no line carries a mutant's find, replace, file or case, or an
-      exception's text. The witness reads fourteen outcomes for the whole
+      exception's text. The witness reads fifteen outcomes for the whole
       spec. They are a check that passes and spec text that does not parse.
       Three are a mutants file that does not parse: an invalid entry,
       invalid YAML, and a list. Two are a mutants commit the host cannot
       read: one the mirror lacks, and a mutants file that is not UTF-8.
-      Three are a mismatch: a witness no criterion declares, a witness two
-      criteria share, and a subject with no mutant. Four are a find the
+      Four are a mismatch: a witness no criterion declares, a witness two
+      criteria share, a subject with no mutant, and a mutants file whose
+      keys mix an integer and a string. Four are a find the
       spec holds, in its body, a claim, a wrong version, or a case. The
       witness also reads a criterion whose file is a directory at the base,
       and one whose file there is not UTF-8.
@@ -180,6 +181,7 @@ acceptance:
       - "A criterion's file that is not UTF-8 raises `UnicodeDecodeError` out of the call."
       - "Spec text that does not parse returns no lines."
       - "A subject with no mutant is let through, as though no criterion declared one."
+      - "A mutants file whose stray keys mix an integer and a string raises `TypeError` out of the call."
     covers:
       - set: the whole-spec outcomes
         members:
@@ -203,6 +205,8 @@ acceptance:
             driven_by: tests/test_spec_review_mutants.py::test_review_lines_name_each_refusal_in_fixed_words_and_no_mutants_text
           - member: a subject with no mutant
             driven_by: "A subject with no mutant is let through, as though no criterion declared one."
+          - member: a mutants file whose keys mix an integer and a string
+            driven_by: tests/test_spec_review_mutants.py::test_review_lines_name_each_refusal_in_fixed_words_and_no_mutants_text
           - member: a find the body holds
             driven_by: "A disclosed mutant falls into the same sentence as a file that does not match the criteria."
           - member: a find a claim holds
@@ -416,15 +420,18 @@ and lists each slot a loaded file keeps
    `guidance`, one line per criterion, and a last line.
    - No mutant for the witness gives `no-mutant`. A mutant gives `count`,
      where a file absent at `base` counts 0.
-   - `GitError`, `ValueError` or `TypeError` from that `file_at` gives
+   - `GitError` or `ValueError` from that `file_at` gives
      `unreadable-file`. `UnicodeDecodeError` is a `ValueError`.
    - The last line is `passes`, or `disclosed` for `DisclosedMutantError`,
-     or `mismatch` for any other `MutantsError` from `attach_mutants`.
+     or `mismatch` for a `MutantsError` or a `TypeError` from
+     `attach_mutants`. Its stray-witness check sorts the keys, so stray keys
+     that mix an integer and a string raise `TypeError`
+     (`saffron/mutants.py:115-119`).
    - Three outcomes replace every criterion line and the last line:
      `spec-unparsed` for a `SpecError` from `parse_spec`, `file-unparsed`
      for a `MutantsError` from `read_mutants`, and `commit-unread` for a
-     `GitError`, `ValueError` or `TypeError` from it. Catch `MutantsError`
-     first, since it is a `ValueError` too.
+     `GitError` or `ValueError` from it. Catch `MutantsError` first, since
+     it is a `ValueError` too.
 3. **Register the file in `tests/test_context.py`**. Add its constant to
    `TURN_PROMPTS`, and its four slots, `{witness}`, `{witness}`, `{count}`
    and `{witness}` in file order, to
@@ -456,7 +463,8 @@ and lists each slot a loaded file keeps
   `saffron/agents/prompts/spec-review.md` says nothing about mutants. The
   instruction rides in the new turn prompt's `header` and `guidance`
   sentences instead.
-- **A refusal**. The check tells the reviewer and refuses nothing.
+- **A refusal**. The check tells the spec review session and refuses
+  nothing.
   `run_task` still refuses a spec whose mutants fail `attach_mutants_at`.
   So `retired_first` is empty. Refusing a ref-side failure before the
   review, such as a mutants file that does not parse, is a follow-up.
@@ -464,17 +472,24 @@ and lists each slot a loaded file keeps
   decoded text, and the `witness` gate counts its bytes
   (`saffron/cell/worktree.py:840-842`). A file that does not decode reads
   `unreadable-file` here.
-- **Whether the reviewer heeds the lines**. No witness can measure a
-  route, and this change to what the reviewer reads is unmeasured.
+- **Whether the spec review session heeds the lines**. No witness can
+  measure a route, and this change to what the spec review session reads
+  is unmeasured.
 
 ## Notes for the agent
 
 **No criterion declares a mutant**. `review_lines` and the prompt block are
 new code whose spelling is yours. `witness` will report `skip`.
 
-**Reach every new name by attribute inside a test body**. The witness file
-is new. A module-scope import of `review_lines` would make the reverted
-tree a collection error, which `revert` reads as `skip`.
+**Reach every new name by attribute inside a test body**. A module-scope
+import of `review_lines` fails at import in the reverted tree. The `tests`
+gate lists such a module's tests as uncollected for a handed subset, and
+`revert` reads them as failed. The attribute keeps that failure to the one
+test that calls the name.
+
+**Criterion 4 declares no mutant either**. The keyword's spelling and its
+place in each call are yours, so no find text would stay stable. Its two
+wrong versions cover a site that omits the ledger.
 
 **Build the review rig in the witness file**. Fake `end_review.layer_cell`
 with a context manager yielding a name, and `spec_review.run_spec_review`
@@ -502,6 +517,6 @@ lines, never on the whole prompt.
 
 **What the prototype measured**. It was cut from `main` at `a13d8890`
 with `SA-0445`'s prototype diff applied first, as saved at 15:36 on
-2026-11-27. It changed 128 lines of `saffron/mutants.py`,
-`saffron/cli.py` and the new turn prompt, 503 changed tokens
+2026-11-27. It changed 129 lines of `saffron/mutants.py`,
+`saffron/cli.py` and the new turn prompt, 514 changed tokens
 by the `size` gate's own count. With it applied, the whole suite passed.
