@@ -4,7 +4,7 @@ title: A batch's spec review routes a spec to revision on a mutant it cannot see
 status: open
 tier: 2
 filed: 2026-11-21
-specs: []
+specs: [SA-0446]
 prs: []
 commits: []
 cites: [§5.4.1]
