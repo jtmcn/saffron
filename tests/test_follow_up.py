@@ -8,6 +8,7 @@ fail collection under `revert`.
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 from dataclasses import replace
@@ -2784,3 +2785,466 @@ def test_a_draft_declaring_depends_on_is_judged_minted_and_recorded_with_those_l
     assert expected_indentless_try1 in resend_prompt
     appended = resend_prompt.split("The reply above was refused.", 1)[1]
     assert "SA-0378" not in appended
+
+
+def test_a_finding_an_unretired_spec_names_and_touches_gets_no_writer_session(
+    tmp_path, monkeypatch
+):
+    """`write_follow_ups` pulls an owned finding out of its group before
+    the writer ever sees it. The rest of the group drafts exactly as
+    before (SA-NNNN, b-cc87b1)."""
+    from saffron import follow_up, intake, spec_review
+
+    monkeypatch.setattr(spec_review, "SPEC_WRITER_SESSION_USD", 1.0)
+
+    discover_calls: list = []
+    real_discover = intake.discover_specs
+
+    def counting_discover(*args, **kwargs):
+        discover_calls.append((args, kwargs))
+        return real_discover(*args, **kwargs)
+
+    monkeypatch.setattr(intake, "discover_specs", counting_discover)
+
+    built = _build(tmp_path)
+    key_101 = built.ledger.record_key(built.task_101)
+    key_102 = built.ledger.record_key(built.task_102)
+
+    # Unretired specs outside the stack: two exact touches entries, one
+    # glob, and one whose touches lack the finding's own file.
+    _write(
+        built.specs_dir,
+        "SA-0103-bare.md",
+        _spec_text(
+            {
+                "id": "SA-0103",
+                "title": "Bare",
+                "type": "feature",
+                "touches": ["src/a.py", "src/b.py"],
+            }
+        ),
+    )
+    _write(
+        built.specs_dir,
+        "SA-0104-glob.md",
+        _spec_text(
+            {
+                "id": "SA-0104",
+                "title": "Glob",
+                "type": "feature",
+                "touches": ["src/*.py"],
+            }
+        ),
+    )
+    _write(
+        built.specs_dir,
+        "SA-0170-apostrophe.md",
+        _spec_text(
+            {
+                "id": "SA-0170",
+                "title": "Apostrophe",
+                "type": "feature",
+                "touches": ["src/b.py"],
+            }
+        ),
+    )
+    _write(
+        built.specs_dir,
+        "SA-0106-other-file.md",
+        _spec_text(
+            {
+                "id": "SA-0106",
+                "title": "Other file",
+                "type": "feature",
+                "touches": ["src/c.py"],
+            }
+        ),
+    )
+    _write(
+        built.specs_dir,
+        "SA-0130-high.md",
+        _spec_text(
+            {
+                "id": "SA-0130",
+                "title": "High",
+                "type": "feature",
+                "touches": ["src/b.py"],
+            }
+        ),
+    )
+    _write(
+        built.specs_dir,
+        "inline.md",
+        _candidate(
+            "SA-0120",
+            touches=("src/b.py",),
+            claims=("claim-inline",),
+            mutant=("src/b.py", "beta", "betax"),
+        ),
+    )
+    _write(
+        built.specs_dir / "done",
+        "SA-0105-old.md",
+        _spec_text(
+            {
+                "id": "SA-0105",
+                "title": "Old",
+                "type": "feature",
+                "touches": ["src/b.py"],
+            }
+        ),
+    )
+    # The stack's own two layers, rewritten so their own touches would
+    # otherwise look like they own the finding's file too.
+    _write(
+        built.specs_dir,
+        "one.md",
+        _spec_text(
+            {
+                "id": "SA-0101",
+                "title": "One",
+                "type": "feature",
+                "budget_usd": 12.0,
+                "touches": ["src/a.py", "src/b.py"],
+            }
+        ),
+    )
+    _write(
+        built.specs_dir,
+        "SA-0102-two.md",
+        _spec_text(
+            {
+                "id": "SA-0102",
+                "title": "Two",
+                "type": "feature",
+                "budget_usd": 12.0,
+                "touches": ["src/a.py", "src/b.py"],
+            }
+        ),
+    )
+
+    # A third, synthetic layer above key_102, naming no spec file at all:
+    # its own id is still excluded by the stack filter alone.
+    run_130 = built.ledger.create_run(built.repo_id, built.shas["base"], built.batch_id)
+    task_130 = built.ledger.create_task(run_130, "SA-0130", "0" * 64, "saffron/SA-0130")
+    key_130 = built.ledger.record_key(task_130)
+
+    base_fields = layer_fields(built.ledger, key_102)
+    fields = {
+        key_101: layer_fields(built.ledger, key_101),
+        key_102: base_fields,
+        key_130: replace(base_fields, spec_id="SA-0130", branch="saffron/SA-0130"),
+    }
+    stack = StackReview(
+        join=review.LensReview("join", []),
+        layers=[
+            LayerReview(key_130, []),
+            LayerReview(key_102, []),
+            LayerReview(key_101, []),
+        ],
+        fields=fields,
+    )
+
+    owned_bare = _finding(
+        "spec", "concern", "src/b.py", 1, "already the real fix lives in SA-0103"
+    )
+    owned_backtick = _finding(
+        "spec", "concern", "src/b.py", 2, "see `SA-0104` for the actual change"
+    )
+    owned_apostrophe = _finding(
+        "spec", "concern", "src/b.py", 3, "this gap is SA-0170's own concern to close"
+    )
+    kept_lacks_touches = _finding(
+        "spec", "concern", "src/b.py", 4, "SA-0106 covers something else, not this file"
+    )
+    kept_no_spec = _finding(
+        "spec", "concern", "src/b.py", 5, "this needs its own fix regardless of specs"
+    )
+    kept_longer_id = _finding(
+        "spec", "concern", "src/b.py", 6, "the follow-up for SA-0103x tracks this"
+    )
+    kept_done = _finding(
+        "spec", "concern", "src/b.py", 7, "SA-0105 already retired this behavior"
+    )
+    kept_inline = _finding(
+        "spec", "concern", "src/b.py", 8, "SA-0120 names the same defect inline"
+    )
+    kept_own_layer = _finding(
+        "spec", "concern", "src/b.py", 9, "already tracked under SA-0102 itself"
+    )
+    kept_lower_layer = _finding(
+        "spec", "concern", "src/b.py", 10, "SA-0101 already handles the related piece"
+    )
+    kept_higher_layer = _finding(
+        "spec", "concern", "src/b.py", 11, "SA-0130 will subsume this change"
+    )
+
+    kept_in_order = [
+        kept_lacks_touches,
+        kept_no_spec,
+        kept_longer_id,
+        kept_done,
+        kept_inline,
+        kept_own_layer,
+        kept_lower_layer,
+        kept_higher_layer,
+    ]
+
+    group1 = FollowUpGroup(
+        task_key=key_102,
+        file="src/b.py",
+        findings=(
+            _q(key_102, kept_lacks_touches),
+            _q(key_102, owned_bare),
+            _q(key_102, kept_no_spec),
+            _q(key_102, owned_backtick),
+            _q(key_102, kept_longer_id),
+            _q(key_102, kept_done),
+            _q(key_102, owned_apostrophe),
+            _q(key_102, kept_inline),
+            _q(key_102, kept_own_layer),
+            _q(key_102, kept_lower_layer),
+            _q(key_102, kept_higher_layer),
+        ),
+    )
+    group2 = FollowUpGroup(
+        task_key=key_102,
+        file="src/b.py",
+        findings=(
+            _q(
+                key_102,
+                _finding(
+                    "spec", "concern", "src/b.py", 12, "SA-0103 already fixed this one"
+                ),
+            ),
+        ),
+    )
+
+    write_calls: list = []
+
+    def write(group, prompt):
+        write_calls.append((group, prompt))
+        match = re.search(r"^id: (\S+)$", prompt, re.MULTILINE)
+        assert match is not None
+        text = _candidate(match.group(1))
+        return spec_review.SpecWriterSession(
+            text=text,
+            cost_usd=0.25,
+            error=None,
+            resets_at=None,
+            session_id="s1",
+            num_turns=3,
+            spec_sha=hash_artifact(text),
+        )
+
+    mint_calls: list = []
+    pooled: list = []
+
+    candidates = follow_up.write_follow_ups(
+        built.ledger,
+        stack,
+        batch_key=str(built.batch_id),
+        qualify=_qualify_stub([], [group1, group2], []),
+        write=write,
+        judge=_green_judge,
+        mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], mint_calls),
+        mirror=built.mirror,
+        specs_dir=built.specs_dir,
+        repo_id=built.repo_id,
+        test_paths=["tests/**"],
+        cap_usd=50.0,
+        emit=lambda line: None,
+        pooled=pooled,
+    )
+
+    assert len(discover_calls) == 1
+
+    assert len(write_calls) == 1
+    got_group, _prompt = write_calls[0]
+    assert got_group.task_key == key_102
+    assert got_group.file == "src/b.py"
+    assert [q.finding.claim for q in got_group.findings] == [
+        f.claim for f in kept_in_order
+    ]
+
+    assert len(candidates) == 1
+
+    assert len(pooled) == 4
+    for p in pooled:
+        assert len(p.group.findings) == 1
+    assert pooled[0].group.findings[0].finding.claim == owned_bare.claim
+    assert "SA-0103" in pooled[0].reason
+    assert "src/b.py" in pooled[0].reason
+    assert pooled[1].group.findings[0].finding.claim == owned_backtick.claim
+    assert "SA-0104" in pooled[1].reason
+    assert "src/b.py" in pooled[1].reason
+    assert pooled[2].group.findings[0].finding.claim == owned_apostrophe.claim
+    assert "SA-0170" in pooled[2].reason
+    assert "src/b.py" in pooled[2].reason
+    assert "SA-0103" in pooled[3].reason
+    assert "src/b.py" in pooled[3].reason
+
+
+def test_a_finding_an_unretired_spec_owns_is_pooled_alone_naming_that_spec(
+    tmp_path, monkeypatch
+):
+    """Each finding an unretired spec owns pools alone, one `Pooled` per
+    finding. Ownership is decided ahead of the sub-cap, so it never pools
+    under the sub-cap's own reason instead (SA-NNNN, b-cc87b1).
+    `finish.write_findings` then shows the same reason."""
+    from saffron import finish, follow_up, spec_review
+
+    monkeypatch.setattr(spec_review, "SPEC_WRITER_SESSION_USD", 1.0)
+
+    built = _build(tmp_path)
+    stack = _stack(built)
+    key_102 = built.ledger.record_key(built.task_102)
+
+    _write(
+        built.specs_dir,
+        "SA-0170-first-owner.md",
+        _spec_text(
+            {
+                "id": "SA-0170",
+                "title": "First owner",
+                "type": "feature",
+                "touches": ["src/b.py"],
+            }
+        ),
+    )
+    _write(
+        built.specs_dir,
+        "SA-0180-second-owner.md",
+        _spec_text(
+            {
+                "id": "SA-0180",
+                "title": "Second owner",
+                "type": "feature",
+                "touches": ["src/b.py"],
+            }
+        ),
+    )
+
+    filler = _finding("spec", "concern", "src/b.py", 1, "claim-filler")
+    owned_first_a = _finding(
+        "spec", "concern", "src/b.py", 2, "SA-0170 already covers this"
+    )
+    owned_first_b = _finding(
+        "spec", "concern", "src/b.py", 3, "SA-0170 covers this one too"
+    )
+    owned_second = _finding(
+        "spec", "concern", "src/b.py", 4, "`SA-0180` finishes the job"
+    )
+    unowned = _finding("spec", "concern", "src/b.py", 5, "nothing else explains this")
+
+    filler_group = FollowUpGroup(
+        task_key=key_102, file="src/b.py", findings=(_q(key_102, filler),)
+    )
+    target_group = FollowUpGroup(
+        task_key=key_102,
+        file="src/b.py",
+        findings=(
+            _q(key_102, owned_first_a),
+            _q(key_102, owned_first_b),
+            _q(key_102, owned_second),
+            _q(key_102, unowned),
+        ),
+    )
+
+    write_calls: list = []
+
+    def write(group, prompt):
+        write_calls.append((group, prompt))
+        match = re.search(r"^id: (\S+)$", prompt, re.MULTILINE)
+        assert match is not None
+        text = _candidate(match.group(1), claims=("claim-filler-draft",))
+        return spec_review.SpecWriterSession(
+            text=text,
+            cost_usd=0.25,
+            error=None,
+            resets_at=None,
+            session_id="s-filler",
+            num_turns=1,
+            spec_sha=hash_artifact(text),
+        )
+
+    mint_calls: list = []
+    pooled: list = []
+    emitted: list = []
+
+    candidates = follow_up.write_follow_ups(
+        built.ledger,
+        stack,
+        batch_key=str(built.batch_id),
+        qualify=_qualify_stub([], [filler_group, target_group], []),
+        write=write,
+        judge=_green_judge,
+        mint=_mint_stub(built.ledger, built.repo_id, built.shas["base"], mint_calls),
+        mirror=built.mirror,
+        specs_dir=built.specs_dir,
+        repo_id=built.repo_id,
+        test_paths=["tests/**"],
+        # Enough for the filler's one session, and nothing left for a
+        # second: the target group's own sub-cap check must then fail.
+        cap_usd=1.2,
+        emit=emitted.append,
+        pooled=pooled,
+    )
+
+    # The filler group's own claim never names a spec, so it drafts and
+    # mints as any ordinary group would.
+    assert len(write_calls) == 1
+    assert len(candidates) == 1
+
+    assert len(pooled) == 4
+    owned_pooled, pooled_b, pooled_c, subcap_pooled = pooled
+    assert len(owned_pooled.group.findings) == 1
+    assert owned_pooled.group.findings[0].finding.claim == owned_first_a.claim
+    assert "SA-0170" in owned_pooled.reason and "src/b.py" in owned_pooled.reason
+    assert len(pooled_b.group.findings) == 1
+    assert pooled_b.group.findings[0].finding.claim == owned_first_b.claim
+    assert "SA-0170" in pooled_b.reason
+    assert len(pooled_c.group.findings) == 1
+    assert pooled_c.group.findings[0].finding.claim == owned_second.claim
+    assert "SA-0180" in pooled_c.reason and "src/b.py" in pooled_c.reason
+    assert len(subcap_pooled.group.findings) == 1
+    assert subcap_pooled.group.findings[0].finding.claim == unowned.claim
+    assert "sub-cap" in subcap_pooled.reason
+
+    # `_pool` emits its own reason on the `pooled` line for an owned
+    # finding too, not only in the `Pooled` record itself.
+    for p in (owned_pooled, pooled_b, pooled_c, subcap_pooled):
+        prefix = f"pooled {p.group.task_key} {p.group.file}: "
+        assert any(
+            line.startswith(prefix) and line[len(prefix) :] == p.reason
+            for line in emitted
+        ), p.reason
+
+    # Each finding is recorded `qualified`, as a real `qualify.qualify` call
+    # would leave it. `write_findings` remaps the owned and sub-capped rows to `pooled` here.
+    for finding in (owned_first_a, owned_first_b, owned_second, unowned):
+        built.ledger.record_qualification(
+            built.task_102,
+            finding=finding,
+            filed=finding.severity,
+            outcome="qualified",
+            reason="",
+        )
+
+    dest = finish.write_findings(
+        built.ledger,
+        built.batch_id,
+        [],
+        tmp_path / "findings.json",
+        pooled=pooled,
+    )
+    written = json.loads(dest.read_text())
+    by_claim = {entry["claim"]: entry for entry in written["findings"]}
+    assert by_claim[owned_first_a.claim]["outcome"] == "pooled"
+    assert by_claim[owned_first_a.claim]["reason"] == owned_pooled.reason
+    assert by_claim[owned_first_b.claim]["outcome"] == "pooled"
+    assert by_claim[owned_first_b.claim]["reason"] == pooled_b.reason
+    assert by_claim[owned_second.claim]["outcome"] == "pooled"
+    assert by_claim[owned_second.claim]["reason"] == pooled_c.reason
+    assert by_claim[unowned.claim]["outcome"] == "pooled"
+    assert by_claim[unowned.claim]["reason"] == subcap_pooled.reason
