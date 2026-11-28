@@ -11,7 +11,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from saffron import spec_review
+from saffron import end_review, spec_review
 from saffron.end_review import END_LENSES
 from saffron.gates.contract import GateResult
 from saffron.intake import Spec
@@ -136,10 +136,12 @@ def _build_layer(
 def _phase_table(
     spec_max_turns: int | None,
 ) -> tuple[tuple[str, str, int | None, bool], ...]:
-    """The six attempt labels in page order: label, the attempt `phase` it
+    """The seven attempt labels in page order: label, the attempt `phase` it
     reads, its bound, and whether that bound caps each turn of a summed
     session. The two session labels read their bound from `spec_review` at
-    call time, since those constants belong to that module."""
+    call time, since those constants belong to that module. COMMIT_REVIEW
+    reads its bound from `end_review` the same way: each attempt is one
+    agent call under that bound, never a summed session."""
     return (
         ("SPEC_REVIEW", "SPEC_REVIEW", spec_review.SPEC_REVIEW_MAX_TURNS, True),
         (
@@ -152,6 +154,7 @@ def _phase_table(
         ("GATE ⇄ REPAIR", "REPAIRING", spec_max_turns, False),
         ("REVIEW", "REVIEWING", spec_max_turns, False),
         ("REBUT", "REBUTTING", spec_max_turns, False),
+        ("COMMIT_REVIEW", "COMMIT_REVIEW", end_review.LENS_MAX_TURNS, False),
     )
 
 
