@@ -9,9 +9,10 @@ draft that fails to parse goes back to the writer once, through
 in, or one the injected `judge` fails against the finishing suite. Every
 other group that cannot become a follow-up joins the caller-owned
 `pooled` list instead: a reset time, a spent sub-cap, a stale probe, an
-untrusted spec, or a `cite` or `judge` that raised. This module opens no
-cell and calls no model of its own. `write`, `cite`, `judge` and `mint`
-are the caller's own adapters.
+untrusted spec, or a `cite` or `judge` that raised. A finding an
+unretired spec owns pools alone as well, under that owner's reason.
+This module opens no cell and calls no model of its own. `write`,
+`cite`, `judge` and `mint` are the caller's own adapters.
 
 A draft that declares a `depends_on` entry has those lines cut from
 its frontmatter before `_validate` reads it. Any paired `consumes`
@@ -136,6 +137,45 @@ def next_spec_id(
                 highest = max(highest, int(found.group(1)))
 
     return f"{prefix}-{str(highest + 1).zfill(len(digits))}"
+
+
+def _unretired_specs(
+    specs_dir: Path, stack_spec_ids: set[str]
+) -> list[tuple[str, list[str]]]:
+    """Every id and `touches` list `intake.discover_specs` finds directly in
+    `specs_dir`, with its default refusals, except an id `stack_spec_ids`
+    names. Read once for the whole stack, never once a group."""
+    discovered, _failures = intake.discover_specs(specs_dir)
+    return [
+        (entry.spec.id, entry.spec.touches)
+        for entry in discovered
+        if entry.spec.id not in stack_spec_ids
+    ]
+
+
+def _names_as_whole_word(claim: str, spec_id: str) -> bool:
+    """Whether `claim` names `spec_id` with no id character on either side,
+    so a longer id sharing `spec_id`'s own digits does not count."""
+    pattern = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(spec_id)}(?![A-Za-z0-9_])")
+    return pattern.search(claim) is not None
+
+
+def _owning_spec(
+    claim: str, file: str, unretired: Sequence[tuple[str, list[str]]]
+) -> str | None:
+    """The id of the first unretired spec `claim` names as a whole word whose
+    own `touches` holds `file`, by `scope.matches`. `None` when none does.
+
+    A glob entry counts, since it reads `touches` the same way the `scope`
+    gate does. The order is `unretired`'s own, so a file two specs both claim
+    resolves to whichever one `intake.discover_specs` found first.
+    """
+    for spec_id, touches in unretired:
+        if _names_as_whole_word(claim, spec_id) and any(
+            matches(file, touch) for touch in touches
+        ):
+            return spec_id
+    return None
 
 
 def _slug(title: str) -> str:
@@ -317,6 +357,11 @@ def write_follow_ups(
         for path in changed_files(mirror, bottom.diff_base, top.head)
         if any(matches(path, glob) for glob in test_paths)
     ]
+    stack_spec_ids = {
+        graded_fields(ledger, stack.fields, layer.task_key).spec_id
+        for layer in stack.layers
+    }
+    unretired = _unretired_specs(specs_dir, stack_spec_ids)
 
     def _pool(group: FollowUpGroup, reason: str) -> None:
         pooled.append(Pooled(group=group, reason=reason))
@@ -370,6 +415,23 @@ def write_follow_ups(
     candidates: list[Candidate] = []
 
     for group in qualification.groups:
+        unowned: list[Qualified] = []
+        for q in group.findings:
+            owner = _owning_spec(q.finding.claim, q.finding.file, unretired)
+            if owner is None:
+                unowned.append(q)
+                continue
+            _pool(
+                FollowUpGroup(task_key=group.task_key, file=group.file, findings=(q,)),
+                f"{owner} owns this finding: its touches hold {q.finding.file}",
+            )
+        if not unowned:
+            continue
+        if len(unowned) != len(group.findings):
+            group = FollowUpGroup(
+                task_key=group.task_key, file=group.file, findings=tuple(unowned)
+            )
+
         if halt_reason is not None:
             _pool(group, halt_reason)
             continue
