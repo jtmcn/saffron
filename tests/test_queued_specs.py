@@ -34,8 +34,8 @@ RETIRED, STOPPED = _retired_ids(SPECS)
 
 @dataclass(frozen=True)
 class _RetiredCase:
-    """A `done/` file's case, carried unparsed: the three per-spec tests
-    below read nothing from it but its name."""
+    """A `done/` file's case, carried unparsed: the per-spec tests below
+    read nothing from it but its name."""
 
     path: Path
 
@@ -204,11 +204,103 @@ def test_retiring_a_spec_keeps_every_case_id(tmp_path, collected):
         "test_no_queued_spec_is_refused_on_its_own_text",
         "test_every_preserves_witness_names_a_test_the_suite_collects",
         "test_no_witness_that_claims_a_change_exists_where_the_spec_was_written",
+        "test_no_witness_names_one_case_of_a_parametrised_test",
     )
     for test in tests:
         for path in sorted((SPECS / "done").glob("SA-*.md")):
             node = f"tests/test_queued_specs.py::{test}[{path.name}]"
             assert node in collected
+
+
+def test_a_witness_naming_one_case_is_refused_and_a_bare_one_is_not(
+    tmp_path, collected
+):
+    directory = tmp_path / "specs"
+    (directory / "done").mkdir(parents=True)
+    spec_path = directory / "ZZ-7700.md"
+
+    def write(criteria):
+        lines = ["---", "id: ZZ-7700", "title: t", "type: chore", "acceptance:"]
+        for claim, witness, preserves in criteria:
+            lines.append(f"  - claim: {claim}")
+            lines.append(f"    witness: {witness}")
+            if preserves:
+                lines.append("    preserves: true")
+        lines += ["---", "body", ""]
+        spec_path.write_text("\n".join(lines))
+        return _cases(directory)[0]
+
+    bracketed = [
+        "tests/test_queued_specs.py::test_x[SA-0001-a.md]",
+        "tests/test_queued_specs.py::test_x[a-b]",
+        "tests/test_queued_specs.py::test_x[0]",
+        "tests/test_queued_specs.py::test_x[]",
+        "tests/test_queued_specs.py::test_x[oops",
+    ]
+    bare = "tests/test_queued_specs.py::test_x"
+
+    for witness in bracketed:
+        case = write([("c", witness, False)])
+        # a bracketed witness is refused, and refused again on a second check
+        with pytest.raises(AssertionError, match=re.escape(witness)):
+            test_no_witness_names_one_case_of_a_parametrised_test(case)
+        with pytest.raises(AssertionError, match=re.escape(witness)):
+            test_no_witness_names_one_case_of_a_parametrised_test(case)
+
+    # the same id, with no bracket, passes
+    case = write([("c", bare, False)])
+    assert test_no_witness_names_one_case_of_a_parametrised_test(case) is None
+
+    # a bracketed witness with preserves: true passes, since the test it
+    # names already exists
+    case = write([("c", bracketed[0], True)])
+    assert test_no_witness_names_one_case_of_a_parametrised_test(case) is None
+
+    # two bracketed witnesses: the message prints both in full
+    case = write([("c", bracketed[0], False), ("d", bracketed[1], False)])
+    with pytest.raises(AssertionError) as excinfo:
+        test_no_witness_names_one_case_of_a_parametrised_test(case)
+    assert bracketed[0] in str(excinfo.value)
+    assert bracketed[1] in str(excinfo.value)
+
+    # a preserves witness beside a refused one, in either order: only the
+    # refused one is printed
+    case = write([("c", bracketed[0], True), ("d", bracketed[1], False)])
+    with pytest.raises(AssertionError) as excinfo:
+        test_no_witness_names_one_case_of_a_parametrised_test(case)
+    assert bracketed[1] in str(excinfo.value)
+    assert bracketed[0] not in str(excinfo.value)
+
+    case = write([("c", bracketed[1], False), ("d", bracketed[0], True)])
+    with pytest.raises(AssertionError) as excinfo:
+        test_no_witness_names_one_case_of_a_parametrised_test(case)
+    assert bracketed[1] in str(excinfo.value)
+    assert bracketed[0] not in str(excinfo.value)
+
+    # a bracketed witness in the first criterion, ahead of a bare one
+    case = write([("c", bracketed[2], False), ("d", bare, False)])
+    with pytest.raises(AssertionError, match=re.escape(bracketed[2])):
+        test_no_witness_names_one_case_of_a_parametrised_test(case)
+
+    # a bracketed witness in a later criterion, behind a bare first one
+    case = write([("c", bare, False), ("d", bracketed[2], False)])
+    with pytest.raises(AssertionError, match=re.escape(bracketed[2])):
+        test_no_witness_names_one_case_of_a_parametrised_test(case)
+
+    # a spec in done/ whose witness carries a bracket passes: a retired
+    # spec reaches no cell
+    write([("c", bracketed[0], False)])
+    shutil.move(str(spec_path), directory / "done" / "ZZ-7700.md")
+    retired_case = _cases(directory)[0]
+    assert test_no_witness_names_one_case_of_a_parametrised_test(retired_case) is None
+
+    for case in CASES:
+        node = (
+            "tests/test_queued_specs.py::"
+            "test_no_witness_names_one_case_of_a_parametrised_test"
+            f"[{case.path.name}]"
+        )
+        assert node in collected
 
 
 @pytest.mark.parametrize("queued", CASES, ids=lambda d: d.path.name)
@@ -223,6 +315,24 @@ def test_every_preserves_witness_names_a_test_the_suite_collects(queued, collect
         if c.preserves and c.witness not in collected
     ]
     assert missing == []
+
+
+@pytest.mark.parametrize("queued", CASES, ids=lambda d: d.path.name)
+def test_no_witness_names_one_case_of_a_parametrised_test(queued):
+    if not isinstance(queued, DiscoveredSpec):
+        return  # retired to done/: no longer queued, so nothing here applies
+
+    # Every criterion, not only the first. A `preserves` witness names a
+    # test that already exists, so its parameter list is already written.
+    named = [
+        c.witness
+        for c in queued.spec.acceptance
+        if "[" in c.witness and not c.preserves
+    ]
+
+    # Joined by hand: pytest's own comparison elides a long list item, so a
+    # bare `== []` would not print the offending witness in full.
+    assert not named, "witness names one case: " + ", ".join(named)
 
 
 def _git(*args: str) -> str:
