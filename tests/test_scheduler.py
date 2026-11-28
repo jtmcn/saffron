@@ -64,6 +64,44 @@ def set_task_package(ledger, task_id, state, *, branch="", pushed_sha="", pr_url
     ledger.set_task_package(task_id, state, branch, pushed_sha, pr_url)
 
 
+def _seed_stack_task(ledger, repo_id, batch_id, *, spec_id, state, spec_sha=None):
+    """A task recorded under one stack batch: a run attached to
+    `batch_id`, plus the one `spec_reviews` row every stack-batch task
+    carries, the shape `Ledger.stack_batch_of` requires (b-323c97). Its
+    own shape, not imported from `tests/test_adopt_stack_layer.py`."""
+    run_id = ledger.create_run(repo_id, base_sha="a" * 40)
+    ledger.attach_run_to_batch(run_id, batch_id)
+    task_id = ledger.create_task(
+        run_id,
+        spec_id=spec_id,
+        spec_sha=spec_sha or ("s" * 40),
+        branch=f"saffron/{spec_id}",
+    )
+    ledger.record_spec_review(
+        task_id, route="run", block=None, block_sha256=None, error=None, findings=[]
+    )
+    ledger.set_task_state(task_id, state)
+    return task_id
+
+
+def _pr(spec_id, sha, url):
+    """One open pull request shape, keyed the way `_fake_gh` reads it, for
+    a `spec_id` whose branch is `_branch`'s own spelling."""
+    return {"headRefName": f"saffron/{spec_id}", "sha": sha, "url": url, "files": []}
+
+
+def _overlapping(pr, files):
+    """`_pr`'s own shape with `files` set to an overlap list.
+
+    `sha` is dropped: `_fake_gh` only reads the `--json` fields `gh`
+    itself would print, and `sha` is this module's own bookkeeping."""
+    return {
+        "headRefName": pr["headRefName"],
+        "url": pr["url"],
+        "files": [{"path": f} for f in files],
+    }
+
+
 def _sha(path):
     """The spec_sha the scan would compute for a spec file on disk."""
     return load_spec(path)[1]
@@ -1121,9 +1159,11 @@ def test_the_stacking_parents_own_pull_request_is_not_an_overlap(tmp_path, ledge
 
 
 def test_a_third_partys_overlap_still_refuses_a_stacked_child(tmp_path, ledger):
-    """The exemption above is the candidate's own `depends_on` chain and
-    nothing else. Another task's pull request over the same file, off that
-    chain, is the collision the check exists for."""
+    """The exemption above is the candidate's own `depends_on` chain,
+    widened by any stack layer recorded below an ancestor's own
+    (b-910cef). `TE-0` records no such layer here. So another task's pull
+    request over the same file, off the chain, is still the collision the
+    check exists for."""
     directory = _spec_dir(tmp_path)
     _write_spec(directory, "a.md", id="TE-1", touches=["a.py"], depends_on=["TE-0"])
     _write_spec(directory, "b.md", id="TE-0", touches=["b.py"])
@@ -1486,6 +1526,629 @@ def test_the_overlap_refusal_exempts_every_branch_on_the_chosen_parents_chain(
         assert "pull/deep" not in mine.reason
         assert "anc.py" not in mine.reason
         assert "pull/anc" not in mine.reason
+
+
+# ------------------------------- refusal: overlap exempts a stack's own layers
+
+
+def _refused_paths(refusals):
+    return {r.path.name for r in refusals}
+
+
+def _refused(directory, repo_id, ledger, **kwargs):
+    """`build_queue`'s own refused paths alone. `**kwargs` passes through
+    untyped, the way `_outcome` already does, so a `_BOTH_SCANS` spread
+    is one call rather than one typed per key."""
+    _candidates, refusals = build_queue(directory, repo_id, ledger, **kwargs)
+    return _refused_paths(refusals)
+
+
+def test_an_open_stacks_lower_layers_do_not_refuse_a_child_of_its_top(tmp_path, ledger):
+    """When an open `depends_on` ancestor's newest waiting task is a
+    layer, `build_queue` exempts more than its own branch (b-910cef). It
+    also exempts every task recorded below that layer, on its own
+    predecessor chain.
+
+    A child of the top layer overlaps the layer one below it and the
+    layer two below it. So does a grandchild that reaches the top layer
+    through a plain open parent. Both are refused before the
+    `stack_layers` rows exist, and admitted after, beside each one alone
+    and beside all three, in both scans."""
+    directory = _spec_dir(tmp_path)
+    repo_id = _repo(ledger)
+    batch_id = ledger.create_batch(budget_usd=10.0)
+
+    pr1 = _pr("TE-1", "1" * 40, "https://example/pull/301")
+    pr2 = _pr("TE-2", "2" * 40, "https://example/pull/302")
+    pr3 = _pr("TE-3", "3" * 40, "https://example/pull/303")
+    # `TE-3` is a direct `depends_on` target below, so the plain scan's
+    # own admission needs it on disk, waiting at its current sha.
+    _write_spec(directory, "te3.md", id="TE-3", touches=["te3.py"])
+    te3_sha = _sha(directory / "te3.md")
+    layer1 = _seed_stack_task(
+        ledger, repo_id, batch_id, spec_id="TE-1", state="READY_FOR_REVIEW"
+    )
+    set_task_package(
+        ledger,
+        layer1,
+        "READY_FOR_REVIEW",
+        branch="saffron/TE-1",
+        pushed_sha=pr1["sha"],
+        pr_url=pr1["url"],
+    )
+    layer2 = _seed_stack_task(
+        ledger, repo_id, batch_id, spec_id="TE-2", state="READY_FOR_REVIEW"
+    )
+    set_task_package(
+        ledger,
+        layer2,
+        "READY_FOR_REVIEW",
+        branch="saffron/TE-2",
+        pushed_sha=pr2["sha"],
+        pr_url=pr2["url"],
+    )
+    layer3 = _seed_stack_task(
+        ledger,
+        repo_id,
+        batch_id,
+        spec_id="TE-3",
+        state="READY_FOR_REVIEW",
+        spec_sha=te3_sha,
+    )
+    set_task_package(
+        ledger,
+        layer3,
+        "READY_FOR_REVIEW",
+        branch="saffron/TE-3",
+        pushed_sha=pr3["sha"],
+        pr_url=pr3["url"],
+    )
+
+    _write_spec(
+        directory, "te20.md", id="TE-20", touches=["te20.py"], depends_on=["TE-3"]
+    )
+    _write_spec(
+        directory, "te10.md", id="TE-10", touches=["shared.py"], depends_on=["TE-3"]
+    )
+    _write_spec(
+        directory, "te11.md", id="TE-11", touches=["shared.py"], depends_on=["TE-20"]
+    )
+    te20_task = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-20",
+        spec_sha=_sha(directory / "te20.md"),
+        state="READY_FOR_REVIEW",
+    )
+    pr20 = _pr("TE-20", "4" * 40, "https://example/pull/320")
+    set_task_package(
+        ledger,
+        te20_task,
+        "READY_FOR_REVIEW",
+        branch="saffron/TE-20",
+        pushed_sha=pr20["sha"],
+        pr_url=pr20["url"],
+    )
+
+    gh_below = _fake_gh(
+        [_overlapping(pr1, ["shared.py"]), _overlapping(pr2, ["shared.py"])]
+    )
+    for kwargs in _BOTH_SCANS:
+        refused = _refused(
+            directory, repo_id, ledger, repo_slug="o/r", gh=gh_below, **kwargs
+        )
+        assert "te10.md" in refused
+        assert "te11.md" in refused
+
+    # Position 1's predecessor is `None`, so recording it first costs nothing.
+    ledger.record_stack_layer(
+        layer1, position=1, predecessor_task_id=None, generation=0
+    )
+    ledger.record_stack_layer(
+        layer2, position=2, predecessor_task_id=layer1, generation=0
+    )
+    ledger.record_stack_layer(
+        layer3, position=3, predecessor_task_id=layer2, generation=0
+    )
+
+    for gh_prs in (
+        [_overlapping(pr1, ["shared.py"])],
+        [_overlapping(pr2, ["shared.py"])],
+        [
+            _overlapping(pr1, ["shared.py"]),
+            _overlapping(pr2, ["shared.py"]),
+            _overlapping(pr3, ["shared.py"]),
+        ],
+    ):
+        gh_after = _fake_gh(gh_prs)
+        for kwargs in _BOTH_SCANS:
+            refused = _refused(
+                directory, repo_id, ledger, repo_slug="o/r", gh=gh_after, **kwargs
+            )
+            assert "te10.md" not in refused
+            assert "te11.md" not in refused
+
+
+def test_a_stack_base_in_an_earlier_batch_does_not_refuse_a_child_of_the_stack(
+    tmp_path, ledger
+):
+    """The walk crosses from a stack batch's first layer into the batch its
+    predecessor belongs to, as a stack base. The open pull request of that
+    predecessor and of each layer below it in its own batch are exempt too
+    (backlog item b-910cef). A third layer of the earlier batch sits
+    above the stack base. It still refuses: the walk never looks above a
+    predecessor. Two more stack bases are no layer at all: a plain cell
+    task, and a missed task of a stack batch whose own one layer sits
+    below no row."""
+    directory = _spec_dir(tmp_path)
+    repo_id = _repo(ledger)
+
+    # The earlier batch: TE-1, TE-2, then TE-3 above the stack base TE-2.
+    earlier = ledger.create_batch(budget_usd=10.0)
+    pr1 = _pr("TE-1", "1" * 40, "https://example/pull/401")
+    pr2 = _pr("TE-2", "2" * 40, "https://example/pull/402")
+    pr3 = _pr("TE-3", "3" * 40, "https://example/pull/403")
+    t1 = _seed_stack_task(
+        ledger, repo_id, earlier, spec_id="TE-1", state="READY_FOR_REVIEW"
+    )
+    set_task_package(
+        ledger,
+        t1,
+        "READY_FOR_REVIEW",
+        branch="saffron/TE-1",
+        pushed_sha=pr1["sha"],
+        pr_url=pr1["url"],
+    )
+    ledger.record_stack_layer(t1, position=1, predecessor_task_id=None, generation=0)
+    t2 = _seed_stack_task(
+        ledger, repo_id, earlier, spec_id="TE-2", state="READY_FOR_REVIEW"
+    )
+    set_task_package(
+        ledger,
+        t2,
+        "READY_FOR_REVIEW",
+        branch="saffron/TE-2",
+        pushed_sha=pr2["sha"],
+        pr_url=pr2["url"],
+    )
+    ledger.record_stack_layer(t2, position=2, predecessor_task_id=t1, generation=0)
+    t3 = _seed_stack_task(
+        ledger, repo_id, earlier, spec_id="TE-3", state="READY_FOR_REVIEW"
+    )
+    set_task_package(
+        ledger,
+        t3,
+        "READY_FOR_REVIEW",
+        branch="saffron/TE-3",
+        pushed_sha=pr3["sha"],
+        pr_url=pr3["url"],
+    )
+    ledger.record_stack_layer(t3, position=3, predecessor_task_id=t2, generation=0)
+
+    # The later three-layer batch, cut from TE-2, not TE-3, the earlier
+    # batch's own later top.
+    later = ledger.create_batch(budget_usd=10.0)
+    pr5 = _pr("TE-5", "5" * 40, "https://example/pull/405")
+    pr6 = _pr("TE-6", "6" * 40, "https://example/pull/406")
+    pr7 = _pr("TE-7", "7" * 40, "https://example/pull/407")
+    t5 = _seed_stack_task(
+        ledger, repo_id, later, spec_id="TE-5", state="READY_FOR_REVIEW"
+    )
+    set_task_package(
+        ledger,
+        t5,
+        "READY_FOR_REVIEW",
+        branch="saffron/TE-5",
+        pushed_sha=pr5["sha"],
+        pr_url=pr5["url"],
+    )
+    t6 = _seed_stack_task(
+        ledger, repo_id, later, spec_id="TE-6", state="READY_FOR_REVIEW"
+    )
+    set_task_package(
+        ledger,
+        t6,
+        "READY_FOR_REVIEW",
+        branch="saffron/TE-6",
+        pushed_sha=pr6["sha"],
+        pr_url=pr6["url"],
+    )
+    # `TE-7` is the direct `depends_on` target below, so the plain scan's
+    # own admission needs it on disk too, at its task's own current sha.
+    _write_spec(directory, "te7.md", id="TE-7", touches=["te7.py"])
+    te7_sha = _sha(directory / "te7.md")
+    t7 = _seed_stack_task(
+        ledger,
+        repo_id,
+        later,
+        spec_id="TE-7",
+        state="READY_FOR_REVIEW",
+        spec_sha=te7_sha,
+    )
+    set_task_package(
+        ledger,
+        t7,
+        "READY_FOR_REVIEW",
+        branch="saffron/TE-7",
+        pushed_sha=pr7["sha"],
+        pr_url=pr7["url"],
+    )
+
+    _write_spec(
+        directory, "te50.md", id="TE-50", touches=["shared.py"], depends_on=["TE-7"]
+    )
+
+    gh_crossing = _fake_gh(
+        [_overlapping(pr2, ["shared.py"]), _overlapping(pr3, ["shared.py"])]
+    )
+    for kwargs in _BOTH_SCANS:
+        refused = _refused(
+            directory, repo_id, ledger, repo_slug="o/r", gh=gh_crossing, **kwargs
+        )
+        assert "te50.md" in refused
+
+    ledger.record_stack_layer(t5, position=1, predecessor_task_id=t2, generation=0)
+    ledger.record_stack_layer(t6, position=2, predecessor_task_id=t5, generation=0)
+    ledger.record_stack_layer(t7, position=3, predecessor_task_id=t6, generation=0)
+
+    for gh_prs in (
+        [_overlapping(pr1, ["shared.py"])],
+        [_overlapping(pr2, ["shared.py"])],
+        [_overlapping(pr1, ["shared.py"]), _overlapping(pr2, ["shared.py"])],
+    ):
+        gh_after = _fake_gh(gh_prs)
+        for kwargs in _BOTH_SCANS:
+            refused = _refused(
+                directory, repo_id, ledger, repo_slug="o/r", gh=gh_after, **kwargs
+            )
+            assert "te50.md" not in refused
+
+    # TE-3 sits above the stack base TE-2 in the earlier batch, so it is
+    # never exempt.
+    gh_above = _fake_gh([_overlapping(pr3, ["shared.py"])])
+    for kwargs in _BOTH_SCANS:
+        refused = _refused(
+            directory, repo_id, ledger, repo_slug="o/r", gh=gh_above, **kwargs
+        )
+        assert "te50.md" in refused
+
+    # A plain cell task, in no batch, as a stack base with no layer at all.
+    # Its own directory: `stack=True` picks one external parent per order.
+    directory2 = tmp_path / "specs2"
+    directory2.mkdir()
+    plain_sha = "8" * 40
+    plain = _task_at(
+        ledger,
+        repo_id,
+        spec_id="TE-80",
+        spec_sha="plainsha" * 5,
+        state="READY_FOR_REVIEW",
+    )
+    pr80 = _pr("TE-80", plain_sha, "https://example/pull/480")
+    set_task_package(
+        ledger,
+        plain,
+        "READY_FOR_REVIEW",
+        branch="saffron/TE-80",
+        pushed_sha=pr80["sha"],
+        pr_url=pr80["url"],
+    )
+    third = ledger.create_batch(budget_usd=10.0)
+    _write_spec(directory2, "te81.md", id="TE-81", touches=["te81.py"])
+    te81_sha = _sha(directory2 / "te81.md")
+    t81 = _seed_stack_task(
+        ledger,
+        repo_id,
+        third,
+        spec_id="TE-81",
+        state="READY_FOR_REVIEW",
+        spec_sha=te81_sha,
+    )
+    set_task_package(
+        ledger,
+        t81,
+        "READY_FOR_REVIEW",
+        branch="saffron/TE-81",
+        pushed_sha="9" * 40,
+        pr_url="https://example/pull/481",
+    )
+    _write_spec(
+        directory2, "te82.md", id="TE-82", touches=["plain.py"], depends_on=["TE-81"]
+    )
+    gh_plain = _fake_gh([_overlapping(pr80, ["plain.py"])])
+    for kwargs in _BOTH_SCANS:
+        refused = _refused(
+            directory2, repo_id, ledger, repo_slug="o/r", gh=gh_plain, **kwargs
+        )
+        assert "te82.md" in refused
+    ledger.record_stack_layer(t81, position=1, predecessor_task_id=plain, generation=0)
+    for kwargs in _BOTH_SCANS:
+        refused = _refused(
+            directory2, repo_id, ledger, repo_slug="o/r", gh=gh_plain, **kwargs
+        )
+        assert "te82.md" not in refused
+
+    # A missed task of a stack batch whose own one layer sits below no
+    # row, in its own directory for the same reason as above.
+    directory3 = tmp_path / "specs3"
+    directory3.mkdir()
+    fourth = ledger.create_batch(budget_usd=10.0)
+    t90 = _seed_stack_task(
+        ledger, repo_id, fourth, spec_id="TE-90", state="READY_FOR_REVIEW"
+    )
+    pr90 = _pr("TE-90", "a" * 40, "https://example/pull/490")
+    set_task_package(
+        ledger,
+        t90,
+        "READY_FOR_REVIEW",
+        branch="saffron/TE-90",
+        pushed_sha=pr90["sha"],
+        pr_url=pr90["url"],
+    )
+    ledger.record_stack_layer(t90, position=1, predecessor_task_id=None, generation=0)
+    t91 = _seed_stack_task(
+        ledger, repo_id, fourth, spec_id="TE-91", state="READY_FOR_REVIEW"
+    )
+    pr91 = _pr("TE-91", "b" * 40, "https://example/pull/491")
+    set_task_package(
+        ledger,
+        t91,
+        "READY_FOR_REVIEW",
+        branch="saffron/TE-91",
+        pushed_sha=pr91["sha"],
+        pr_url=pr91["url"],
+    )
+    fifth = ledger.create_batch(budget_usd=10.0)
+    _write_spec(directory3, "te92.md", id="TE-92", touches=["te92.py"])
+    te92_sha = _sha(directory3 / "te92.md")
+    t92 = _seed_stack_task(
+        ledger,
+        repo_id,
+        fifth,
+        spec_id="TE-92",
+        state="READY_FOR_REVIEW",
+        spec_sha=te92_sha,
+    )
+    set_task_package(
+        ledger,
+        t92,
+        "READY_FOR_REVIEW",
+        branch="saffron/TE-92",
+        pushed_sha="c" * 40,
+        pr_url="https://example/pull/492",
+    )
+    _write_spec(
+        directory3, "te93.md", id="TE-93", touches=["missed.py"], depends_on=["TE-92"]
+    )
+
+    gh_missed = _fake_gh([_overlapping(pr91, ["missed.py"])])
+    for kwargs in _BOTH_SCANS:
+        refused = _refused(
+            directory3, repo_id, ledger, repo_slug="o/r", gh=gh_missed, **kwargs
+        )
+        assert "te93.md" in refused
+    ledger.record_stack_layer(t92, position=1, predecessor_task_id=t91, generation=0)
+    for kwargs in _BOTH_SCANS:
+        refused = _refused(
+            directory3, repo_id, ledger, repo_slug="o/r", gh=gh_missed, **kwargs
+        )
+        assert "te93.md" not in refused
+    # Beside the missed one, that batch's own layer still refuses.
+    gh_missed_layer = _fake_gh([_overlapping(pr90, ["missed.py"])])
+    for kwargs in _BOTH_SCANS:
+        refused = _refused(
+            directory3, repo_id, ledger, repo_slug="o/r", gh=gh_missed_layer, **kwargs
+        )
+        assert "te93.md" in refused
+
+
+def test_an_open_stack_still_refuses_a_pull_request_off_its_childs_chain(
+    tmp_path, ledger
+):
+    """Every other open pull request still refuses on overlap
+    (backlog item b-910cef). A parent whose newest waiting task is the
+    third of four layers exempts only the two layers below it.
+
+    Everything else still refuses: the layer above it, an older waiting
+    task's own lower layer, an unrelated layer, and a pull request no
+    task owns. A spec with no `depends_on` refuses too, and so does a
+    child of a parent that missed in the same batch."""
+    directory = _spec_dir(tmp_path)
+    repo_id = _repo(ledger)
+
+    # `te63.md`'s own direct `depends_on` target: the plain scan's own
+    # admission needs it on disk, at the task waiting at that sha.
+    _write_spec(directory, "te60.md", id="TE-60", touches=["te60.py"])
+    te60_sha = _sha(directory / "te60.md")
+
+    # The older waiting task's own batch, with a layer below it.
+    older_batch = ledger.create_batch(budget_usd=10.0)
+    pr70 = _pr("TE-70", "1" * 40, "https://example/pull/570")
+    t70 = _seed_stack_task(
+        ledger, repo_id, older_batch, spec_id="TE-70", state="READY_FOR_REVIEW"
+    )
+    set_task_package(
+        ledger,
+        t70,
+        "READY_FOR_REVIEW",
+        branch="saffron/TE-70",
+        pushed_sha=pr70["sha"],
+        pr_url=pr70["url"],
+    )
+    ledger.record_stack_layer(t70, position=1, predecessor_task_id=None, generation=0)
+    older = _seed_stack_task(
+        ledger,
+        repo_id,
+        older_batch,
+        spec_id="TE-60",
+        state="READY_FOR_REVIEW",
+        spec_sha="o" * 40,
+    )
+    pr_older = _pr("TE-60", "2" * 40, "https://example/pull/571")
+    set_task_package(
+        ledger,
+        older,
+        "READY_FOR_REVIEW",
+        branch="saffron/TE-60",
+        pushed_sha=pr_older["sha"],
+        pr_url=pr_older["url"],
+    )
+    ledger.record_stack_layer(older, position=2, predecessor_task_id=t70, generation=0)
+
+    # The parent's own batch: TE-61, TE-62, the parent itself (newest
+    # waiting, position 3), then TE-64 above it.
+    batch_x = ledger.create_batch(budget_usd=10.0)
+    pr61 = _pr("TE-61", "3" * 40, "https://example/pull/572")
+    pr62 = _pr("TE-62", "4" * 40, "https://example/pull/573")
+    pr_newest = _pr("TE-60", "5" * 40, "https://example/pull/574")
+    pr64 = _pr("TE-64", "6" * 40, "https://example/pull/575")
+    t61 = _seed_stack_task(
+        ledger, repo_id, batch_x, spec_id="TE-61", state="READY_FOR_REVIEW"
+    )
+    set_task_package(
+        ledger,
+        t61,
+        "READY_FOR_REVIEW",
+        branch="saffron/TE-61",
+        pushed_sha=pr61["sha"],
+        pr_url=pr61["url"],
+    )
+    ledger.record_stack_layer(t61, position=1, predecessor_task_id=None, generation=0)
+    t62 = _seed_stack_task(
+        ledger, repo_id, batch_x, spec_id="TE-62", state="READY_FOR_REVIEW"
+    )
+    set_task_package(
+        ledger,
+        t62,
+        "READY_FOR_REVIEW",
+        branch="saffron/TE-62",
+        pushed_sha=pr62["sha"],
+        pr_url=pr62["url"],
+    )
+    ledger.record_stack_layer(t62, position=2, predecessor_task_id=t61, generation=0)
+    newest = _seed_stack_task(
+        ledger,
+        repo_id,
+        batch_x,
+        spec_id="TE-60",
+        state="READY_FOR_REVIEW",
+        spec_sha=te60_sha,
+    )
+    set_task_package(
+        ledger,
+        newest,
+        "READY_FOR_REVIEW",
+        branch="saffron/TE-60",
+        pushed_sha=pr_newest["sha"],
+        pr_url=pr_newest["url"],
+    )
+    ledger.record_stack_layer(newest, position=3, predecessor_task_id=t62, generation=0)
+    t64 = _seed_stack_task(
+        ledger, repo_id, batch_x, spec_id="TE-64", state="READY_FOR_REVIEW"
+    )
+    set_task_package(
+        ledger,
+        t64,
+        "READY_FOR_REVIEW",
+        branch="saffron/TE-64",
+        pushed_sha=pr64["sha"],
+        pr_url=pr64["url"],
+    )
+    ledger.record_stack_layer(t64, position=4, predecessor_task_id=newest, generation=0)
+
+    # A newer ORPHANED task of the parent sits above both waiting ones.
+    _task_at(ledger, repo_id, spec_id="TE-60", spec_sha="z" * 40, state="ORPHANED")
+
+    # An unrelated batch, with its own unrelated layer.
+    batch_z = ledger.create_batch(budget_usd=10.0)
+    pr_unrelated = _pr("TE-99", "7" * 40, "https://example/pull/599")
+    t99 = _seed_stack_task(
+        ledger, repo_id, batch_z, spec_id="TE-99", state="READY_FOR_REVIEW"
+    )
+    set_task_package(
+        ledger,
+        t99,
+        "READY_FOR_REVIEW",
+        branch="saffron/TE-99",
+        pushed_sha=pr_unrelated["sha"],
+        pr_url=pr_unrelated["url"],
+    )
+    ledger.record_stack_layer(t99, position=1, predecessor_task_id=None, generation=0)
+
+    # A pull request no task owns.
+    pr_unowned = {
+        "headRefName": "saffron/NOBODY",
+        "url": "https://example/pull/598",
+        "files": [],
+    }
+
+    _write_spec(
+        directory, "te63.md", id="TE-63", touches=["shared.py"], depends_on=["TE-60"]
+    )
+    _write_spec(directory, "other.md", id="TE-OTHER", touches=["shared.py"])
+
+    for name, pr in (
+        ("te64 (above the parent)", pr64),
+        ("older task's lower layer", pr70),
+        ("unrelated batch's layer", pr_unrelated),
+        ("owned by nobody", pr_unowned),
+    ):
+        gh = _fake_gh([_overlapping(pr, ["shared.py"])])
+        for kwargs in _BOTH_SCANS:
+            refused = _refused(
+                directory, repo_id, ledger, repo_slug="o/r", gh=gh, **kwargs
+            )
+            assert "te63.md" in refused, name
+
+    # The two below the parent's own layer are legitimately exempt.
+    gh_below = _fake_gh(
+        [_overlapping(pr61, ["shared.py"]), _overlapping(pr62, ["shared.py"])]
+    )
+    for kwargs in _BOTH_SCANS:
+        refused = _refused(
+            directory, repo_id, ledger, repo_slug="o/r", gh=gh_below, **kwargs
+        )
+        assert "te63.md" not in refused
+
+    # A spec with no depends_on still refuses on the bottom layer's PR.
+    gh_bottom = _fake_gh([_overlapping(pr61, ["shared.py"])])
+    for kwargs in _BOTH_SCANS:
+        refused = _refused(
+            directory, repo_id, ledger, repo_slug="o/r", gh=gh_bottom, **kwargs
+        )
+        assert "other.md" in refused
+
+    # A child of a parent that missed in the same batch, in its own
+    # directory, away from `TE-60`'s own second external dependency.
+    directory_b = tmp_path / "specs_b"
+    directory_b.mkdir()
+    _write_spec(directory_b, "te65.md", id="TE-65", touches=["te65.py"])
+    te65_sha = _sha(directory_b / "te65.md")
+    missed_parent = _seed_stack_task(
+        ledger,
+        repo_id,
+        batch_x,
+        spec_id="TE-65",
+        state="READY_FOR_REVIEW",
+        spec_sha=te65_sha,
+    )
+    set_task_package(
+        ledger,
+        missed_parent,
+        "READY_FOR_REVIEW",
+        branch="saffron/TE-65",
+        pushed_sha="8" * 40,
+        pr_url="https://example/pull/576",
+    )
+    _write_spec(
+        directory_b, "te66.md", id="TE-66", touches=["shared.py"], depends_on=["TE-65"]
+    )
+    gh_same_batch = _fake_gh([_overlapping(pr61, ["shared.py"])])
+    for kwargs in _BOTH_SCANS:
+        refused = _refused(
+            directory_b, repo_id, ledger, repo_slug="o/r", gh=gh_same_batch, **kwargs
+        )
+        assert "te66.md" in refused
 
 
 # ------------------------------------------- refusal: acceptance criteria path

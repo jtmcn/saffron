@@ -64,6 +64,23 @@ row at its `spec_sha` carries. It is also refused beside an open pull
 request on its branch that no *non*-`ORPHANED` row there owns, by its
 `pushed_sha` or its own `pr_url`. An `ORPHANED` row's own push or url owns
 nothing. Every other re-queue state keeps the wide exemption.
+
+Backlog item b-910cef widens the second refusal's own exempt set.
+`_ancestor_branches` only ever walked `depends_on`. A stack batch's own
+layers declare none between themselves (ADR 7). So a candidate naming a
+stack order's top layer still collided with the open pull requests of
+every layer underneath it.
+
+`_stacked_ancestor_branches` widens it. For every id the `depends_on`
+walk reaches, its own newest waiting task can itself be a recorded
+layer. When it is, every task recorded below it on that layer's own
+`predecessor_key` chain is exempt too. The walk crosses from a batch's
+first layer into the batch its own stack base belongs to, when that base
+is a layer there.
+
+A task that is no layer at all contributes nothing. Missed, or never run
+under a stack batch's own review, it still refuses beside every layer
+around it. Nothing walks past it in either direction.
 """
 
 from __future__ import annotations
@@ -303,6 +320,101 @@ def _ancestor_branches(
     any entry.
     """
     return frozenset(_branch(dep) for dep in _reachable(spec_id, edges))
+
+
+def _layer_row(layers: Sequence[sqlite3.Row], task_id: int) -> sqlite3.Row | None:
+    """The row in one batch's own `ledger.stack_layers` whose own
+    `task_id` is `task_id`. `None` when that task is no layer of this
+    batch: missed, or never run under it at all."""
+    return next((row for row in layers if int(row["task_id"]) == task_id), None)
+
+
+def _stack_layer_chain_branches(
+    ledger: Ledger,
+    task_id: int,
+    task_id_by_pushed_sha: Mapping[str, int],
+    spec_id_by_task: Mapping[int, str],
+) -> frozenset[str]:
+    """Every branch recorded below `task_id`'s own layer, in its own order
+    and in the batch that order was cut from (b-910cef). `task_id`'s own
+    branch is not included.
+
+    Contributes nothing once `task_id` is no recorded layer: no batch, or
+    no row there at all (missed). A missed task's own dependents stay
+    refused around it (b-0bd8c9).
+
+    Crosses a batch boundary using the predecessor's own baked sha: there
+    is no public record-key lookup. Its branch is added either way."""
+    branches: set[str] = set()
+    current = task_id
+    visited: set[int] = set()
+    while current not in visited:
+        visited.add(current)
+        batch_id = ledger.stack_batch_of(current)
+        if batch_id is None:
+            break
+        layers = ledger.stack_layers(batch_id)
+        row = _layer_row(layers, current)
+        if row is None:
+            break
+        predecessor_key = row["predecessor_key"]
+        if predecessor_key is None:
+            break
+        same_batch = next((r for r in layers if r["task_key"] == predecessor_key), None)
+        if same_batch is not None:
+            branches.add(_branch(same_batch["spec_id"]))
+            current = int(same_batch["task_id"])
+            continue
+        predecessor_head = row["predecessor_head"]
+        next_task_id = (
+            task_id_by_pushed_sha.get(predecessor_head) if predecessor_head else None
+        )
+        if next_task_id is None:
+            break
+        spec_id = spec_id_by_task.get(next_task_id)
+        if spec_id is not None:
+            branches.add(_branch(spec_id))
+        current = next_task_id
+    return frozenset(branches)
+
+
+def _stacked_ancestor_branches(
+    spec_id: str,
+    edges: Mapping[str, Sequence[str]],
+    ledger: Ledger,
+    repo_id: int | None,
+    task_id_by_pushed_sha: Mapping[str, int],
+    spec_id_by_task: Mapping[int, str],
+    chain_cache: dict[str, frozenset[str]],
+) -> frozenset[str]:
+    """`_ancestor_branches`, widened by the recorded stack-layer
+    predecessors below each reachable ancestor's own newest waiting task
+    (backlog item b-910cef). `chain_cache` is built once per `build_queue`
+    call, keyed on spec id. Each id's own chain is read once per scan,
+    never once per candidate.
+
+    `repo_id is None` widens nothing: a repo with no ledger row has no
+    `stack_layers` row to walk either.
+    """
+    branches = set(_ancestor_branches(spec_id, edges))
+    if repo_id is None:
+        return frozenset(branches)
+    for dep in _reachable(spec_id, edges):
+        if dep not in chain_cache:
+            waiting = [
+                row
+                for row in ledger.tasks_by_spec_id(repo_id, dep)
+                if row["state"] in DEPENDENCY_WAITING_STATES
+            ]
+            if waiting:
+                newest_task_id = int(waiting[-1]["task_id"])
+                chain_cache[dep] = _stack_layer_chain_branches(
+                    ledger, newest_task_id, task_id_by_pushed_sha, spec_id_by_task
+                )
+            else:
+                chain_cache[dep] = frozenset()
+        branches |= chain_cache[dep]
+    return frozenset(branches)
 
 
 def _deepest_open_parent(
@@ -942,8 +1054,8 @@ def open_pr_refusal(
     # ancestor's above it, are in that same tree by construction, so an
     # overlap with any of their pull requests is what stacking is *for*.
     # `exempt_branches` is the caller's own answer to what is already in
-    # this candidate's tree: `_ancestor_branches` for `_refuse`, a stack
-    # batch's own recorded layers for a follow-up or a revision (`SA-0162`).
+    # this candidate's tree: `_stacked_ancestor_branches` for `_refuse`
+    # (b-910cef), a stack batch's layers for a follow-up (`SA-0162`).
     # Left un-exempted, this refusal shadows the dependency admission
     # entirely — a parent at `READY_FOR_REVIEW` has an open pull request by
     # definition, and almost every spec here touched the backlog file then
@@ -1435,11 +1547,18 @@ def build_queue(
     # `ORPHANED` resume's own `pr_url` refuses with no `repo_slug` at all.
     pr_url_by_task: dict[int, str] = {}
     pushed_sha_by_task: dict[int, str] = {}
+    # `task_id_by_pushed_sha` and `spec_id_by_task` resolve a layer's
+    # predecessor once it sits outside the batch (b-910cef).
+    task_id_by_pushed_sha: dict[str, int] = {}
+    spec_id_by_task: dict[int, str] = {}
     if repo_id is not None:
         for row in ledger.tasks_by_repo(repo_id):
             task_id = int(row["task_id"])
             pr_url_by_task[task_id] = row["pr_url"] or ""
             pushed_sha_by_task[task_id] = row["pushed_sha"] or ""
+            spec_id_by_task[task_id] = row["spec_id"]
+            if row["pushed_sha"]:
+                task_id_by_pushed_sha[row["pushed_sha"]] = task_id
 
     candidates: list[Candidate] = []
     for discovered in specs:
@@ -1533,6 +1652,10 @@ def build_queue(
         specs, candidate_ids, states_at_current_sha
     )
 
+    # Keyed on spec id, built once here, never per candidate: each id's own
+    # stack-layer chain is read once per scan (b-910cef).
+    chain_cache: dict[str, frozenset[str]] = {}
+
     kept: list[Candidate] = []
     for candidate in candidates:
         refused = _refuse(
@@ -1544,7 +1667,15 @@ def build_queue(
             unreadable_retired=len(retired_failures),
             protected=protected,
             markers=markers,
-            ancestor_branches=_ancestor_branches(candidate.spec.id, edges),
+            ancestor_branches=_stacked_ancestor_branches(
+                candidate.spec.id,
+                edges,
+                ledger,
+                repo_id,
+                task_id_by_pushed_sha,
+                spec_id_by_task,
+                chain_cache,
+            ),
             edges=edges,
             rows=existing.get((candidate.spec.id, candidate.spec_sha), ()),
             pr_url_by_task=pr_url_by_task,
